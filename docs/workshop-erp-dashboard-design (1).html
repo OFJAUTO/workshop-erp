@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workshop ERP - Manager dashboard (design reference)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#F4F4F5}
+a{color:#5F6368;text-decoration:none}a:hover{color:#111113}
+</style>
+</head>
+<body>
+<!-- Design reference only. Static sample data. Use this for the look: colours, spacing, type, card and step-track layout. -->
+<div style="min-height: 100vh; box-sizing: border-box; background: #F4F4F5; color: #111113; font-family: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif; padding: 24px; display: flex; flex-direction: column; gap: 24px">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px">
+<div style="height: 44px; padding: 0 16px; border: 1px dashed #8A8E96; border-radius: 10px; display: flex; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.12em; color: #5F6368">[YOUR LOGO]</div>
+<nav style="display: flex; flex-wrap: wrap; gap: 4px; font-size: 14px; font-weight: 500">
+<a href="#top" style="padding: 12px 14px; border-radius: 10px; background: #111113; color: #FFFFFF">Dashboard</a>
+<a href="#top" style="padding: 12px 14px; border-radius: 10px">Calendar</a>
+<a href="#top" style="padding: 12px 14px; border-radius: 10px">Parts</a>
+<a href="#top" style="padding: 12px 14px; border-radius: 10px">Team</a>
+</nav>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+<span style="font-size: 13px; color: #5F6368">Tuesday 6 October · sample data</span>
+<button style="min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: #111113; color: #FFFFFF; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer">Gate in a car</button>
+</div>
+</header>
+
+<section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px">
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #5F6368">In the workshop</span><span style="font-size: 36px; font-weight: 700; line-height: 1; color: #111113">12</span></div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #5F6368">Due today</span><span style="font-size: 36px; font-weight: 700; line-height: 1; color: #8A5A00">3</span></div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #5F6368">Overdue</span><span style="font-size: 36px; font-weight: 700; line-height: 1; color: #B42318">1</span></div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #5F6368">Ready to collect</span><span style="font-size: 36px; font-weight: 700; line-height: 1; color: #0F7B4F">2</span></div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase">Pending</span>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">Inspection<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">2</span></button>
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">Quote<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">1</span></button>
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">Customer approval<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">1</span></button>
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">Parts<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">2</span></button>
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">QC<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">1</span></button>
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">Car wash<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">1</span></button>
+<button style="min-height: 44px; padding: 0 14px; border: 1px solid #D4D4D8; border-radius: 999px; background: #FFFFFF; color: #111113; font-family: inherit; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; cursor: pointer">Payment<span style="min-width: 22px; height: 22px; border-radius: 11px; background: #111113; color: #FFFFFF; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">1</span></button>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase">Cars</span><span style="font-size: 13px; color: #5F6368">Most urgent first</span></div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">F 60238</span><span style="font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid #111113; color: #111113">High priority</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #B42318; background: #FDE7E4">Overdue 1 day</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche Panamera 4S</div>
+<div style="font-size: 12px; color: #5F6368">Rashid · Mon 5 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Waiting for parts</span><span style="font-size: 12px; color: #5F6368">Expected Wed 7 Oct</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #D92D20"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">M 9051</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #8A5A00; background: #FFF1CC">Due today</span></div>
+<div style="font-size: 14px; font-weight: 500">Bentley Bentayga</div>
+<div style="font-size: 12px; color: #5F6368">Advisor: Omar · Today</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Waiting for customer approval</span><span style="font-size: 12px; color: #5F6368">Quote sent yesterday</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #C98A00"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">T 26071</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #8A5A00; background: #FFF1CC">Due today</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche Cayenne S</div>
+<div style="font-size: 12px; color: #5F6368">Joseph · Today</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Pending QC</span><span style="font-size: 12px; color: #5F6368">Road test not done</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #C98A00"></span><span style="font-size: 11px; color: #111113; font-weight: 700">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">C 70336</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #8A5A00; background: #FFF1CC">Due today</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche Macan GTS</div>
+<div style="font-size: 12px; color: #5F6368">Imran · Today</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Pending car wash</span><span style="font-size: 12px; color: #5F6368">QC passed 11:40</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #C98A00"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">K 20417</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; background: #111113; color: #FFFFFF; letter-spacing: 0.08em">VIP</span><span style="font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid #111113; color: #111113">High priority</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">On time</span></div>
+<div style="font-size: 14px; font-weight: 500">Bentley Continental GT</div>
+<div style="font-size: 12px; color: #5F6368">Imran · Fri 9 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Pending inspection</span><span style="font-size: 12px; color: #5F6368">Assigned 09:15</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">R 77102</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">On time</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche Macan S</div>
+<div style="font-size: 12px; color: #5F6368">Joseph · Thu 8 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Pending inspection</span><span style="font-size: 12px; color: #5F6368">Assigned 10:05</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">B 31660</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">On time</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche Cayenne Turbo</div>
+<div style="font-size: 12px; color: #5F6368">Advisor: Omar · Fri 9 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Pending quote</span><span style="font-size: 12px; color: #5F6368">Parts priced, advisor to quote</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">AA 4410</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">On time</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche 911 Turbo S</div>
+<div style="font-size: 12px; color: #5F6368">Rashid · Mon 12 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Waiting for parts</span><span style="font-size: 12px; color: #5F6368">Expected Thu 8 Oct</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">D 48213</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">On time</span></div>
+<div style="font-size: 14px; font-weight: 500">Bentley Flying Spur</div>
+<div style="font-size: 12px; color: #5F6368">Sajid · Sun 11 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">In work · Paint</span><span style="font-size: 12px; color: #5F6368">Clocked 3 h 05 m</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">H 15529</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">On time</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche Taycan 4S</div>
+<div style="font-size: 12px; color: #5F6368">Rashid · Wed 7 Oct</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">In work · Mechanical</span><span style="font-size: 12px; color: #5F6368">Clocked 45 m</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #DCDCE0"></span><span style="font-size: 11px; color: #8A8E96; font-weight: 500">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">W 5519</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #8A5A00; background: #FFF1CC">Balance due</span></div>
+<div style="font-size: 14px; font-weight: 500">Bentley Continental GTC</div>
+<div style="font-size: 12px; color: #5F6368">Advisor: Omar · Collect today</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Job done · pending payment</span><span style="font-size: 12px; color: #5F6368">Gate-out locked</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #C98A00"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Ready</span></div>
+</div></div>
+</div>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px">
+<div style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="font-size: 17px; font-weight: 700; letter-spacing: 0.03em">P 8804</span><span style="font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: #0F7B4F; background: #E6F4EC">Paid</span></div>
+<div style="font-size: 14px; font-weight: 500">Porsche 718 Cayman GTS</div>
+<div style="font-size: 12px; color: #5F6368">Advisor: Omar · Collect today</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px"><span style="font-size: 14px; font-weight: 700">Job done · ready to collect</span><span style="font-size: 12px; color: #5F6368">Customer notified</span></div>
+<div style="overflow-x: auto"><div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; min-width: 520px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Gate-in</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Inspection</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Quote</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Approval</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Parts</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Work</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">QC</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #111113"></span><span style="font-size: 11px; color: #6B6F76; font-weight: 500">Wash</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="height: 6px; border-radius: 3px; background: #0F7B4F"></span><span style="font-size: 11px; color: #111113; font-weight: 700">Ready</span></div>
+</div></div>
+</div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px"><span style="font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase">On the clock</span><span style="font-size: 13px; color: #5F6368">4 working · 1 idle</span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px">
+<div style="flex: 1 1 200px; display: flex; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 12px; padding: 12px"><span style="width: 44px; height: 44px; border-radius: 50%; background: #E9E9EC; color: #111113; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">IM</span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 600">Imran</span><span style="font-size: 12px; color: #5F6368">K 20417 · 1 h 20 m</span></span></div>
+<div style="flex: 1 1 200px; display: flex; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 12px; padding: 12px"><span style="width: 44px; height: 44px; border-radius: 50%; background: #E9E9EC; color: #111113; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">RA</span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 600">Rashid</span><span style="font-size: 12px; color: #5F6368">H 15529 · 45 m</span></span></div>
+<div style="flex: 1 1 200px; display: flex; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 12px; padding: 12px"><span style="width: 44px; height: 44px; border-radius: 50%; background: #E9E9EC; color: #111113; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">SA</span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 600">Sajid</span><span style="font-size: 12px; color: #5F6368">D 48213 · 3 h 05 m</span></span></div>
+<div style="flex: 1 1 200px; display: flex; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 12px; padding: 12px"><span style="width: 44px; height: 44px; border-radius: 50%; background: #E9E9EC; color: #111113; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">JO</span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 600">Joseph</span><span style="font-size: 12px; color: #5F6368">R 77102 · 25 m</span></span></div>
+<div style="flex: 1 1 200px; display: flex; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #C98A00; border-radius: 12px; padding: 12px"><span style="width: 44px; height: 44px; border-radius: 50%; background: #E9E9EC; color: #111113; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center">AN</span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 600">Anil</span><span style="font-size: 12px; color: #8A5A00">No job · idle 35 m</span></span></div>
+</div>
+</section>
+
+</div>
+</body>
+</html>

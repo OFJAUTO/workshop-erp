@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Design tokens taken from docs/workshop-erp-dashboard-design (1).html.
+   Light theme only: white, black and grey, colour reserved for timing. */
+@theme {
+  --color-canvas: #f4f4f5;
+  --color-ink: #111113;
+  --color-muted: #5f6368;
+  --color-faint: #8a8e96;
+  --color-line: #e4e4e7;
+  --color-line-strong: #d4d4d8;
+  --color-track: #dcdce0;
+  --color-chip: #e9e9ec;
+
+  --color-green: #0f7b4f;
+  --color-green-soft: #e6f4ec;
+  --color-amber: #8a5a00;
+  --color-amber-soft: #fff1cc;
+  --color-amber-bar: #c98a00;
+  --color-red: #b42318;
+  --color-red-soft: #fde7e4;
+  --color-red-bar: #d92d20;
+
+  --font-sans: var(--font-jakarta), "Segoe UI", system-ui, sans-serif;
+
+  --radius-card: 14px;
+  --radius-control: 10px;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Large touch targets everywhere: nothing tappable is under 44px. */
+button,
+[role="button"],
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
