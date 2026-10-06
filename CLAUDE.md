@@ -13,7 +13,7 @@ ERP for a luxury car workshop in Dubai (about 45 users). The owner is not a deve
 
 - Next.js 16 (App Router, `src/`), React 19, Tailwind v4, TypeScript. Light theme only.
 - Supabase: Postgres + Auth + Storage. Access rules live in the database (row level security), not only in the UI.
-- Hosting: Vercel. Code: private GitHub repository. Address: erp.ofjauto.com.
+- Hosting: Vercel (project workshop-erp, live at https://workshop-erp-chi.vercel.app, target address erp.ofjauto.com). Code: private GitHub repository github.com/OFJAUTO/workshop-erp; every push to `main` deploys automatically.
 - Secrets in `.env.local` (never committed). Keys: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_PASSWORD`, `SUPABASE_ACCESS_TOKEN`.
 
 ## Commands
