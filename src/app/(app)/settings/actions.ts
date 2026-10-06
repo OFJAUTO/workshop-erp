@@ -1,8 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { FormState } from "@/components/forms";
-import { formValues } from "@/components/forms";
+import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 

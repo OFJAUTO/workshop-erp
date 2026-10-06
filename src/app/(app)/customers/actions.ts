@@ -3,8 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { FormState } from "@/components/forms";
-import { formValues } from "@/components/forms";
+import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
