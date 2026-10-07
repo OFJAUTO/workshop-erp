@@ -52,7 +52,7 @@ export function StaffForm({
               <ChoiceButtons
                 name="login_type"
                 columns={2}
-                defaultValue={v.login_type ?? "pin"}
+                defaultValue={v.login_type}
                 options={[
                   { value: "pin", label: "Shared tablet", hint: "Tap name, enter 4-digit PIN" },
                   { value: "password", label: "Office PC", hint: "Email and password" },

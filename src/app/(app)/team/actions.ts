@@ -23,7 +23,7 @@ const staffSchema = z
     role_id: z.enum(ALL_ROLES as [string, ...string[]], { message: "Choose a role." }),
     department_id: z.enum(["mechanical", "bodyshop", "paint", "ppf_tint", "office"], { message: "Choose a department." }),
     employee_number: z.string().trim().optional(),
-    login_type: z.enum(["password", "pin"], { message: "Choose how this person logs in." }),
+    login_type: z.enum(["password", "pin"]).optional(),
     email: z.string().trim().toLowerCase().optional(),
     phone: z.string().trim().optional(),
     pin: z.string().trim().optional(),
@@ -49,7 +49,7 @@ function parseStaff(formData: FormData) {
     role_id: formData.get("role_id"),
     department_id: formData.get("department_id"),
     employee_number: formData.get("employee_number") ?? "",
-    login_type: formData.get("login_type"),
+    login_type: formData.get("login_type") || undefined,
     email: formData.get("email") ?? "",
     phone: formData.get("phone") ?? "",
     pin: formData.get("pin") ?? "",
@@ -64,6 +64,7 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
   if (!parsed.success) return { error: firstIssue(parsed), values };
   const d = parsed.data;
 
+  if (!d.login_type) return { error: "Choose how this person logs in.", values };
   if (d.login_type === "pin" && !PIN_PATTERN.test(d.pin ?? "")) {
     return { error: "Tablet login needs a 4-digit PIN.", values };
   }

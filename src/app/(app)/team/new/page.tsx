@@ -9,7 +9,7 @@ export default async function NewStaffPage() {
     <>
       <PageHeader title="Add staff member" subtitle="They can log in as soon as you save." />
       <Card className="max-w-3xl">
-        <StaffForm action={createStaff} mode="create" initialValues={{ login_type: "pin", department_id: "mechanical" }} />
+        <StaffForm action={createStaff} mode="create" initialValues={{ department_id: "mechanical" }} />
       </Card>
     </>
   );
