@@ -9,6 +9,7 @@ import { requirePermission } from "@/lib/auth";
 import { hashPin, PIN_PATTERN } from "@/lib/pin";
 import { ALL_ROLES } from "@/lib/roles";
 import { getSiteUrl } from "@/lib/site";
+import { issueSetupToken } from "@/lib/setup-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { blankToNull, normalisePhone } from "@/lib/format";
@@ -215,20 +216,21 @@ export async function resetPin(id: string, _state: FormState, formData: FormData
   return { success: "New PIN saved." };
 }
 
-/** Makes a one-time link the person opens to choose a password. Shown on screen for the owner to send. */
+/** Makes a 24-hour setup link the person opens to choose a password. Opening it changes nothing; it is used up when the password is saved. */
 export async function createSetupLink(id: string) {
-  await requirePermission("manageTeam");
+  const owner = await requirePermission("manageTeam");
   const admin = createAdminClient();
   const { data: u } = await admin.auth.admin.getUserById(id);
   if (!u.user?.email) redirect(`/team/${id}?error=` + encodeURIComponent("No login email on this account."));
 
-  const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email: u.user.email });
-  if (error || !data.properties?.hashed_token) {
+  let token: string;
+  try {
+    token = await issueSetupToken(id, owner.id);
+  } catch {
     redirect(`/team/${id}?error=` + encodeURIComponent("Could not create the link."));
   }
   const site = await getSiteUrl();
-  const link = `${site}/auth/callback?token_hash=${encodeURIComponent(data.properties.hashed_token)}&type=recovery&next=/auth/set-password`;
-  redirect(`/team/${id}?link=${encodeURIComponent(link)}`);
+  redirect(`/team/${id}?link=${encodeURIComponent(`${site}/auth/setup/${token}`)}`);
 }
 
 export async function uploadStaffPhoto(id: string, _state: FormState, formData: FormData): Promise<FormState> {

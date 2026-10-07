@@ -73,8 +73,8 @@ export default async function StaffDetailPage({
         <Card className="flex flex-col gap-3">
           <SectionLabel>One-time setup link for {staff.display_name}</SectionLabel>
           <p className="text-sm text-muted">
-            Send this link to them. It works once and expires in about an hour. They open it, choose a password and
-            are signed in.
+            Send this link to them on WhatsApp. It lasts 24 hours and is used up only when they save a password. They open it,
+            choose a password and are signed in.
           </p>
           <CopyLink link={link} />
         </Card>

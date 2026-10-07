@@ -2,6 +2,7 @@
 // Run from the project folder:
 //   node --env-file=.env.local scripts/bootstrap-owner.mjs --email owner@example.com --name "Omar Aljaf" --site http://localhost:3000
 import { writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 function arg(name, fallback) {
@@ -72,13 +73,18 @@ let userId = null;
   }
 }
 
-// 3. One-time setup link so the owner chooses a password.
+// 3. A 24-hour setup link so the owner chooses a password (used up only when saved).
 {
-  const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email });
+  const token = randomBytes(24).toString("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const { error } = await admin.from("setup_links").insert({
+    staff_id: userId,
+    token_hash: tokenHash,
+    expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    created_by: userId,
+  });
   if (error) throw error;
-  const tokenHash = data.properties?.hashed_token;
-  if (!tokenHash) throw new Error("No token returned");
-  const link = `${site}/auth/callback?token_hash=${encodeURIComponent(tokenHash)}&type=recovery&next=/auth/set-password`;
+  const link = `${site}/auth/setup/${token}`;
   writeFileSync("owner-setup-link.txt", link + "\n", "utf8");
   console.log("Setup link written to owner-setup-link.txt (open it in the browser, then delete the file).");
 }
