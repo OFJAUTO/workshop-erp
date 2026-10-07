@@ -1,16 +1,18 @@
 @import "tailwindcss";
 
-/* Design tokens taken from docs/workshop-erp-dashboard-design (1).html.
+/* Design tokens based on docs/workshop-erp-dashboard-design (1).html,
+   with stronger contrast as agreed on 7 October 2026.
    Light theme only: white, black and grey, colour reserved for timing. */
 @theme {
-  --color-canvas: #f4f4f5;
+  --color-canvas: #f1f1f3;
   --color-ink: #111113;
-  --color-muted: #5f6368;
-  --color-faint: #8a8e96;
-  --color-line: #e4e4e7;
-  --color-line-strong: #d4d4d8;
-  --color-track: #dcdce0;
-  --color-chip: #e9e9ec;
+  --color-muted: #3b3f46;
+  --color-faint: #6b6f76;
+  --color-line: #cfd2d8;
+  --color-line-strong: #b4b8c0;
+  --color-track: #d6d8dd;
+  --color-chip: #e6e7ea;
+  --color-sidebar: #0d0d0f;
 
   --color-green: #0f7b4f;
   --color-green-soft: #e6f4ec;
@@ -38,7 +40,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Large touch targets everywhere: nothing tappable is under 44px. */
 button,
 [role="button"],
 input,
@@ -51,4 +52,14 @@ input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* The logo is black on white. On the dark menu bar it is inverted, and
+   the (now black) background is dropped with a screen blend. */
+.logo-on-dark {
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+.logo-on-light {
+  mix-blend-mode: multiply;
 }

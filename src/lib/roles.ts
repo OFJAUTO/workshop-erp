@@ -2,6 +2,7 @@ export type RoleId =
   | "owner"
   | "workshop_manager"
   | "service_advisor"
+  | "gate_in"
   | "technician"
   | "parts"
   | "qc_inspector"
@@ -11,6 +12,7 @@ export const ROLE_LABELS: Record<RoleId, string> = {
   owner: "Owner",
   workshop_manager: "Workshop manager",
   service_advisor: "Service advisor",
+  gate_in: "Gate-in",
   technician: "Technician",
   parts: "Parts",
   qc_inspector: "QC inspector",
@@ -18,6 +20,9 @@ export const ROLE_LABELS: Record<RoleId, string> = {
 };
 
 export const ALL_ROLES = Object.keys(ROLE_LABELS) as RoleId[];
+
+/** Roles whose logins are kept short because they see money. */
+export const SENSITIVE_ROLES: RoleId[] = ["owner", "accounts"];
 
 export type DepartmentId = "mechanical" | "bodyshop" | "paint" | "ppf_tint" | "office";
 
@@ -30,8 +35,8 @@ export const DEPARTMENT_LABELS: Record<DepartmentId, string> = {
 };
 
 /**
- * What each role may do in Phase 1. These mirror the database rules; the
- * database is the final word, this list only decides what the screens show.
+ * What each role may do. These mirror the database rules; the database is
+ * the final word, this list only decides what the screens show.
  */
 export const PERMISSIONS = {
   manageTeam: ["owner"],
@@ -39,10 +44,14 @@ export const PERMISSIONS = {
   manageTablets: ["owner"],
   manageSettings: ["owner"],
   viewAudit: ["owner"],
-  viewCustomers: ["owner", "workshop_manager", "service_advisor", "parts", "qc_inspector", "accounts"],
-  editCustomers: ["owner", "workshop_manager", "service_advisor"],
+  viewCustomers: ["owner", "workshop_manager", "service_advisor", "gate_in", "parts", "qc_inspector", "accounts"],
+  editCustomers: ["owner", "workshop_manager", "service_advisor", "gate_in"],
   viewVehicles: ALL_ROLES,
-  editVehicles: ["owner", "workshop_manager", "service_advisor"],
+  editVehicles: ["owner", "workshop_manager", "service_advisor", "gate_in"],
+  gateIn: ["owner", "workshop_manager", "service_advisor", "gate_in"],
+  viewPartCosts: ["owner", "accounts", "service_advisor", "parts"],
+  viewTechnicianCostRate: ["owner", "accounts"],
+  viewProfitPanel: ["owner", "accounts", "service_advisor"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -61,6 +70,7 @@ export const ROLE_PHASE1_SUMMARY: Record<RoleId, string[]> = {
   ],
   workshop_manager: ["Add and edit customers, contacts and cars", "See registered tablets"],
   service_advisor: ["Add and edit customers, contacts and cars"],
+  gate_in: ["Add and edit customers, contacts and cars", "Gate cars in with photos and video (Phase 2)"],
   technician: ["See cars (plate, model, photos) and VIP handling notes"],
   parts: ["See customers and cars"],
   qc_inspector: ["See customers and cars"],

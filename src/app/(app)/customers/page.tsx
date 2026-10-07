@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Badge, Button, Card, Empty, Input, LinkButton, PageHeader } from "@/components/ui";
+import { Avatar, Badge, Button, Card, Empty, Input, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -20,7 +20,7 @@ export default async function CustomersPage({
     .from("customers")
     .select("id, customer_number, customer_type, full_name, company_name, phone, phone2, email, area, trn, is_vip, vip_note, notes, is_active, created_at, updated_at")
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .limit(120);
   if (show !== "all") query = query.eq("is_active", true);
   if (term) {
     const like = `%${term.replace(/[%_]/g, "")}%`;
@@ -31,6 +31,13 @@ export default async function CustomersPage({
   }
   const { data } = await query;
   const rows = (data ?? []) as CustomerRow[];
+
+  const ids = rows.map((r) => r.id);
+  const { data: carRows } = ids.length
+    ? await supabase.from("vehicles").select("customer_id").in("customer_id", ids).eq("is_active", true)
+    : { data: [] as { customer_id: string }[] };
+  const carCount = new Map<string, number>();
+  for (const c of carRows ?? []) carCount.set(c.customer_id, (carCount.get(c.customer_id) ?? 0) + 1);
 
   return (
     <>
@@ -55,24 +62,31 @@ export default async function CustomersPage({
           {canEdit ? "Add the first customer with the button above." : null}
         </Empty>
       ) : (
-        <div className="flex flex-col gap-2">
-          {rows.map((c) => (
-            <Link key={c.id} href={`/customers/${c.id}`} className="block">
-              <Card className="flex flex-wrap items-center gap-x-6 gap-y-2 hover:border-ink py-4">
-                <span className="text-xs text-muted w-16 shrink-0">{c.customer_number}</span>
-                <span className="flex flex-col min-w-0 flex-1">
-                  <span className="font-bold truncate flex items-center gap-2">
-                    {c.company_name ?? c.full_name}
-                    {c.is_vip ? <Badge tone="ink">VIP</Badge> : null}
-                    {!c.is_active ? <Badge tone="red">Archived</Badge> : null}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+          {rows.map((c) => {
+            const cars = carCount.get(c.id) ?? 0;
+            return (
+              <Link key={c.id} href={`/customers/${c.id}`} className="block">
+                <Card className="flex items-start gap-4 hover:border-ink h-full">
+                  <Avatar name={c.company_name ?? c.full_name} size={64} />
+                  <span className="flex flex-col gap-1.5 min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-base break-words">{c.company_name ?? c.full_name}</span>
+                      {c.is_vip ? <Badge tone="ink">VIP</Badge> : null}
+                      {!c.is_active ? <Badge tone="red">Archived</Badge> : null}
+                    </span>
+                    {c.company_name ? <span className="text-sm text-muted break-words">{c.full_name}</span> : null}
+                    <span className="text-sm font-medium">{c.phone}</span>
+                    <span className="text-xs text-muted">
+                      {c.customer_number}
+                      {c.area ? ` · ${c.area}` : ""}
+                      {` · ${cars} car${cars === 1 ? "" : "s"}`}
+                    </span>
                   </span>
-                  {c.company_name ? <span className="text-xs text-muted truncate">{c.full_name}</span> : null}
-                </span>
-                <span className="text-sm text-muted">{c.phone}</span>
-                {c.area ? <span className="text-sm text-muted">{c.area}</span> : null}
-              </Card>
-            </Link>
-          ))}
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       )}
     </>

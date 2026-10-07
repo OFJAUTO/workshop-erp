@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Avatar, Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
+import { Avatar, Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -53,17 +53,15 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
       ) : (
         grouped.map((g) => (
           <section key={g.role} className="flex flex-col gap-3">
-            <span className="text-[13px] font-bold tracking-[0.06em] uppercase">
-              {ROLE_LABELS[g.role]} · {g.people.length}
-            </span>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <SectionLabel right={`${g.people.length}`}>{ROLE_LABELS[g.role]}</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
               {g.people.map((p) => (
                 <Link key={p.id} href={`/team/${p.id}`} className="block">
-                  <Card className="flex items-center gap-4 hover:border-ink">
-                    <Avatar name={p.full_name} photoUrl={p.photo_path ? urlByPath.get(p.photo_path) : null} size={48} />
-                    <span className="flex flex-col gap-1 min-w-0">
-                      <span className="font-bold truncate">{p.full_name}</span>
-                      <span className="text-xs text-muted truncate">
+                  <Card className="flex items-center gap-4 hover:border-ink h-full">
+                    <Avatar name={p.full_name} photoUrl={p.photo_path ? urlByPath.get(p.photo_path) : null} size={80} />
+                    <span className="flex flex-col gap-1.5 min-w-0">
+                      <span className="font-bold text-base break-words">{p.full_name}</span>
+                      <span className="text-sm text-muted truncate">
                         {p.display_name}
                         {p.department_id ? ` · ${DEPARTMENT_LABELS[p.department_id as DepartmentId]}` : ""}
                         {p.employee_number ? ` · #${p.employee_number}` : ""}

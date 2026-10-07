@@ -211,3 +211,26 @@ export async function addVehiclePhoto(id: string, _state: FormState, formData: F
   revalidatePath(`/vehicles/${id}`);
   return { success: "Photo added." };
 }
+
+/** Sets the car's profile picture (wide, cropped on the client). The old file stays in storage. */
+export async function setVehicleProfilePhoto(id: string, _state: FormState, formData: FormData): Promise<FormState> {
+  await requirePermission("editVehicles");
+  const file = formData.get("photo");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a picture first." };
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return { error: "Use a JPG, PNG or WebP picture." };
+  if (file.size > 10 * 1024 * 1024) return { error: "The picture must be under 10 MB." };
+
+  const path = `${id}/profile-${Date.now()}-${randomBytes(4).toString("hex")}.jpg`;
+  const supabase = await createClient();
+  const { error: upError } = await supabase.storage
+    .from("vehicle-photos")
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (upError) return { error: "Upload failed: " + upError.message };
+
+  const { error } = await supabase.from("vehicles").update({ photo_path: path }).eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/vehicles/${id}`);
+  revalidatePath("/vehicles");
+  return { success: "Picture saved." };
+}

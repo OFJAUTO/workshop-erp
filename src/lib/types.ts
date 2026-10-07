@@ -88,6 +88,7 @@ export type FuelType = (typeof FUEL_TYPES)[number];
 export type VehicleRow = {
   id: string;
   customer_id: string;
+  photo_path: string | null;
   plate_country: string;
   plate_emirate: Emirate | null;
   plate_code: string | null;

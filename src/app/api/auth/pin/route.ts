@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentDevice } from "@/lib/devices";
 import { getSettings } from "@/lib/settings";
 import { PIN_PATTERN, verifyPin } from "@/lib/pin";
+import { cookies } from "next/headers";
+import { LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions, sessionWindow } from "@/lib/session";
 
 /**
  * Tablet login: name + 4-digit PIN. Only works from a registered tablet.
@@ -110,6 +112,12 @@ export async function POST(request: NextRequest) {
   if (sessionError) {
     return NextResponse.json({ error: "Could not start a session. Try again." }, { status: 500 });
   }
+
+  // Tablet sessions last one working day at most; the idle lock ends them sooner.
+  const { untilMs, maxAgeSeconds } = sessionWindow(null);
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_UNTIL_COOKIE, String(untilMs), sessionCookieOptions(maxAgeSeconds));
+  cookieStore.set(LOGIN_KIND_COOKIE, "pin", sessionCookieOptions(maxAgeSeconds));
 
   await admin
     .from("devices")

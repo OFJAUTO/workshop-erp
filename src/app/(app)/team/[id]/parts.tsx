@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
+import { ImageCropper } from "@/components/ImageCropper";
 import { Button, Field, Input } from "@/components/ui";
 
 export function PinResetForm({ action }: { action: FormAction }) {
@@ -23,20 +24,15 @@ export function PinResetForm({ action }: { action: FormAction }) {
 
 export function PhotoForm({ action }: { action: FormAction }) {
   return (
-    <ActionForm action={action} className="flex flex-col gap-2 flex-1">
+    <ActionForm action={action} className="flex flex-col gap-3 flex-1">
       {() => (
         <>
-          <input
-            type="file"
-            name="photo"
-            accept="image/jpeg,image/png,image/webp"
-            capture="user"
-            required
-            className="text-sm file:mr-3 file:min-h-11 file:rounded-control file:border file:border-line-strong file:bg-white file:px-4 file:text-sm file:font-bold"
-          />
-          <SubmitButton size="md" tone="secondary">
-            Upload photo
-          </SubmitButton>
+          <ImageCropper name="photo" shape="circle" outputWidth={320} outputHeight={320} capture="user" label="Choose or take a photo" />
+          <div>
+            <SubmitButton size="md" tone="secondary">
+              Save photo
+            </SubmitButton>
+          </div>
         </>
       )}
     </ActionForm>

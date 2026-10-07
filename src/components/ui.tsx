@@ -75,8 +75,8 @@ export function PageHeader({
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold leading-tight">{title}</h1>
-        {subtitle ? <p className="text-sm text-muted">{subtitle}</p> : null}
+        <h1 className="text-3xl font-extrabold leading-tight">{title}</h1>
+        {subtitle ? <p className="text-sm font-medium text-muted">{subtitle}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>
@@ -86,8 +86,8 @@ export function PageHeader({
 export function SectionLabel({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-2">
-      <span className="text-[13px] font-bold tracking-[0.06em] uppercase">{children}</span>
-      {right ? <span className="text-[13px] text-muted">{right}</span> : null}
+      <span className="text-sm font-extrabold tracking-[0.08em] uppercase">{children}</span>
+      {right ? <span className="text-sm font-semibold text-muted">{right}</span> : null}
     </div>
   );
 }
@@ -252,7 +252,7 @@ export function DescriptionList({ items }: { items: { label: string; value: Reac
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
       {items.map((it) => (
         <div key={it.label} className="flex flex-col gap-0.5">
-          <dt className="text-xs text-muted">{it.label}</dt>
+          <dt className="text-xs font-semibold text-muted">{it.label}</dt>
           <dd className="text-[15px] font-medium break-words">{it.value ?? <span className="text-faint">Not set</span>}</dd>
         </div>
       ))}

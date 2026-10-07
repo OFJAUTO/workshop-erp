@@ -1,6 +1,6 @@
 import Link from "next/link";
+import { PublicShell } from "@/components/Shell";
 import { Card } from "@/components/ui";
-import { Logo } from "@/components/Logo";
 import { getCurrentDevice } from "@/lib/devices";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
@@ -13,18 +13,20 @@ export default async function TabletPage() {
 
   if (!device) {
     return (
-      <main className="flex-1 flex items-center justify-center p-6">
-        <Card className="max-w-md w-full flex flex-col gap-3">
-          <h1 className="text-xl font-bold">This tablet is not registered</h1>
-          <p className="text-sm text-muted">
-            PIN login only works on tablets the owner has registered. To register this one, the owner
-            signs in here with their own email and password, then opens the registration page.
-          </p>
-          <Link href="/login?next=/tablet/register" className="font-semibold underline underline-offset-4">
-            Owner: sign in to register this tablet
-          </Link>
-        </Card>
-      </main>
+      <PublicShell note="Shared tablet">
+        <div className="flex-1 flex items-center justify-center p-6">
+          <Card className="max-w-md w-full flex flex-col gap-3">
+            <h1 className="text-xl font-extrabold">This tablet is not registered</h1>
+            <p className="text-sm text-muted">
+              PIN login only works on tablets the owner has registered. To register this one, the owner signs in
+              here with their own email and password, then opens the registration page.
+            </p>
+            <Link href="/login?next=/tablet/register" className="font-semibold underline underline-offset-4">
+              Owner: sign in to register this tablet
+            </Link>
+          </Card>
+        </div>
+      </PublicShell>
     );
   }
 
@@ -52,15 +54,11 @@ export default async function TabletPage() {
   }));
 
   return (
-    <main className="flex-1 flex flex-col gap-6 p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-4">
-          <Logo />
-          <span className="text-sm text-muted">{device.name}</span>
-        </div>
-        <span className="text-sm font-semibold">Tap your name</span>
-      </header>
-      <PinLogin people={people} />
-    </main>
+    <PublicShell note={device.name}>
+      <div className="flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
+        <h1 className="text-2xl font-extrabold">Tap your name</h1>
+        <PinLogin people={people} />
+      </div>
+    </PublicShell>
   );
 }

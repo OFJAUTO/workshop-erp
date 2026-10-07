@@ -6,8 +6,9 @@ import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehiclePhotoRow, type VehicleRow } from "@/lib/types";
-import { addVehiclePhoto, setVehicleActive } from "../actions";
+import { addVehiclePhoto, setVehicleActive, setVehicleProfilePhoto } from "../actions";
 import { PhotoUploadForm } from "./PhotoUploadForm";
+import { ProfilePhotoForm } from "./ProfilePhotoForm";
 
 type Row = VehicleRow & {
   make: { name: string } | null;
@@ -34,7 +35,7 @@ export default async function VehiclePage({
     supabase
       .from("vehicles")
       .select(
-        "id, customer_id, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, customer_number, full_name, company_name, phone)",
+        "id, customer_id, photo_path, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, customer_number, full_name, company_name, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -50,10 +51,10 @@ export default async function VehiclePage({
 
   const { data: vipRow } = await supabase.from("customer_vip_flags").select("is_vip, vip_note").eq("id", v.customer_id).maybeSingle();
 
-  const signed = photos.length
-    ? await supabase.storage.from("vehicle-photos").createSignedUrls(photos.map((p) => p.storage_path), 3600)
-    : { data: [] };
+  const allPaths = [...photos.map((p) => p.storage_path), ...(v.photo_path ? [v.photo_path] : [])];
+  const signed = allPaths.length ? await supabase.storage.from("vehicle-photos").createSignedUrls(allPaths, 3600) : { data: [] };
   const urlByPath = new Map((signed.data ?? []).map((s) => [s.path, s.signedUrl]));
+  const profileUrl = v.photo_path ? (urlByPath.get(v.photo_path) ?? null) : null;
 
   const title = [v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ");
 
@@ -83,6 +84,25 @@ export default async function VehiclePage({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 flex flex-col gap-6">
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Car picture</SectionLabel>
+            <div className="flex flex-col xl:flex-row gap-5">
+              <div className="w-full xl:w-96 shrink-0 aspect-[16/10] rounded-card bg-chip overflow-hidden">
+                {profileUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={profileUrl} alt={formatPlate(v)} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-sm font-semibold text-faint">No picture yet</div>
+                )}
+              </div>
+              {canEdit ? (
+                <div className="flex-1">
+                  <ProfilePhotoForm action={setVehicleProfilePhoto.bind(null, v.id)} />
+                </div>
+              ) : null}
+            </div>
+          </Card>
+
           <Card className="flex flex-col gap-4">
             <SectionLabel>Details</SectionLabel>
             <DescriptionList

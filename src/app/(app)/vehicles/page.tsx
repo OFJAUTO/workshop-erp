@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Badge, Button, Card, Empty, Input, LinkButton, PageHeader } from "@/components/ui";
+import { Badge, Button, Empty, Input, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
+import { VehicleCard } from "./VehicleCard";
 
 type Row = VehicleRow & {
   make: { name: string } | null;
@@ -27,10 +28,10 @@ export default async function VehiclesPage({
   let query = supabase
     .from("vehicles")
     .select(
-      "id, customer_id, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name)",
+      "id, customer_id, photo_path, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name)",
     )
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .limit(120);
   if (show !== "all") query = query.eq("is_active", true);
   if (term) {
     const like = `%${term.replace(/[%_\s]/g, "")}%`;
@@ -39,11 +40,17 @@ export default async function VehiclesPage({
   const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];
 
-  const { data: vip } = await supabase
-    .from("customer_vip_flags")
-    .select("id, is_vip")
-    .in("id", Array.from(new Set(rows.map((r) => r.customer_id))));
+  const { data: vip } = rows.length
+    ? await supabase
+        .from("customer_vip_flags")
+        .select("id, is_vip")
+        .in("id", Array.from(new Set(rows.map((r) => r.customer_id))))
+    : { data: [] as { id: string; is_vip: boolean }[] };
   const vipIds = new Set((vip ?? []).filter((v) => v.is_vip).map((v) => v.id));
+
+  const paths = rows.map((r) => r.photo_path).filter((p): p is string => !!p);
+  const signed = paths.length ? await supabase.storage.from("vehicle-photos").createSignedUrls(paths, 3600) : { data: [] };
+  const urlByPath = new Map((signed.data ?? []).map((s) => [s.path, s.signedUrl]));
 
   return (
     <>
@@ -63,24 +70,22 @@ export default async function VehiclesPage({
       {rows.length === 0 ? (
         <Empty title={term ? "No cars match" : "No cars yet"} />
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
           {rows.map((v) => (
             <Link key={v.id} href={`/vehicles/${v.id}`} className="block">
-              <Card className="flex flex-wrap items-center gap-x-6 gap-y-2 hover:border-ink py-4">
-                <span className="flex items-center gap-2">
-                  <span className="font-bold tracking-[0.03em] text-[17px]">{formatPlate(v)}</span>
-                  {vipIds.has(v.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
-                  {!v.is_active ? <Badge tone="red">Inactive</Badge> : null}
-                </span>
-                <span className="text-sm font-medium flex-1 min-w-40">
-                  {[v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ")}
-                  {v.model_year ? ` · ${v.model_year}` : ""}
-                  {v.colour ? ` · ${v.colour}` : ""}
-                </span>
-                {seesCustomers && v.customer ? (
-                  <span className="text-sm text-muted">{v.customer.company_name ?? v.customer.full_name}</span>
-                ) : null}
-              </Card>
+              <VehicleCard
+                photoUrl={v.photo_path ? (urlByPath.get(v.photo_path) ?? null) : null}
+                plate={formatPlate(v)}
+                title={[v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ") || "Make and model not set"}
+                subtitle={[v.model_year, v.colour].filter(Boolean).join(" · ")}
+                owner={seesCustomers && v.customer ? (v.customer.company_name ?? v.customer.full_name) : null}
+                badges={
+                  <>
+                    {vipIds.has(v.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
+                    {!v.is_active ? <Badge tone="red">Inactive</Badge> : null}
+                  </>
+                }
+              />
             </Link>
           ))}
         </div>
