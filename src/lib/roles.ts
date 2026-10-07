@@ -52,6 +52,16 @@ export const PERMISSIONS = {
   viewPartCosts: ["owner", "accounts", "service_advisor", "parts"],
   viewTechnicianCostRate: ["owner", "accounts"],
   viewProfitPanel: ["owner", "accounts", "service_advisor"],
+  viewJobs: ALL_ROLES,
+  editGateIn: ["owner", "workshop_manager", "service_advisor", "gate_in"],
+  sendApproval: ["owner", "workshop_manager", "service_advisor", "gate_in"],
+  assignJobs: ["owner", "workshop_manager"],
+  moveJobs: ["owner", "workshop_manager"],
+  setPriority: ["owner", "workshop_manager", "service_advisor", "gate_in"],
+  gateOut: ["owner", "workshop_manager", "service_advisor", "gate_in", "accounts"],
+  overrideKeys: ["owner", "workshop_manager"],
+  approveRelease: ["owner", "accounts"],
+  viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "gate_in", "parts", "qc_inspector"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

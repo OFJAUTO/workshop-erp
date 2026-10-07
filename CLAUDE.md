@@ -6,14 +6,15 @@ ERP for a luxury car workshop in Dubai (about 45 users). The owner is not a deve
 
 - `docs/workshop-erp-blueprint.md` - the full specification and agreed decisions.
 - `docs/phase-1-decisions.md` - answers that shape the build (tablets, VIP privacy, plates, retention).
-- `docs/gate-in-spec-phase-2.md` - authoritative gate-in spec; overrides the blueprint's gate-in notes.
+- `docs/phase-2-spec.md` - authoritative Phase 2 spec (gate-in, approval page, job cards, floor board, gate-out); overrides the blueprint on those topics.
+- `docs/later-phases-notes.md` - owner notes for phases 4 to 6 (quotation rules, parts flow, profit per invoice).
 - `docs/workshop-erp-dashboard-design (1).html` - the look: white, black, grey; colour only for timing.
 
 ## Stack
 
 - Next.js 16 (App Router, `src/`), React 19, Tailwind v4, TypeScript. Light theme only.
 - Supabase: Postgres + Auth + Storage. Access rules live in the database (row level security), not only in the UI.
-- Hosting: Vercel (project workshop-erp, live at https://workshop-erp-chi.vercel.app, target address erp.ofjauto.com). Code: private GitHub repository github.com/OFJAUTO/workshop-erp; every push to `main` deploys automatically.
+- Hosting: Vercel (project workshop-erp). Live address: https://erp.ofjauto.com (the vercel.app address redirects there). Code: private GitHub repository github.com/OFJAUTO/workshop-erp; every push to `main` deploys automatically.
 - Secrets in `.env.local` (never committed). Keys: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_PASSWORD`, `SUPABASE_ACCESS_TOKEN`.
 
 ## Commands
@@ -39,6 +40,6 @@ node --env-file=.env.local scripts/bootstrap-owner.mjs --email <owner email> --n
 
 ## Phases
 
-1. Foundation (this phase): logins, roles, PINs, tablets, customers, contacts, cars, photos, settings, change log.
-2. Gate-in, job cards, floor board. 3. Calendar, QC, manager dashboard. 4. Quotes, approvals, invoices, Zoho Books.
+1. Foundation (done): logins, roles, PINs, tablets, customers, contacts, cars, photos, settings, change log.
+2. Gate-in, approval page, job cards, dashboard and floor board, gate-out (built, in testing). 3. Calendar, QC, manager dashboard. 4. Quotes, approvals, invoices, Zoho Books.
 5. Parts, purchase orders, materials stock. 6. Time clock, bodyshop sub-steps, customer messages.

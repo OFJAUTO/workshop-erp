@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DEFAULT_SESSION_HOURS, LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions } from "@/lib/session";
 
 /** Pages anyone may open without being logged in. */
-const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet"];
+const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet", "/api/media", "/api/approve", "/u", "/approve", "/terms"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
@@ -47,6 +47,13 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+
+  // The old vercel.app address always sends people to the company address.
+  const host = request.headers.get("host") ?? "";
+  if (host.endsWith(".vercel.app")) {
+    const url = new URL(request.nextUrl.pathname + request.nextUrl.search, "https://erp.ofjauto.com");
+    return NextResponse.redirect(url, 308);
+  }
 
   if (user) {
     const untilRaw = request.cookies.get(SESSION_UNTIL_COOKIE)?.value;

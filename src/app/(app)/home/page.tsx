@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { can, DEPARTMENT_LABELS, ROLE_LABELS, ROLE_PHASE1_SUMMARY, type DepartmentId, type RoleId } from "@/lib/roles";
@@ -14,6 +15,8 @@ function greeting() {
 export default async function HomePage() {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
+  if (can(role, "viewDashboard")) redirect("/dashboard");
+  if (role === "technician") redirect("/my-jobs");
   const today = new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
     day: "numeric",

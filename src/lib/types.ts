@@ -1,4 +1,5 @@
 import type { DepartmentId, RoleId } from "./roles";
+import type { JobStatus, Priority, Stage } from "./jobs";
 
 export type StaffRow = {
   id: string;
@@ -136,12 +137,120 @@ export type AuditRow = {
 };
 
 /** Formats a plate for display, e.g. "Dubai F 60238" or "Saudi Arabia 1234 ABC". */
-export function formatPlate(v: Pick<VehicleRow, "plate_country" | "plate_emirate" | "plate_code" | "plate_number">) {
+export type PlateFields = { plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string };
+
+export function formatPlate(v: PlateFields) {
   const region = v.plate_country === "UAE" ? v.plate_emirate ?? "UAE" : v.plate_country;
   return [region, v.plate_code, v.plate_number].filter(Boolean).join(" ");
 }
 
 /** Short plate without the emirate, matching the dashboard design ("F 60238"). */
-export function shortPlate(v: Pick<VehicleRow, "plate_code" | "plate_number">) {
+export function shortPlate(v: Pick<PlateFields, "plate_code" | "plate_number">) {
   return [v.plate_code, v.plate_number].filter(Boolean).join(" ");
 }
+
+/* ---------------------------------------------------------------------------
+   Phase 2: job cards
+   --------------------------------------------------------------------------- */
+
+export type JobRow = {
+  id: string;
+  job_number: string;
+  vehicle_id: string;
+  customer_id: string;
+  stage: Stage;
+  status: JobStatus;
+  priority: Priority;
+  promised_at: string | null;
+  assigned_to: string | null;
+  assigned_at: string | null;
+  gated_in_at: string;
+  gated_in_by: string;
+  gated_out_at: string | null;
+  gated_out_by: string | null;
+  first_approval_at: string | null;
+  is_open: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GateInRow = {
+  id: string;
+  job_id: string;
+  arrived_by: "our_recovery" | "customer_drove" | "customer_driver" | "outside_recovery";
+  condition: "runs_drives" | "needs_assistance" | "does_not_run";
+  fuel_level: "empty" | "quarter" | "half" | "three_quarters" | "full" | null;
+  battery_percent: number | null;
+  cleanliness: "clean" | "average" | "dirty" | "very_dirty";
+  dash_cam: boolean;
+  mileage: number;
+  keys_count: number;
+  keys_keychain: boolean;
+  customer_requests: string;
+  notes: string | null;
+  old_parts_return: boolean;
+  is_complete: boolean;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MediaKind = "video" | "dashboard_photo" | "keys_photo" | "damage_photo" | "gate_out_photo";
+
+export type GateInMediaRow = {
+  id: string;
+  job_id: string;
+  kind: MediaKind;
+  storage_path: string;
+  duration_s: number | null;
+  caption: string | null;
+  taken_at: string;
+  uploaded_by: string | null;
+};
+
+export type JobEventRow = {
+  id: number;
+  job_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  from_stage: string | null;
+  to_stage: string | null;
+  from_staff: string | null;
+  to_staff: string | null;
+  note: string | null;
+  created_at: string;
+  created_by: string | null;
+};
+
+export type ApprovalRequestRow = {
+  id: string;
+  job_id: string;
+  kind: "job_card" | "quote";
+  token: string;
+  sent_to_name: string | null;
+  sent_to_phone: string;
+  sent_at: string;
+  sent_by: string | null;
+  opened_at: string | null;
+  approved_at: string | null;
+  approver_name: string | null;
+  terms_text: string;
+  status: "sent" | "opened" | "approved" | "cancelled";
+};
+
+export type GateOutRow = {
+  id: string;
+  job_id: string;
+  keys_returned: number;
+  keychain_returned: boolean;
+  keys_match: boolean;
+  keys_override_by: string | null;
+  keys_override_reason: string | null;
+  dash_cam_reconnected: boolean | null;
+  balance_due_aed: number;
+  release_approved_by: string | null;
+  release_reason: string | null;
+  notes: string | null;
+  created_at: string;
+};
