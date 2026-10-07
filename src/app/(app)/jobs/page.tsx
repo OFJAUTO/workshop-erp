@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
+import { JobMediaStrip } from "@/components/JobMediaStrip";
+import { loadJobMediaSummaries } from "@/lib/job-media-strip";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -10,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
 
 type Row = JobRow & {
-  vehicle: { plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string; make: { name: string } | null; model: { name: string } | null } | null;
+  vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null;
   customer: { full_name: string; company_name: string | null } | null;
 };
 
@@ -24,11 +26,12 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)",
     )
     .eq("is_open", !closed)
     .order(closed ? "gated_out_at" : "gated_in_at", { ascending: false })
     .limit(200);
+  const summaries = await loadJobMediaSummaries(((data ?? []) as unknown as Row[]).map((j) => ({ id: j.id, photo_path: j.vehicle?.photo_path ?? null })));
   const rows = ((data ?? []) as unknown as Row[]).sort((a, b) => {
     if (closed) return 0;
     const ra = urgencyRank(a);
@@ -59,7 +62,8 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
             const timing = jobTiming(j.promised_at, j.is_open);
             return (
               <Link key={j.id} href={`/jobs/${j.id}`} className="block">
-                <Card className="flex flex-wrap items-center gap-x-7 gap-y-4 hover:border-ink">
+                <Card className="flex flex-col gap-4 hover:border-ink">
+                  <div className="flex flex-wrap items-center gap-x-7 gap-y-4">
                   <div className="flex-1 basis-64 min-w-0 flex flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
@@ -77,6 +81,8 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                     <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
                     <StageTrack stage={j.stage} timing={timing} />
                   </div>
+                  </div>
+                  <JobMediaStrip summary={summaries.get(j.id)} />
                 </Card>
               </Link>
             );

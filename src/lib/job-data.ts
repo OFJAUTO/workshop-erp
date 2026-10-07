@@ -9,10 +9,11 @@ export type JobCard = {
   vehicle: {
     id: string;
     photo_path: string | null;
+    has_plate: boolean;
     plate_country: string;
     plate_emirate: string | null;
     plate_code: string | null;
-    plate_number: string;
+    plate_number: string | null;
     vin: string | null;
     fuel_type: string | null;
     variant: string | null;
@@ -27,6 +28,7 @@ export type JobCard = {
   gateIn: GateInRow | null;
   media: GateInMediaRow[];
   mediaUrls: Map<string, string>;
+  vehiclePhotoUrl: string | null;
   events: (JobEventRow & { by_name: string | null; from_name: string | null; to_name: string | null })[];
   approvals: ApprovalRequestRow[];
   gateOut: GateOutRow | null;
@@ -47,7 +49,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
     await Promise.all([
       client
         .from("vehicles")
-        .select("id, photo_path, plate_country, plate_emirate, plate_code, plate_number, vin, fuel_type, variant, model_year, colour, make:vehicle_makes(name), model:vehicle_models(name)")
+        .select("id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, fuel_type, variant, model_year, colour, make:vehicle_makes(name), model:vehicle_models(name)")
         .eq("id", job.vehicle_id)
         .maybeSingle(),
       client
@@ -58,7 +60,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
       client.from("customer_vip_flags").select("is_vip, vip_note").eq("id", job.customer_id).maybeSingle(),
       client
         .from("gate_ins")
-        .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, mileage, keys_count, keys_keychain, customer_requests, notes, old_parts_return, is_complete, completed_at, created_at, updated_at")
+        .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, keys_count, keys_keychain, customer_requests, notes, old_parts_return, is_complete, completed_at, created_at, updated_at")
         .eq("job_id", jobId)
         .maybeSingle(),
       client
@@ -81,6 +83,11 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
 
   const media = await loadMedia(jobId);
   const mediaUrls = await signMedia(media);
+  let vehiclePhotoUrl: string | null = null;
+  if (vehicle.photo_path) {
+    const { data: signed } = await createAdminClient().storage.from("vehicle-photos").createSignedUrl(vehicle.photo_path, 3600);
+    vehiclePhotoUrl = signed?.signedUrl ?? null;
+  }
 
   // Names for the people in the log (readable by every role).
   const ids = new Set<string>();
@@ -104,6 +111,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
     gateIn: (gateIn as GateInRow | null) ?? null,
     media,
     mediaUrls,
+    vehiclePhotoUrl,
     events: ((events ?? []) as JobEventRow[]).map((e) => ({
       ...e,
       by_name: e.created_by ? (nameOf.get(e.created_by) ?? null) : null,

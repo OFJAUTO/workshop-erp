@@ -1,8 +1,7 @@
 import { PublicShell } from "@/components/Shell";
-import { MediaCapture } from "@/components/MediaCapture";
-import { VideoRecorder } from "@/components/VideoRecorder";
+import { MediaChecklist } from "@/components/MediaChecklist";
 import { Card, Notice } from "@/components/ui";
-import { loadMedia, mediaChecklist } from "@/lib/media";
+import { loadMajorDamage, loadMedia, mediaChecklist } from "@/lib/media";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 
@@ -15,10 +14,12 @@ function isExpired(iso: string) {
 type JobInfo = {
   job_number: string;
   vehicle: {
+    has_plate: boolean;
     plate_country: string;
     plate_emirate: string | null;
     plate_code: string | null;
-    plate_number: string;
+    plate_number: string | null;
+    vin: string | null;
     make: { name: string } | null;
     model: { name: string } | null;
   } | null;
@@ -30,7 +31,7 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
   const admin = createAdminClient();
   const { data: link } = await admin
     .from("upload_links")
-    .select("job_id, expires_at, job:jobs(job_number, vehicle:vehicles(plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name)))")
+    .select("job_id, expires_at, job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)))")
     .eq("token", token)
     .maybeSingle();
 
@@ -47,9 +48,8 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
   }
 
   const job = link.job as unknown as JobInfo | null;
-  const media = await loadMedia(link.job_id);
-  const check = mediaChecklist(media);
-  const damageCount = media.filter((m) => m.kind === "damage_photo").length;
+  const [media, majorDamage] = await Promise.all([loadMedia(link.job_id), loadMajorDamage(link.job_id)]);
+  const check = mediaChecklist(media, majorDamage);
 
   return (
     <PublicShell note="Phone upload">
@@ -60,17 +60,7 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
             {[job?.vehicle?.make?.name, job?.vehicle?.model?.name].filter(Boolean).join(" ")} · {job?.job_number}
           </p>
         </div>
-        {check.complete ? <Notice tone="success">Everything required is uploaded. You can add more damage photos.</Notice> : null}
-        <VideoRecorder jobId={link.job_id} token={token} done={check.video} />
-        <MediaCapture jobId={link.job_id} kind="dashboard_photo" label="Dashboard photo (mileage)" done={check.dashboard} token={token} />
-        <MediaCapture jobId={link.job_id} kind="keys_photo" label="Keys photo" done={check.keys} token={token} />
-        <MediaCapture
-          jobId={link.job_id}
-          kind="damage_photo"
-          label={`Damage close-ups (optional)${damageCount ? ` · ${damageCount}` : ""}`}
-          multiple
-          token={token}
-        />
+        <MediaChecklist jobId={link.job_id} check={check} token={token} />
         <p className="text-xs text-muted">This link works for 30 minutes. Uploads are recorded under the person who opened it.</p>
       </div>
     </PublicShell>

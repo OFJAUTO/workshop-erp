@@ -17,8 +17,7 @@ export default async function GateOutPage({ params }: { params: Promise<{ id: st
   if (!card || !card.gateIn) notFound();
   if (!card.job.is_open) redirect(`/jobs/${id}`);
   const g = card.gateIn;
-  const keysPhoto = card.media.find((m) => m.kind === "keys_photo");
-  const keysUrl = keysPhoto ? card.mediaUrls.get(keysPhoto.storage_path) ?? null : null;
+  const keysPhotos = card.media.filter((m) => m.kind === "keys_photo_front" || m.kind === "keys_photo_back" || m.kind === "keys_photo");
   const role = staff.role_id as RoleId;
 
   return (
@@ -38,13 +37,20 @@ export default async function GateOutPage({ params }: { params: Promise<{ id: st
         <div className="flex flex-col gap-6">
           <Card className="flex flex-col gap-3">
             <SectionLabel>Keys at gate-in</SectionLabel>
-            {keysUrl ? (
-              <a href={keysUrl} target="_blank" rel="noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={keysUrl} alt="Keys at gate-in" className="w-full rounded-card object-cover aspect-[4/3] bg-chip" />
-              </a>
+            {keysPhotos.length ? (
+              <div className="grid grid-cols-2 gap-2">
+                {keysPhotos.map((p) => {
+                  const url = card.mediaUrls.get(p.storage_path);
+                  return url ? (
+                    <a key={p.id} href={url} target="_blank" rel="noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="Keys at gate-in" className="w-full rounded-card object-cover aspect-[4/3] bg-chip" />
+                    </a>
+                  ) : null;
+                })}
+              </div>
             ) : (
-              <p className="text-sm text-muted">No keys photo on record.</p>
+              <p className="text-sm text-muted">No keys photos on record.</p>
             )}
             <DescriptionList
               items={[

@@ -42,6 +42,7 @@ function Fields({
   makes: VehicleMakeRow[];
   models: VehicleModelRow[];
 }) {
+  const [noPlate, setNoPlate] = useState(v.has_plate === "no");
   const [country, setCountry] = useState(v.plate_country || "UAE");
   const [makeId, setMakeId] = useState(v.make_id || "");
   const [modelId, setModelId] = useState(v.model_id || "");
@@ -64,6 +65,12 @@ function Fields({
 
       <div className="rounded-card border border-line p-4 flex flex-col gap-4">
         <span className="text-sm font-bold">Number plate</span>
+        <label className="flex items-center gap-3 min-h-11 cursor-pointer">
+          <input type="checkbox" name="no_plate" checked={noPlate} onChange={(e) => setNoPlate(e.target.checked)} className="h-5 w-5 accent-ink" />
+          <span className="text-sm font-semibold">No number plate</span>
+        </label>
+        {!noPlate ? (
+        <>
         <Field label="Country">
           <Select name="plate_country" value={country} onChange={(e) => setCountry(e.target.value)}>
             {PLATE_COUNTRIES.map((c) => (
@@ -100,6 +107,8 @@ function Fields({
             </Field>
           </div>
         </div>
+        </>
+        ) : null}
       </div>
 
       <Field label="VIN" optional hint="17 characters, from the door jamb or windscreen plate.">

@@ -7,8 +7,12 @@ export const GATE_IN_BUCKET = "gate-in-media";
 
 export const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
   video: "Walk-around video",
+  video_exterior: "Exterior video",
+  video_interior: "Interior video",
   dashboard_photo: "Dashboard photo (mileage)",
   keys_photo: "Keys photo",
+  keys_photo_front: "Keys, front",
+  keys_photo_back: "Keys, back",
   damage_photo: "Damage close-up",
   gate_out_photo: "Gate-out photo",
 };
@@ -40,12 +44,35 @@ export async function loadMedia(jobId: string): Promise<GateInMediaRow[]> {
   return (data ?? []) as GateInMediaRow[];
 }
 
-export function mediaChecklist(media: GateInMediaRow[]) {
+export type Checklist = {
+  videoExterior: boolean;
+  videoInterior: boolean;
+  dashboard: boolean;
+  keysFront: boolean;
+  keysBack: boolean;
+  damageCount: number;
+  majorDamage: boolean;
+  complete: boolean;
+};
+
+/** What is still missing. Both videos, the dashboard photo and both keys photos are always required; damage photos when major damage was ticked. */
+export function mediaChecklist(media: GateInMediaRow[], majorDamage = false): Checklist {
   const has = (k: MediaKind) => media.some((m) => m.kind === k);
-  return {
-    video: has("video"),
+  const damageCount = media.filter((m) => m.kind === "damage_photo").length;
+  const c = {
+    videoExterior: has("video_exterior"),
+    videoInterior: has("video_interior"),
     dashboard: has("dashboard_photo"),
-    keys: has("keys_photo"),
-    complete: has("video") && has("dashboard_photo") && has("keys_photo"),
+    keysFront: has("keys_photo_front"),
+    keysBack: has("keys_photo_back"),
+    damageCount,
+    majorDamage,
   };
+  return { ...c, complete: c.videoExterior && c.videoInterior && c.dashboard && c.keysFront && c.keysBack && (!majorDamage || damageCount > 0) };
+}
+
+export async function loadMajorDamage(jobId: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("gate_ins").select("major_damage").eq("job_id", jobId).maybeSingle();
+  return !!data?.major_damage;
 }

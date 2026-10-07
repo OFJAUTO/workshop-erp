@@ -24,7 +24,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("vehicles")
     .select(
-      "id, customer_id, photo_path, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
+      "id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
     )
     .eq("id", vehicleId)
     .maybeSingle();
@@ -56,9 +56,14 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
         }
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2">
-          <GateInForm action={createGateIn.bind(null, v.id)} isElectric={v.fuel_type === "electric"} initialValues={{ priority: "normal", promised_at: tomorrow, keys_count: "1" }} />
+      <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
+        <div className="2xl:col-span-3">
+          <GateInForm
+            action={createGateIn.bind(null, v.id)}
+            isElectric={v.fuel_type === "electric"}
+            pictureMode={v.photo_path ? "optional" : "required"}
+            initialValues={{ priority: "normal", promised_at: tomorrow, keys_count: "1", major_damage: "no" }}
+          />
         </div>
 
         <div className="flex flex-col gap-6">

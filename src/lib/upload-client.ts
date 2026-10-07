@@ -1,6 +1,15 @@
 /** Browser-side upload steps shared by the photo and video capture components. */
 
-export type UploadKind = "video" | "dashboard_photo" | "keys_photo" | "damage_photo" | "gate_out_photo";
+export type UploadKind =
+  | "video"
+  | "video_exterior"
+  | "video_interior"
+  | "dashboard_photo"
+  | "keys_photo"
+  | "keys_photo_front"
+  | "keys_photo_back"
+  | "damage_photo"
+  | "gate_out_photo";
 
 export async function prepareUpload(jobId: string, kind: UploadKind, contentType: string, token?: string) {
   const res = await fetch("/api/media/prepare", {

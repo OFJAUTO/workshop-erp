@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
+import { JobMediaStrip } from "@/components/JobMediaStrip";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { loadJobMediaSummaries } from "@/lib/job-media-strip";
 import { PENDING_GROUPS, STATUS_LABELS, formatPromised, jobTiming, urgencyRank, type JobStatus } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -11,10 +13,20 @@ import { formatPlate, type JobRow } from "@/lib/types";
 import { ProfitPanel } from "./ProfitPanel";
 
 type Row = JobRow & {
-  vehicle: { photo_path: string | null; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string; make: { name: string } | null; model: { name: string } | null } | null;
+  vehicle: {
+    photo_path: string | null;
+    has_plate: boolean;
+    plate_country: string;
+    plate_emirate: string | null;
+    plate_code: string | null;
+    plate_number: string | null;
+    vin: string | null;
+    make: { name: string } | null;
+    model: { name: string } | null;
+  } | null;
   customer: { full_name: string; company_name: string | null } | null;
   assignee: { display_name: string } | null;
-  gate_in: { condition: string; dash_cam: boolean; is_complete: boolean } | null;
+  gate_in: { condition: string; dash_cam: boolean; is_complete: boolean; major_damage: boolean } | null;
 };
 
 const CONDITION_SHORT: Record<string, string> = { runs_drives: "Runs and drives", needs_assistance: "Needs assistance", does_not_run: "Does not run" };
@@ -29,7 +41,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage)",
     )
     .eq("is_open", true);
   const all = ((data ?? []) as unknown as Row[]).sort((a, b) => {
@@ -39,9 +51,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     return 0;
   });
 
-  const { data: vip } = all.length
-    ? await supabase.from("customer_vip_flags").select("id, is_vip").in("id", Array.from(new Set(all.map((j) => j.customer_id))))
-    : { data: [] as { id: string; is_vip: boolean }[] };
+  const [{ data: vip }, mediaSummaries] = await Promise.all([
+    all.length
+      ? supabase.from("customer_vip_flags").select("id, is_vip").in("id", Array.from(new Set(all.map((j) => j.customer_id))))
+      : Promise.resolve({ data: [] as { id: string; is_vip: boolean }[] }),
+    loadJobMediaSummaries(all.map((j) => ({ id: j.id, photo_path: j.vehicle?.photo_path ?? null }))),
+  ]);
   const vipIds = new Set((vip ?? []).filter((v) => v.is_vip).map((v) => v.id));
 
   const timings = new Map(all.map((j) => [j.id, jobTiming(j.promised_at, j.is_open)]));
@@ -84,20 +99,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <section className="flex flex-col gap-3">
         <SectionLabel>Pending</SectionLabel>
         <div className="flex flex-wrap gap-2">
-          <Link href="/dashboard" className={`inline-flex min-h-11 items-center gap-2.5 rounded-full border px-4 text-sm font-semibold ${!group ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-            All
-            <span className={`inline-flex min-w-6 h-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${!group ? "bg-white text-ink" : "bg-ink text-white"}`}>{all.length}</span>
-          </Link>
-          {PENDING_GROUPS.map((g) => {
-            const n = all.filter((j) => g.statuses.includes(j.status as JobStatus)).length;
-            const active = group?.key === g.key;
-            return (
-              <Link key={g.key} href={`/dashboard?pending=${g.key}`} className={`inline-flex min-h-11 items-center gap-2.5 rounded-full border px-4 text-sm font-semibold ${active ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                {g.label}
-                <span className={`inline-flex min-w-6 h-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${active ? "bg-white text-ink" : "bg-ink text-white"}`}>{n}</span>
-              </Link>
-            );
-          })}
+          <PendingChip href="/dashboard" label="All" count={all.length} active={!group} />
+          {PENDING_GROUPS.map((g) => (
+            <PendingChip
+              key={g.key}
+              href={`/dashboard?pending=${g.key}`}
+              label={g.label}
+              count={all.filter((j) => g.statuses.includes(j.status as JobStatus)).length}
+              active={group?.key === g.key}
+            />
+          ))}
         </div>
       </section>
 
@@ -111,26 +122,30 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               const timing = timings.get(j.id)!;
               return (
                 <Link key={j.id} href={`/jobs/${j.id}`} className="block">
-                  <Card className="flex flex-wrap items-center gap-x-7 gap-y-4 hover:border-ink">
-                    <div className="flex-1 basis-64 min-w-0 flex flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
-                        {vipIds.has(j.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
-                        <PriorityBadge priority={j.priority} />
-                        <TimingBadge timing={timing} />
+                  <Card className="flex flex-col gap-4 hover:border-ink">
+                    <div className="flex flex-wrap items-center gap-x-7 gap-y-4">
+                      <div className="flex-1 basis-64 min-w-0 flex flex-col gap-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
+                          {vipIds.has(j.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
+                          <PriorityBadge priority={j.priority} />
+                          <TimingBadge timing={timing} />
+                        </div>
+                        <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}</span>
+                        <span className="text-xs text-muted">
+                          {j.assignee?.display_name ?? (seesCustomers && j.customer ? (j.customer.company_name ?? j.customer.full_name) : "Not assigned")}
+                          {j.promised_at ? ` · ${formatPromised(j.promised_at)}` : ""}
+                          {j.gate_in ? ` · ${CONDITION_SHORT[j.gate_in.condition] ?? ""}` : ""}
+                          {j.gate_in?.dash_cam ? " · Dash cam" : ""}
+                          {j.gate_in?.major_damage ? " · Major damage" : ""}
+                        </span>
                       </div>
-                      <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}</span>
-                      <span className="text-xs text-muted">
-                        {j.assignee?.display_name ?? (seesCustomers && j.customer ? (j.customer.company_name ?? j.customer.full_name) : "Not assigned")}
-                        {j.promised_at ? ` · ${formatPromised(j.promised_at)}` : ""}
-                        {j.gate_in ? ` · ${CONDITION_SHORT[j.gate_in.condition] ?? ""}` : ""}
-                        {j.gate_in?.dash_cam ? " · Dash cam" : ""}
-                      </span>
+                      <div className="flex-[999] basis-[560px] min-w-0 flex flex-col gap-2.5">
+                        <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
+                        <StageTrack stage={j.stage} timing={timing} />
+                      </div>
                     </div>
-                    <div className="flex-[999] basis-[560px] min-w-0 flex flex-col gap-2.5">
-                      <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
-                      <StageTrack stage={j.stage} timing={timing} />
-                    </div>
+                    <JobMediaStrip summary={mediaSummaries.get(j.id)} />
                   </Card>
                 </Link>
               );
@@ -146,6 +161,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </Card>
       </section>
     </>
+  );
+}
+
+function PendingChip({ href, label, count, active }: { href: string; label: string; count: number; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={`inline-flex min-h-11 items-center gap-2.5 rounded-full border px-4 text-sm font-semibold ${active ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+    >
+      {label}
+      <span className={`inline-flex min-w-6 h-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${active ? "bg-white text-ink" : "bg-ink text-white"}`}>
+        {count}
+      </span>
+    </Link>
   );
 }
 

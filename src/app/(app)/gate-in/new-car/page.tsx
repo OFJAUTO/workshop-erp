@@ -1,4 +1,4 @@
-import { Card, PageHeader } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { VehicleMakeRow, VehicleModelRow } from "@/lib/types";
@@ -16,9 +16,7 @@ export default async function NewCarForGateInPage() {
   return (
     <>
       <PageHeader title="New customer and car" subtitle="Just enough to gate the car in. Everything else can be added later." />
-      <Card className="max-w-3xl">
-        <QuickCarForm action={createCustomerAndVehicle} makes={(makes ?? []) as VehicleMakeRow[]} models={(models ?? []) as VehicleModelRow[]} />
-      </Card>
+      <QuickCarForm action={createCustomerAndVehicle} makes={(makes ?? []) as VehicleMakeRow[]} models={(models ?? []) as VehicleModelRow[]} />
     </>
   );
 }

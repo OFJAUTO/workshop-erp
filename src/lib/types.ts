@@ -90,10 +90,11 @@ export type VehicleRow = {
   id: string;
   customer_id: string;
   photo_path: string | null;
+  has_plate: boolean;
   plate_country: string;
   plate_emirate: Emirate | null;
   plate_code: string | null;
-  plate_number: string;
+  plate_number: string | null;
   vin: string | null;
   make_id: string;
   model_id: string | null;
@@ -137,16 +138,26 @@ export type AuditRow = {
 };
 
 /** Formats a plate for display, e.g. "Dubai F 60238" or "Saudi Arabia 1234 ABC". */
-export type PlateFields = { plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string };
+export type PlateFields = {
+  plate_country: string;
+  plate_emirate: string | null;
+  plate_code: string | null;
+  plate_number: string | null;
+  has_plate?: boolean;
+  vin?: string | null;
+};
 
 export function formatPlate(v: PlateFields) {
+  if (v.has_plate === false || !v.plate_number) {
+    return v.vin ? `No plate · VIN …${v.vin.slice(-6)}` : "No plate";
+  }
   const region = v.plate_country === "UAE" ? v.plate_emirate ?? "UAE" : v.plate_country;
   return [region, v.plate_code, v.plate_number].filter(Boolean).join(" ");
 }
 
 /** Short plate without the emirate, matching the dashboard design ("F 60238"). */
 export function shortPlate(v: Pick<PlateFields, "plate_code" | "plate_number">) {
-  return [v.plate_code, v.plate_number].filter(Boolean).join(" ");
+  return [v.plate_code, v.plate_number].filter(Boolean).join(" ") || "No plate";
 }
 
 /* ---------------------------------------------------------------------------
@@ -189,13 +200,23 @@ export type GateInRow = {
   customer_requests: string;
   notes: string | null;
   old_parts_return: boolean;
+  major_damage: boolean;
   is_complete: boolean;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type MediaKind = "video" | "dashboard_photo" | "keys_photo" | "damage_photo" | "gate_out_photo";
+export type MediaKind =
+  | "video"
+  | "video_exterior"
+  | "video_interior"
+  | "dashboard_photo"
+  | "keys_photo"
+  | "keys_photo_front"
+  | "keys_photo_back"
+  | "damage_photo"
+  | "gate_out_photo";
 
 export type GateInMediaRow = {
   id: string;

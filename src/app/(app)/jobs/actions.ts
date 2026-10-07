@@ -7,7 +7,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, type JobStatus } from "@/lib/jobs";
-import { loadMedia, mediaChecklist, newToken } from "@/lib/media";
+import { loadMajorDamage, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -49,8 +49,8 @@ export async function assignJob(jobId: string, formData: FormData) {
   const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
 
-  const check = mediaChecklist(await loadMedia(jobId));
-  if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in video, dashboard photo and keys photo must be uploaded before the car can be assigned."));
+  const check = mediaChecklist(await loadMedia(jobId), await loadMajorDamage(jobId));
+  if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
 
   const { data: tech } = await supabase.from("staff").select("id, display_name, role_id, is_active").eq("id", technicianId).maybeSingle();
   if (!tech || !tech.is_active) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Choose a technician."));
@@ -115,6 +115,7 @@ const amendSchema = z.object({
   battery_percent: z.string().trim(),
   cleanliness: z.enum(["clean", "average", "dirty", "very_dirty"]),
   dash_cam: z.enum(["yes", "no"]),
+  major_damage: z.enum(["yes", "no"]),
   mileage: z.string().regex(/^\d{1,7}$/, "Enter the mileage in km."),
   keys_count: z.string().regex(/^\d{1,2}$/, "Enter how many keys were received."),
   keys_keychain: z.enum(["yes", "no"]),
@@ -137,6 +138,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     battery_percent: get("battery_percent"),
     cleanliness: get("cleanliness"),
     dash_cam: get("dash_cam"),
+    major_damage: get("major_damage"),
     mileage: get("mileage"),
     keys_count: get("keys_count"),
     keys_keychain: get("keys_keychain"),
@@ -163,6 +165,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
       battery_percent: d.is_electric === "yes" && d.battery_percent ? Number(d.battery_percent) : null,
       cleanliness: d.cleanliness,
       dash_cam: d.dash_cam === "yes",
+      major_damage: d.major_damage === "yes",
       mileage: Number(d.mileage),
       keys_count: Number(d.keys_count),
       keys_keychain: d.keys_keychain === "yes",
@@ -199,8 +202,8 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   const supabase = await createClient();
   const { data: job } = await supabase.from("jobs").select("id, status, is_open, job_number").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
-  const check = mediaChecklist(await loadMedia(jobId));
-  if (!check.complete) return { error: "The video, dashboard photo and keys photo must be uploaded before the approval link can be sent.", values };
+  const check = mediaChecklist(await loadMedia(jobId), await loadMajorDamage(jobId));
+  if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos and any required damage photos must be uploaded before the approval link can be sent.", values };
 
   const settings = await getSettings();
   const terms = String(settings.terms_and_conditions ?? "").trim();

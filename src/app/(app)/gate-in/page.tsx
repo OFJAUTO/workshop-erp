@@ -24,7 +24,7 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
     const { data } = await supabase
       .from("vehicles")
       .select(
-        "id, customer_id, photo_path, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name, phone, is_vip)",
+        "id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name, phone, is_vip)",
       )
       .eq("is_active", true)
       .or(`plate_number.ilike.${like},vin.ilike.${like}`)

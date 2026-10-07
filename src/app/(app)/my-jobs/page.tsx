@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
+import { JobMediaStrip } from "@/components/JobMediaStrip";
+import { loadJobMediaSummaries } from "@/lib/job-media-strip";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, PageHeader } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -8,7 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
 
 type Row = JobRow & {
-  vehicle: { plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string; make: { name: string } | null; model: { name: string } | null } | null;
+  vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null;
   gate_in: { dash_cam: boolean; customer_requests: string } | null;
 };
 
@@ -19,7 +21,7 @@ export default async function MyJobsPage() {
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests)",
     )
     .eq("is_open", true)
     .eq("assigned_to", staff.id);
@@ -29,6 +31,7 @@ export default async function MyJobsPage() {
     for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
     return 0;
   });
+  const summaries = await loadJobMediaSummaries(rows.map((j) => ({ id: j.id, photo_path: j.vehicle?.photo_path ?? null })));
   const { data: vip } = rows.length
     ? await supabase.from("customer_vip_flags").select("id, is_vip").in("id", Array.from(new Set(rows.map((j) => j.customer_id))))
     : { data: [] as { id: string; is_vip: boolean }[] };
@@ -60,6 +63,7 @@ export default async function MyJobsPage() {
                     {j.promised_at ? ` · promised ${formatPromised(j.promised_at)}` : ""}
                   </span>
                   <StageTrack stage={j.stage} timing={timing} compact />
+                  <JobMediaStrip summary={summaries.get(j.id)} />
                 </Card>
               </Link>
             );

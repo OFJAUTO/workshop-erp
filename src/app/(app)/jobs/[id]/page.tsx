@@ -33,7 +33,7 @@ export default async function JobPage({
   const card = await loadJobCard(supabase, id);
   if (!card) notFound();
   const { job, vehicle, customer, vip, gateIn, media, events, approvals, gateOut } = card;
-  const check = mediaChecklist(media);
+  const check = mediaChecklist(media, gateIn?.major_damage ?? false);
   const timing = jobTiming(job.promised_at, job.is_open);
   const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
@@ -105,7 +105,7 @@ export default async function JobPage({
         <StageTrack stage={job.stage} timing={timing} />
         {job.status === "gate_in_pending" ? (
           <p className="text-sm font-semibold text-amber">
-            Incomplete, video pending. The approval link cannot be sent and the car cannot be assigned until the video, dashboard photo and keys photo are uploaded.
+            Incomplete, video pending. The approval link cannot be sent and the car cannot be assigned until both videos, the dashboard photo, both keys photos and any required damage photos are uploaded.
           </p>
         ) : null}
       </Card>
@@ -133,6 +133,7 @@ export default async function JobPage({
                   },
                   { label: "Cleanliness", value: labelOf(CLEANLINESS, gateIn.cleanliness) },
                   { label: "Dash cam", value: gateIn.dash_cam ? "Fitted, to be disconnected" : "Not fitted" },
+                  { label: "Major damage", value: gateIn.major_damage ? "Yes" : "No" },
                   { label: "Mileage", value: `${gateIn.mileage.toLocaleString("en-GB")} km` },
                   { label: "Keys", value: `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}` },
                   { label: "Old parts returned to customer", value: gateIn.old_parts_return ? "Yes" : "No" },
@@ -154,7 +155,7 @@ export default async function JobPage({
                 </LinkButton>
               ) : null}
             </div>
-            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} />
+            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} />
           </Card>
 
           {gateOut ? (

@@ -3,18 +3,32 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui";
-import { uploadFile } from "@/lib/upload-client";
+import { uploadFile, type UploadKind } from "@/lib/upload-client";
 
 const MAX_SECONDS = 90;
 const BITRATE = 3_500_000; // about 40 MB for a full 90-second 1080p recording
 
-type Phase = "idle" | "ready" | "recording" | "review" | "uploading" | "done" | "unsupported";
+type Phase = "idle" | "starting" | "ready" | "recording" | "review" | "uploading" | "done" | "unsupported";
 
 /**
- * Records the walk-around video in the browser: 1080p where the camera allows,
- * stops by itself at 90 seconds, then uploads with a progress bar.
+ * Records a video in the browser: 1080p where the camera allows, live preview
+ * while filming, stops by itself at 90 seconds, then uploads with a progress bar.
  */
-export function VideoRecorder({ jobId, token, done = false }: { jobId: string; token?: string; done?: boolean }) {
+export function VideoRecorder({
+  jobId,
+  kind,
+  label,
+  hint,
+  token,
+  done = false,
+}: {
+  jobId: string;
+  kind: UploadKind;
+  label: string;
+  hint: string;
+  token?: string;
+  done?: boolean;
+}) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -30,6 +44,19 @@ export function VideoRecorder({ jobId, token, done = false }: { jobId: string; t
 
   useEffect(() => () => stopStream(), []);
 
+  // Attach the camera stream to the preview element once it is on screen.
+  // (The element only exists while the camera is open, so this cannot be done
+  // at the moment the camera starts.)
+  useEffect(() => {
+    const el = videoRef.current;
+    const stream = streamRef.current;
+    if ((phase === "ready" || phase === "recording") && el && stream && el.srcObject !== stream) {
+      el.srcObject = stream;
+      el.muted = true;
+      el.play().catch(() => {});
+    }
+  }, [phase]);
+
   function stopStream() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -42,17 +69,13 @@ export function VideoRecorder({ jobId, token, done = false }: { jobId: string; t
       setPhase("unsupported");
       return;
     }
+    setPhase("starting");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: true,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-        await videoRef.current.play().catch(() => {});
-      }
       setPhase("ready");
     } catch {
       setError("Camera not available. Allow camera access, or use the file option below.");
@@ -109,7 +132,7 @@ export function VideoRecorder({ jobId, token, done = false }: { jobId: string; t
     setError(null);
     try {
       const type = (file.type || "video/webm").split(";")[0];
-      await uploadFile(jobId, "video", file, type, setProgress, { duration, token });
+      await uploadFile(jobId, kind, file, type, setProgress, { duration, token });
       setPhase("done");
       router.refresh();
     } catch (err) {
@@ -130,30 +153,37 @@ export function VideoRecorder({ jobId, token, done = false }: { jobId: string; t
   }
 
   const finished = phase === "done";
+  const cameraOpen = phase === "ready" || phase === "recording";
 
   return (
     <div className={`flex flex-col gap-3 rounded-card border-2 p-4 ${finished ? "border-green bg-green-soft" : "border-line-strong bg-white"}`}>
       <div className="flex items-center justify-between gap-3">
         <span className="flex flex-col">
-          <span className="font-bold">Walk-around video</span>
-          <span className="text-xs text-muted">Exterior, interior and dashboard. Up to 90 seconds, stops by itself.</span>
+          <span className="font-bold">{label}</span>
+          <span className="text-xs text-muted">{hint} Up to {MAX_SECONDS} seconds, stops by itself.</span>
         </span>
         <span className={`text-2xl font-bold ${finished ? "text-green" : "text-faint"}`}>{finished ? "✓" : "●"}</span>
       </div>
 
-      {phase === "idle" ? (
-        <Button size="lg" onClick={startCamera}>
-          Open camera
+      {phase === "idle" || phase === "done" ? (
+        <Button size="lg" tone={finished ? "secondary" : "primary"} onClick={startCamera}>
+          {finished ? "Record another" : "Open camera"}
         </Button>
       ) : null}
+      {phase === "starting" ? <p className="text-sm text-muted">Starting the camera…</p> : null}
 
-      {phase === "ready" || phase === "recording" ? (
+      {cameraOpen ? (
         <div className="flex flex-col gap-3">
-          <video ref={videoRef} playsInline autoPlay muted className="w-full rounded-card bg-black aspect-video" />
+          <video ref={videoRef} playsInline autoPlay muted className="w-full rounded-card bg-black aspect-video object-cover" />
           {phase === "ready" ? (
-            <Button size="lg" onClick={startRecording}>
-              Start recording
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button size="lg" onClick={startRecording}>
+                Start recording
+              </Button>
+              <Button tone="ghost" size="lg" onClick={() => { stopStream(); setPhase(done ? "done" : "idle"); }}>
+                Cancel
+              </Button>
+            </div>
           ) : (
             <div className="flex items-center gap-3">
               <span className="inline-flex h-3 w-3 rounded-full bg-red-bar animate-pulse" />

@@ -13,10 +13,11 @@ import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES } from "@/lib/types";
 const vehicleSchema = z
   .object({
     customer_id: z.uuid({ message: "Choose the customer." }),
-    plate_country: z.enum(PLATE_COUNTRIES, { message: "Choose the plate country." }),
+    no_plate: z.string(),
+    plate_country: z.string().trim(),
     plate_emirate: z.string().trim(),
     plate_code: z.string().trim().toUpperCase(),
-    plate_number: z.string().trim().toUpperCase().min(1, "Enter the plate number."),
+    plate_number: z.string().trim().toUpperCase(),
     vin: z.string().trim().toUpperCase(),
     make_id: z.string().trim(),
     new_make: z.string().trim(),
@@ -30,8 +31,14 @@ const vehicleSchema = z
     notes: z.string().trim(),
   })
   .superRefine((d, ctx) => {
-    if (d.plate_country === "UAE" && !(EMIRATES as readonly string[]).includes(d.plate_emirate)) {
-      ctx.addIssue({ code: "custom", path: ["plate_emirate"], message: "Choose the emirate." });
+    if (d.no_plate !== "on") {
+      if (!(PLATE_COUNTRIES as readonly string[]).includes(d.plate_country)) {
+        ctx.addIssue({ code: "custom", path: ["plate_country"], message: "Choose the plate country." });
+      }
+      if (d.plate_country === "UAE" && !(EMIRATES as readonly string[]).includes(d.plate_emirate)) {
+        ctx.addIssue({ code: "custom", path: ["plate_emirate"], message: "Choose the emirate." });
+      }
+      if (!d.plate_number) ctx.addIssue({ code: "custom", path: ["plate_number"], message: "Enter the plate number, or tick No number plate." });
     }
     if (d.vin && d.vin.length !== 17) {
       ctx.addIssue({ code: "custom", path: ["vin"], message: "A VIN has exactly 17 characters." });
@@ -57,6 +64,7 @@ function parse(formData: FormData) {
   const get = (k: string) => formData.get(k) ?? "";
   return vehicleSchema.safeParse({
     customer_id: get("customer_id"),
+    no_plate: get("no_plate"),
     plate_country: get("plate_country"),
     plate_emirate: get("plate_emirate"),
     plate_code: get("plate_code"),

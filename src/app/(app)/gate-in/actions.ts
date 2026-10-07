@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -8,7 +9,28 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
 import { createClient } from "@/lib/supabase/server";
-import { EMIRATES, PLATE_COUNTRIES } from "@/lib/types";
+import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES } from "@/lib/types";
+
+/* ---------------------------------------------------------------------------
+   Car picture upload (shared)
+   --------------------------------------------------------------------------- */
+
+async function saveCarPicture(vehicleId: string, file: FormDataEntryValue | null): Promise<string | null> {
+  if (!(file instanceof File) || file.size === 0) return null;
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return "Use a JPG, PNG or WebP picture.";
+  if (file.size > 10 * 1024 * 1024) return "The picture must be under 10 MB.";
+  const path = `${vehicleId}/profile-${Date.now()}-${randomBytes(4).toString("hex")}.jpg`;
+  const supabase = await createClient();
+  const { error: upError } = await supabase.storage.from("vehicle-photos").upload(path, file, { contentType: file.type, upsert: false });
+  if (upError) return "Picture upload failed: " + upError.message;
+  const { error } = await supabase.from("vehicles").update({ photo_path: path }).eq("id", vehicleId);
+  if (error) return error.message;
+  return null;
+}
+
+/* ---------------------------------------------------------------------------
+   Gate-in
+   --------------------------------------------------------------------------- */
 
 const gateInSchema = z
   .object({
@@ -18,6 +40,7 @@ const gateInSchema = z
     battery_percent: z.string().trim(),
     cleanliness: z.enum(["clean", "average", "dirty", "very_dirty"], { message: "Choose the cleanliness." }),
     dash_cam: z.enum(["yes", "no"], { message: "Is a dash cam fitted?" }),
+    major_damage: z.enum(["yes", "no"], { message: "Is there major damage?" }),
     mileage: z.string().trim(),
     keys_count: z.string().trim(),
     keys_keychain: z.enum(["yes", "no"], { message: "Did the keys come with a keychain?" }),
@@ -56,6 +79,7 @@ function parseGateIn(formData: FormData) {
     battery_percent: get("battery_percent"),
     cleanliness: get("cleanliness"),
     dash_cam: get("dash_cam"),
+    major_damage: get("major_damage"),
     mileage: get("mileage"),
     keys_count: get("keys_count"),
     keys_keychain: get("keys_keychain"),
@@ -78,10 +102,14 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const supabase = await createClient();
   const { data: vehicle } = await supabase
     .from("vehicles")
-    .select("id, customer_id, is_active")
+    .select("id, customer_id, is_active, photo_path")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
+
+  const picture = formData.get("car_picture");
+  const hasNewPicture = picture instanceof File && picture.size > 0;
+  if (!vehicle.photo_path && !hasNewPicture) return { error: "Take a picture of the car.", values };
 
   const { data: openJob } = await supabase
     .from("jobs")
@@ -90,6 +118,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     .eq("is_open", true)
     .maybeSingle();
   if (openJob) return { error: `This car is already in the workshop on job ${openJob.job_number}.`, values };
+
+  if (hasNewPicture) {
+    const picError = await saveCarPicture(vehicleId, picture);
+    if (picError) return { error: picError, values };
+  }
 
   const { data: job, error: jobError } = await supabase
     .from("jobs")
@@ -112,6 +145,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     battery_percent: d.is_electric === "yes" ? Number(d.battery_percent) : null,
     cleanliness: d.cleanliness,
     dash_cam: d.dash_cam === "yes",
+    major_damage: d.major_damage === "yes",
     mileage: Number(d.mileage),
     keys_count: Number(d.keys_count),
     keys_keychain: d.keys_keychain === "yes",
@@ -134,6 +168,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
 
   revalidatePath("/dashboard");
   revalidatePath("/jobs");
+  revalidatePath("/vehicles");
   redirect(`/jobs/${job.id}/media`);
 }
 
@@ -145,27 +180,40 @@ const quickSchema = z
   .object({
     full_name: z.string().trim().min(2, "Enter the customer's name."),
     phone: z.string().trim().min(7, "Enter the customer's phone number."),
-    plate_country: z.enum(PLATE_COUNTRIES, { message: "Choose the plate country." }),
+    email: z.string().trim().toLowerCase(),
+    trn: z.string().trim(),
+    no_plate: z.string(),
+    plate_country: z.string().trim(),
     plate_emirate: z.string().trim(),
     plate_code: z.string().trim().toUpperCase(),
-    plate_number: z.string().trim().toUpperCase().min(1, "Enter the plate number."),
-    vin: z.string().trim().toUpperCase(),
+    plate_number: z.string().trim().toUpperCase(),
+    vin: z.string().trim().toUpperCase().min(1, "Enter the VIN."),
     make_id: z.string().trim(),
     new_make: z.string().trim(),
     model_id: z.string().trim(),
     new_model: z.string().trim(),
-    fuel_type: z.string().trim(),
+    fuel_type: z.enum(FUEL_TYPES, { message: "Choose the fuel type." }),
   })
   .superRefine((d, ctx) => {
-    if (d.plate_country === "UAE" && !(EMIRATES as readonly string[]).includes(d.plate_emirate)) {
-      ctx.addIssue({ code: "custom", path: ["plate_emirate"], message: "Choose the emirate." });
+    if (d.email && !z.email().safeParse(d.email).success) {
+      ctx.addIssue({ code: "custom", path: ["email"], message: "That email does not look right." });
     }
-    if (d.vin && d.vin.length !== 17) ctx.addIssue({ code: "custom", path: ["vin"], message: "A VIN has exactly 17 characters." });
+    if (d.trn && !/^\d{15}$/.test(d.trn)) ctx.addIssue({ code: "custom", path: ["trn"], message: "A TRN is 15 digits." });
+    if (d.no_plate !== "on") {
+      if (!(PLATE_COUNTRIES as readonly string[]).includes(d.plate_country)) {
+        ctx.addIssue({ code: "custom", path: ["plate_country"], message: "Choose the plate country." });
+      }
+      if (d.plate_country === "UAE" && !(EMIRATES as readonly string[]).includes(d.plate_emirate)) {
+        ctx.addIssue({ code: "custom", path: ["plate_emirate"], message: "Choose the emirate." });
+      }
+      if (!d.plate_number) ctx.addIssue({ code: "custom", path: ["plate_number"], message: "Enter the plate number, or tick No number plate." });
+    }
+    if (d.vin.length !== 17) ctx.addIssue({ code: "custom", path: ["vin"], message: "A VIN has exactly 17 characters." });
     if (d.make_id === "__new__" ? d.new_make.length < 2 : !d.make_id) {
       ctx.addIssue({ code: "custom", path: ["make_id"], message: "Choose the make, or type a new one." });
     }
-    if (d.model_id === "__new__" && d.new_model.length < 1) {
-      ctx.addIssue({ code: "custom", path: ["model_id"], message: "Type the new model name." });
+    if (d.model_id === "__new__" ? d.new_model.length < 1 : !d.model_id) {
+      ctx.addIssue({ code: "custom", path: ["model_id"], message: "Choose the model, or type a new one." });
     }
   });
 
@@ -176,6 +224,9 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
   const parsed = quickSchema.safeParse({
     full_name: get("full_name"),
     phone: get("phone"),
+    email: get("email"),
+    trn: get("trn"),
+    no_plate: get("no_plate"),
     plate_country: get("plate_country"),
     plate_emirate: get("plate_emirate"),
     plate_code: get("plate_code"),
@@ -190,6 +241,9 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
 
+  const picture = formData.get("car_picture");
+  if (!(picture instanceof File) || picture.size === 0) return { error: "Take a picture of the car.", values };
+
   const supabase = await createClient();
 
   let makeId = d.make_id;
@@ -202,7 +256,7 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
       makeId = data.id;
     }
   }
-  let modelId: string | null = d.model_id || null;
+  let modelId: string = d.model_id;
   if (d.model_id === "__new__") {
     const { data: existing } = await supabase.from("vehicle_models").select("id").eq("make_id", makeId).ilike("name", d.new_model).maybeSingle();
     if (existing) modelId = existing.id;
@@ -215,23 +269,32 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
 
   const { data: customer, error: cError } = await supabase
     .from("customers")
-    .insert({ customer_type: "individual", full_name: d.full_name, phone: normalisePhone(d.phone) })
+    .insert({
+      customer_type: d.trn ? "company" : "individual",
+      full_name: d.full_name,
+      company_name: d.trn ? d.full_name : null,
+      phone: normalisePhone(d.phone),
+      email: blankToNull(d.email),
+      trn: blankToNull(d.trn),
+    })
     .select("id")
     .single();
   if (cError || !customer) return { error: cError?.message ?? "Could not save the customer.", values };
 
+  const noPlate = d.no_plate === "on";
   const { data: vehicle, error: vError } = await supabase
     .from("vehicles")
     .insert({
       customer_id: customer.id,
-      plate_country: d.plate_country,
-      plate_emirate: d.plate_country === "UAE" ? d.plate_emirate : null,
-      plate_code: blankToNull(d.plate_code),
-      plate_number: d.plate_number.replace(/\s+/g, ""),
-      vin: blankToNull(d.vin),
+      has_plate: !noPlate,
+      plate_country: noPlate ? "UAE" : d.plate_country,
+      plate_emirate: !noPlate && d.plate_country === "UAE" ? d.plate_emirate : null,
+      plate_code: noPlate ? null : blankToNull(d.plate_code),
+      plate_number: noPlate ? null : d.plate_number.replace(/\s+/g, ""),
+      vin: d.vin,
       make_id: makeId,
       model_id: modelId,
-      fuel_type: ["petrol", "diesel", "hybrid", "electric"].includes(d.fuel_type) ? d.fuel_type : null,
+      fuel_type: d.fuel_type,
     })
     .select("id")
     .single();
@@ -246,6 +309,9 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
       values,
     };
   }
+
+  const picError = await saveCarPicture(vehicle.id, picture);
+  if (picError) return { error: picError, values };
 
   revalidatePath("/customers");
   revalidatePath("/vehicles");

@@ -7,6 +7,7 @@ import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, labelOf } from "@/lib
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
 
 export const dynamic = "force-dynamic";
 
@@ -53,10 +54,6 @@ export default async function ApprovalPage({
     );
   }
   const { vehicle, gateIn, media, mediaUrls, job } = card;
-  const video = media.find((m) => m.kind === "video");
-  const videoUrl = video ? mediaUrls.get(video.storage_path) : null;
-  const keysPhoto = media.find((m) => m.kind === "keys_photo");
-  const keysUrl = keysPhoto ? mediaUrls.get(keysPhoto.storage_path) : null;
   const dirty = gateIn.cleanliness === "dirty" || gateIn.cleanliness === "very_dirty";
   const approved = !!req.approved_at;
 
@@ -69,18 +66,18 @@ export default async function ApprovalPage({
         </p>
       </div>
 
-      {videoUrl ? (
-        <video src={videoUrl} controls playsInline preload="metadata" className="w-full rounded-card bg-black aspect-video" />
-      ) : (
-        <div className="w-full rounded-card bg-chip aspect-video flex items-center justify-center text-sm text-muted">Walk-around video</div>
-      )}
-
       {approved ? (
         <Notice tone="success">
           Approved by {req.approver_name} on {formatDateTime(req.approved_at)}. Thank you.
         </Notice>
       ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+
+      <Card className="flex flex-col gap-4">
+        <SectionLabel>Your car on arrival</SectionLabel>
+        <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} />
+        {dirty ? <p className="text-sm font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
+      </Card>
 
       <Card className="flex flex-col gap-4">
         <SectionLabel>Job card</SectionLabel>
@@ -94,24 +91,14 @@ export default async function ApprovalPage({
               value: vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : null) : labelOf(FUEL_LEVELS, gateIn.fuel_level),
             },
             { label: "Cleanliness", value: labelOf(CLEANLINESS, gateIn.cleanliness) },
+            { label: "Major damage noted", value: gateIn.major_damage ? "Yes, see the damage photos above" : "No" },
             { label: "Mileage", value: `${gateIn.mileage.toLocaleString("en-GB")} km` },
+            { label: "Keys received", value: `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}` },
             { label: "Old parts returned to you", value: gateIn.old_parts_return ? "Yes" : "No" },
             { label: "Promised date", value: job.promised_at ? formatDate(job.promised_at + "T12:00:00+04:00") : null },
           ]}
         />
         {gateIn.dash_cam ? <p className="text-sm font-semibold">Dash cam fitted: it will be disconnected as per the terms and conditions.</p> : null}
-        {dirty ? <p className="text-sm font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
-      </Card>
-
-      <Card className="flex flex-col gap-3">
-        <SectionLabel>Keys received</SectionLabel>
-        <p className="text-sm">
-          {gateIn.keys_count} key{gateIn.keys_count === 1 ? "" : "s"}, {gateIn.keys_keychain ? "with keychain" : "no keychain"}
-        </p>
-        {keysUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={keysUrl} alt="Keys received" className="w-full max-w-sm rounded-card object-cover aspect-[4/3] bg-chip" />
-        ) : null}
       </Card>
 
       {!approved ? (
@@ -151,7 +138,7 @@ function Branded({ companyName, children }: { companyName: string; children: Rea
         <Logo onDark className="h-10" alt={companyName} />
         <span className="text-xs text-white/70">{companyName}</span>
       </header>
-      <main className="mx-auto max-w-2xl px-4 py-6 flex flex-col gap-5">{children}</main>
+      <main className="mx-auto max-w-3xl px-4 py-6 flex flex-col gap-5">{children}</main>
     </div>
   );
 }

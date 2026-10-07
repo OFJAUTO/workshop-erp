@@ -13,7 +13,7 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
   const supabase = await createClient();
   const { data } = await supabase
     .from("vehicles")
-    .select("id, customer_id, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at")
+    .select("id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at")
     .eq("id", id)
     .maybeSingle();
   if (!data) notFound();
@@ -29,10 +29,11 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
           mode="edit"
           initialValues={{
             customer_id: v.customer_id,
+            has_plate: v.has_plate ? "yes" : "no",
             plate_country: v.plate_country,
             plate_emirate: v.plate_emirate ?? "",
             plate_code: v.plate_code ?? "",
-            plate_number: v.plate_number,
+            plate_number: v.plate_number ?? "",
             vin: v.vin ?? "",
             make_id: v.make_id,
             model_id: v.model_id ?? "",

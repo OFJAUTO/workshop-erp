@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { GATE_IN_BUCKET, loadMedia, mediaChecklist } from "@/lib/media";
+import { GATE_IN_BUCKET, loadMajorDamage, loadMedia, mediaChecklist } from "@/lib/media";
 import { authoriseUpload } from "@/lib/upload-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -41,6 +41,6 @@ export async function POST(request: NextRequest) {
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const checklist = mediaChecklist(await loadMedia(jobId));
+  const checklist = mediaChecklist(await loadMedia(jobId), await loadMajorDamage(jobId));
   return NextResponse.json({ ok: true, checklist });
 }

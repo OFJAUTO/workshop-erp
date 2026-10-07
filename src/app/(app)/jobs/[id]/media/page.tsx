@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
-import { MediaCapture } from "@/components/MediaCapture";
-import { VideoRecorder } from "@/components/VideoRecorder";
-import { Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { MediaChecklist } from "@/components/MediaChecklist";
+import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { mediaChecklist } from "@/lib/media";
@@ -21,7 +20,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
   const supabase = await createClient();
   const card = await loadJobCard(supabase, id);
   if (!card) notFound();
-  const check = mediaChecklist(card.media);
+  const check = mediaChecklist(card.media, card.gateIn?.major_damage ?? false);
 
   const token = await createUploadLinkToken(id);
   const site = await getSiteUrl();
@@ -40,20 +39,9 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
         }
       />
 
-      {check.complete ? (
-        <Notice tone="success">Gate-in complete. The approval link can now be sent and the car can be assigned.</Notice>
-      ) : (
-        <Notice tone="info">
-          The gate-in stays &quot;incomplete, video pending&quot; until the walk-around video, the dashboard photo and the keys photo are uploaded.
-        </Notice>
-      )}
-
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 flex flex-col gap-4">
-          <VideoRecorder jobId={id} done={check.video} />
-          <MediaCapture jobId={id} kind="dashboard_photo" label="Dashboard photo (mileage)" done={check.dashboard} />
-          <MediaCapture jobId={id} kind="keys_photo" label="Keys photo" done={check.keys} />
-          <MediaCapture jobId={id} kind="damage_photo" label="Damage close-ups (optional)" multiple done={card.media.some((m) => m.kind === "damage_photo")} />
+        <div className="xl:col-span-2">
+          <MediaChecklist jobId={id} check={check} />
         </div>
 
         <div className="flex flex-col gap-6">

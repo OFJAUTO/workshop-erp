@@ -33,6 +33,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
             battery_percent: g.battery_percent?.toString() ?? "",
             cleanliness: g.cleanliness,
             dash_cam: g.dash_cam ? "yes" : "no",
+            major_damage: g.major_damage ? "yes" : "no",
             mileage: g.mileage.toString(),
             keys_count: g.keys_count.toString(),
             keys_keychain: g.keys_keychain ? "yes" : "no",
