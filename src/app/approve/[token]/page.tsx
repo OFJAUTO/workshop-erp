@@ -66,7 +66,7 @@ export default async function ApprovalPage({
       </Branded>
     );
   }
-  const { vehicle, gateIn, media, mediaUrls, job } = card;
+  const { vehicle, gateIn, requests, media, mediaUrls, job } = card;
 
   if (!req.opened_at) {
     await admin
@@ -96,7 +96,7 @@ export default async function ApprovalPage({
   const approved = !!req.approved_at;
   const carName = [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ");
   const customerName = req.sent_to_name ?? card.customer?.full_name ?? "Customer";
-  const location = [gateIn.location_name, gateIn.location_address].filter(Boolean).join(", ");
+  const location = gateIn.location_type === "branch" ? (gateIn.location_name ?? "") : [gateIn.location_name, gateIn.location_address].filter(Boolean).join(", ");
   const declaration = req.declaration_text ?? settings.declaration_text;
   const declarationAr = req.declaration_text_ar ?? settings.declaration_text_ar;
   const waDigits = advisor?.phone ? advisor.phone.replace(/[^\d]/g, "") : "";
@@ -138,7 +138,18 @@ export default async function ApprovalPage({
         <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Job card</h2>
         <DescriptionList
           items={[
-            { label: "Your requests", value: <span className="whitespace-pre-wrap">{gateIn.customer_requests}</span> },
+            {
+              label: "Your requests",
+              value: requests.length ? (
+                <ol className="list-decimal pl-5 flex flex-col gap-0.5">
+                  {requests.map((r) => (
+                    <li key={r.id}>{r.text}</li>
+                  ))}
+                </ol>
+              ) : (
+                <span className="whitespace-pre-wrap">{gateIn.customer_requests}</span>
+              ),
+            },
             { label: "Received at", value: location || null },
             { label: "Arrived by", value: labelOf(ARRIVED_BY, gateIn.arrived_by) },
             { label: "Condition on arrival", value: labelOf(CONDITIONS, gateIn.condition) },

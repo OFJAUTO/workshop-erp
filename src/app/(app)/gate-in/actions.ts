@@ -45,7 +45,6 @@ const gateInSchema = z
     mileage: z.string().trim(),
     keys_count: z.string().trim(),
     keys_keychain: z.enum(["yes", "no"], { message: "Did the keys come with a keychain?" }),
-    customer_requests: z.string().trim().min(3, "Write the customer's requests in their own words."),
     notes: z.string().trim(),
     old_parts_return: z.enum(["yes", "no"], { message: "Does the customer want old parts returned?" }),
     priority: z.enum(["high", "normal", "low"], { message: "Choose the priority." }),
@@ -69,6 +68,14 @@ const gateInSchema = z
     }
   });
 
+export async function requestLines(formData: FormData): Promise<string[]> {
+  return formData
+    .getAll("requests")
+    .map((r) => String(r).trim())
+    .filter((r) => r.length > 0)
+    .slice(0, 50);
+}
+
 function parseGateIn(formData: FormData) {
   const get = (k: string) => formData.get(k) ?? "";
   return gateInSchema.safeParse({
@@ -82,7 +89,6 @@ function parseGateIn(formData: FormData) {
     mileage: get("mileage"),
     keys_count: get("keys_count"),
     keys_keychain: get("keys_keychain"),
-    customer_requests: get("customer_requests"),
     notes: get("notes"),
     old_parts_return: get("old_parts_return"),
     priority: get("priority"),
@@ -100,6 +106,10 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const parsed = parseGateIn(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
+  const requests = await requestLines(formData);
+  if (requests.length === 0) return { error: "Add at least one customer request.", values };
+  const vipOn = formData.get("vip") === "on";
+  const vipNote = blankToNull(formData.get("vip_note"));
 
   const settings = await getSettings();
   const branch = settings.branches.find((b) => b.name === d.location_choice);
@@ -111,7 +121,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const supabase = await createClient();
   const { data: vehicle } = await supabase
     .from("vehicles")
-    .select("id, customer_id, is_active, photo_path")
+    .select("id, customer_id, is_active, photo_path, customer:customers(is_vip, vip_note)")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
@@ -152,7 +162,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     mileage: Number(d.mileage),
     keys_count: Number(d.keys_count),
     keys_keychain: d.keys_keychain === "yes",
-    customer_requests: d.customer_requests,
+    customer_requests: requests.map((r, i) => `${i + 1}. ${r}`).join("\n"),
     notes: blankToNull(d.notes),
     old_parts_return: d.old_parts_return === "yes",
     location_type: locationType,
@@ -162,6 +172,18 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     location_lng: Number.isFinite(lng) ? lng : null,
   });
   if (giError) return { error: giError.message, values };
+
+  await supabase.from("job_requests").insert(requests.map((text, i) => ({ job_id: job.id, position: i + 1, text })));
+
+  // VIP is a customer mark; the gate-in switch sets it and the change is logged with who and when.
+  const cust = vehicle.customer as unknown as { is_vip: boolean; vip_note: string | null } | null;
+  const wasVip = cust?.is_vip ?? false;
+  if (vipOn !== wasVip || (vipOn && vipNote && vipNote !== cust?.vip_note)) {
+    await supabase.from("customers").update({ is_vip: vipOn, vip_note: vipOn ? vipNote ?? cust?.vip_note ?? null : cust?.vip_note ?? null }).eq("id", vehicle.customer_id);
+    if (vipOn !== wasVip) {
+      await supabase.from("job_events").insert({ job_id: job.id, event_type: "vip_change", note: `VIP switched ${vipOn ? "on" : "off"} at gate-in`, created_by: staff.id });
+    }
+  }
 
   await supabase.from("job_events").insert({
     job_id: job.id,
@@ -245,7 +267,7 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     model_id: get("model_id"),
     model_text: get("model_text"),
     variant: get("variant"),
-    model_year: get("model_year"),
+    model_year: get("model_year_choice") === "__other__" ? get("model_year_other") : get("model_year_choice"),
     fuel_type: get("fuel_type"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };

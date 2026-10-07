@@ -26,7 +26,11 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
           action={updateGateIn.bind(null, id)}
           isElectric={card.vehicle.fuel_type === "electric"}
           mode="edit"
+          requests={card.requests.map((r) => r.text)}
+          requestsLocked={g.is_complete}
           initialValues={{
+            vip: card.customer?.is_vip ?? card.vip?.is_vip ? "on" : "",
+            vip_note: card.customer?.vip_note ?? card.vip?.vip_note ?? "",
             arrived_by: g.arrived_by,
             condition: g.condition,
             fuel_level: g.fuel_level ?? "",
@@ -37,7 +41,6 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
             mileage: g.mileage.toString(),
             keys_count: g.keys_count.toString(),
             keys_keychain: g.keys_keychain ? "yes" : "no",
-            customer_requests: g.customer_requests,
             notes: g.notes ?? "",
             old_parts_return: g.old_parts_return ? "yes" : "no",
             priority: card.job.priority,

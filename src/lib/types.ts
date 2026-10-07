@@ -237,6 +237,14 @@ export type GateInMediaRow = {
   uploaded_by: string | null;
 };
 
+export type JobRequestRow = {
+  id: string;
+  job_id: string;
+  position: number;
+  text: string;
+  is_active: boolean;
+};
+
 export type JobEventRow = {
   id: number;
   job_id: string;

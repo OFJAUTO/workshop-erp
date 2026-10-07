@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ImageCropper } from "@/components/ImageCropper";
+import { ModelYearSelect } from "@/components/ModelYearSelect";
 import { SearchSelect } from "@/components/SearchSelect";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
 import { makeFromVin } from "@/lib/vin";
@@ -142,7 +143,7 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
                 </>
               </Field>
               <Field label="Model year">
-                <Input name="model_year" inputMode="numeric" defaultValue={v.model_year} required maxLength={4} pattern="\d{4}" />
+                <ModelYearSelect defaultValue={v.model_year_other || v.model_year_choice} />
               </Field>
             </div>
             <Field label="Fuel" hint="Electric cars record battery percentage instead of fuel level.">

@@ -62,6 +62,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
   ]);
   const vipIds = new Set((vip ?? []).filter((v) => v.is_vip).map((v) => v.id));
+  // VIP cars sort above other cars of the same priority.
+  all.sort((a, b) => {
+    const ra = urgencyRank(a, clockFor(a), vipIds.has(a.customer_id));
+    const rb = urgencyRank(b, clockFor(b), vipIds.has(b.customer_id));
+    for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
+    return 0;
+  });
 
   const timings = new Map(all.map((j) => [j.id, jobTiming(j.promised_at, j.is_open, clockFor(j))]));
   const dueToday = all.filter((j) => j.promised_at && timings.get(j.id)?.tone === "amber").length;

@@ -35,7 +35,7 @@ export default async function JobPage({
   const supabase = await createClient();
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
-  const { job, vehicle, customer, vip, gateIn, media, events, approvals, gateOut } = card;
+  const { job, vehicle, customer, vip, gateIn, requests, media, events, approvals, gateOut } = card;
   const check = mediaChecklist(media, gateIn?.major_damage ?? false);
   const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours });
   const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
@@ -147,7 +147,7 @@ export default async function JobPage({
                     value: (
                       <span>
                         {gateIn.location_name ?? ""}
-                        {gateIn.location_address ? ` · ${gateIn.location_address}` : ""}
+                        {gateIn.location_type !== "branch" && gateIn.location_address ? ` · ${gateIn.location_address}` : ""}
                         {mapHref ? (
                           <>
                             {" · "}
@@ -171,7 +171,18 @@ export default async function JobPage({
                   { label: "Mileage", value: `${gateIn.mileage.toLocaleString("en-GB")} km` },
                   { label: "Keys", value: `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}` },
                   { label: "Old parts returned to customer", value: gateIn.old_parts_return ? "Yes" : "No" },
-                  { label: "Customer requests", value: <span className="whitespace-pre-wrap">{gateIn.customer_requests}</span> },
+                  {
+                    label: "Customer requests",
+                    value: requests.length ? (
+                      <ol className="list-decimal pl-5 flex flex-col gap-0.5">
+                        {requests.map((r) => (
+                          <li key={r.id}>{r.text}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <span className="whitespace-pre-wrap">{gateIn.customer_requests}</span>
+                    ),
+                  },
                   { label: "Notes", value: gateIn.notes ? <span className="whitespace-pre-wrap">{gateIn.notes}</span> : null },
                 ]}
               />

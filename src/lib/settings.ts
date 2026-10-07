@@ -28,7 +28,7 @@ const DEFAULTS = {
     "I agree to the terms and conditions and confirm I am the owner of the vehicle or a legal representative authorised to act on the owner's behalf.",
   declaration_text_ar: "أوافق على الشروط والأحكام وأقر بأنني مالك المركبة أو ممثل قانوني مفوّض بالتصرف نيابةً عن المالك.",
   stage_target_hours: { gate_in: 2, inspection: 4, quote: 4, approval: 24, parts: 48, work: 24, qc: 2, wash: 2, ready: 24 } as Record<string, number>,
-  branches: [{ name: "OFJ Al Quoz", address: "Al Quoz Industrial Area, Dubai" }] as Branch[],
+  branches: [{ name: "OFJ Automotive (Al Quoz, Dubai)", address: "" }] as Branch[],
   approval_reminder_hours: 4,
   whatsapp_approval_template:
     "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection: [link]. Thank you, [advisor], OFJ Automotive",

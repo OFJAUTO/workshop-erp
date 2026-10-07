@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./supabase/admin";
 import { loadMedia, signMedia } from "./media";
-import type { ApprovalRequestRow, GateInMediaRow, GateInRow, GateOutRow, JobEventRow, JobRow } from "./types";
+import type { ApprovalRequestRow, GateInMediaRow, GateInRow, GateOutRow, JobEventRow, JobRequestRow, JobRow } from "./types";
 
 export type JobCard = {
   job: JobRow;
@@ -26,6 +26,7 @@ export type JobCard = {
   customer: { id: string; customer_number: string; full_name: string; company_name: string | null; phone: string; is_vip: boolean; vip_note: string | null } | null;
   vip: { is_vip: boolean; vip_note: string | null } | null;
   gateIn: GateInRow | null;
+  requests: JobRequestRow[];
   media: GateInMediaRow[];
   mediaUrls: Map<string, string>;
   vehiclePhotoUrl: string | null;
@@ -45,7 +46,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
   const { data: job } = await client.from("jobs").select(JOB_SELECT).eq("id", jobId).maybeSingle();
   if (!job) return null;
 
-  const [{ data: vehicle }, { data: customer }, { data: vip }, { data: gateIn }, { data: events }, { data: approvals }, { data: gateOut }] =
+  const [{ data: vehicle }, { data: customer }, { data: vip }, { data: gateIn }, { data: events }, { data: approvals }, { data: gateOut }, { data: requests }] =
     await Promise.all([
       client
         .from("vehicles")
@@ -78,6 +79,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
         .select("id, job_id, keys_returned, keychain_returned, keys_match, keys_override_by, keys_override_reason, dash_cam_reconnected, balance_due_aed, release_approved_by, release_reason, notes, created_at")
         .eq("job_id", jobId)
         .maybeSingle(),
+      client.from("job_requests").select("id, job_id, position, text, is_active").eq("job_id", jobId).eq("is_active", true).order("position"),
     ]);
   if (!vehicle) return null;
 
@@ -109,6 +111,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
     customer: (customer as JobCard["customer"]) ?? null,
     vip: (vip as JobCard["vip"]) ?? null,
     gateIn: (gateIn as GateInRow | null) ?? null,
+    requests: ((requests ?? []) as JobRequestRow[]),
     media,
     mediaUrls,
     vehiclePhotoUrl,

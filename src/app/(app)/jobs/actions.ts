@@ -136,7 +136,6 @@ const amendSchema = z.object({
   mileage: z.string().regex(/^\d{1,7}$/, "Enter the mileage in km."),
   keys_count: z.string().regex(/^\d{1,2}$/, "Enter how many keys were received."),
   keys_keychain: z.enum(["yes", "no"]),
-  customer_requests: z.string().trim().min(3, "Write the customer's requests."),
   notes: z.string().trim(),
   old_parts_return: z.enum(["yes", "no"]),
   priority: z.enum(["high", "normal", "low"]),
@@ -158,7 +157,6 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     mileage: get("mileage"),
     keys_count: get("keys_count"),
     keys_keychain: get("keys_keychain"),
-    customer_requests: get("customer_requests"),
     notes: get("notes"),
     old_parts_return: get("old_parts_return"),
     priority: get("priority"),
@@ -166,10 +164,15 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
+  const requests = formData.getAll("requests").map((r) => String(r).trim()).filter(Boolean).slice(0, 50);
+  if (requests.length === 0) return { error: "Keep at least one customer request.", values };
+  const vipOn = formData.get("vip") === "on";
+  const vipNote = blankToNull(formData.get("vip_note"));
 
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, priority, is_open").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, priority, is_open, customer_id, customer:customers(is_vip, vip_note)").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
+  const { data: gi } = await supabase.from("gate_ins").select("is_complete").eq("job_id", jobId).maybeSingle();
 
   const { error } = await supabase
     .from("gate_ins")
@@ -184,12 +187,25 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
       mileage: Number(d.mileage),
       keys_count: Number(d.keys_count),
       keys_keychain: d.keys_keychain === "yes",
-      customer_requests: d.customer_requests,
       notes: blankToNull(d.notes),
       old_parts_return: d.old_parts_return === "yes",
+      ...(gi?.is_complete ? {} : { customer_requests: requests.map((r, i) => `${i + 1}. ${r}`).join("\n") }),
     })
     .eq("job_id", jobId);
   if (error) return { error: error.message, values };
+
+  if (!gi?.is_complete) {
+    // Request lines can be rewritten until the gate-in is complete: retire the old ones, add the new ones.
+    await supabase.from("job_requests").update({ is_active: false }).eq("job_id", jobId).eq("is_active", true);
+    await supabase.from("job_requests").insert(requests.map((text, i) => ({ job_id: jobId, position: i + 1, text })));
+  }
+
+  const cust = job.customer as unknown as { is_vip: boolean; vip_note: string | null } | null;
+  const wasVip = cust?.is_vip ?? false;
+  if (vipOn !== wasVip || (vipOn && vipNote && vipNote !== cust?.vip_note)) {
+    await supabase.from("customers").update({ is_vip: vipOn, vip_note: vipOn ? vipNote ?? cust?.vip_note ?? null : cust?.vip_note ?? null }).eq("id", job.customer_id);
+    if (vipOn !== wasVip) await logEvent(supabase, jobId, staff.id, { event_type: "vip_change", note: `VIP switched ${vipOn ? "on" : "off"}` });
+  }
 
   if (job.priority !== d.priority) {
     await supabase.from("jobs").update({ priority: d.priority }).eq("id", jobId);

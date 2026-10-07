@@ -64,7 +64,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             isElectric={v.fuel_type === "electric"}
             pictureMode={v.photo_path ? "optional" : "required"}
             branches={settings.branches}
-            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no" }}
+            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "" }}
           />
         </div>
 

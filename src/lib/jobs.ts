@@ -177,9 +177,9 @@ export function formatPromised(promisedAt: string | null) {
 }
 
 /** Sort key: overdue first, then due today, then by priority, then by promised date. */
-export function urgencyRank(job: { promised_at: string | null; priority: Priority; is_open: boolean }, clock?: StageClock) {
+export function urgencyRank(job: { promised_at: string | null; priority: Priority; is_open: boolean }, clock?: StageClock, vip = false) {
   const t = jobTiming(job.promised_at, job.is_open, clock);
   const toneRank = { red: 0, amber: 1, green: 2, neutral: 3 }[t.tone];
   const prioRank = { high: 0, normal: 1, low: 2 }[job.priority];
-  return [toneRank, prioRank, -t.daysOver, job.promised_at ?? "9999"] as const;
+  return [toneRank, prioRank, vip ? 0 : 1, -t.daysOver, job.promised_at ?? "9999"] as const;
 }

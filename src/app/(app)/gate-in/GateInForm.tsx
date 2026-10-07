@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ImageCropper } from "@/components/ImageCropper";
+import { RequestsList } from "@/components/RequestsList";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Textarea } from "@/components/ui";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS } from "@/lib/jobs";
 import type { Branch } from "@/lib/settings";
@@ -20,6 +21,8 @@ export function GateInForm({
   mode = "create",
   pictureMode = "none",
   branches = [],
+  requests = [],
+  requestsLocked = false,
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -28,8 +31,12 @@ export function GateInForm({
   /** required: the car has no picture yet; optional: it has one, a new one replaces it. */
   pictureMode?: "none" | "required" | "optional";
   branches?: Branch[];
+  requests?: string[];
+  /** After the gate-in is complete the request lines can no longer be changed. */
+  requestsLocked?: boolean;
 }) {
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
+  const [vip, setVip] = useState(initialValues?.vip === "on");
   const atBranch = branches.some((b) => b.name === location);
 
   return (
@@ -59,7 +66,7 @@ export function GateInForm({
                   columns={3}
                   defaultValue={location}
                   options={[
-                    ...branches.map((b) => ({ value: b.name, label: b.name, hint: b.address })),
+                    ...branches.map((b) => ({ value: b.name, label: b.name, hint: b.address || undefined })),
                     { value: "customer", label: "Customer location" },
                     { value: "other", label: "Other" },
                   ]}
@@ -122,8 +129,8 @@ export function GateInForm({
 
               <Card className="flex flex-col gap-5">
                 <SectionLabel>Customer</SectionLabel>
-                <Field label="Customer requests, in their own words">
-                  <Textarea name="customer_requests" defaultValue={v.customer_requests} rows={4} required />
+                <Field label="Customer requests, one line each, in their own words" hint={requestsLocked ? "Locked once the gate-in is complete." : "Enter adds a line. At least one is required."}>
+                  <RequestsList initial={requests} locked={requestsLocked} />
                 </Field>
                 <Field label="Notes for unusual cases" optional>
                   <Textarea name="notes" defaultValue={v.notes} rows={2} />
@@ -134,7 +141,18 @@ export function GateInForm({
               </Card>
 
               <Card className="flex flex-col gap-5">
-                <SectionLabel>Priority</SectionLabel>
+                <SectionLabel>Plan</SectionLabel>
+                <label className="flex items-center gap-3 min-h-11 cursor-pointer">
+                  <input type="checkbox" name="vip" checked={vip} onChange={(e) => setVip(e.target.checked)} className="h-5 w-5 accent-ink" />
+                  <span className="text-sm font-bold">VIP</span>
+                  <span className="text-xs text-muted">Marks the customer as VIP for every visit. Logged.</span>
+                </label>
+                {vip ? (
+                  <Field label="VIP handling note" hint="Shown to everyone who opens this customer's cars.">
+                    <Textarea name="vip_note" defaultValue={v.vip_note} rows={2} />
+                  </Field>
+                ) : null}
+                <Field label="Priority">
                 <ChoiceButtons
                   name="priority"
                   columns={3}
@@ -145,6 +163,7 @@ export function GateInForm({
                     { value: "low", label: "Low" },
                   ]}
                 />
+                </Field>
                 <p className="text-xs text-muted">The promised date is set at the quotation stage, or from the job card at any time.</p>
               </Card>
             </div>

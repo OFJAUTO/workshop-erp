@@ -14,6 +14,7 @@ import { formatPlate, type JobRow } from "@/lib/types";
 type Row = JobRow & {
   vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   gate_in: { dash_cam: boolean; customer_requests: string } | null;
+  requests: { id: string; position: number; text: string; is_active: boolean }[] | null;
 };
 
 /** The technician's list: cars assigned to them. The full technician screen arrives in Phase 6. */
@@ -24,7 +25,7 @@ export default async function MyJobsPage() {
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active)",
     )
     .eq("is_open", true)
     .eq("assigned_to", staff.id);
@@ -42,6 +43,12 @@ export default async function MyJobsPage() {
       : Promise.resolve({ data: [] as { id: string; is_vip: boolean }[] }),
   ]);
   const vipIds = new Set((vip ?? []).filter((v) => v.is_vip).map((v) => v.id));
+  rows.sort((a, b) => {
+    const ra = urgencyRank(a, clockFor(a), vipIds.has(a.customer_id));
+    const rb = urgencyRank(b, clockFor(b), vipIds.has(b.customer_id));
+    for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
+    return 0;
+  });
 
   return (
     <>
@@ -67,7 +74,15 @@ export default async function MyJobsPage() {
                       </div>
                       <span className="font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
                       {j.gate_in?.dash_cam ? <Badge tone="red">Dash cam fitted: disconnect</Badge> : null}
-                      <span className="text-sm">{j.gate_in?.customer_requests}</span>
+                      {j.requests?.filter((r) => r.is_active).length ? (
+                        <ol className="list-decimal pl-5 text-sm flex flex-col gap-0.5">
+                          {j.requests.filter((r) => r.is_active).sort((a, b) => a.position - b.position).map((r) => (
+                            <li key={r.id}>{r.text}</li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <span className="text-sm">{j.gate_in?.customer_requests}</span>
+                      )}
                     </div>
                   </div>
                   <span className="text-sm font-bold">
