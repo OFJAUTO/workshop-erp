@@ -59,12 +59,15 @@ export type Checklist = {
 export function mediaChecklist(media: GateInMediaRow[], majorDamage = false): Checklist {
   const has = (k: MediaKind) => media.some((m) => m.kind === k);
   const damageCount = media.filter((m) => m.kind === "damage_photo").length;
+  // Jobs gated in before 7 October 2026 have a single walk-around video and one keys photo; those still count.
+  const legacyVideo = has("video");
+  const legacyKeys = has("keys_photo");
   const c = {
-    videoExterior: has("video_exterior"),
-    videoInterior: has("video_interior"),
+    videoExterior: has("video_exterior") || legacyVideo,
+    videoInterior: has("video_interior") || legacyVideo,
     dashboard: has("dashboard_photo"),
-    keysFront: has("keys_photo_front"),
-    keysBack: has("keys_photo_back"),
+    keysFront: has("keys_photo_front") || legacyKeys,
+    keysBack: has("keys_photo_back") || legacyKeys,
     damageCount,
     majorDamage,
   };
