@@ -5,9 +5,14 @@ import { Button } from "./ui";
 
 type Shape = "circle" | "wide";
 
+const FILL = "#e6e7ea"; // neutral grey behind photos that do not fill the frame
+const MAX_ZOOM = 4;
+
 /**
- * Pick a photo, then drag and zoom it to fit the frame. The cropped result is
- * placed into a hidden file field so an ordinary form submit uploads it.
+ * Pick a photo, then drag and zoom it to fit the frame. Starts with the whole
+ * photo visible inside the frame; zooming in crops, zooming out never goes
+ * below "whole photo fits". The result goes into a hidden file field so an
+ * ordinary form submit uploads it.
  */
 export function ImageCropper({
   name,
@@ -33,35 +38,42 @@ export function ImageCropper({
   const boxRef = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
-  const aspect = outputWidth / outputHeight;
+
+  // Zoom is relative to "cover" (photo fills the frame). The smallest zoom is
+  // "contain" (whole photo inside the frame), which depends only on the aspect ratios.
+  const minZoom = img
+    ? Math.min(outputWidth / img.naturalWidth, outputHeight / img.naturalHeight) /
+      Math.max(outputWidth / img.naturalWidth, outputHeight / img.naturalHeight)
+    : 1;
+
+  const clampZoom = useCallback((z: number) => Math.min(MAX_ZOOM, Math.max(minZoom, z)), [minZoom]);
 
   const layout = useCallback(
     (boxW: number, boxH: number) => {
       if (!img) return null;
       const cover = Math.max(boxW / img.naturalWidth, boxH / img.naturalHeight);
-      const scale = cover * zoom;
+      const scale = cover * clampZoom(zoom);
       const dw = img.naturalWidth * scale;
       const dh = img.naturalHeight * scale;
-      const maxX = (dw - boxW) / 2;
-      const maxY = (dh - boxH) / 2;
+      // The photo may be moved until its edge meets the frame edge, in either direction.
+      const maxX = Math.abs(dw - boxW) / 2;
+      const maxY = Math.abs(dh - boxH) / 2;
       const x = Math.min(maxX, Math.max(-maxX, offset.x));
       const y = Math.min(maxY, Math.max(-maxY, offset.y));
       return { dw, dh, dx: (boxW - dw) / 2 + x, dy: (boxH - dh) / 2 + y };
     },
-    [img, zoom, offset],
+    [img, zoom, offset, clampZoom],
   );
 
   // Preview
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !img) return;
-    const boxW = canvas.width;
-    const boxH = canvas.height;
-    const l = layout(boxW, boxH);
-    if (!l) return;
+    const l = layout(canvas.width, canvas.height);
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, boxW, boxH);
+    if (!l || !ctx) return;
+    ctx.fillStyle = FILL;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, l.dx, l.dy, l.dw, l.dh);
   }, [img, layout]);
 
@@ -74,7 +86,7 @@ export function ImageCropper({
     const l = layout(outputWidth, outputHeight);
     const ctx = out.getContext("2d");
     if (!l || !ctx) return;
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = FILL;
     ctx.fillRect(0, 0, outputWidth, outputHeight);
     ctx.drawImage(img, l.dx, l.dy, l.dw, l.dh);
     const input = hiddenRef.current;
@@ -97,8 +109,10 @@ export function ImageCropper({
     const url = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
+      const cover = Math.max(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight);
+      const contain = Math.min(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight);
       setImg(image);
-      setZoom(1);
+      setZoom(contain / cover); // start with the whole photo visible
       setOffset({ x: 0, y: 0 });
       setReady(false);
     };
@@ -121,7 +135,7 @@ export function ImageCropper({
     if (pointers.current.size === 2 && pinch.current) {
       const [a, b] = Array.from(pointers.current.values());
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      setZoom(Math.min(4, Math.max(1, (pinch.current.zoom * dist) / pinch.current.dist)));
+      setZoom(clampZoom((pinch.current.zoom * dist) / pinch.current.dist));
       return;
     }
     const box = boxRef.current;
@@ -136,7 +150,7 @@ export function ImageCropper({
   }
 
   const previewW = 360;
-  const previewH = Math.round(previewW / aspect);
+  const previewH = Math.round((previewW * outputHeight) / outputWidth);
 
   return (
     <div className="flex flex-col gap-3">
@@ -167,19 +181,29 @@ export function ImageCropper({
             <span className="text-xs font-semibold text-muted">Zoom</span>
             <input
               type="range"
-              min={1}
-              max={4}
+              min={minZoom}
+              max={MAX_ZOOM}
               step={0.01}
-              value={zoom}
+              value={clampZoom(zoom)}
               onChange={(e) => setZoom(Number(e.target.value))}
               className="flex-1 accent-ink"
               aria-label="Zoom"
             />
-            <Button tone="ghost" size="md" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}>
-              Reset
+            <Button
+              tone="ghost"
+              size="md"
+              onClick={() => {
+                setZoom(minZoom);
+                setOffset({ x: 0, y: 0 });
+              }}
+            >
+              Fit whole photo
             </Button>
           </div>
-          <p className="text-xs text-muted">Drag to move, pinch or use the slider to zoom. {ready ? "Ready to save." : "Preparing…"}</p>
+          <p className="text-xs text-muted">
+            Drag to move, pinch or use the slider to zoom. Empty space is filled with grey.{" "}
+            {ready ? "Ready to save." : "Preparing…"}
+          </p>
         </>
       ) : null}
     </div>
