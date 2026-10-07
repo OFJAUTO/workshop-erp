@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Card } from "@/components/ui";
+import { Logo } from "@/components/Logo";
 import { getCurrentDevice } from "@/lib/devices";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getSettings } from "@/lib/settings";
 import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { PinLogin, type TabletPerson } from "./PinLogin";
 
@@ -10,7 +10,6 @@ export const dynamic = "force-dynamic";
 
 export default async function TabletPage() {
   const device = await getCurrentDevice();
-  const settings = await getSettings();
 
   if (!device) {
     return (
@@ -56,9 +55,7 @@ export default async function TabletPage() {
     <main className="flex-1 flex flex-col gap-6 p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
-          <span className="inline-flex h-11 items-center rounded-control border border-dashed border-faint px-4 text-xs font-semibold tracking-[0.12em] text-muted">
-            {settings.company_name}
-          </span>
+          <Logo />
           <span className="text-sm text-muted">{device.name}</span>
         </div>
         <span className="text-sm font-semibold">Tap your name</span>

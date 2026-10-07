@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button, Card, Field, Input, Notice } from "@/components/ui";
+import { Logo } from "@/components/Logo";
 import { signInWithPassword } from "./actions";
 
 export default async function LoginPage({
@@ -13,9 +14,7 @@ export default async function LoginPage({
     <main className="flex-1 flex items-center justify-center p-6">
       <div className="w-full max-w-sm flex flex-col gap-6">
         <div className="flex flex-col gap-1">
-          <span className="inline-flex self-start h-11 items-center rounded-control border border-dashed border-faint px-4 text-xs font-semibold tracking-[0.12em] text-muted">
-            [YOUR LOGO]
-          </span>
+          <Logo className="h-16 self-start" />
           <h1 className="mt-4 text-2xl font-bold">Sign in</h1>
           <p className="text-sm text-muted">Office login with email and password.</p>
         </div>

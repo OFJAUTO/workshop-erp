@@ -9,7 +9,7 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Workshop ERP",
+  title: "OFJ Automotive · Workshop ERP",
   description: "Runs the workshop from booking to gate-out.",
 };
 

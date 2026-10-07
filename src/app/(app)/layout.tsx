@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Avatar } from "@/components/ui";
+import { Logo } from "@/components/Logo";
 import { requireStaff } from "@/lib/auth";
 import { can, ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -34,11 +35,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <header className="bg-canvas">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-            <Link
-              href="/home"
-              className="inline-flex h-11 items-center rounded-control border border-dashed border-faint px-4 text-xs font-semibold tracking-[0.12em] text-muted"
-            >
-              {settings.company_name}
+            <Link href="/home" className="inline-flex items-center" aria-label="Home">
+              <Logo />
             </Link>
             <nav className="flex flex-wrap gap-1 text-sm font-medium">
               {nav
