@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Item = { id: number; type: string; title: string; body: string | null; job_id: string | null; href: string | null; read_at: string | null; created_at: string };
+type Item = { id: number; staff_id?: string; type: string; title: string; body: string | null; job_id: string | null; href: string | null; read_at: string | null; created_at: string };
 
 const SOUND_KEY = "erp_notif_sound";
+const POLL_MS = 30000;
 
 function timeAgo(iso: string) {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -16,7 +17,11 @@ function timeAgo(iso: string) {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-/** Bell with unread count, dropdown list, live arrival with a corner pop-up and optional sound. */
+/**
+ * Bell with unread count at the top right of the page, a panel below it, live arrival
+ * with a corner pop-up and optional sound. New notifications arrive over the live
+ * connection; a timer and a refresh on returning to the tab cover any dropped connection.
+ */
 export function NotificationBell({ staffId }: { staffId: string }) {
   const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
@@ -32,45 +37,76 @@ export function NotificationBell({ staffId }: { staffId: string }) {
   });
   const box = useRef<HTMLDivElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
+  const known = useRef<Set<number>>(new Set());
 
-  const load = useCallback(async () => {
+  const announce = useCallback((n: Item) => {
+    setToast(n);
+    setTimeout(() => setToast((t) => (t?.id === n.id ? null : t)), 8000);
     try {
-      const res = await fetch("/api/notifications", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = (await res.json()) as { items: Item[]; unread: number };
-      setItems(data.items);
-      setUnread(data.unread);
-    } catch {
-      // ignore
-    }
+      if (localStorage.getItem(SOUND_KEY) === "1" && document.hidden) audio.current?.play().catch(() => {});
+    } catch {}
   }, []);
 
+  const load = useCallback(
+    async (quiet = true) => {
+      try {
+        const res = await fetch("/api/notifications", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { items: Item[]; unread: number };
+        // Anything unread that we have not seen before gets the pop-up (when the live connection missed it).
+        if (!quiet) {
+          const fresh = data.items.filter((i) => !i.read_at && !known.current.has(i.id));
+          if (fresh.length && known.current.size) announce(fresh[0]);
+        }
+        for (const i of data.items) known.current.add(i.id);
+        setItems(data.items);
+        setUnread(data.unread);
+      } catch {
+        // ignore
+      }
+    },
+    [announce],
+  );
+
   useEffect(() => {
-    const first = setTimeout(load, 0);
+    const first = setTimeout(() => load(true), 0);
     const supabase = createClient();
+    // Unfiltered on purpose: Realtime did not deliver filtered changes to this project, so the person is checked here.
     const channel = supabase
-      .channel(`notifications-${staffId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `staff_id=eq.${staffId}` }, (payload) => {
+      .channel(`notifications-${staffId}-${Math.random().toString(36).slice(2, 8)}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, (payload) => {
         const n = payload.new as Item;
+        if (n.staff_id !== staffId || known.current.has(n.id)) return;
+        known.current.add(n.id);
         setItems((prev) => [n, ...prev].slice(0, 30));
         setUnread((u) => u + 1);
-        setToast(n);
-        setTimeout(() => setToast((t) => (t?.id === n.id ? null : t)), 8000);
-        try {
-          if (localStorage.getItem(SOUND_KEY) === "1" && document.hidden) audio.current?.play().catch(() => {});
-        } catch {}
-      })
-      .subscribe();
+        announce(n);
+      });
+    let cancelled = false;
+    // Hand the live connection the login first; otherwise the access rules see an anonymous visitor.
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) supabase.realtime.setAuth(data.session.access_token);
+      channel.subscribe();
+    });
+    const poll = setInterval(() => load(false), POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load(false);
+    };
+    document.addEventListener("visibilitychange", onVisible);
     const close = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => {
+      cancelled = true;
       clearTimeout(first);
+      clearInterval(poll);
       supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
       document.removeEventListener("mousedown", close);
     };
-  }, [staffId, load]);
+  }, [staffId, load, announce]);
 
   async function openItem(n: Item) {
     setOpen(false);
@@ -105,33 +141,34 @@ export function NotificationBell({ staffId }: { staffId: string }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={`Notifications, ${unread} unread`}
-        className="relative inline-flex h-10 w-10 items-center justify-center rounded-control text-white/90 hover:bg-white/10"
+        aria-expanded={open}
+        className={`relative inline-flex h-11 w-11 items-center justify-center rounded-control border bg-white text-ink hover:bg-chip ${open ? "border-ink" : "border-line-strong"}`}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
         {unread > 0 ? (
-          <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 rounded-full bg-red-bar text-white text-[11px] font-bold flex items-center justify-center px-1">{unread > 99 ? "99+" : unread}</span>
+          <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 rounded-full bg-red-bar text-white text-[11px] font-bold flex items-center justify-center px-1">{unread > 99 ? "99+" : unread}</span>
         ) : null}
       </button>
 
       {open ? (
-        <div className="absolute left-0 md:left-0 top-12 z-40 w-80 max-w-[90vw] rounded-card border border-line bg-white text-ink shadow-xl">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-line">
+        <div className="z-50 rounded-card border border-line bg-white text-ink shadow-xl flex flex-col max-sm:fixed max-sm:inset-x-4 max-sm:top-20 sm:absolute sm:right-0 sm:top-13 sm:w-[360px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
             <span className="text-sm font-extrabold">Notifications</span>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={toggleSound} className="text-xs font-semibold text-muted hover:text-ink">
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={toggleSound} className="min-h-9 text-xs font-semibold text-muted hover:text-ink">
                 Sound {sound ? "on" : "off"}
               </button>
               {unread > 0 ? (
-                <button type="button" onClick={markAll} className="text-xs font-semibold text-muted hover:text-ink">
+                <button type="button" onClick={markAll} className="min-h-9 text-xs font-semibold text-muted hover:text-ink">
                   Mark all read
                 </button>
               ) : null}
             </div>
           </div>
-          <ul className="max-h-96 overflow-y-auto divide-y divide-line">
+          <ul className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain divide-y divide-line">
             {items.length === 0 ? <li className="px-4 py-6 text-sm text-muted text-center">Nothing yet.</li> : null}
             {items.map((n) => (
               <li key={n.id}>
@@ -148,9 +185,9 @@ export function NotificationBell({ staffId }: { staffId: string }) {
               </li>
             ))}
           </ul>
-          <div className="px-4 py-2.5 border-t border-line">
+          <div className="px-4 py-2.5 border-t border-line shrink-0">
             <a href="/notifications" className="text-xs font-semibold underline underline-offset-4">
-              Notification settings
+              All notifications and settings
             </a>
           </div>
         </div>

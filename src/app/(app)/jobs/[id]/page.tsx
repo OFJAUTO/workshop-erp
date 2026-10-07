@@ -71,7 +71,7 @@ export default async function JobPage({
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "gate_in_media", "approval_requests"]} filter={`job_id=eq.${id}`} />
+      <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests"]} jobId={id} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={

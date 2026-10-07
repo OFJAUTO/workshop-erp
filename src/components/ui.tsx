@@ -73,7 +73,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="flex flex-wrap items-end justify-between gap-4 pr-14">
       <div className="flex flex-col gap-1">
         <h1 className="text-3xl font-extrabold leading-tight">{title}</h1>
         {subtitle ? <p className="text-sm font-medium text-muted">{subtitle}</p> : null}

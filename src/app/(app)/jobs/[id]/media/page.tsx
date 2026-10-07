@@ -30,7 +30,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <LiveRefresh tables={["gate_in_media", "gate_ins"]} filter={`job_id=eq.${id}`} />
+      <LiveRefresh tables={["gate_in_media", "gate_ins"]} jobId={id} />
       <PageHeader
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
         subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}

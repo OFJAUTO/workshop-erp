@@ -27,7 +27,6 @@ export function Shell({
           <Link href="/home" className="shrink-0 flex items-center" aria-label="Home">
             <Logo onDark className="h-9 md:h-12" />
           </Link>
-          {user ? <NotificationBell staffId={user.id} /> : null}
         </div>
         {nav.length ? <SidebarNav items={nav} /> : null}
         {user ? (
@@ -41,7 +40,13 @@ export function Shell({
         ) : null}
         {footer ? <div className="shrink-0 ml-auto md:ml-0">{footer}</div> : null}
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col">
+      <main className="flex-1 min-w-0 flex flex-col relative">
+        {/* Bell at the top right of the page area, level with the page title. */}
+        {user ? (
+          <div className="absolute top-5 right-4 sm:right-6 lg:right-8 z-30">
+            <NotificationBell staffId={user.id} />
+          </div>
+        ) : null}
         <div className="flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
       </main>
     </div>
