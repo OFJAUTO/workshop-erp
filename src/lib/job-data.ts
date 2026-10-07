@@ -38,7 +38,7 @@ export type JobCard = {
 };
 
 const JOB_SELECT =
-  "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at";
+  "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, created_at, updated_at";
 
 /** Everything a job card screen needs. `client` decides what the viewer may see (their own session, or the master key for public pages). */
 export async function loadJobCard(client: SupabaseClient, jobId: string): Promise<JobCard | null> {
@@ -60,7 +60,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
       client.from("customer_vip_flags").select("is_vip, vip_note").eq("id", job.customer_id).maybeSingle(),
       client
         .from("gate_ins")
-        .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, keys_count, keys_keychain, customer_requests, notes, old_parts_return, is_complete, completed_at, created_at, updated_at")
+        .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, keys_count, keys_keychain, customer_requests, notes, old_parts_return, location_type, location_name, location_address, location_lat, location_lng, is_complete, completed_at, created_at, updated_at")
         .eq("job_id", jobId)
         .maybeSingle(),
       client
@@ -70,7 +70,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
         .order("created_at", { ascending: false }),
       client
         .from("approval_requests")
-        .select("id, job_id, kind, token, sent_to_name, sent_to_phone, sent_at, sent_by, opened_at, approved_at, approver_name, terms_text, status")
+        .select("id, job_id, kind, token, sent_to_name, sent_to_phone, sent_at, sent_method, sent_by, opened_at, approved_at, approver_name, terms_text, terms_text_ar, declaration_text, declaration_text_ar, reminded_at, status, created_at")
         .eq("job_id", jobId)
         .order("sent_at", { ascending: false }),
       client
@@ -127,5 +127,5 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
 }
 
 export function vehicleTitle(v: JobCard["vehicle"]) {
-  return [v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ") || "Make and model not set";
+  return [v.make?.name, v.model?.name, v.variant, v.model_year].filter(Boolean).join(" ") || "Make and model not set";
 }

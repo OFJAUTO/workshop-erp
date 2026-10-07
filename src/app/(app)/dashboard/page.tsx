@@ -1,10 +1,11 @@
 import Link from "next/link";
+import { CarPicture } from "@/components/CarPicture";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
-import { JobMediaStrip } from "@/components/JobMediaStrip";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { loadJobMediaSummaries } from "@/lib/job-media-strip";
+import { signCarPictures } from "@/lib/car-pictures";
 import { PENDING_GROUPS, STATUS_LABELS, formatPromised, jobTiming, urgencyRank, type JobStatus } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -21,6 +22,8 @@ type Row = JobRow & {
     plate_code: string | null;
     plate_number: string | null;
     vin: string | null;
+    variant: string | null;
+    model_year: number | null;
     make: { name: string } | null;
     model: { name: string } | null;
   } | null;
@@ -41,26 +44,27 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage)",
     )
     .eq("is_open", true);
+  const clockFor = (j: Row) => ({ stage: j.stage, enteredAt: j.stage_entered_at, targetHours: settings.stage_target_hours });
   const all = ((data ?? []) as unknown as Row[]).sort((a, b) => {
-    const ra = urgencyRank(a);
-    const rb = urgencyRank(b);
+    const ra = urgencyRank(a, clockFor(a));
+    const rb = urgencyRank(b, clockFor(b));
     for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
     return 0;
   });
 
-  const [{ data: vip }, mediaSummaries] = await Promise.all([
+  const [{ data: vip }, pictures] = await Promise.all([
     all.length
       ? supabase.from("customer_vip_flags").select("id, is_vip").in("id", Array.from(new Set(all.map((j) => j.customer_id))))
       : Promise.resolve({ data: [] as { id: string; is_vip: boolean }[] }),
-    loadJobMediaSummaries(all.map((j) => ({ id: j.id, photo_path: j.vehicle?.photo_path ?? null }))),
+    signCarPictures(all.map((j) => j.vehicle?.photo_path)),
   ]);
   const vipIds = new Set((vip ?? []).filter((v) => v.is_vip).map((v) => v.id));
 
-  const timings = new Map(all.map((j) => [j.id, jobTiming(j.promised_at, j.is_open)]));
-  const dueToday = all.filter((j) => timings.get(j.id)?.tone === "amber").length;
+  const timings = new Map(all.map((j) => [j.id, jobTiming(j.promised_at, j.is_open, clockFor(j))]));
+  const dueToday = all.filter((j) => j.promised_at && timings.get(j.id)?.tone === "amber").length;
   const overdue = all.filter((j) => timings.get(j.id)?.tone === "red").length;
   const ready = all.filter((j) => j.status === "ready" || j.status === "pending_payment").length;
 
@@ -72,6 +76,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
+      <LiveRefresh tables={["jobs", "gate_ins"]} pollMs={60000} />
       <PageHeader
         title="Dashboard"
         subtitle={today}
@@ -92,7 +97,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Tile label="In the workshop" value={all.length} tone="ink" href="/dashboard" />
         <Tile label="Due today" value={dueToday} tone="amber" />
-        <Tile label="Overdue" value={overdue} tone="red" />
+        <Tile label="Overdue or late" value={overdue} tone="red" />
         <Tile label="Ready to collect" value={ready} tone="green" href="/dashboard?pending=payment" />
       </section>
 
@@ -122,30 +127,28 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               const timing = timings.get(j.id)!;
               return (
                 <Link key={j.id} href={`/jobs/${j.id}`} className="block">
-                  <Card className="flex flex-col gap-4 hover:border-ink">
-                    <div className="flex flex-wrap items-center gap-x-7 gap-y-4">
-                      <div className="flex-1 basis-64 min-w-0 flex flex-col gap-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
-                          {vipIds.has(j.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
-                          <PriorityBadge priority={j.priority} />
-                          <TimingBadge timing={timing} />
-                        </div>
-                        <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}</span>
-                        <span className="text-xs text-muted">
-                          {j.assignee?.display_name ?? (seesCustomers && j.customer ? (j.customer.company_name ?? j.customer.full_name) : "Not assigned")}
-                          {j.promised_at ? ` · ${formatPromised(j.promised_at)}` : ""}
-                          {j.gate_in ? ` · ${CONDITION_SHORT[j.gate_in.condition] ?? ""}` : ""}
-                          {j.gate_in?.dash_cam ? " · Dash cam" : ""}
-                          {j.gate_in?.major_damage ? " · Major damage" : ""}
-                        </span>
+                  <Card className="flex flex-col md:flex-row md:items-center gap-5 hover:border-ink">
+                    <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full md:w-56" />
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
+                        {vipIds.has(j.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
+                        <PriorityBadge priority={j.priority} />
+                        <TimingBadge timing={timing} />
                       </div>
-                      <div className="flex-[999] basis-[560px] min-w-0 flex flex-col gap-2.5">
-                        <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
-                        <StageTrack stage={j.stage} timing={timing} />
-                      </div>
+                      <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
+                      <span className="text-xs text-muted">
+                        {j.assignee?.display_name ?? (seesCustomers && j.customer ? (j.customer.company_name ?? j.customer.full_name) : "Not assigned")}
+                        {j.promised_at ? ` · ${formatPromised(j.promised_at)}` : ""}
+                        {j.gate_in ? ` · ${CONDITION_SHORT[j.gate_in.condition] ?? ""}` : ""}
+                        {j.gate_in?.dash_cam ? " · Dash cam" : ""}
+                        {j.gate_in?.major_damage ? " · Major damage" : ""}
+                      </span>
                     </div>
-                    <JobMediaStrip summary={mediaSummaries.get(j.id)} />
+                    <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
+                      <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
+                      <StageTrack stage={j.stage} timing={timing} />
+                    </div>
                   </Card>
                 </Link>
               );

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, type JobStatus } from "@/lib/jobs";
+import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus } from "@/lib/jobs";
 import { loadMajorDamage, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -74,7 +74,7 @@ export async function assignJob(jobId: string, formData: FormData) {
   redirect(`/jobs/${jobId}?message=` + encodeURIComponent(`Assigned to ${tech.display_name}.`));
 }
 
-/** Manual stage move for the workshop manager until later phases automate it. */
+/** Manual stage move for the owner and workshop manager until later phases automate it. */
 export async function moveJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("moveJobs");
   const toStatus = String(formData.get("status") ?? "") as JobStatus;
@@ -104,6 +104,23 @@ export async function setJobPriority(jobId: string, formData: FormData) {
   redirect(`/jobs/${jobId}`);
 }
 
+/** The promised date is set at the quotation stage or from the job card at any time. */
+export async function setPromisedDate(jobId: string, formData: FormData) {
+  const staff = await requirePermission("setPriority");
+  const date = String(formData.get("promised_at") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Choose the promised date."));
+  if (date < dubaiDate()) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The promised date cannot be in the past."));
+  const supabase = await createClient();
+  const { data: job } = await supabase.from("jobs").select("promised_at, is_open").eq("id", jobId).maybeSingle();
+  if (!job || !job.is_open) redirect(`/jobs/${jobId}`);
+  if (job.promised_at === date) redirect(`/jobs/${jobId}`);
+  const { error } = await supabase.from("jobs").update({ promised_at: date }).eq("id", jobId);
+  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
+  await logEvent(supabase, jobId, staff.id, { event_type: "promised_date", note: `Promised date ${job.promised_at ?? "none"} → ${date}` });
+  refresh(jobId);
+  redirect(`/jobs/${jobId}?message=` + encodeURIComponent("Promised date saved."));
+}
+
 /* ---------------------------------------------------------------------------
    Gate-in amendments
    --------------------------------------------------------------------------- */
@@ -123,7 +140,6 @@ const amendSchema = z.object({
   notes: z.string().trim(),
   old_parts_return: z.enum(["yes", "no"]),
   priority: z.enum(["high", "normal", "low"]),
-  promised_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose the promised date."),
   is_electric: z.string(),
 });
 
@@ -146,14 +162,13 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     notes: get("notes"),
     old_parts_return: get("old_parts_return"),
     priority: get("priority"),
-    promised_at: get("promised_at"),
     is_electric: get("is_electric"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
 
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, priority, promised_at, is_open").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, priority, is_open").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
 
   const { error } = await supabase
@@ -176,12 +191,9 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     .eq("job_id", jobId);
   if (error) return { error: error.message, values };
 
-  if (job.priority !== d.priority || job.promised_at !== d.promised_at) {
-    await supabase.from("jobs").update({ priority: d.priority, promised_at: d.promised_at }).eq("id", jobId);
-    await logEvent(supabase, jobId, staff.id, {
-      event_type: "amendment",
-      note: `Priority ${job.priority} → ${d.priority}; promised ${job.promised_at ?? "none"} → ${d.promised_at}`,
-    });
+  if (job.priority !== d.priority) {
+    await supabase.from("jobs").update({ priority: d.priority }).eq("id", jobId);
+    await logEvent(supabase, jobId, staff.id, { event_type: "amendment", note: `Priority ${job.priority} → ${d.priority}` });
   }
   await logEvent(supabase, jobId, staff.id, { event_type: "amendment", note: "Gate-in details amended" });
   refresh(jobId);
@@ -192,6 +204,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
    Customer approval link
    --------------------------------------------------------------------------- */
 
+/** Creates the link. Nothing is "sent" until Open WhatsApp or Copy link is used. */
 export async function sendApproval(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("sendApproval");
   const values = formValues(formData);
@@ -203,28 +216,56 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   const { data: job } = await supabase.from("jobs").select("id, status, is_open, job_number").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
   const check = mediaChecklist(await loadMedia(jobId), await loadMajorDamage(jobId));
-  if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos and any required damage photos must be uploaded before the approval link can be sent.", values };
+  if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos and any required damage photos must be uploaded before the approval link can be created.", values };
 
   const settings = await getSettings();
   const terms = String(settings.terms_and_conditions ?? "").trim();
   if (!terms) return { error: "Add the terms and conditions text in Settings first.", values };
 
   const token = newToken();
-  const { error } = await supabase.from("approval_requests").insert({
-    job_id: jobId,
-    kind: "job_card",
-    token,
-    sent_to_name: blankToNull(name),
-    sent_to_phone: phone,
-    sent_by: staff.id,
-    terms_text: terms,
-  });
-  if (error) return { error: error.message, values };
+  const { data: created, error } = await supabase
+    .from("approval_requests")
+    .insert({
+      job_id: jobId,
+      kind: "job_card",
+      token,
+      sent_to_name: blankToNull(name),
+      sent_to_phone: phone,
+      sent_by: staff.id,
+      sent_at: null,
+      status: "created",
+      terms_text: terms,
+      terms_text_ar: blankToNull(settings.terms_and_conditions_ar),
+      declaration_text: settings.declaration_text,
+      declaration_text_ar: settings.declaration_text_ar,
+    })
+    .select("id")
+    .single();
+  if (error || !created) return { error: error?.message ?? "Could not create the link.", values };
 
-  await logEvent(supabase, jobId, staff.id, { event_type: "approval_sent", note: `Job card approval link sent to ${name || phone}` });
+  await logEvent(supabase, jobId, staff.id, { event_type: "approval_created", note: `Approval link created for ${name || phone}` });
   refresh(jobId);
   const site = await getSiteUrl();
-  redirect(`/jobs/${jobId}?link=${encodeURIComponent(`${site}/approve/${token}`)}&to=${encodeURIComponent(phone)}`);
+  redirect(`/jobs/${jobId}?link=${encodeURIComponent(`${site}/approve/${token}`)}&req=${created.id}`);
+}
+
+/** Records that the link was actually sent (Open WhatsApp or Copy link). */
+export async function markApprovalSent(jobId: string, requestId: string, method: "whatsapp" | "copy" | "tablet") {
+  const staff = await requirePermission("sendApproval");
+  const supabase = await createClient();
+  const { data: req } = await supabase.from("approval_requests").select("id, status, sent_at, sent_to_name, sent_to_phone").eq("id", requestId).eq("job_id", jobId).maybeSingle();
+  if (!req) return;
+  if (!req.sent_at) {
+    await supabase
+      .from("approval_requests")
+      .update({ sent_at: new Date().toISOString(), sent_method: method, status: req.status === "created" ? "sent" : req.status })
+      .eq("id", requestId);
+    await logEvent(supabase, jobId, staff.id, {
+      event_type: "approval_sent",
+      note: `Approval link sent by ${method === "whatsapp" ? "WhatsApp" : method === "copy" ? "copied link" : "tablet"} to ${req.sent_to_name || req.sent_to_phone}`,
+    });
+    refresh(jobId);
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -261,7 +302,6 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   }
   if (gi.dash_cam && !dashCamReconnected) return { error: "Tick that the dash cam has been reconnected.", values };
 
-  // Balance due arrives with invoicing (Phase 4). Until then it is zero.
   const balanceDue = 0;
   let releaseBy: string | null = null;
   if (balanceDue > 0) {

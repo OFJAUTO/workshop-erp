@@ -1,3 +1,4 @@
+import { PollRefresh } from "@/components/LiveRefresh";
 import { PublicShell } from "@/components/Shell";
 import { MediaChecklist } from "@/components/MediaChecklist";
 import { Card, Notice } from "@/components/ui";
@@ -53,6 +54,7 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
 
   return (
     <PublicShell note="Phone upload">
+      <PollRefresh ms={6000} />
       <div className="flex-1 flex flex-col gap-4 px-4 py-5 max-w-lg w-full mx-auto">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-extrabold">{job?.vehicle ? formatPlate(job.vehicle) : "Job"}</h1>

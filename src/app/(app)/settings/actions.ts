@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
+import { STAGES } from "@/lib/jobs";
 import { createClient } from "@/lib/supabase/server";
 
 const NUMBER_KEYS = [
@@ -18,8 +19,17 @@ const NUMBER_KEYS = [
   "profit_target_yellow_percent",
   "supplier_invoice_pending_red_days",
   "video_retention_months",
+  "approval_reminder_hours",
 ] as const;
-const TEXT_KEYS = ["company_name", "company_trn", "terms_and_conditions"] as const;
+const TEXT_KEYS = [
+  "company_name",
+  "company_trn",
+  "terms_and_conditions",
+  "terms_and_conditions_ar",
+  "declaration_text",
+  "declaration_text_ar",
+  "whatsapp_approval_template",
+] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   tablet_idle_lock_seconds: [30, 3600, "Tablet idle lock"],
@@ -34,6 +44,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   profit_target_yellow_percent: [0, 100, "Target yellow threshold"],
   supplier_invoice_pending_red_days: [1, 365, "Supplier invoice red days"],
   video_retention_months: [1, 120, "Video retention"],
+  approval_reminder_hours: [1, 168, "Approval link reminder"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -72,6 +83,8 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     const text = String(formData.get(key) ?? "").trim();
     if (key === "company_name" && text.length < 2) return { error: "Enter the company name.", values };
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
+    if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
+    if (key === "whatsapp_approval_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     updates.push({ key, value: text });
   }
 
@@ -82,6 +95,27 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   const byDept = overrides(formData, "cost_dept__");
   if (typeof byDept === "string") return { error: byDept, values };
   updates.push({ key: "technician_cost_rate_by_department", value: byDept });
+
+  const stageHours: Record<string, number> = {};
+  for (const s of STAGES) {
+    const raw = String(formData.get(`stage__${s}`) ?? "").trim();
+    const n = Number(raw);
+    if (!raw || !Number.isFinite(n) || n < 0 || n > 10000) return { error: `Target hours for ${s} must be a number.`, values };
+    stageHours[s] = n;
+  }
+  updates.push({ key: "stage_target_hours", value: stageHours });
+
+  const branchLines = String(formData.get("branches") ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [name, ...rest] = l.split("|");
+      return { name: name.trim(), address: rest.join("|").trim() };
+    })
+    .filter((b) => b.name);
+  if (branchLines.length === 0) return { error: "Enter at least one branch, as Name | Address.", values };
+  updates.push({ key: "branches", value: branchLines });
 
   const days = formData.getAll("working_days").map(String).filter((d) => DAYS.includes(d));
   if (days.length === 0) return { error: "Tick at least one working day.", values };
@@ -94,4 +128,23 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
 
   revalidatePath("/", "layout");
   return { success: "Settings saved.", values };
+}
+
+/* ---------------------------------------------------------------------------
+   Makes and models review (owner and workshop manager)
+   --------------------------------------------------------------------------- */
+
+export async function reviewCatalogEntry(kind: "make" | "model", id: string, formData: FormData) {
+  const staff = await requirePermission("viewTablets"); // owner or workshop manager
+  void staff;
+  const decision = String(formData.get("decision") ?? "");
+  const newName = String(formData.get("name") ?? "").trim();
+  const table = kind === "make" ? "vehicle_makes" : "vehicle_models";
+  const supabase = await createClient();
+  if (decision === "approve") {
+    await supabase.from(table).update({ needs_review: false, ...(newName ? { name: newName } : {}) }).eq("id", id);
+  } else if (decision === "deactivate") {
+    await supabase.from(table).update({ needs_review: false, is_active: false }).eq("id", id);
+  }
+  revalidatePath("/settings/catalog");
 }

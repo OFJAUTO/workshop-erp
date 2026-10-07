@@ -3,23 +3,56 @@
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ImageCropper } from "@/components/ImageCropper";
+import { SearchSelect } from "@/components/SearchSelect";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
+import { makeFromVin } from "@/lib/vin";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES, type VehicleMakeRow, type VehicleModelRow } from "@/lib/types";
 
-export function QuickCarForm({ action, makes, models }: { action: FormAction; makes: VehicleMakeRow[]; models: VehicleModelRow[] }) {
+export type VariantMap = Record<string, string[]>;
+
+export function QuickCarForm({
+  action,
+  makes,
+  models,
+  variants,
+}: {
+  action: FormAction;
+  makes: VehicleMakeRow[];
+  models: VehicleModelRow[];
+  variants: VariantMap;
+}) {
   return (
     <ActionForm action={action} className="flex flex-col gap-6">
-      {(v) => <Fields v={v} makes={makes} models={models} />}
+      {(v) => <Fields v={v} makes={makes} models={models} variants={variants} />}
     </ActionForm>
   );
 }
 
-function Fields({ v, makes, models }: { v: Record<string, string>; makes: VehicleMakeRow[]; models: VehicleModelRow[] }) {
+function Fields({ v, makes, models, variants }: { v: Record<string, string>; makes: VehicleMakeRow[]; models: VehicleModelRow[]; variants: VariantMap }) {
   const [noPlate, setNoPlate] = useState(v.no_plate === "on");
   const [country, setCountry] = useState(v.plate_country || "UAE");
-  const [makeId, setMakeId] = useState(v.make_id || "");
-  const [modelId, setModelId] = useState(v.model_id || "");
-  const modelsForMake = models.filter((m) => m.make_id === makeId);
+  const [vin, setVin] = useState(v.vin || "");
+  const [make, setMake] = useState({ id: v.make_id || "", text: v.make_text || "" });
+  const [model, setModel] = useState({ id: v.model_id || "", text: v.model_text || "" });
+  const [vinMake, setVinMake] = useState<string | null>(null);
+
+  const makeOptions = makes.map((m) => ({ id: m.id, label: m.name }));
+  const modelOptions = models.filter((m) => m.make_id === make.id).map((m) => ({ id: m.id, label: m.name }));
+  const variantSuggestions = model.id && model.id !== "__new__" ? (variants[model.id] ?? []) : [];
+
+  // Read the make from the VIN and pre-select it when nothing is chosen yet.
+  function onVinChange(value: string) {
+    const next = value.toUpperCase();
+    setVin(next);
+    const detected = makeFromVin(next);
+    setVinMake(detected);
+    if (detected && !make.text) {
+      const hit = makes.find((m) => m.name.toLowerCase() === detected.toLowerCase());
+      setMake(hit ? { id: hit.id, text: hit.name } : { id: "__new__", text: detected });
+    }
+  }
+
+  const makeWarning = vinMake && make.text && make.text.toLowerCase() !== vinMake.toLowerCase() ? `The VIN suggests ${vinMake}. Check the make.` : null;
 
   return (
     <>
@@ -83,48 +116,34 @@ function Fields({ v, makes, models }: { v: Record<string, string>; makes: Vehicl
         <div className="flex flex-col gap-6">
           <Card className="flex flex-col gap-4">
             <SectionLabel>Car</SectionLabel>
-            <Field label="VIN" hint="17 characters, from the door jamb or windscreen plate.">
-              <Input name="vin" defaultValue={v.vin} className="uppercase font-mono" maxLength={17} minLength={17} required autoCapitalize="characters" />
+            <Field label="VIN" hint="17 characters. The make is read from it automatically.">
+              <Input
+                name="vin"
+                value={vin}
+                onChange={(e) => onVinChange(e.target.value)}
+                className="uppercase font-mono"
+                maxLength={17}
+                minLength={17}
+                required
+                autoCapitalize="characters"
+              />
             </Field>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Make">
-                <Select name="make_id" value={makeId} onChange={(e) => { setMakeId(e.target.value); setModelId(""); }} required>
-                  <option value="" disabled>
-                    Choose…
-                  </option>
-                  {makes.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                  <option value="__new__">Other (type it)</option>
-                </Select>
-              </Field>
-              {makeId === "__new__" ? (
-                <Field label="New make name">
-                  <Input name="new_make" defaultValue={v.new_make} required />
-                </Field>
-              ) : (
-                <Field label="Model">
-                  <Select name="model_id" value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={!makeId} required>
-                    <option value="" disabled>
-                      Choose…
-                    </option>
-                    {modelsForMake.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
+              <SearchSelect name="make" label="Make" options={makeOptions} value={make} onChange={(m) => { setMake(m); setModel({ id: "", text: "" }); }} placeholder="Type to search…" warning={makeWarning} />
+              <SearchSelect name="model" label="Model" options={modelOptions} value={model} onChange={setModel} placeholder={make.text ? "Type to search…" : "Choose the make first"} disabled={!make.text} />
+              <Field label="Variant" hint="For example: 4S, Turbo S, GTS.">
+                <>
+                  <Input name="variant" defaultValue={v.variant} required list="variant-suggestions" autoComplete="off" />
+                  <datalist id="variant-suggestions">
+                    {variantSuggestions.map((s) => (
+                      <option key={s} value={s} />
                     ))}
-                    <option value="__new__">Other (type it)</option>
-                  </Select>
-                </Field>
-              )}
-              {makeId === "__new__" || modelId === "__new__" ? (
-                <Field label="New model name">
-                  <Input name="new_model" defaultValue={v.new_model} required />
-                </Field>
-              ) : null}
-              {makeId === "__new__" ? <input type="hidden" name="model_id" value="__new__" /> : null}
+                  </datalist>
+                </>
+              </Field>
+              <Field label="Model year">
+                <Input name="model_year" inputMode="numeric" defaultValue={v.model_year} required maxLength={4} pattern="\d{4}" />
+              </Field>
             </div>
             <Field label="Fuel" hint="Electric cars record battery percentage instead of fuel level.">
               <ChoiceButtons name="fuel_type" columns={4} defaultValue={v.fuel_type} options={FUEL_TYPES.map((f) => ({ value: f, label: f[0].toUpperCase() + f.slice(1) }))} />
@@ -133,7 +152,7 @@ function Fields({ v, makes, models }: { v: Record<string, string>; makes: Vehicl
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>Car picture</SectionLabel>
-            <p className="text-sm text-muted">Shown on the Cars page, the dashboard, the job card and the customer&apos;s approval page.</p>
+            <p className="text-sm text-muted">Internal only: the Cars page, the dashboard and the job card. Customers never see it.</p>
             <ImageCropper name="car_picture" shape="wide" outputWidth={960} outputHeight={600} capture="environment" label="Take or choose a picture" />
           </Card>
         </div>

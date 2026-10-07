@@ -72,7 +72,7 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
                   {open ? <Badge tone="amber">In workshop · {open.job_number}</Badge> : null}
                 </div>
                 <span className="font-semibold">
-                  {[v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ")}
+                  {[v.make?.name, v.model?.name, v.variant, v.model_year].filter(Boolean).join(" ")}
                   {v.colour ? ` · ${v.colour}` : ""}
                 </span>
                 <span className="text-sm text-muted">

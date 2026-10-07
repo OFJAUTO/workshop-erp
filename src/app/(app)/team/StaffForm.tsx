@@ -51,18 +51,19 @@ export function StaffForm({
             <Field label="How this person logs in">
               <ChoiceButtons
                 name="login_type"
-                columns={2}
+                columns={3}
                 defaultValue={v.login_type}
                 options={[
-                  { value: "pin", label: "Shared tablet", hint: "Tap name, enter 4-digit PIN" },
-                  { value: "password", label: "Office PC", hint: "Email and password" },
+                  { value: "password", label: "PC login", hint: "Email and password" },
+                  { value: "pin", label: "Handheld login", hint: "Name and PIN on a registered device" },
+                  { value: "both", label: "Both", hint: "PC and any registered handheld" },
                 ]}
               />
             </Field>
           ) : null}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Email" hint="Needed for PC login. Optional for tablet users." optional>
+            <Field label="Email" hint="Needed for PC login and Both. Optional for handheld-only users." optional>
               <Input name="email" type="email" inputMode="email" defaultValue={v.email} />
             </Field>
             <Field label="Phone" optional>
@@ -72,7 +73,7 @@ export function StaffForm({
               <Input name="employee_number" defaultValue={v.employee_number} />
             </Field>
             {mode === "create" ? (
-              <Field label="4-digit PIN" hint="Needed for tablet login. The PIN is scrambled before it is stored.">
+              <Field label="4-digit PIN" hint="Needed for handheld login and Both. The PIN is scrambled before it is stored.">
                 <Input
                   name="pin"
                   inputMode="numeric"

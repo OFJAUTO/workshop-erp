@@ -35,7 +35,7 @@ export default async function TabletPage() {
     .from("staff")
     .select("id, display_name, full_name, department_id, photo_path")
     .eq("is_active", true)
-    .eq("login_type", "pin")
+    .in("login_type", ["pin", "both"])
     .order("department_id")
     .order("display_name");
 
@@ -45,7 +45,8 @@ export default async function TabletPage() {
     : { data: [] as { path: string | null; signedUrl: string }[] };
   const urlByPath = new Map((signed.data ?? []).map((s) => [s.path, s.signedUrl]));
 
-  const people: TabletPerson[] = (rows ?? []).map((r) => ({
+  const scoped = device.kind === "personal" ? (rows ?? []).filter((r) => r.id === device.staff_id) : (rows ?? []);
+  const people: TabletPerson[] = scoped.map((r) => ({
     id: r.id,
     display_name: r.display_name,
     full_name: r.full_name,
@@ -56,8 +57,8 @@ export default async function TabletPage() {
   return (
     <PublicShell note={device.name}>
       <div className="flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-extrabold">Tap your name</h1>
-        <PinLogin people={people} />
+        <h1 className="text-2xl font-extrabold">{device.kind === "personal" ? "Enter your PIN" : "Tap your name"}</h1>
+        <PinLogin people={people} autoSelect={device.kind === "personal"} />
       </div>
     </PublicShell>
   );

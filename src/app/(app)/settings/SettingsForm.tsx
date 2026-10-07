@@ -2,6 +2,7 @@
 
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { Card, Field, Input, SectionLabel, Textarea } from "@/components/ui";
+import { STAGE_LABELS, STAGES } from "@/lib/jobs";
 
 const DAYS: { id: string; label: string }[] = [
   { id: "mon", label: "Mon" },
@@ -21,6 +22,8 @@ export function SettingsForm({
   makeOverrides,
   departmentOverrides,
   workingDays,
+  stageHours,
+  branchesText,
 }: {
   action: FormAction;
   initialValues: Record<string, string>;
@@ -29,6 +32,8 @@ export function SettingsForm({
   makeOverrides: Record<string, number>;
   departmentOverrides: Record<string, number>;
   workingDays: string[];
+  stageHours: Record<string, number>;
+  branchesText: string;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
@@ -44,12 +49,15 @@ export function SettingsForm({
                 <Input name="company_trn" defaultValue={v.company_trn} inputMode="numeric" maxLength={15} />
               </Field>
             </div>
+            <Field label="Branches" hint="One per line: Name | Address. The first one is the default at gate-in.">
+              <Textarea name="branches" defaultValue={v.branches ?? branchesText} rows={3} />
+            </Field>
           </Card>
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>Logins</SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Tablet idle lock (seconds)" hint="A shared tablet locks after this long without a touch.">
+              <Field label="Handheld idle lock (seconds)" hint="A registered device locks after this long without a touch.">
                 <Input name="tablet_idle_lock_seconds" defaultValue={v.tablet_idle_lock_seconds} inputMode="numeric" required />
               </Field>
               <Field label="Wrong PINs before lock">
@@ -58,18 +66,50 @@ export function SettingsForm({
               <Field label="PIN lock time (minutes)">
                 <Input name="pin_lock_minutes" defaultValue={v.pin_lock_minutes} inputMode="numeric" required />
               </Field>
-              <Field label="Keep me signed in: office staff (days)" hint="PC logins only. Never on tablets.">
+              <Field label="Keep me signed in: office staff (days)" hint="PC logins only. Never on handhelds.">
                 <Input name="keep_signed_in_days_staff" defaultValue={v.keep_signed_in_days_staff} inputMode="numeric" required />
               </Field>
               <Field label="Keep me signed in: owner and accounts (days)">
-                <Input
-                  name="keep_signed_in_days_owner_accounts"
-                  defaultValue={v.keep_signed_in_days_owner_accounts}
-                  inputMode="numeric"
-                  required
-                />
+                <Input name="keep_signed_in_days_owner_accounts" defaultValue={v.keep_signed_in_days_owner_accounts} inputMode="numeric" required />
               </Field>
             </div>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Gate-in and approvals</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Video retention (months)" hint="Videos are deleted automatically after this. Photos are kept forever.">
+                <Input name="video_retention_months" defaultValue={v.video_retention_months} inputMode="numeric" required />
+              </Field>
+              <Field label="Approval link reminder (hours)" hint="Remind the advisor if a sent link is not opened in time.">
+                <Input name="approval_reminder_hours" defaultValue={v.approval_reminder_hours} inputMode="numeric" required />
+              </Field>
+            </div>
+            <Field label="Target hours per stage" hint="Without a promised date a car turns amber past the target and red at double.">
+              <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+                {STAGES.map((s) => (
+                  <label key={s} className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-muted">{STAGE_LABELS[s]}</span>
+                    <Input name={`stage__${s}`} defaultValue={v[`stage__${s}`] ?? String(stageHours[s] ?? "")} inputMode="numeric" required />
+                  </label>
+                ))}
+              </div>
+            </Field>
+            <Field label="WhatsApp approval message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
+              <Textarea name="whatsapp_approval_template" defaultValue={v.whatsapp_approval_template} rows={4} required />
+            </Field>
+            <Field label="Terms and conditions (English)" hint="Shown in full on the approval page. Every approval keeps the exact version shown.">
+              <Textarea name="terms_and_conditions" defaultValue={v.terms_and_conditions} rows={10} />
+            </Field>
+            <Field label="Terms and conditions (Arabic)" hint="Shown right to left under the English terms.">
+              <Textarea name="terms_and_conditions_ar" defaultValue={v.terms_and_conditions_ar} rows={10} dir="rtl" lang="ar" />
+            </Field>
+            <Field label="Declaration (English)" hint="The tick-box text on the approval page.">
+              <Textarea name="declaration_text" defaultValue={v.declaration_text} rows={3} required />
+            </Field>
+            <Field label="Declaration (Arabic)">
+              <Textarea name="declaration_text_ar" defaultValue={v.declaration_text_ar} rows={3} dir="rtl" lang="ar" />
+            </Field>
           </Card>
 
           <Card className="flex flex-col gap-4">
@@ -113,13 +153,7 @@ export function SettingsForm({
               <div className="flex flex-wrap gap-2">
                 {DAYS.map((d) => (
                   <label key={d.id} className="cursor-pointer">
-                    <input
-                      type="checkbox"
-                      name="working_days"
-                      value={d.id}
-                      defaultChecked={workingDays.includes(d.id)}
-                      className="peer sr-only"
-                    />
+                    <input type="checkbox" name="working_days" value={d.id} defaultChecked={workingDays.includes(d.id)} className="peer sr-only" />
                     <span className="inline-flex min-h-11 min-w-14 items-center justify-center rounded-control border border-line-strong bg-white px-3 text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-white">
                       {d.label}
                     </span>
@@ -133,12 +167,7 @@ export function SettingsForm({
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {departments.map((d) => (
                   <Field key={d.id} label={d.label}>
-                    <Input
-                      name={`cost_dept__${d.id}`}
-                      defaultValue={departmentOverrides[d.id]?.toString() ?? ""}
-                      inputMode="numeric"
-                      placeholder="AED/h"
-                    />
+                    <Input name={`cost_dept__${d.id}`} defaultValue={departmentOverrides[d.id]?.toString() ?? ""} inputMode="numeric" placeholder="AED/h" />
                   </Field>
                 ))}
               </div>
@@ -146,22 +175,9 @@ export function SettingsForm({
           </Card>
 
           <Card className="flex flex-col gap-4">
-            <SectionLabel>Parts and gate-in</SectionLabel>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Pending supplier invoice turns red after (days)" hint="Used from the parts phase.">
-                <Input
-                  name="supplier_invoice_pending_red_days"
-                  defaultValue={v.supplier_invoice_pending_red_days}
-                  inputMode="numeric"
-                  required
-                />
-              </Field>
-              <Field label="Gate-in video retention (months)" hint="Used from Phase 2.">
-                <Input name="video_retention_months" defaultValue={v.video_retention_months} inputMode="numeric" required />
-              </Field>
-            </div>
-            <Field label="Terms and conditions" hint="The text customers agree to when approving a job.">
-              <Textarea name="terms_and_conditions" defaultValue={v.terms_and_conditions} rows={10} />
+            <SectionLabel>Parts</SectionLabel>
+            <Field label="Pending supplier invoice turns red after (days)" hint="Used from the parts phase.">
+              <Input name="supplier_invoice_pending_red_days" defaultValue={v.supplier_invoice_pending_red_days} inputMode="numeric" required className="max-w-40" />
             </Field>
           </Card>
 

@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "./ui";
 import { uploadFile, type UploadKind } from "@/lib/upload-client";
 
-/** One-tap photo capture and upload with a progress bar. */
+/** One-tap photo capture and upload with a progress bar and retry. */
 export function MediaCapture({
   jobId,
   kind,
@@ -26,26 +27,33 @@ export function MediaCapture({
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [count, setCount] = useState(0);
+  const [failed, setFailed] = useState<File[]>([]);
+
+  async function uploadAll(files: File[]) {
+    setError(null);
+    setFailed([]);
+    const notDone: File[] = [];
+    for (const file of files) {
+      const type = file.type || "image/jpeg";
+      setProgress(0);
+      try {
+        await uploadFile(jobId, kind, file, type, setProgress, { token, caption });
+        setCount((c) => c + 1);
+      } catch (err) {
+        notDone.push(file);
+        setError(err instanceof Error ? err.message : "Upload failed.");
+      }
+    }
+    setProgress(null);
+    setFailed(notDone);
+    if (notDone.length < files.length) router.refresh();
+  }
 
   async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
     if (files.length === 0) return;
-    setError(null);
-    try {
-      for (const file of files) {
-        const type = file.type || "image/jpeg";
-        setProgress(0);
-        await uploadFile(jobId, kind, file, type, setProgress, { token, caption });
-        setCount((c) => c + 1);
-      }
-      setProgress(null);
-      router.refresh();
-    } catch (err) {
-      setProgress(null);
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      e.target.value = "";
-    }
+    await uploadAll(files);
   }
 
   const finished = done || count > 0;
@@ -56,7 +64,7 @@ export function MediaCapture({
         <input type="file" accept="image/*" capture="environment" multiple={multiple} onChange={onChange} className="sr-only" disabled={progress !== null} />
         <span
           className={`flex min-h-16 items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${
-            finished ? "border-green bg-green-soft" : "border-line-strong bg-white"
+            finished ? "border-green bg-green-soft" : failed.length ? "border-red-bar bg-red-soft" : "border-line-strong bg-white"
           }`}
         >
           <span className="flex flex-col">
@@ -66,7 +74,7 @@ export function MediaCapture({
                 ? `Uploading… ${Math.round(progress * 100)}%`
                 : finished
                   ? multiple
-                    ? `${count} added. Tap to add more.`
+                    ? `${count ? count + " added. " : ""}Tap to add more.`
                     : "Done. Tap to add another."
                   : "Tap to take a photo"}
             </span>
@@ -80,6 +88,11 @@ export function MediaCapture({
         </div>
       ) : null}
       {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
+      {failed.length ? (
+        <Button size="md" onClick={() => uploadAll(failed)}>
+          Retry upload{failed.length > 1 ? ` (${failed.length} photos)` : ""}
+        </Button>
+      ) : null}
     </div>
   );
 }

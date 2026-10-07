@@ -14,15 +14,15 @@ export type TabletPerson = {
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
 
-export function PinLogin({ people }: { people: TabletPerson[] }) {
+export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[]; autoSelect?: boolean }) {
   const router = useRouter();
-  const [selected, setSelected] = useState<TabletPerson | null>(null);
+  const [selected, setSelected] = useState<TabletPerson | null>(autoSelect && people.length === 1 ? people[0] : null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   function reset() {
-    setSelected(null);
+    setSelected(autoSelect && people.length === 1 ? people[0] : null);
     setPin("");
     setError(null);
     setBusy(false);

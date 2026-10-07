@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Card, DescriptionList, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
-import { STATUS_LABELS, dubaiDate, type JobStatus } from "@/lib/jobs";
+import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
+import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
 import { createGateIn } from "../actions";
@@ -42,7 +43,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const openVisit = visits.find((h) => h.is_open);
   if (openVisit) redirect(`/jobs/${openVisit.id}`);
 
-  const tomorrow = new Date(Date.parse(dubaiDate()) + 86400000).toISOString().slice(0, 10);
+  const settings = await getSettings();
 
   return (
     <>
@@ -62,7 +63,8 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             action={createGateIn.bind(null, v.id)}
             isElectric={v.fuel_type === "electric"}
             pictureMode={v.photo_path ? "optional" : "required"}
-            initialValues={{ priority: "normal", promised_at: tomorrow, keys_count: "1", major_damage: "no" }}
+            branches={settings.branches}
+            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no" }}
           />
         </div>
 

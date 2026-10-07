@@ -8,7 +8,7 @@ export type StaffRow = {
   role_id: RoleId;
   department_id: DepartmentId | null;
   employee_number: string | null;
-  login_type: "password" | "pin";
+  login_type: "password" | "pin" | "both";
   is_head_accountant: boolean;
   photo_path: string | null;
   is_active: boolean;
@@ -30,7 +30,9 @@ export type StaffPrivateRow = {
 export type DeviceRow = {
   id: string;
   name: string;
-  location: "workshop" | "bodyshop" | "office";
+  location: "workshop" | "bodyshop" | "office" | "personal";
+  kind: "shared" | "personal";
+  staff_id: string | null;
   is_active: boolean;
   registered_at: string;
   registered_by: string | null;
@@ -67,8 +69,8 @@ export type CustomerContactRow = {
   is_active: boolean;
 };
 
-export type VehicleMakeRow = { id: string; name: string; is_active: boolean };
-export type VehicleModelRow = { id: string; make_id: string; name: string; is_active: boolean };
+export type VehicleMakeRow = { id: string; name: string; is_active: boolean; needs_review?: boolean };
+export type VehicleModelRow = { id: string; make_id: string; name: string; is_active: boolean; needs_review?: boolean };
 
 export const EMIRATES = [
   "Dubai",
@@ -180,6 +182,7 @@ export type JobRow = {
   gated_out_at: string | null;
   gated_out_by: string | null;
   first_approval_at: string | null;
+  stage_entered_at: string;
   is_open: boolean;
   created_at: string;
   updated_at: string;
@@ -201,6 +204,11 @@ export type GateInRow = {
   notes: string | null;
   old_parts_return: boolean;
   major_damage: boolean;
+  location_type: "branch" | "customer" | "other";
+  location_name: string | null;
+  location_address: string | null;
+  location_lat: number | null;
+  location_lng: number | null;
   is_complete: boolean;
   completed_at: string | null;
   created_at: string;
@@ -251,13 +259,31 @@ export type ApprovalRequestRow = {
   token: string;
   sent_to_name: string | null;
   sent_to_phone: string;
-  sent_at: string;
+  sent_at: string | null;
+  sent_method: "whatsapp" | "copy" | "tablet" | null;
   sent_by: string | null;
   opened_at: string | null;
   approved_at: string | null;
   approver_name: string | null;
   terms_text: string;
-  status: "sent" | "opened" | "approved" | "cancelled";
+  terms_text_ar: string | null;
+  declaration_text: string | null;
+  declaration_text_ar: string | null;
+  reminded_at: string | null;
+  status: "created" | "sent" | "opened" | "approved" | "cancelled";
+  created_at: string;
+};
+
+export type NotificationRow = {
+  id: number;
+  staff_id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  job_id: string | null;
+  href: string | null;
+  read_at: string | null;
+  created_at: string;
 };
 
 export type GateOutRow = {

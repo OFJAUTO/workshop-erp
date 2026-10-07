@@ -39,7 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {staff.login_type === "pin" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         nav={nav}
-        user={{ name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
+        user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
         footer={
           <form method="post" action="/api/auth/signout">
             <button

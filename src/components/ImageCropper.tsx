@@ -12,7 +12,8 @@ const MAX_ZOOM = 4;
  * Pick a photo, then drag and zoom it to fit the frame. Starts with the whole
  * photo visible inside the frame; zooming in crops, zooming out never goes
  * below "whole photo fits". The result goes into a hidden file field so an
- * ordinary form submit uploads it.
+ * ordinary form submit uploads it. The slider is kept out of the form, so it
+ * can never block saving, and the cropped picture survives a failed save.
  */
 export function ImageCropper({
   name,
@@ -36,11 +37,10 @@ export function ImageCropper({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenRef = useRef<HTMLInputElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const blobRef = useRef<Blob | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
 
-  // Zoom is relative to "cover" (photo fills the frame). The smallest zoom is
-  // "contain" (whole photo inside the frame), which depends only on the aspect ratios.
   const minZoom = img
     ? Math.min(outputWidth / img.naturalWidth, outputHeight / img.naturalHeight) /
       Math.max(outputWidth / img.naturalWidth, outputHeight / img.naturalHeight)
@@ -55,7 +55,6 @@ export function ImageCropper({
       const scale = cover * clampZoom(zoom);
       const dw = img.naturalWidth * scale;
       const dh = img.naturalHeight * scale;
-      // The photo may be moved until its edge meets the frame edge, in either direction.
       const maxX = Math.abs(dw - boxW) / 2;
       const maxY = Math.abs(dh - boxH) / 2;
       const x = Math.min(maxX, Math.max(-maxX, offset.x));
@@ -64,6 +63,14 @@ export function ImageCropper({
     },
     [img, zoom, offset, clampZoom],
   );
+
+  function putBlobInField(blob: Blob) {
+    const input = hiddenRef.current;
+    if (!input) return;
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], "photo.jpg", { type: "image/jpeg" }));
+    input.files = dt.files;
+  }
 
   // Preview
   useEffect(() => {
@@ -79,7 +86,7 @@ export function ImageCropper({
 
   // Export into the hidden file field whenever the crop changes
   useEffect(() => {
-    if (!img || !hiddenRef.current) return;
+    if (!img) return;
     const out = document.createElement("canvas");
     out.width = outputWidth;
     out.height = outputHeight;
@@ -89,19 +96,30 @@ export function ImageCropper({
     ctx.fillStyle = FILL;
     ctx.fillRect(0, 0, outputWidth, outputHeight);
     ctx.drawImage(img, l.dx, l.dy, l.dw, l.dh);
-    const input = hiddenRef.current;
     out.toBlob(
       (blob) => {
         if (!blob) return;
-        const dt = new DataTransfer();
-        dt.items.add(new File([blob], "photo.jpg", { type: "image/jpeg" }));
-        input.files = dt.files;
+        blobRef.current = blob;
+        putBlobInField(blob);
         setReady(true);
       },
       "image/jpeg",
       0.86,
     );
   }, [img, layout, outputWidth, outputHeight]);
+
+  // After a failed save the browser may reset the form; put the picture back.
+  useEffect(() => {
+    const input = hiddenRef.current;
+    if (!input) return;
+    const restore = () => {
+      if (blobRef.current && input.files?.length === 0) putBlobInField(blobRef.current);
+    };
+    const form = input.form;
+    form?.addEventListener("reset", () => setTimeout(restore, 0));
+    const t = setInterval(restore, 800);
+    return () => clearInterval(t);
+  });
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -112,7 +130,7 @@ export function ImageCropper({
       const cover = Math.max(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight);
       const contain = Math.min(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight);
       setImg(image);
-      setZoom(contain / cover); // start with the whole photo visible
+      setZoom(contain / cover);
       setOffset({ x: 0, y: 0 });
       setReady(false);
     };
@@ -151,12 +169,14 @@ export function ImageCropper({
 
   const previewW = 360;
   const previewH = Math.round((previewW * outputHeight) / outputWidth);
+  // The slider works in whole steps from 0 (whole photo) to 100 (4x), so it never fails number checks.
+  const sliderValue = Math.round(((clampZoom(zoom) - minZoom) / (MAX_ZOOM - minZoom)) * 100);
 
   return (
     <div className="flex flex-col gap-3">
       <input type="file" name={name} ref={hiddenRef} className="hidden" tabIndex={-1} aria-hidden />
       <label className="inline-flex">
-        <input type="file" accept="image/*" capture={capture} onChange={onFile} className="sr-only" />
+        <input type="file" accept="image/*" capture={capture} onChange={onFile} className="sr-only" form="__not_part_of_any_form" />
         <span className="inline-flex items-center justify-center min-h-11 px-5 rounded-control border border-line-strong bg-white text-sm font-bold cursor-pointer hover:bg-canvas">
           {img ? "Choose a different photo" : label}
         </span>
@@ -181,11 +201,12 @@ export function ImageCropper({
             <span className="text-xs font-semibold text-muted">Zoom</span>
             <input
               type="range"
-              min={minZoom}
-              max={MAX_ZOOM}
-              step={0.01}
-              value={clampZoom(zoom)}
-              onChange={(e) => setZoom(Number(e.target.value))}
+              min={0}
+              max={100}
+              step={1}
+              value={sliderValue}
+              form="__not_part_of_any_form"
+              onChange={(e) => setZoom(minZoom + (Number(e.target.value) / 100) * (MAX_ZOOM - minZoom))}
               className="flex-1 accent-ink"
               aria-label="Zoom"
             />

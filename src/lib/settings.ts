@@ -2,6 +2,8 @@ import "server-only";
 import { cache } from "react";
 import { createAdminClient } from "./supabase/admin";
 
+export type Branch = { name: string; address: string };
+
 const DEFAULTS = {
   company_name: "OFJ Automotive",
   company_trn: "",
@@ -19,8 +21,17 @@ const DEFAULTS = {
   working_days: ["mon", "tue", "wed", "thu", "fri", "sat"] as string[],
   profit_target_yellow_percent: 80,
   supplier_invoice_pending_red_days: 7,
-  video_retention_months: 6,
+  video_retention_months: 12,
   terms_and_conditions: "",
+  terms_and_conditions_ar: "",
+  declaration_text:
+    "I agree to the terms and conditions and confirm I am the owner of the vehicle or a legal representative authorised to act on the owner's behalf.",
+  declaration_text_ar: "أوافق على الشروط والأحكام وأقر بأنني مالك المركبة أو ممثل قانوني مفوّض بالتصرف نيابةً عن المالك.",
+  stage_target_hours: { gate_in: 2, inspection: 4, quote: 4, approval: 24, parts: 48, work: 24, qc: 2, wash: 2, ready: 24 } as Record<string, number>,
+  branches: [{ name: "OFJ Al Quoz", address: "Al Quoz Industrial Area, Dubai" }] as Branch[],
+  approval_reminder_hours: 4,
+  whatsapp_approval_template:
+    "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection: [link]. Thank you, [advisor], OFJ Automotive",
 };
 
 export type Settings = typeof DEFAULTS;

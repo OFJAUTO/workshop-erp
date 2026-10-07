@@ -7,7 +7,8 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { dubaiDate } from "@/lib/jobs";
+import { notifyRoles } from "@/lib/notifications";
+import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES } from "@/lib/types";
 
@@ -48,8 +49,11 @@ const gateInSchema = z
     notes: z.string().trim(),
     old_parts_return: z.enum(["yes", "no"], { message: "Does the customer want old parts returned?" }),
     priority: z.enum(["high", "normal", "low"], { message: "Choose the priority." }),
-    promised_at: z.string().trim(),
     is_electric: z.string(),
+    location_choice: z.string().trim().min(1, "Choose the gate-in location."),
+    location_address: z.string().trim(),
+    location_lat: z.string().trim(),
+    location_lng: z.string().trim(),
   })
   .superRefine((d, ctx) => {
     if (d.is_electric === "yes") {
@@ -62,11 +66,6 @@ const gateInSchema = z
     if (!/^\d{1,7}$/.test(d.mileage)) ctx.addIssue({ code: "custom", path: ["mileage"], message: "Enter the mileage in km." });
     if (!/^\d{1,2}$/.test(d.keys_count) || Number(d.keys_count) > 10) {
       ctx.addIssue({ code: "custom", path: ["keys_count"], message: "Enter how many keys were received." });
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.promised_at)) {
-      ctx.addIssue({ code: "custom", path: ["promised_at"], message: "Choose the promised date." });
-    } else if (d.promised_at < dubaiDate()) {
-      ctx.addIssue({ code: "custom", path: ["promised_at"], message: "The promised date cannot be in the past." });
     }
   });
 
@@ -87,8 +86,11 @@ function parseGateIn(formData: FormData) {
     notes: get("notes"),
     old_parts_return: get("old_parts_return"),
     priority: get("priority"),
-    promised_at: get("promised_at"),
     is_electric: get("is_electric"),
+    location_choice: get("location_choice"),
+    location_address: get("location_address"),
+    location_lat: get("location_lat"),
+    location_lng: get("location_lng"),
   });
 }
 
@@ -98,6 +100,13 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const parsed = parseGateIn(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
+
+  const settings = await getSettings();
+  const branch = settings.branches.find((b) => b.name === d.location_choice);
+  const locationType = branch ? "branch" : d.location_choice === "customer" ? "customer" : "other";
+  if (!branch && d.location_address.length < 3) return { error: "Enter the address or describe where the car is.", values };
+  const lat = d.location_lat ? Number(d.location_lat) : null;
+  const lng = d.location_lng ? Number(d.location_lng) : null;
 
   const supabase = await createClient();
   const { data: vehicle } = await supabase
@@ -126,13 +135,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
 
   const { data: job, error: jobError } = await supabase
     .from("jobs")
-    .insert({
-      vehicle_id: vehicleId,
-      customer_id: vehicle.customer_id,
-      priority: d.priority,
-      promised_at: d.promised_at,
-      gated_in_by: staff.id,
-    })
+    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: d.priority, gated_in_by: staff.id })
     .select("id, job_number")
     .single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
@@ -152,6 +155,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     customer_requests: d.customer_requests,
     notes: blankToNull(d.notes),
     old_parts_return: d.old_parts_return === "yes",
+    location_type: locationType,
+    location_name: branch ? branch.name : locationType === "customer" ? "Customer location" : "Other location",
+    location_address: branch ? branch.address : d.location_address,
+    location_lat: Number.isFinite(lat) ? lat : null,
+    location_lng: Number.isFinite(lng) ? lng : null,
   });
   if (giError) return { error: giError.message, values };
 
@@ -161,7 +169,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     to_status: "gate_in_pending",
     to_stage: "gate_in",
     to_staff: staff.id,
-    note: `Gated in on job ${job.job_number}`,
+    note: `Gated in on job ${job.job_number} at ${branch ? branch.name : d.location_address}`,
     created_by: staff.id,
   });
   await supabase.from("vehicles").update({ last_mileage: Number(d.mileage) }).eq("id", vehicleId);
@@ -189,9 +197,11 @@ const quickSchema = z
     plate_number: z.string().trim().toUpperCase(),
     vin: z.string().trim().toUpperCase().min(1, "Enter the VIN."),
     make_id: z.string().trim(),
-    new_make: z.string().trim(),
+    make_text: z.string().trim(),
     model_id: z.string().trim(),
-    new_model: z.string().trim(),
+    model_text: z.string().trim(),
+    variant: z.string().trim().min(1, "Enter the variant."),
+    model_year: z.string().trim().regex(/^\d{4}$/, "Enter the model year (4 digits)."),
     fuel_type: z.enum(FUEL_TYPES, { message: "Choose the fuel type." }),
   })
   .superRefine((d, ctx) => {
@@ -209,16 +219,14 @@ const quickSchema = z
       if (!d.plate_number) ctx.addIssue({ code: "custom", path: ["plate_number"], message: "Enter the plate number, or tick No number plate." });
     }
     if (d.vin.length !== 17) ctx.addIssue({ code: "custom", path: ["vin"], message: "A VIN has exactly 17 characters." });
-    if (d.make_id === "__new__" ? d.new_make.length < 2 : !d.make_id) {
-      ctx.addIssue({ code: "custom", path: ["make_id"], message: "Choose the make, or type a new one." });
-    }
-    if (d.model_id === "__new__" ? d.new_model.length < 1 : !d.model_id) {
-      ctx.addIssue({ code: "custom", path: ["model_id"], message: "Choose the model, or type a new one." });
-    }
+    if (!d.make_text) ctx.addIssue({ code: "custom", path: ["make_id"], message: "Choose or type the make." });
+    if (!d.model_text) ctx.addIssue({ code: "custom", path: ["model_id"], message: "Choose or type the model." });
+    const year = Number(d.model_year);
+    if (year < 1950 || year > new Date().getFullYear() + 1) ctx.addIssue({ code: "custom", path: ["model_year"], message: "Check the model year." });
   });
 
 export async function createCustomerAndVehicle(_state: FormState, formData: FormData): Promise<FormState> {
-  await requirePermission("gateIn");
+  const staff = await requirePermission("gateIn");
   const values = formValues(formData);
   const get = (k: string) => formData.get(k) ?? "";
   const parsed = quickSchema.safeParse({
@@ -233,9 +241,11 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     plate_number: get("plate_number"),
     vin: get("vin"),
     make_id: get("make_id"),
-    new_make: get("new_make"),
+    make_text: get("make_text"),
     model_id: get("model_id"),
-    new_model: get("new_model"),
+    model_text: get("model_text"),
+    variant: get("variant"),
+    model_year: get("model_year"),
     fuel_type: get("fuel_type"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
@@ -245,25 +255,34 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
   if (!(picture instanceof File) || picture.size === 0) return { error: "Take a picture of the car.", values };
 
   const supabase = await createClient();
+  const newEntries: string[] = [];
 
-  let makeId = d.make_id;
-  if (makeId === "__new__") {
-    const { data: existing } = await supabase.from("vehicle_makes").select("id").ilike("name", d.new_make).maybeSingle();
+  // Make: existing by id, else by name, else create for review.
+  let makeId = d.make_id !== "__new__" ? d.make_id : "";
+  if (!makeId) {
+    const { data: existing } = await supabase.from("vehicle_makes").select("id").ilike("name", d.make_text).maybeSingle();
     if (existing) makeId = existing.id;
     else {
-      const { data, error } = await supabase.from("vehicle_makes").insert({ name: d.new_make }).select("id").single();
+      const { data, error } = await supabase.from("vehicle_makes").insert({ name: d.make_text, needs_review: true }).select("id").single();
       if (error || !data) return { error: "Could not add the make.", values };
       makeId = data.id;
+      newEntries.push(`make "${d.make_text}"`);
     }
   }
-  let modelId: string = d.model_id;
-  if (d.model_id === "__new__") {
-    const { data: existing } = await supabase.from("vehicle_models").select("id").eq("make_id", makeId).ilike("name", d.new_model).maybeSingle();
+  // Model: existing by id (must belong to the make), else by name, else create for review.
+  let modelId = d.model_id !== "__new__" ? d.model_id : "";
+  if (modelId) {
+    const { data: m } = await supabase.from("vehicle_models").select("id").eq("id", modelId).eq("make_id", makeId).maybeSingle();
+    if (!m) modelId = "";
+  }
+  if (!modelId) {
+    const { data: existing } = await supabase.from("vehicle_models").select("id").eq("make_id", makeId).ilike("name", d.model_text).maybeSingle();
     if (existing) modelId = existing.id;
     else {
-      const { data, error } = await supabase.from("vehicle_models").insert({ make_id: makeId, name: d.new_model }).select("id").single();
+      const { data, error } = await supabase.from("vehicle_models").insert({ make_id: makeId, name: d.model_text, needs_review: true }).select("id").single();
       if (error || !data) return { error: "Could not add the model.", values };
       modelId = data.id;
+      newEntries.push(`model "${d.model_text}"`);
     }
   }
 
@@ -294,6 +313,8 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
       vin: d.vin,
       make_id: makeId,
       model_id: modelId,
+      variant: d.variant,
+      model_year: Number(d.model_year),
       fuel_type: d.fuel_type,
     })
     .select("id")
@@ -312,6 +333,15 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
 
   const picError = await saveCarPicture(vehicle.id, picture);
   if (picError) return { error: picError, values };
+
+  if (newEntries.length) {
+    await notifyRoles(["owner", "workshop_manager"], {
+      type: "catalog_review",
+      title: "New " + newEntries.join(" and ") + " added at gate-in",
+      body: `Added by ${staff.display_name}. Review it in Settings, Makes and models.`,
+      href: "/settings/catalog",
+    });
+  }
 
   revalidatePath("/customers");
   revalidatePath("/vehicles");

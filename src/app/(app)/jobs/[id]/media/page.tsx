@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { MediaChecklist } from "@/components/MediaChecklist";
 import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -29,6 +30,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
+      <LiveRefresh tables={["gate_in_media", "gate_ins"]} filter={`job_id=eq.${id}`} />
       <PageHeader
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
         subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
@@ -47,7 +49,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
         <div className="flex flex-col gap-6">
           <Card className="flex flex-col gap-3 items-center text-center">
             <SectionLabel>Use a phone instead</SectionLabel>
-            <p className="text-sm text-muted">Scan this with the phone camera. The page opens with the same buttons, no login needed. Valid for 30 minutes.</p>
+            <p className="text-sm text-muted">Scan this with the phone camera. The page opens with the same buttons, no login needed. Valid for 30 minutes. This page updates by itself as the phone uploads.</p>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qr} alt="QR code for phone upload" width={260} height={260} className="rounded-card border border-line" />
             <Link href={phoneUrl} className="text-xs text-muted underline underline-offset-4 break-all" target="_blank" rel="noreferrer">

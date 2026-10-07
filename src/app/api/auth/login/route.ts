@@ -36,9 +36,9 @@ export async function POST(request: NextRequest) {
     await supabase.auth.signOut();
     return fail("This account is disabled. Ask the owner.");
   }
-  if (staff.login_type !== "password") {
+  if (staff.login_type === "pin") {
     await supabase.auth.signOut();
-    return fail("This person logs in on a workshop tablet with a PIN.");
+    return fail("This person logs in on a handheld device with a PIN.");
   }
 
   const settings = await getSettings();

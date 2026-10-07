@@ -132,10 +132,25 @@ export function labelOf(list: readonly { value: string; label: string }[], value
 
 export type Timing = { tone: "green" | "amber" | "red" | "neutral"; label: string; daysOver: number };
 
-/** Green on time, amber due today, red overdue; based on the promised date in Dubai time. */
-export function jobTiming(promisedAt: string | null, isOpen: boolean, now = new Date()): Timing {
+export type StageClock = { stage: Stage; enteredAt: string; targetHours: Record<string, number> };
+
+/**
+ * Green on time, amber due today, red overdue, based on the promised date.
+ * Without a promised date: time in the current stage against the stage target
+ * (amber past the target, red at double).
+ */
+export function jobTiming(promisedAt: string | null, isOpen: boolean, clock?: StageClock, now = new Date()): Timing {
   if (!isOpen) return { tone: "neutral", label: "Closed", daysOver: 0 };
-  if (!promisedAt) return { tone: "neutral", label: "No promised date", daysOver: 0 };
+  if (!promisedAt) {
+    if (!clock) return { tone: "neutral", label: "No promised date", daysOver: 0 };
+    const hours = Math.max(0, (now.getTime() - Date.parse(clock.enteredAt)) / 3600000);
+    const target = Number(clock.targetHours[clock.stage] ?? 0);
+    const text = hours < 1 ? `${Math.round(hours * 60)} min` : hours < 48 ? `${Math.round(hours)} h` : `${Math.round(hours / 24)} days`;
+    const label = `${text} in ${STAGE_LABELS[clock.stage]}`;
+    if (target > 0 && hours >= target * 2) return { tone: "red", label, daysOver: Math.floor(hours / 24) };
+    if (target > 0 && hours >= target) return { tone: "amber", label, daysOver: 0 };
+    return { tone: "green", label, daysOver: 0 };
+  }
   const today = dubaiDate(now);
   const promised = promisedAt.slice(0, 10);
   if (promised < today) {
@@ -162,8 +177,8 @@ export function formatPromised(promisedAt: string | null) {
 }
 
 /** Sort key: overdue first, then due today, then by priority, then by promised date. */
-export function urgencyRank(job: { promised_at: string | null; priority: Priority; is_open: boolean }) {
-  const t = jobTiming(job.promised_at, job.is_open);
+export function urgencyRank(job: { promised_at: string | null; priority: Priority; is_open: boolean }, clock?: StageClock) {
+  const t = jobTiming(job.promised_at, job.is_open, clock);
   const toneRank = { red: 0, amber: 1, green: 2, neutral: 3 }[t.tone];
   const prioRank = { high: 0, normal: 1, low: 2 }[job.priority];
   return [toneRank, prioRank, -t.daysOver, job.promised_at ?? "9999"] as const;

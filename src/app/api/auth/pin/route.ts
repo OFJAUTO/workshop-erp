@@ -37,8 +37,11 @@ export async function POST(request: NextRequest) {
     .select("id, display_name, login_type, is_active")
     .eq("id", staffId)
     .maybeSingle();
-  if (!staff || !staff.is_active || staff.login_type !== "pin") {
+  if (!staff || !staff.is_active || staff.login_type === "password") {
     return NextResponse.json({ error: "This name cannot log in with a PIN." }, { status: 403 });
+  }
+  if (device.kind === "personal" && device.staff_id !== staffId) {
+    return NextResponse.json({ error: "This device is assigned to someone else." }, { status: 403 });
   }
 
   const { data: priv } = await admin

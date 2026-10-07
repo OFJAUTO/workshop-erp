@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Logo } from "./Logo";
 import { Avatar } from "./ui";
 import { SidebarNav, type NavItem } from "./SidebarNav";
+import { NotificationBell } from "./NotificationBell";
 
 /**
  * Black menu bar down the left, content using the full width.
@@ -15,16 +16,19 @@ export function Shell({
   children,
 }: {
   nav?: NavItem[];
-  user?: { name: string; role: string; photoUrl: string | null };
+  user?: { id: string; name: string; role: string; photoUrl: string | null };
   footer?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
       <aside className="bg-sidebar text-white flex flex-row md:flex-col items-center md:items-stretch gap-3 md:gap-6 px-4 py-3 md:px-5 md:py-6 md:w-60 md:shrink-0 md:h-screen md:sticky md:top-0 overflow-x-auto md:overflow-y-auto">
-        <Link href="/home" className="shrink-0 flex items-center" aria-label="Home">
-          <Logo onDark className="h-9 md:h-12" />
-        </Link>
+        <div className="flex items-center justify-between gap-2 shrink-0">
+          <Link href="/home" className="shrink-0 flex items-center" aria-label="Home">
+            <Logo onDark className="h-9 md:h-12" />
+          </Link>
+          {user ? <NotificationBell staffId={user.id} /> : null}
+        </div>
         {nav.length ? <SidebarNav items={nav} /> : null}
         {user ? (
           <div className="md:mt-auto flex items-center gap-3 shrink-0 md:border-t md:border-white/15 md:pt-5">

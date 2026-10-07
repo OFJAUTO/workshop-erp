@@ -23,14 +23,14 @@ const staffSchema = z
     role_id: z.enum(ALL_ROLES as [string, ...string[]], { message: "Choose a role." }),
     department_id: z.enum(["mechanical", "bodyshop", "paint", "ppf_tint", "office"], { message: "Choose a department." }),
     employee_number: z.string().trim().optional(),
-    login_type: z.enum(["password", "pin"]).optional(),
+    login_type: z.enum(["password", "pin", "both"]).optional(),
     email: z.string().trim().toLowerCase().optional(),
     phone: z.string().trim().optional(),
     pin: z.string().trim().optional(),
     is_head_accountant: z.boolean(),
   })
   .superRefine((d, ctx) => {
-    if (d.login_type === "password" && !z.email().safeParse(d.email ?? "").success) {
+    if ((d.login_type === "password" || d.login_type === "both") && !z.email().safeParse(d.email ?? "").success) {
       ctx.addIssue({ code: "custom", path: ["email"], message: "A valid email is needed for password login." });
     }
     if (d.email && !z.email().safeParse(d.email).success) {
@@ -65,13 +65,12 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
   const d = parsed.data;
 
   if (!d.login_type) return { error: "Choose how this person logs in.", values };
-  if (d.login_type === "pin" && !PIN_PATTERN.test(d.pin ?? "")) {
-    return { error: "Tablet login needs a 4-digit PIN.", values };
+  if ((d.login_type === "pin" || d.login_type === "both") && !PIN_PATTERN.test(d.pin ?? "")) {
+    return { error: "Handheld login needs a 4-digit PIN.", values };
   }
 
   const admin = createAdminClient();
-  const loginEmail =
-    d.login_type === "password" ? d.email! : `pin-${randomBytes(6).toString("hex")}@${PIN_EMAIL_DOMAIN}`;
+  const loginEmail = d.login_type === "pin" ? `pin-${randomBytes(6).toString("hex")}@${PIN_EMAIL_DOMAIN}` : d.email!;
 
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: loginEmail,
@@ -109,14 +108,14 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
     staff_id: id,
     email: blankToNull(d.email),
     phone: d.phone ? normalisePhone(d.phone) : null,
-    pin_hash: d.login_type === "pin" ? hashPin(d.pin!) : null,
-    pin_updated_at: d.login_type === "pin" ? new Date().toISOString() : null,
+    pin_hash: d.login_type !== "password" ? hashPin(d.pin!) : null,
+    pin_updated_at: d.login_type !== "password" ? new Date().toISOString() : null,
     updated_by: owner.id,
   });
   if (privError) return { error: privError.message, values };
 
   revalidatePath("/team");
-  if (d.login_type === "password") {
+  if (d.login_type !== "pin") {
     redirect(`/team/${id}?setup=1`);
   }
   redirect(`/team/${id}`);
@@ -161,7 +160,7 @@ export async function updateStaff(id: string, _state: FormState, formData: FormD
     .eq("staff_id", id);
   if (privError) return { error: privError.message, values };
 
-  if (current.login_type === "password" && d.email) {
+  if (current.login_type !== "pin" && d.email) {
     const admin = createAdminClient();
     const { data: u } = await admin.auth.admin.getUserById(id);
     if (u.user && u.user.email?.toLowerCase() !== d.email) {
@@ -264,4 +263,48 @@ export async function setDeviceActive(id: string, active: boolean) {
   revalidatePath("/team/tablets");
   if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
   redirect("/team/tablets");
+}
+
+/** Owner only: PC login, handheld login, or both. */
+export async function setLoginType(id: string, formData: FormData) {
+  const owner = await requirePermission("manageTeam");
+  const loginType = String(formData.get("login_type") ?? "");
+  if (!["password", "pin", "both"].includes(loginType)) redirect(`/team/${id}`);
+  const supabase = await createClient();
+  const [{ data: staff }, { data: priv }] = await Promise.all([
+    supabase.from("staff").select("login_type").eq("id", id).maybeSingle(),
+    supabase.from("staff_private").select("email, pin_hash").eq("staff_id", id).maybeSingle(),
+  ]);
+  if (!staff) redirect(`/team/${id}`);
+  if (staff.login_type === loginType) redirect(`/team/${id}`);
+
+  const needsEmail = loginType !== "pin";
+  const needsPin = loginType !== "password";
+  if (needsEmail && !priv?.email) redirect(`/team/${id}?error=` + encodeURIComponent("Add the person's email in the form first, then choose PC login."));
+  if (needsPin && !priv?.pin_hash) redirect(`/team/${id}?error=` + encodeURIComponent("Set a 4-digit PIN first, then choose handheld login."));
+
+  const admin = createAdminClient();
+  if (needsEmail && priv?.email) {
+    const { data: u } = await admin.auth.admin.getUserById(id);
+    if (u.user && u.user.email?.toLowerCase() !== priv.email.toLowerCase()) {
+      const { error } = await admin.auth.admin.updateUserById(id, { email: priv.email, email_confirm: true });
+      if (error) redirect(`/team/${id}?error=` + encodeURIComponent("Could not set the login email: " + error.message));
+    }
+  }
+  const { error } = await supabase.from("staff").update({ login_type: loginType }).eq("id", id);
+  if (error) redirect(`/team/${id}?error=` + encodeURIComponent(error.message));
+  void owner;
+  revalidatePath("/team");
+  revalidatePath(`/team/${id}`);
+  redirect(`/team/${id}?message=` + encodeURIComponent("Login method changed."));
+}
+
+/** Owner only: register a device from the Team page is not possible; devices register themselves. This removes one at once. */
+export async function removeDevice(id: string) {
+  await requirePermission("manageTablets");
+  const supabase = await createClient();
+  const { error } = await supabase.from("devices").update({ is_active: false, removed_at: new Date().toISOString() }).eq("id", id);
+  revalidatePath("/team/tablets");
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  redirect("/team/tablets?message=" + encodeURIComponent("Device removed. It stops working immediately."));
 }

@@ -67,7 +67,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                         {p.employee_number ? ` · #${p.employee_number}` : ""}
                       </span>
                       <span className="flex flex-wrap gap-1.5">
-                        <Badge>{p.login_type === "pin" ? "Tablet PIN" : "PC login"}</Badge>
+                        <Badge>{p.login_type === "pin" ? "Handheld" : p.login_type === "both" ? "PC and handheld" : "PC login"}</Badge>
                         {p.is_head_accountant ? <Badge tone="outline">Head accountant</Badge> : null}
                         {!p.is_active ? <Badge tone="red">Disabled</Badge> : null}
                       </span>

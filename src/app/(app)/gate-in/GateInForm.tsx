@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ImageCropper } from "@/components/ImageCropper";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Textarea } from "@/components/ui";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS } from "@/lib/jobs";
+import type { Branch } from "@/lib/settings";
+import { GeoCapture } from "./GeoCapture";
 
 const YES_NO = [
   { value: "yes", label: "Yes" },
@@ -16,6 +19,7 @@ export function GateInForm({
   initialValues,
   mode = "create",
   pictureMode = "none",
+  branches = [],
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -23,7 +27,11 @@ export function GateInForm({
   mode?: "create" | "edit";
   /** required: the car has no picture yet; optional: it has one, a new one replaces it. */
   pictureMode?: "none" | "required" | "optional";
+  branches?: Branch[];
 }) {
+  const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
+  const atBranch = branches.some((b) => b.name === location);
+
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
       {(v) => (
@@ -35,10 +43,37 @@ export function GateInForm({
               <SectionLabel>Car picture</SectionLabel>
               <p className="text-sm text-muted">
                 {pictureMode === "required"
-                  ? "Take a picture of the car. It is shown on the Cars page, the dashboard, the job card and the customer's approval page."
+                  ? "Take a picture of the car. Internal only: the Cars page, the dashboard and the job card."
                   : "The car already has a picture. Take a new one here to replace it."}
               </p>
               <ImageCropper name="car_picture" shape="wide" outputWidth={960} outputHeight={600} capture="environment" label="Take or choose a picture" />
+            </Card>
+          ) : null}
+
+          {mode === "create" ? (
+            <Card className="flex flex-col gap-4">
+              <SectionLabel>Gate-in location</SectionLabel>
+              <div onChange={(e) => setLocation((e.target as HTMLInputElement).value)}>
+                <ChoiceButtons
+                  name="location_choice"
+                  columns={3}
+                  defaultValue={location}
+                  options={[
+                    ...branches.map((b) => ({ value: b.name, label: b.name, hint: b.address })),
+                    { value: "customer", label: "Customer location" },
+                    { value: "other", label: "Other" },
+                  ]}
+                />
+              </div>
+              {!atBranch ? (
+                <>
+                  <Field label={location === "customer" ? "Customer address" : "Where is the car?"} hint="Address or a short description.">
+                    <Textarea name="location_address" defaultValue={v.location_address} rows={2} required />
+                  </Field>
+                  <GeoCapture />
+                </>
+              ) : null}
+              <p className="text-xs text-muted">The location is recorded with the gate-in time and cannot be changed afterwards.</p>
             </Card>
           ) : null}
 
@@ -78,12 +113,7 @@ export function GateInForm({
               <Card className="flex flex-col gap-5">
                 <SectionLabel>Keys</SectionLabel>
                 <Field label="Number of keys received">
-                  <ChoiceButtons
-                    name="keys_count"
-                    columns={4}
-                    defaultValue={v.keys_count}
-                    options={["1", "2", "3", "4"].map((n) => ({ value: n, label: n }))}
-                  />
+                  <ChoiceButtons name="keys_count" columns={4} defaultValue={v.keys_count} options={["1", "2", "3", "4"].map((n) => ({ value: n, label: n }))} />
                 </Field>
                 <Field label="Came with keychain">
                   <ChoiceButtons name="keys_keychain" columns={2} defaultValue={v.keys_keychain} options={YES_NO} />
@@ -104,22 +134,18 @@ export function GateInForm({
               </Card>
 
               <Card className="flex flex-col gap-5">
-                <SectionLabel>Plan</SectionLabel>
-                <Field label="Priority">
-                  <ChoiceButtons
-                    name="priority"
-                    columns={3}
-                    defaultValue={v.priority ?? "normal"}
-                    options={[
-                      { value: "high", label: "High" },
-                      { value: "normal", label: "Normal" },
-                      { value: "low", label: "Low" },
-                    ]}
-                  />
-                </Field>
-                <Field label="Promised date">
-                  <Input name="promised_at" type="date" defaultValue={v.promised_at} className="max-w-56" required />
-                </Field>
+                <SectionLabel>Priority</SectionLabel>
+                <ChoiceButtons
+                  name="priority"
+                  columns={3}
+                  defaultValue={v.priority ?? "normal"}
+                  options={[
+                    { value: "high", label: "High" },
+                    { value: "normal", label: "Normal" },
+                    { value: "low", label: "Low" },
+                  ]}
+                />
+                <p className="text-xs text-muted">The promised date is set at the quotation stage, or from the job card at any time.</p>
               </Card>
             </div>
           </div>

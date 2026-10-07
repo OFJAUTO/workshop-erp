@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
-import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
+import { getSettings } from "@/lib/settings";
+import { getSiteUrl } from "@/lib/site";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
-import { assignJob, moveJob, setJobPriority } from "../actions";
+import { assignJob, moveJob, setJobPriority, setPromisedDate } from "../actions";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MediaGallery } from "./MediaGallery";
 
@@ -22,19 +25,19 @@ export default async function JobPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ message?: string; error?: string; link?: string; to?: string }>;
+  searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string }>;
 }) {
   const staff = await requireStaff();
   const { id } = await params;
-  const { message, error, link, to } = await searchParams;
+  const { message, error, link, req } = await searchParams;
   const role = staff.role_id as RoleId;
 
   const supabase = await createClient();
-  const card = await loadJobCard(supabase, id);
+  const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
   const { job, vehicle, customer, vip, gateIn, media, events, approvals, gateOut } = card;
   const check = mediaChecklist(media, gateIn?.major_damage ?? false);
-  const timing = jobTiming(job.promised_at, job.is_open);
+  const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours });
   const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
 
@@ -43,6 +46,7 @@ export default async function JobPage({
   const canEditGateIn = can(role, "editGateIn") && job.is_open;
   const canSend = can(role, "sendApproval") && job.is_open;
   const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending";
+  const canPlan = can(role, "setPriority") && job.is_open;
   const isTechnician = role === "technician";
 
   const { data: technicians } = canAssign
@@ -50,9 +54,24 @@ export default async function JobPage({
     : { data: [] as { id: string; display_name: string; department_id: string | null }[] };
 
   const latestApproval = approvals[0] ?? null;
+  const activeLink = link ?? (latestApproval && !latestApproval.approved_at ? `${site}/approve/${latestApproval.token}` : null);
+  const activeRequestId = req ?? latestApproval?.id ?? null;
+  const customerName = customer?.company_name ?? customer?.full_name ?? latestApproval?.sent_to_name ?? "Customer";
+  const messageTemplate = activeLink
+    ? settings.whatsapp_approval_template
+        .replaceAll("[name]", latestApproval?.sent_to_name || customerName)
+        .replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" "))
+        .replaceAll("[plate]", formatPlate(vehicle))
+        .replaceAll("[link]", activeLink)
+        .replaceAll("[advisor]", staff.display_name)
+    : null;
+
+  const mapHref =
+    gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
 
   return (
     <>
+      <LiveRefresh tables={["jobs", "gate_in_media", "approval_requests"]} filter={`job_id=eq.${id}`} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={
@@ -84,9 +103,7 @@ export default async function JobPage({
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
-      {gateIn?.dash_cam && isTechnician ? (
-        <Notice tone="error">Dash cam fitted: disconnect before starting work.</Notice>
-      ) : null}
+      {gateIn?.dash_cam && isTechnician ? <Notice tone="error">Dash cam fitted: disconnect before starting work.</Notice> : null}
       {isVip && vipNote ? (
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>
@@ -98,14 +115,14 @@ export default async function JobPage({
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="text-lg font-extrabold">{STATUS_LABELS[job.status]}</span>
           <span className="text-sm text-muted">
-            {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date"}
+            {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date yet"}
             {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
           </span>
         </div>
         <StageTrack stage={job.stage} timing={timing} />
         {job.status === "gate_in_pending" ? (
           <p className="text-sm font-semibold text-amber">
-            Incomplete, video pending. The approval link cannot be sent and the car cannot be assigned until both videos, the dashboard photo, both keys photos and any required damage photos are uploaded.
+            Incomplete, video pending. The approval link cannot be created and the car cannot be assigned until both videos, the dashboard photo, both keys photos and any required damage photos are uploaded.
           </p>
         ) : null}
       </Card>
@@ -125,6 +142,23 @@ export default async function JobPage({
               <DescriptionList
                 items={[
                   { label: "Gated in", value: `${formatDateTime(job.gated_in_at)} by ${card.gatedInBy ?? "unknown"}` },
+                  {
+                    label: "Location",
+                    value: (
+                      <span>
+                        {gateIn.location_name ?? ""}
+                        {gateIn.location_address ? ` · ${gateIn.location_address}` : ""}
+                        {mapHref ? (
+                          <>
+                            {" · "}
+                            <a href={mapHref} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                              Map
+                            </a>
+                          </>
+                        ) : null}
+                      </span>
+                    ),
+                  },
                   { label: "Arrived by", value: labelOf(ARRIVED_BY, gateIn.arrived_by) },
                   { label: "Condition", value: labelOf(CONDITIONS, gateIn.condition) },
                   {
@@ -216,11 +250,25 @@ export default async function JobPage({
               complete={check.complete}
               latest={latestApproval}
               approvedAt={job.first_approval_at}
-              link={link ?? null}
-              sentTo={to ?? null}
+              link={activeLink}
+              activeRequestId={activeRequestId}
               customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null}
               contacts={customer ? await loadApproverContacts(customer.id) : []}
+              messageTemplate={messageTemplate}
             />
+          ) : null}
+
+          {canPlan ? (
+            <Card className="flex flex-col gap-3">
+              <SectionLabel>Promised date</SectionLabel>
+              <form action={setPromisedDate.bind(null, id)} className="flex flex-col gap-3">
+                <Input name="promised_at" type="date" defaultValue={job.promised_at ?? ""} required />
+                <Button type="submit" tone="secondary">
+                  {job.promised_at ? "Change promised date" : "Set promised date"}
+                </Button>
+                <p className="text-xs text-muted">Until a date is set, the card shows the time in the current stage.</p>
+              </form>
+            </Card>
           ) : null}
 
           {canAssign ? (
@@ -237,7 +285,7 @@ export default async function JobPage({
                     </option>
                   ))}
                 </Select>
-                <Button type="submit" tone="secondary" disabled={!check.complete}>
+                <Button type="submit" disabled={!check.complete}>
                   {job.assigned_to ? "Reassign" : "Assign"}
                 </Button>
                 {!check.complete ? <p className="text-xs text-amber font-semibold">Blocked until the gate-in media is complete.</p> : null}
@@ -260,12 +308,12 @@ export default async function JobPage({
                 <Button type="submit" tone="secondary">
                   Move
                 </Button>
-                <p className="text-xs text-muted">Manual moves are logged. Later phases move cars automatically.</p>
+                <p className="text-xs text-muted">Owner and workshop manager only. Manual moves are logged.</p>
               </form>
             </Card>
           ) : null}
 
-          {can(role, "setPriority") && job.is_open ? (
+          {canPlan ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel>Priority</SectionLabel>
               <form action={setJobPriority.bind(null, id)} className="flex gap-2">

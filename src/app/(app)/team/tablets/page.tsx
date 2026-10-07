@@ -4,54 +4,59 @@ import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { DeviceRow } from "@/lib/types";
-import { setDeviceActive } from "../actions";
+import { removeDevice } from "../actions";
 
-const LOCATION_LABEL = { workshop: "Workshop", bodyshop: "Bodyshop", office: "Office" } as const;
+const LOCATION_LABEL = { workshop: "Workshop", bodyshop: "Bodyshop", office: "Office", personal: "Personal" } as const;
 
-export default async function TabletsPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+export default async function TabletsPage({ searchParams }: { searchParams: Promise<{ error?: string; message?: string }> }) {
   const staff = await requirePermission("viewTablets");
-  const { error } = await searchParams;
+  const { error, message } = await searchParams;
   const canManage = can(staff.role_id as RoleId, "manageTablets");
 
   const supabase = await createClient();
   const { data } = await supabase
     .from("devices")
-    .select("id, name, location, is_active, registered_at, registered_by, last_seen_at, last_staff_id, last_user:staff!devices_last_staff_id_fkey(display_name)")
+    .select("id, name, location, kind, staff_id, is_active, registered_at, registered_by, last_seen_at, last_staff_id, owner:staff!devices_staff_id_fkey(display_name), last_user:staff!devices_last_staff_id_fkey(display_name)")
     .order("is_active", { ascending: false })
-    .order("location")
+    .order("kind")
     .order("name");
-  const devices = (data ?? []) as unknown as (DeviceRow & { last_user: { display_name: string } | null })[];
+  const devices = (data ?? []) as unknown as (DeviceRow & { owner: { display_name: string } | null; last_user: { display_name: string } | null })[];
+  const active = devices.filter((d) => d.is_active);
+  const removed = devices.filter((d) => !d.is_active);
 
   return (
     <>
-      <PageHeader title="Registered tablets" subtitle="PIN login only works on these devices." />
+      <PageHeader title="Registered devices" subtitle="PIN login only works on these. An unregistered phone or tablet cannot use PIN login at all." />
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {message ? <Notice tone="success">{message}</Notice> : null}
 
       {canManage ? (
         <Card className="flex flex-col gap-2">
-          <p className="font-semibold">To register a new tablet</p>
+          <p className="font-semibold">To register a device (owner only)</p>
           <ol className="list-decimal pl-5 text-sm text-muted flex flex-col gap-1">
-            <li>On the tablet, open the app address in Chrome and sign in with your owner email and password.</li>
+            <li>On the phone or tablet itself, open erp.ofjauto.com in Chrome and sign in with your owner email and password.</li>
             <li>
-              Open <span className="font-semibold text-ink">/tablet/register</span>, give the tablet a name and tap Register.
+              Open <span className="font-semibold text-ink">erp.ofjauto.com/tablet/register</span>. Choose <strong>Shared</strong> (name grid for everyone with handheld login) or <strong>Personal</strong> (assigned to one person, opens straight to their PIN).
             </li>
-            <li>You are signed out and the tablet shows the name-and-PIN screen. Add it to the home screen for full-screen use.</li>
+            <li>Tap Register. You are signed out and the device shows its PIN screen. Add it to the home screen for full-screen use.</li>
           </ol>
         </Card>
       ) : null}
 
-      {devices.length === 0 ? (
-        <Empty title="No tablets registered yet" />
+      {active.length === 0 ? (
+        <Empty title="No devices registered yet" />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {devices.map((d) => (
+          {active.map((d) => (
             <Card key={d.id} className="flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <span className="flex flex-col">
                   <span className="font-bold">{d.name}</span>
-                  <span className="text-xs text-muted">{LOCATION_LABEL[d.location]}</span>
+                  <span className="text-xs text-muted">
+                    {d.kind === "personal" ? `Personal · ${d.owner?.display_name ?? "unassigned"}` : `Shared · ${LOCATION_LABEL[d.location]}`}
+                  </span>
                 </span>
-                {d.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Removed</Badge>}
+                <Badge tone={d.kind === "personal" ? "outline" : "neutral"}>{d.kind === "personal" ? "Personal" : "Shared"}</Badge>
               </div>
               <dl className="text-xs text-muted flex flex-col gap-0.5">
                 <div>Registered {formatDateTime(d.registered_at)}</div>
@@ -61,9 +66,9 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
                 </div>
               </dl>
               {canManage ? (
-                <form action={setDeviceActive.bind(null, d.id, !d.is_active)}>
-                  <Button type="submit" tone={d.is_active ? "danger" : "secondary"} size="md">
-                    {d.is_active ? "Remove this tablet" : "Re-activate"}
+                <form action={removeDevice.bind(null, d.id)}>
+                  <Button type="submit" tone="danger" size="md">
+                    Remove this device
                   </Button>
                 </form>
               ) : null}
@@ -71,6 +76,19 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
           ))}
         </div>
       )}
+
+      {removed.length ? (
+        <details className="text-sm text-muted">
+          <summary className="cursor-pointer font-semibold">Removed devices ({removed.length})</summary>
+          <ul className="mt-2 flex flex-col gap-1">
+            {removed.map((d) => (
+              <li key={d.id}>
+                {d.name} · {d.kind} · registered {formatDateTime(d.registered_at)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </>
   );
 }

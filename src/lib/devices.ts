@@ -34,7 +34,7 @@ export async function getCurrentDevice(): Promise<DeviceRow | null> {
   const admin = createAdminClient();
   const { data } = await admin
     .from("devices")
-    .select("id, name, location, is_active, registered_at, registered_by, last_seen_at, last_staff_id")
+    .select("id, name, location, kind, staff_id, is_active, registered_at, registered_by, last_seen_at, last_staff_id")
     .eq("token_hash", hashDeviceToken(token))
     .eq("is_active", true)
     .maybeSingle();

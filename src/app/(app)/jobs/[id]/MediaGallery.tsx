@@ -42,11 +42,14 @@ export function MediaGallery({
   urls,
   carPictureUrl,
   compact = false,
+  stacked = false,
 }: {
   media: GateInMediaRow[];
   urls: Record<string, string>;
   carPictureUrl?: string | null;
   compact?: boolean;
+  /** Phone-first: videos large, one under the other. */
+  stacked?: boolean;
 }) {
   if (media.length === 0 && !carPictureUrl) return <p className="text-sm text-muted">Nothing uploaded yet.</p>;
   const videos = media.filter((m) => m.kind === "video_exterior" || m.kind === "video_interior" || m.kind === "video");
@@ -67,7 +70,7 @@ export function MediaGallery({
       ) : null}
 
       {videos.length ? (
-        <div className={`grid gap-4 ${compact ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2"}`}>
+        <div className={`grid gap-4 ${compact || stacked ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2"}`}>
           {videos.map((v) => {
             const url = urls[v.storage_path];
             return (
