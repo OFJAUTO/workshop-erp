@@ -21,7 +21,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
   const supabase = await createClient();
   const card = await loadJobCard(supabase, id);
   if (!card) notFound();
-  const check = mediaChecklist(card.media, card.gateIn?.major_damage ?? false);
+  const check = mediaChecklist(card.media, { majorDamage: card.gateIn?.major_damage ?? false, wheelsRequired: card.gateIn?.wheels_required ?? false, damageNote: card.gateIn?.damage_note ?? "" });
 
   const token = await createUploadLinkToken(id);
   const site = await getSiteUrl();
@@ -59,7 +59,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
 
           <Card className="flex flex-col gap-3">
             <SectionLabel right={`${card.media.length}`}>Uploaded so far</SectionLabel>
-            <MediaGallery media={card.media} urls={Object.fromEntries(card.mediaUrls)} compact />
+            <MediaGallery media={card.media} urls={Object.fromEntries(card.mediaUrls)} damageNote={card.gateIn?.damage_note} compact />
           </Card>
         </div>
       </div>

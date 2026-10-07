@@ -130,7 +130,7 @@ export default async function ApprovalPage({
 
       <Card className="flex flex-col gap-4">
         <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Check-in videos and photos</h2>
-        <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} stacked />
+        <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} damageNote={gateIn.damage_note} stacked />
         {dirty ? <p className="text-sm font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
       </Card>
 

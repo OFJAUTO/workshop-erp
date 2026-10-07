@@ -116,6 +116,7 @@ export type VehiclePhotoRow = {
   vehicle_id: string;
   storage_path: string;
   caption: string | null;
+  wheel_condition: string[] | null;
   taken_at: string;
   uploaded_by: string | null;
 };
@@ -204,6 +205,8 @@ export type GateInRow = {
   notes: string | null;
   old_parts_return: boolean;
   major_damage: boolean;
+  damage_note: string | null;
+  wheels_required: boolean;
   location_type: "branch" | "customer" | "other";
   location_name: string | null;
   location_address: string | null;
@@ -224,7 +227,11 @@ export type MediaKind =
   | "keys_photo_front"
   | "keys_photo_back"
   | "damage_photo"
-  | "gate_out_photo";
+  | "gate_out_photo"
+  | "wheel_fl"
+  | "wheel_fr"
+  | "wheel_rl"
+  | "wheel_rr";
 
 export type GateInMediaRow = {
   id: string;
@@ -233,6 +240,7 @@ export type GateInMediaRow = {
   storage_path: string;
   duration_s: number | null;
   caption: string | null;
+  wheel_condition: string[] | null;
   taken_at: string;
   uploaded_by: string | null;
 };

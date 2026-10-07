@@ -7,7 +7,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus } from "@/lib/jobs";
-import { loadMajorDamage, loadMedia, mediaChecklist, newToken } from "@/lib/media";
+import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -49,7 +49,7 @@ export async function assignJob(jobId: string, formData: FormData) {
   const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
 
-  const check = mediaChecklist(await loadMedia(jobId), await loadMajorDamage(jobId));
+  const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
 
   const { data: tech } = await supabase.from("staff").select("id, display_name, role_id, is_active").eq("id", technicianId).maybeSingle();
@@ -231,8 +231,8 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   const supabase = await createClient();
   const { data: job } = await supabase.from("jobs").select("id, status, is_open, job_number").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
-  const check = mediaChecklist(await loadMedia(jobId), await loadMajorDamage(jobId));
-  if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos and any required damage photos must be uploaded before the approval link can be created.", values };
+  const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
+  if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos must be uploaded before the approval link can be created.", values };
 
   const settings = await getSettings();
   const terms = String(settings.terms_and_conditions ?? "").trim();

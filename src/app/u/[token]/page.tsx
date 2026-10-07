@@ -2,7 +2,7 @@ import { PollRefresh } from "@/components/LiveRefresh";
 import { PublicShell } from "@/components/Shell";
 import { MediaChecklist } from "@/components/MediaChecklist";
 import { Card, Notice } from "@/components/ui";
-import { loadMajorDamage, loadMedia, mediaChecklist } from "@/lib/media";
+import { loadGateInFlags, loadMedia, mediaChecklist } from "@/lib/media";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 
@@ -49,8 +49,8 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
   }
 
   const job = link.job as unknown as JobInfo | null;
-  const [media, majorDamage] = await Promise.all([loadMedia(link.job_id), loadMajorDamage(link.job_id)]);
-  const check = mediaChecklist(media, majorDamage);
+  const [media, flags] = await Promise.all([loadMedia(link.job_id), loadGateInFlags(link.job_id)]);
+  const check = mediaChecklist(media, flags);
 
   return (
     <PublicShell note="Phone upload">

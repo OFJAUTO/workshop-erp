@@ -17,6 +17,10 @@ const LABEL: Record<string, string> = {
   keys_photo: "Keys",
   damage_photo: "Damage",
   gate_out_photo: "Gate-out",
+  wheel_fl: "Front left wheel",
+  wheel_fr: "Front right wheel",
+  wheel_rl: "Rear left wheel",
+  wheel_rr: "Rear right wheel",
 };
 
 /** Car picture and photo thumbnails for a list of jobs, for the dashboard and job lists. */
@@ -36,7 +40,7 @@ export async function loadJobMediaSummaries(
 
   const { data: media } = await admin
     .from("gate_in_media")
-    .select("id, job_id, kind, storage_path, duration_s, caption, taken_at, uploaded_by")
+    .select("id, job_id, kind, storage_path, duration_s, caption, wheel_condition, taken_at, uploaded_by")
     .in("job_id", jobs.map((j) => j.id))
     .order("taken_at", { ascending: true });
   const rows = (media ?? []) as GateInMediaRow[];

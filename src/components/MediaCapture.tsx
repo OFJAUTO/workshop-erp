@@ -14,6 +14,9 @@ export function MediaCapture({
   token,
   caption,
   multiple = false,
+  disabled = false,
+  hint,
+  onUploaded,
 }: {
   jobId: string;
   kind: UploadKind;
@@ -22,6 +25,9 @@ export function MediaCapture({
   token?: string;
   caption?: string;
   multiple?: boolean;
+  disabled?: boolean;
+  hint?: string;
+  onUploaded?: () => void;
 }) {
   const router = useRouter();
   const [progress, setProgress] = useState<number | null>(null);
@@ -39,6 +45,7 @@ export function MediaCapture({
       try {
         await uploadFile(jobId, kind, file, type, setProgress, { token, caption });
         setCount((c) => c + 1);
+        onUploaded?.();
       } catch (err) {
         notDone.push(file);
         setError(err instanceof Error ? err.message : "Upload failed.");
@@ -61,10 +68,10 @@ export function MediaCapture({
   return (
     <div className="flex flex-col gap-2">
       <label className="block cursor-pointer">
-        <input type="file" accept="image/*" capture="environment" multiple={multiple} onChange={onChange} className="sr-only" disabled={progress !== null} />
+        <input type="file" accept="image/*" capture="environment" multiple={multiple} onChange={onChange} className="sr-only" disabled={progress !== null || disabled} />
         <span
           className={`flex min-h-16 items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${
-            finished ? "border-green bg-green-soft" : failed.length ? "border-red-bar bg-red-soft" : "border-line-strong bg-white"
+            finished ? "border-green bg-green-soft" : failed.length ? "border-red-bar bg-red-soft" : disabled ? "border-line bg-chip opacity-60" : "border-line-strong bg-white"
           }`}
         >
           <span className="flex flex-col">
@@ -76,7 +83,9 @@ export function MediaCapture({
                   ? multiple
                     ? `${count ? count + " added. " : ""}Tap to add more.`
                     : "Done. Tap to add another."
-                  : "Tap to take a photo"}
+                  : disabled
+                    ? (hint ?? "Finish the step above first")
+                    : (hint ?? "Tap to take a photo")}
             </span>
           </span>
           <span className={`text-2xl font-bold ${finished ? "text-green" : "text-faint"}`}>{finished ? "✓" : "+"}</span>

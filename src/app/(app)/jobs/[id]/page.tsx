@@ -36,7 +36,7 @@ export default async function JobPage({
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
   const { job, vehicle, customer, vip, gateIn, requests, media, events, approvals, gateOut } = card;
-  const check = mediaChecklist(media, gateIn?.major_damage ?? false);
+  const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "" });
   const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours });
   const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
@@ -122,7 +122,7 @@ export default async function JobPage({
         <StageTrack stage={job.stage} timing={timing} />
         {job.status === "gate_in_pending" ? (
           <p className="text-sm font-semibold text-amber">
-            Incomplete, video pending. The approval link cannot be created and the car cannot be assigned until both videos, the dashboard photo, both keys photos and any required damage photos are uploaded.
+            Incomplete, video pending. The approval link cannot be created and the car cannot be assigned until both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos are uploaded.
           </p>
         ) : null}
       </Card>
@@ -200,7 +200,7 @@ export default async function JobPage({
                 </LinkButton>
               ) : null}
             </div>
-            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} />
+            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} />
           </Card>
 
           {gateOut ? (

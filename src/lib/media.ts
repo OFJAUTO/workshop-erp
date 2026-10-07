@@ -2,6 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { createAdminClient } from "./supabase/admin";
 import type { GateInMediaRow, MediaKind } from "./types";
+import { WHEEL_KINDS, WHEEL_LABELS, type WheelKind } from "./wheels";
 
 export const GATE_IN_BUCKET = "gate-in-media";
 
@@ -15,6 +16,10 @@ export const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
   keys_photo_back: "Keys, back",
   damage_photo: "Damage close-up",
   gate_out_photo: "Gate-out photo",
+  wheel_fl: "Front left wheel",
+  wheel_fr: "Front right wheel",
+  wheel_rl: "Rear left wheel",
+  wheel_rr: "Rear right wheel",
 };
 
 export function newToken() {
@@ -38,11 +43,13 @@ export async function loadMedia(jobId: string): Promise<GateInMediaRow[]> {
   const admin = createAdminClient();
   const { data } = await admin
     .from("gate_in_media")
-    .select("id, job_id, kind, storage_path, duration_s, caption, taken_at, uploaded_by")
+    .select("id, job_id, kind, storage_path, duration_s, caption, wheel_condition, taken_at, uploaded_by")
     .eq("job_id", jobId)
     .order("taken_at", { ascending: true });
   return (data ?? []) as GateInMediaRow[];
 }
+
+export type WheelState = { kind: WheelKind; label: string; photo: boolean; conditions: string[]; done: boolean };
 
 export type Checklist = {
   videoExterior: boolean;
@@ -52,16 +59,36 @@ export type Checklist = {
   keysBack: boolean;
   damageCount: number;
   majorDamage: boolean;
+  wheelsRequired: boolean;
+  wheels: WheelState[];
+  damageNote: string;
   complete: boolean;
 };
 
-/** What is still missing. Both videos, the dashboard photo and both keys photos are always required; damage photos when major damage was ticked. */
-export function mediaChecklist(media: GateInMediaRow[], majorDamage = false): Checklist {
+export type GateInFlags = { majorDamage: boolean; wheelsRequired: boolean; damageNote: string };
+
+/** The newest photo of one wheel; a retaken wheel photo needs its condition chosen again. */
+export function latestWheel(media: GateInMediaRow[], kind: WheelKind): GateInMediaRow | undefined {
+  return media.filter((m) => m.kind === kind).sort((a, b) => (a.taken_at < b.taken_at ? 1 : -1))[0];
+}
+
+/**
+ * What is still missing. Both videos, the dashboard photo and both keys photos are always required;
+ * damage photos when major damage was ticked; four wheel photos with a condition each for jobs gated in
+ * from 8 October 2026.
+ */
+export function mediaChecklist(media: GateInMediaRow[], flags: GateInFlags | boolean = false): Checklist {
+  const f: GateInFlags = typeof flags === "boolean" ? { majorDamage: flags, wheelsRequired: false, damageNote: "" } : flags;
   const has = (k: MediaKind) => media.some((m) => m.kind === k);
   const damageCount = media.filter((m) => m.kind === "damage_photo").length;
   // Jobs gated in before 7 October 2026 have a single walk-around video and one keys photo; those still count.
   const legacyVideo = has("video");
   const legacyKeys = has("keys_photo");
+  const wheels: WheelState[] = WHEEL_KINDS.map((kind) => {
+    const row = latestWheel(media, kind);
+    const conditions = row?.wheel_condition ?? [];
+    return { kind, label: WHEEL_LABELS[kind], photo: !!row, conditions, done: !!row && conditions.length > 0 };
+  });
   const c = {
     videoExterior: has("video_exterior") || legacyVideo,
     videoInterior: has("video_interior") || legacyVideo,
@@ -69,13 +96,26 @@ export function mediaChecklist(media: GateInMediaRow[], majorDamage = false): Ch
     keysFront: has("keys_photo_front") || legacyKeys,
     keysBack: has("keys_photo_back") || legacyKeys,
     damageCount,
-    majorDamage,
+    majorDamage: f.majorDamage,
+    wheelsRequired: f.wheelsRequired,
+    wheels,
+    damageNote: f.damageNote,
   };
-  return { ...c, complete: c.videoExterior && c.videoInterior && c.dashboard && c.keysFront && c.keysBack && (!majorDamage || damageCount > 0) };
+  return {
+    ...c,
+    complete:
+      c.videoExterior &&
+      c.videoInterior &&
+      c.dashboard &&
+      c.keysFront &&
+      c.keysBack &&
+      (!f.majorDamage || damageCount > 0) &&
+      (!f.wheelsRequired || wheels.every((w) => w.done)),
+  };
 }
 
-export async function loadMajorDamage(jobId: string): Promise<boolean> {
+export async function loadGateInFlags(jobId: string): Promise<GateInFlags> {
   const admin = createAdminClient();
-  const { data } = await admin.from("gate_ins").select("major_damage").eq("job_id", jobId).maybeSingle();
-  return !!data?.major_damage;
+  const { data } = await admin.from("gate_ins").select("major_damage, wheels_required, damage_note").eq("job_id", jobId).maybeSingle();
+  return { majorDamage: !!data?.major_damage, wheelsRequired: data?.wheels_required ?? false, damageNote: data?.damage_note ?? "" };
 }

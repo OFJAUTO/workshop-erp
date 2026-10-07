@@ -61,7 +61,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
       client.from("customer_vip_flags").select("is_vip, vip_note").eq("id", job.customer_id).maybeSingle(),
       client
         .from("gate_ins")
-        .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, keys_count, keys_keychain, customer_requests, notes, old_parts_return, location_type, location_name, location_address, location_lat, location_lng, is_complete, completed_at, created_at, updated_at")
+        .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, keys_count, keys_keychain, customer_requests, notes, old_parts_return, damage_note, wheels_required, location_type, location_name, location_address, location_lat, location_lng, is_complete, completed_at, created_at, updated_at")
         .eq("job_id", jobId)
         .maybeSingle(),
       client

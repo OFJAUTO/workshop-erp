@@ -9,7 +9,11 @@ export type UploadKind =
   | "keys_photo_front"
   | "keys_photo_back"
   | "damage_photo"
-  | "gate_out_photo";
+  | "gate_out_photo"
+  | "wheel_fl"
+  | "wheel_fr"
+  | "wheel_rl"
+  | "wheel_rr";
 
 export async function prepareUpload(jobId: string, kind: UploadKind, contentType: string, token?: string) {
   const res = await fetch("/api/media/prepare", {
@@ -67,4 +71,19 @@ export async function uploadFile(
   const { path, url } = await prepareUpload(jobId, kind, contentType, extra.token);
   await putWithProgress(url, file, contentType, onProgress);
   return registerMedia(jobId, kind, path, extra);
+}
+
+/** Records the wheel condition under a wheel photo, or the damage note. Works with a login or a phone upload link. */
+export async function saveMediaDetails(
+  jobId: string,
+  details: { wheel?: { kind: UploadKind; conditions: string[] }; damageNote?: string },
+  token?: string,
+) {
+  const res = await fetch("/api/media/details", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobId, token, ...details }),
+  });
+  const data = (await res.json()) as { ok?: boolean; error?: string };
+  if (!res.ok || !data.ok) throw new Error(data.error ?? "Could not save.");
 }
