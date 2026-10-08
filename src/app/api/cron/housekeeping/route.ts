@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { GATE_IN_BUCKET } from "@/lib/media";
-import { notifyStaff } from "@/lib/notifications";
+import { addDays, dayStartIso, dubaiTimeOf } from "@/lib/calendar";
+import { dubaiDate } from "@/lib/jobs";
+import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -8,6 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * Runs every hour (Vercel cron). Two jobs:
  * 1. Delete gate-in videos older than the retention setting (photos are kept).
  * 2. Remind advisors about approval links not opened within the set hours.
+ * 3. From 8:00 Dubai time, tell advisors about tomorrow's appointments so they send the WhatsApp reminder.
  * Protected by CRON_SECRET, which Vercel sends automatically.
  */
 export async function GET(request: NextRequest) {
@@ -17,7 +20,7 @@ export async function GET(request: NextRequest) {
   }
   const admin = createAdminClient();
   const settings = await getSettings();
-  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0 };
+  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0 };
 
   // 1. Video retention
   const months = Number(settings.video_retention_months) || 12;
@@ -63,6 +66,34 @@ export async function GET(request: NextRequest) {
     });
     await admin.from("approval_requests").update({ reminded_at: new Date().toISOString() }).eq("id", r.id);
     report.remindersSent++;
+  }
+
+  // 3. Appointment reminders for tomorrow
+  const dubaiHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", hour12: false }).format(new Date()));
+  if (dubaiHour >= 8) {
+    const tomorrow = addDays(dubaiDate(), 1);
+    const { data: appts } = await admin
+      .from("appointments")
+      .select("id, reason, starts_at, advisor_id, customer:customers(full_name, company_name)")
+      .eq("is_active", true)
+      .eq("status", "booked")
+      .is("reminder_notified_at", null)
+      .gte("starts_at", dayStartIso(tomorrow))
+      .lt("starts_at", dayStartIso(addDays(tomorrow, 1)))
+      .limit(100);
+    for (const a of appts ?? []) {
+      const c = a.customer as unknown as { full_name: string; company_name: string | null } | null;
+      const n = {
+        type: "appointment_reminder",
+        title: `Send tomorrow's reminder: ${c?.company_name ?? c?.full_name ?? "customer"} at ${dubaiTimeOf(a.starts_at)}`,
+        body: a.reason,
+        href: `/calendar/${a.id}`,
+      };
+      if (a.advisor_id) await notifyStaff([a.advisor_id], n);
+      else await notifyRoles(["service_advisor", "workshop_manager"], n);
+      await admin.from("appointments").update({ reminder_notified_at: new Date().toISOString() }).eq("id", a.id);
+      report.appointmentReminders++;
+    }
   }
 
   return NextResponse.json({ ok: true, ...report });

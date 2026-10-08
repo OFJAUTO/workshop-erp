@@ -122,6 +122,16 @@ export function SettingsForm({
           </Card>
 
           <Card className="flex flex-col gap-4">
+            <SectionLabel>Calendar</SectionLabel>
+            <Field label="Appointments per day" hint="A day shows as full at this number.">
+              <Input name="appointments_per_day" defaultValue={v.appointments_per_day} inputMode="numeric" required className="max-w-40" />
+            </Field>
+            <Field label="WhatsApp appointment reminder" hint="Sent the day before. Placeholders: [name], [date], [time], [reason], [car], [advisor].">
+              <Textarea name="whatsapp_reminder_template" defaultValue={v.whatsapp_reminder_template} rows={3} required />
+            </Field>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
             <SectionLabel>Pricing</SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Advisor discount limit (%)" hint="Used from Phase 4.">

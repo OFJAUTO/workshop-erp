@@ -23,6 +23,7 @@ const NUMBER_KEYS = [
   "inspection_fee_aed",
   "opening_hour",
   "closing_hour",
+  "appointments_per_day",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -34,6 +35,7 @@ const TEXT_KEYS = [
   "whatsapp_approval_template",
   "inspection_fee_notice",
   "inspection_fee_notice_ar",
+  "whatsapp_reminder_template",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -53,6 +55,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   inspection_fee_aed: [0, 1000000, "Inspection fee"],
   opening_hour: [0, 23, "Opening hour"],
   closing_hour: [1, 24, "Closing hour"],
+  appointments_per_day: [1, 100, "Appointments per day"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -94,6 +97,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
     if (key === "whatsapp_approval_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
+    if (key === "whatsapp_reminder_template" && text.length < 10) return { error: "Enter the WhatsApp reminder message.", values };
     updates.push({ key, value: text });
   }
 

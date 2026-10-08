@@ -16,14 +16,16 @@ export function QuickCarForm({
   makes,
   models,
   variants,
+  initialValues = {},
 }: {
   action: FormAction;
   makes: VehicleMakeRow[];
   models: VehicleModelRow[];
   variants: VariantMap;
+  initialValues?: Record<string, string>;
 }) {
   return (
-    <ActionForm action={action} className="flex flex-col gap-6">
+    <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
       {(v) => <Fields v={v} makes={makes} models={models} variants={variants} />}
     </ActionForm>
   );
@@ -57,6 +59,7 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
 
   return (
     <>
+      {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="flex flex-col gap-6">
           <Card className="flex flex-col gap-4">

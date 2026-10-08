@@ -317,3 +317,23 @@ export type GateOutRow = {
   notes: string | null;
   created_at: string;
 };
+
+export type AppointmentRow = {
+  id: string;
+  customer_id: string;
+  vehicle_id: string | null;
+  vehicle_text: string | null;
+  reason: string;
+  starts_at: string;
+  duration_minutes: number;
+  advisor_id: string | null;
+  status: "booked" | "arrived" | "no_show" | "cancelled";
+  job_id: string | null;
+  notes: string | null;
+  cancel_reason: string | null;
+  reminder_sent_at: string | null;
+  reminder_notified_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};

@@ -44,6 +44,7 @@ export function GateInForm({
       {(v) => (
         <>
           <input type="hidden" name="is_electric" value={isElectric ? "yes" : "no"} />
+          {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
 
           {pictureMode !== "none" ? (
             <Card className="flex flex-col gap-4">

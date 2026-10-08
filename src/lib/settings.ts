@@ -35,6 +35,9 @@ const DEFAULTS = {
   inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [amount] درهمًا.",
   opening_hour: 8,
   closing_hour: 17,
+  appointments_per_day: 8,
+  whatsapp_reminder_template:
+    "Dear [name], a reminder of your appointment at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
   whatsapp_approval_template:
     "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection: [link]. Thank you, [advisor], OFJ Automotive",
 };

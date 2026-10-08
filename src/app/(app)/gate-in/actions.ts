@@ -9,6 +9,7 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES } from "@/lib/types";
 
@@ -175,6 +176,16 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
 
   await supabase.from("job_requests").insert(requests.map((text, i) => ({ job_id: job.id, position: i + 1, text })));
 
+  // Started from a calendar appointment: mark it arrived and link the job.
+  const appointmentId = blankToNull(formData.get("appointment_id"));
+  if (appointmentId) {
+    await createAdminClient()
+      .from("appointments")
+      .update({ status: "arrived", job_id: job.id, vehicle_id: vehicleId, updated_by: staff.id })
+      .eq("id", appointmentId)
+      .in("status", ["booked", "arrived"]);
+  }
+
   // VIP is a customer mark; the gate-in switch sets it and the change is logged with who and when.
   const cust = vehicle.customer as unknown as { is_vip: boolean; vip_note: string | null } | null;
   const wasVip = cust?.is_vip ?? false;
@@ -308,7 +319,19 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     }
   }
 
-  const { data: customer, error: cError } = await supabase
+  // From an appointment, the customer already exists: use that record instead of adding a second one.
+  const appointmentId = blankToNull(formData.get("appointment_id"));
+  let customer: { id: string } | null = null;
+  if (appointmentId) {
+    const { data: appt } = await supabase.from("appointments").select("customer_id").eq("id", appointmentId).maybeSingle();
+    if (appt) {
+      customer = { id: appt.customer_id };
+      await supabase.from("customers").update({ email: blankToNull(d.email) ?? undefined, trn: blankToNull(d.trn) ?? undefined }).eq("id", appt.customer_id);
+    }
+  }
+  const { data: newCustomer, error: cError } = customer
+    ? { data: customer, error: null }
+    : await supabase
     .from("customers")
     .insert({
       customer_type: d.trn ? "company" : "individual",
@@ -320,7 +343,8 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     })
     .select("id")
     .single();
-  if (cError || !customer) return { error: cError?.message ?? "Could not save the customer.", values };
+  if (cError || !newCustomer) return { error: cError?.message ?? "Could not save the customer.", values };
+  customer = newCustomer;
 
   const noPlate = d.no_plate === "on";
   const { data: vehicle, error: vError } = await supabase
@@ -367,5 +391,5 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
 
   revalidatePath("/customers");
   revalidatePath("/vehicles");
-  redirect(`/gate-in/new?vehicle=${vehicle.id}`);
+  redirect(`/gate-in/new?vehicle=${vehicle.id}${appointmentId ? `&appointment=${appointmentId}` : ""}`);
 }

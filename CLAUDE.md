@@ -43,5 +43,5 @@ node --env-file=.env.local scripts/bootstrap-owner.mjs --email <owner email> --n
 ## Phases
 
 1. Foundation (done): logins, roles, PINs, tablets, customers, contacts, cars, photos, settings, change log.
-2. Gate-in, approval page, job cards, dashboard and floor board, gate-out (built, in testing). 3. Calendar, QC, manager dashboard. 4. Quotes, approvals, invoices, Zoho Books.
+2. Gate-in, approval page, job cards, dashboard and floor board, gate-out (built, in testing). 3. Calendar (built 8 October 2026: `appointments` table, `/calendar`, gate-in hand-off via `?appointment=`), QC, manager dashboard. 4. Quotes, approvals, invoices, Zoho Books.
 5. Parts, purchase orders, materials stock. 6. Time clock, bodyshop sub-steps, customer messages.

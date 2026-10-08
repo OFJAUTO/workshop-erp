@@ -16,9 +16,9 @@ type Row = VehicleRow & {
   customer: { id: string; full_name: string; company_name: string | null; phone: string; is_vip: boolean; vip_note: string | null } | null;
 };
 
-export default async function NewGateInPage({ searchParams }: { searchParams: Promise<{ vehicle?: string }> }) {
+export default async function NewGateInPage({ searchParams }: { searchParams: Promise<{ vehicle?: string; appointment?: string }> }) {
   await requirePermission("gateIn");
-  const { vehicle: vehicleId } = await searchParams;
+  const { vehicle: vehicleId, appointment: appointmentId } = await searchParams;
   if (!vehicleId) redirect("/gate-in");
 
   const supabase = await createClient();
@@ -45,6 +45,11 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
 
   const settings = await getSettings();
 
+  // Started from the calendar: the appointment's reason becomes the first request line.
+  const { data: appointment } = appointmentId
+    ? await supabase.from("appointments").select("id, reason, status").eq("id", appointmentId).maybeSingle()
+    : { data: null };
+
   return (
     <>
       <PageHeader
@@ -64,7 +69,8 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             isElectric={v.fuel_type === "electric"}
             pictureMode={v.photo_path ? "optional" : "required"}
             branches={settings.branches}
-            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "" }}
+            requests={appointment ? [appointment.reason] : []}
+            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "" }}
           />
         </div>
 

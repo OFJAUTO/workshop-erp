@@ -21,6 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const nav: NavItem[] = [
     { href: "/home", label: "Home", show: true },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
+    { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") },
     { href: "/my-jobs", label: "My jobs", show: role === "technician" },
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") },

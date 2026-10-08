@@ -10,6 +10,8 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "job_awaiting_assignment", label: "Car approved and waiting to be assigned" },
   { type: "owner_approval_needed", label: "Something needs the owner's approval", locked: true },
   { type: "catalog_review", label: "New make or model added during gate-in" },
+  { type: "appointment_booked", label: "An appointment was booked for you" },
+  { type: "appointment_reminder", label: "Appointment tomorrow: send the customer reminder" },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
