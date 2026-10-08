@@ -7,6 +7,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
+import { mileageChecks, toMiles, type MileageUnit } from "@/lib/mileage";
 import { notifyManagers, notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -44,6 +45,9 @@ const gateInSchema = z
     dash_cam: z.enum(["yes", "no"], { message: "Is a dash cam fitted?" }),
     major_damage: z.enum(["yes", "no"], { message: "Is there major damage?" }),
     mileage: z.string().trim(),
+    mileage_unit: z.string().trim(),
+    mileage_entered: z.string().trim(),
+    mileage_confirmed: z.string().trim(),
     keys_count: z.string().trim(),
     keys_keychain: z.enum(["yes", "no"], { message: "Did the keys come with a keychain?" }),
     notes: z.string().trim(),
@@ -64,7 +68,8 @@ const gateInSchema = z
     } else if (!["empty", "quarter", "half", "three_quarters", "full"].includes(d.fuel_level)) {
       ctx.addIssue({ code: "custom", path: ["fuel_level"], message: "Choose the fuel level." });
     }
-    if (!/^\d{1,7}$/.test(d.mileage)) ctx.addIssue({ code: "custom", path: ["mileage"], message: "Enter the mileage in km." });
+    if (!/^\d{1,7}$/.test(d.mileage)) ctx.addIssue({ code: "custom", path: ["mileage"], message: "Enter the mileage." });
+    if (d.mileage_unit !== "km" && d.mileage_unit !== "mi") ctx.addIssue({ code: "custom", path: ["mileage_unit"], message: "Choose km or miles." });
     if (!/^\d{1,2}$/.test(d.keys_count) || Number(d.keys_count) > 10) {
       ctx.addIssue({ code: "custom", path: ["keys_count"], message: "Enter how many keys were received." });
     }
@@ -90,6 +95,9 @@ function parseGateIn(formData: FormData) {
     dash_cam: get("dash_cam"),
     major_damage: get("major_damage"),
     mileage: get("mileage"),
+    mileage_unit: get("mileage_unit") || "km",
+    mileage_entered: get("mileage_entered"),
+    mileage_confirmed: get("mileage_confirmed"),
     keys_count: get("keys_count"),
     keys_keychain: get("keys_keychain"),
     notes: get("notes"),
@@ -124,10 +132,17 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const supabase = await createClient();
   const { data: vehicle } = await supabase
     .from("vehicles")
-    .select("id, customer_id, is_active, photo_path, customer:customers(is_vip, vip_note)")
+    .select("id, customer_id, is_active, photo_path, model_year, last_mileage, customer:customers(is_vip, vip_note)")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
+
+  // The mileage checks run here too, so a figure that looks wrong is only saved once the advisor confirmed it.
+  const unit = d.mileage_unit as MileageUnit;
+  const km = Number(d.mileage);
+  const { data: lastVisit } = await supabase.from("jobs").select("gated_in_at").eq("vehicle_id", vehicleId).order("gated_in_at", { ascending: false }).limit(1).maybeSingle();
+  const checks = mileageChecks(km, { modelYear: vehicle.model_year, lastKm: vehicle.last_mileage, lastVisitAt: lastVisit?.gated_in_at ?? null, unit });
+  if (checks.length && d.mileage_confirmed !== "yes") return { error: `The mileage looks unusual: ${checks.map((c) => c.text).join(" ")} Tap "Yes, the mileage is correct" to continue.`, values };
 
   const picture = formData.get("car_picture");
   const hasNewPicture = picture instanceof File && picture.size > 0;
@@ -162,7 +177,9 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     cleanliness: d.cleanliness,
     dash_cam: d.dash_cam === "yes",
     major_damage: d.major_damage === "yes",
-    mileage: Number(d.mileage),
+    mileage: km,
+    mileage_unit: unit,
+    mileage_miles: unit === "mi" && d.mileage_entered !== "" && Number.isFinite(Number(d.mileage_entered)) ? Number(d.mileage_entered) : toMiles(km),
     keys_count: Number(d.keys_count),
     keys_keychain: d.keys_keychain === "yes",
     customer_requests: requests.map((r, i) => `${i + 1}. ${r}`).join("\n"),
@@ -207,7 +224,8 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     note: `Gated in on job ${job.job_number} at ${branch ? branch.name : d.location_address}`,
     created_by: staff.id,
   });
-  await supabase.from("vehicles").update({ last_mileage: Number(d.mileage) }).eq("id", vehicleId);
+  // The car remembers the unit for its next visit.
+  await supabase.from("vehicles").update({ last_mileage: km, mileage_unit: unit }).eq("id", vehicleId);
   await notifyManagers(d.department, {
     type: "job_gated_in",
     title: `Car gated in · ${job.job_number}`,
@@ -242,7 +260,7 @@ const quickSchema = z
     make_text: z.string().trim(),
     model_id: z.string().trim(),
     model_text: z.string().trim(),
-    variant: z.string().trim().min(1, "Enter the variant."),
+    variant: z.string().trim(),
     model_year: z.string().trim().regex(/^\d{4}$/, "Enter the model year (4 digits)."),
     fuel_type: z.enum(FUEL_TYPES, { message: "Choose the fuel type." }),
   })
@@ -368,7 +386,7 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
       vin: d.vin,
       make_id: makeId,
       model_id: modelId,
-      variant: d.variant,
+      variant: blankToNull(d.variant),
       model_year: Number(d.model_year),
       fuel_type: d.fuel_type,
     })

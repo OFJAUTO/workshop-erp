@@ -93,6 +93,9 @@ export function SettingsForm({
               <Field label="Approved report opens for (hours)" hint="After the owner approves a change request, the report can be edited for this long.">
                 <Input name="inspection_unlock_hours" defaultValue={v.inspection_unlock_hours} inputMode="numeric" required />
               </Field>
+              <Field label="Assignment target (minutes of working time)" hint="How long a car may wait for a technician after the customer approves. Past it the card turns amber, then red, and the owner is told.">
+                <Input name="assignment_target_minutes" defaultValue={v.assignment_target_minutes} inputMode="numeric" required />
+              </Field>
             </div>
             <Field label="Target hours per stage" hint="Without a promised date a car turns amber past the target and red at double.">
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">

@@ -8,6 +8,7 @@ import { blankToNull } from "@/lib/format";
 import { ensureInspection, inspectionLocked, loadInspection, reportProblems } from "@/lib/inspection-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { ROAD_TEST_SELECT, roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -50,6 +51,9 @@ export async function startInspection(jobId: string) {
   if (insp.technician_id !== staff.id && !can(staff.role_id as RoleId, "approveInspections")) redirect(`/my-jobs/${jobId}?error=${encodeURIComponent("This car is assigned to someone else.")}`);
   if (insp.status !== "not_started" && insp.status !== "returned") redirect(`/my-jobs/${jobId}`);
   const admin = createAdminClient();
+  // A road test the manager asked for comes first: the inspection opens once the QC inspector has submitted it.
+  const { data: road } = await admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", jobId).maybeSingle();
+  if (roadTestWaiting(road as RoadTestRow | null) && staff.role_id !== "owner") redirect(`/my-jobs/${jobId}?error=${encodeURIComponent("Waiting for the QC road test. The inspection opens after it is submitted.")}`);
   const settings = await getSettings();
   await admin
     .from("inspections")
@@ -94,7 +98,8 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
     href: `/jobs/${jobId}/inspection`,
   });
   refresh(jobId);
-  return { success: "Report submitted. The workshop manager will review it.", values };
+  // The technician sees a full-screen thank-you on My jobs; anyone else lands on the report.
+  redirect(staff.role_id === "technician" ? `/my-jobs?submitted=${jobId}` : `/jobs/${jobId}/inspection`);
 }
 
 /** The manager approves with a note; the advisor is told and the car moves to Quote. */
@@ -106,8 +111,6 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   const bundle = await loadInspection(jobId);
   if (!bundle || bundle.inspection.status !== "submitted") return { error: "There is no submitted report to approve.", values };
   const admin = createAdminClient();
-  const { data: road } = await admin.from("road_tests").select("status").eq("job_id", jobId).maybeSingle();
-  if (!road || road.status === "not_started") return { error: "The QC road test is not done yet. Approval waits for it (or for \"road test not possible\").", values };
   const now = new Date().toISOString();
   await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, updated_by: staff.id }).eq("id", bundle.inspection.id);
   const job = await jobOf(jobId);
@@ -209,11 +212,11 @@ export async function noteInspectionEdit(jobId: string, formData: FormData) {
   redirect(`/my-jobs/${jobId}`);
 }
 
-/** The advisor or manager decides whether the pre-scan PDF goes to the customer with the report. */
+/** Advisors and the owner decide whether the pre-scan PDF goes to the customer with the report. */
 export async function setPrescanVisible(jobId: string, formData: FormData) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "approveInspections") || role === "service_advisor")) redirect(`/jobs/${jobId}/inspection`);
+  if (!can(role, "sendReport")) redirect(`/jobs/${jobId}/inspection`);
   const bundle = await loadInspection(jobId);
   if (!bundle) redirect(`/jobs/${jobId}/inspection`);
   const visible = String(formData.get("visible") ?? "") === "1";

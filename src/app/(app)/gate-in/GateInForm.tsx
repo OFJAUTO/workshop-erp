@@ -6,9 +6,11 @@ import { useState } from "react";
 import { ActionForm, type FormAction } from "@/components/forms";
 import { GateInAssist } from "@/components/GateInAssist";
 import { ImageCropper } from "@/components/ImageCropper";
+import { MileageInput } from "@/components/MileageInput";
 import { RequestsList } from "@/components/RequestsList";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Textarea } from "@/components/ui";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS } from "@/lib/jobs";
+import type { MileageUnit } from "@/lib/mileage";
 import type { Branch } from "@/lib/settings";
 import { GeoCapture } from "./GeoCapture";
 
@@ -26,6 +28,8 @@ export function GateInForm({
   branches = [],
   requests = [],
   requestsLocked = false,
+  mileageUnit = "km",
+  mileageContext = { modelYear: null, lastKm: null, lastVisitAt: null },
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -37,6 +41,10 @@ export function GateInForm({
   requests?: string[];
   /** After the gate-in is complete the request lines can no longer be changed. */
   requestsLocked?: boolean;
+  /** The unit this car was last entered in. */
+  mileageUnit?: MileageUnit;
+  /** What the mileage checks compare against. */
+  mileageContext?: { modelYear: number | null; lastKm: number | null; lastVisitAt: string | null };
 }) {
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
@@ -115,8 +123,8 @@ export function GateInForm({
               <Field label="Major damage" hint="If yes, at least one damage photo is required in the next step.">
                 <ChoiceButtons name="major_damage" columns={2} defaultValue={v.major_damage} options={YES_NO} />
               </Field>
-              <Field label="Mileage (km)" hint="Take the dashboard photo in the next step.">
-                <Input name="mileage" inputMode="numeric" defaultValue={v.mileage} className="max-w-48 text-lg font-bold" required />
+              <Field label="Mileage" hint="Kilometres or miles; both are kept. Take the dashboard photo in the next step.">
+                <MileageInput initialValue={v.mileage_entered} initialUnit={(v.mileage_unit as MileageUnit) || mileageUnit} initialConfirmed={v.mileage_confirmed === "yes"} context={mileageContext} />
               </Field>
             </Card>
 

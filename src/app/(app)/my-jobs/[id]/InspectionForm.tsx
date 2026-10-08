@@ -7,15 +7,18 @@ import { JumpButton, ProblemsBar, jumpTo } from "@/components/FormAssist";
 import { PrescanToggle } from "@/components/PrescanToggle";
 import { Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import {
+  CHECK_STATUSES,
   ITEM_STATUSES,
   ITEM_STATUS_LABELS,
   MEASUREMENTS,
+  OPTIONAL_SECTION_KEY,
   ROAD_TEST_SECTION_KEY,
   TYRE_ACTIONS,
   TYRE_CONDITIONS,
   TYRE_POSITIONS,
   cleanTyreConditions,
   reportProblemsOf,
+  reportProgressOf,
   tyreItemStatus,
   type ChecklistSection,
   type ItemStatus,
@@ -28,6 +31,7 @@ const STATUS_CLASS: Record<ItemStatus, string> = {
   good: "border-green bg-green text-white",
   average: "border-amber-bar bg-amber-bar text-white",
   bad: "border-red-bar bg-red-bar text-white",
+  na: "border-line-strong bg-chip text-muted",
 };
 
 type Op = Record<string, unknown>;
@@ -108,11 +112,12 @@ function useAutosave(inspectionId: string) {
   return { save, state, error };
 }
 
-function StatusButtons({ value, onPick, disabled }: { value: ItemStatus | null; onPick: (s: ItemStatus) => void; disabled: boolean }) {
+/** GOOD / AVERAGE / BAD, plus N/A in grey on checklist items. */
+function StatusButtons({ value, onPick, disabled, statuses }: { value: ItemStatus | null; onPick: (s: ItemStatus) => void; disabled: boolean; statuses: readonly ItemStatus[] }) {
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {ITEM_STATUSES.map((s) => (
-        <button key={s} type="button" disabled={disabled} onClick={() => onPick(s)} aria-pressed={value === s} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${value === s ? STATUS_CLASS[s] : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
+    <div className={`grid gap-2 ${statuses.length === 4 ? "grid-cols-4" : "grid-cols-3"}`}>
+      {statuses.map((s) => (
+        <button key={s} type="button" disabled={disabled} onClick={() => onPick(s)} aria-pressed={value === s} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${value === s ? STATUS_CLASS[s] : s === "na" ? "border-line bg-white text-muted" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
           {ITEM_STATUS_LABELS[s]}
         </button>
       ))}
@@ -120,14 +125,17 @@ function StatusButtons({ value, onPick, disabled }: { value: ItemStatus | null; 
   );
 }
 
-function Dot({ ok }: { ok: boolean }) {
-  return ok ? <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-white text-xs font-bold" aria-label="complete">✓</span> : <span className="inline-block h-3 w-3 rounded-full bg-red-bar" aria-label="incomplete" />;
+/** Green tick when complete. Before Submit was tapped an open section shows a grey dot; after, red. */
+function Dot({ ok, attempted }: { ok: boolean; attempted: boolean }) {
+  if (ok) return <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-white text-xs font-bold" aria-label="complete">✓</span>;
+  return <span className={`inline-block h-3 w-3 rounded-full ${attempted ? "bg-red-bar" : "bg-line-strong"}`} aria-label="incomplete" />;
 }
 
 /**
  * The technician's report: findings per customer request, the checklist with one-tap statuses,
- * the numbers with tyre conditions, pre-scan PDFs, notes. Every tap is saved at once, with a
- * "Saved" indicator; what is still missing sits in the bar at the bottom.
+ * the numbers with tyre conditions, the optional pre-scan PDF, notes. Every tap is saved at once,
+ * with a "Saved" indicator; the bar at the bottom shows neutral progress until Submit is tapped
+ * with something missing, then lists what is missing in red.
  */
 export function InspectionForm({
   inspectionId,
@@ -138,6 +146,8 @@ export function InspectionForm({
   files: initialFiles,
   notes: initialNotes,
   prescanVisible,
+  showPrescanToggle = false,
+  canAddPrescan = false,
   readOnly,
   submitAction,
   submitLabel = "Submit to workshop manager",
@@ -150,6 +160,10 @@ export function InspectionForm({
   files: (InspectionFile & { itemKey: string | null; requestId: string | null })[];
   notes: string;
   prescanVisible: boolean;
+  /** Show to customer / Hide from customer: advisors and the owner only. */
+  showPrescanToggle?: boolean;
+  /** The pre-scan PDF can still be attached while the rest of the report is read only. */
+  canAddPrescan?: boolean;
   readOnly: boolean;
   submitAction: FormAction | null;
   submitLabel?: string;
@@ -160,6 +174,7 @@ export function InspectionForm({
   const latestMeasurements = useRef(initialMeasurements);
   const [files, setFiles] = useState(initialFiles);
   const [notes, setNotes] = useState(initialNotes);
+  const [attempted, setAttempted] = useState(false);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const { save, state, error } = useAutosave(inspectionId);
   const disabled = readOnly;
@@ -181,6 +196,10 @@ export function InspectionForm({
   function allGood(sectionKey: string) {
     setItems((prev) => prev.map((i) => (i.sectionKey === sectionKey && !i.status ? { ...i, status: "good" } : i)));
     save({ sectionAllGood: sectionKey });
+  }
+  function allNa(sectionKey: string) {
+    setItems((prev) => prev.map((i) => (i.sectionKey === sectionKey ? { ...i, status: "na" } : i)));
+    save({ sectionAll: { key: sectionKey, status: "na" } });
   }
   function setFindingStatus(requestId: string, status: ItemStatus) {
     setFindings((prev) => prev.map((f) => (f.requestId === requestId ? { ...f, status } : f)));
@@ -217,7 +236,9 @@ export function InspectionForm({
   const addFile = (where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }) => (f: InspectionFile) =>
     setFiles((prev) => [...prev, { ...f, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan }]);
 
-  const problems = reportProblemsOf({ items, findings, measurements, hasPrescan: filesFor({ isPrescan: true }).length > 0 });
+  const reportState = { items, findings, measurements };
+  const problems = reportProblemsOf(reportState);
+  const progress = reportProgressOf(reportState);
   const problemKeys = new Set(problems.map((p) => p.key));
   const sectionOk = (sectionKey: string) => !items.some((i) => i.sectionKey === sectionKey && problemKeys.has(i.key));
   const marked = items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY && i.status).length;
@@ -225,6 +246,7 @@ export function InspectionForm({
   const tyresOk = !problems.some((p) => p.key.startsWith("m-tyre"));
   const numbersOk = !problems.some((p) => p.key.startsWith("m-") && !p.key.startsWith("m-tyre"));
   const tyreBtn = (on: boolean) => `min-h-11 rounded-control border-2 px-2 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`;
+  const prescanFiles = filesFor({ isPrescan: true });
 
   return (
     <div className="flex flex-col gap-6 pb-24">
@@ -233,7 +255,7 @@ export function InspectionForm({
       <Card className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-2">
           <SectionLabel right={`${findings.filter((f) => f.status).length} of ${findings.length}`}>Part 1 · Customer requests</SectionLabel>
-          <Dot ok={!problems.some((p) => p.key.startsWith("req-"))} />
+          <Dot ok={!problems.some((p) => p.key.startsWith("req-"))} attempted={attempted} />
         </div>
         {findings.length === 0 ? <p className="text-sm text-muted">No customer requests were recorded at gate-in.</p> : null}
         {findings.map((f, i) => (
@@ -241,7 +263,7 @@ export function InspectionForm({
             <p className="font-bold">
               {i + 1}. {f.text}
             </p>
-            <StatusButtons value={f.status} onPick={(s) => setFindingStatus(f.requestId, s)} disabled={disabled} />
+            <StatusButtons value={f.status} onPick={(s) => setFindingStatus(f.requestId, s)} disabled={disabled} statuses={CHECK_STATUSES} />
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">What was found (required)</span>
               <Textarea value={f.found} onChange={(e) => setFindingText(f.requestId, "found", e.target.value)} rows={2} disabled={disabled} />
@@ -257,23 +279,29 @@ export function InspectionForm({
 
       <Card className="flex flex-col gap-2">
         <SectionLabel right={`${marked} of ${total} marked`}>Part 2 · Full inspection</SectionLabel>
-        <p className="text-sm text-muted">Tap GOOD, AVERAGE or BAD on every item. AVERAGE and BAD need a remark; a photo or short video is optional. List the parts needed against the item.</p>
+        <p className="text-sm text-muted">Tap GOOD, AVERAGE, BAD or N/A on every item. AVERAGE and BAD need a remark; a photo or short video is optional. N/A means it does not apply to this car. List the parts needed against the item.</p>
       </Card>
 
       {sections.map((section) => {
         const sectionItems = items.filter((i) => i.sectionKey === section.key);
         const open = sectionItems.filter((i) => !i.status).length;
+        const optional = section.key === OPTIONAL_SECTION_KEY;
         return (
           <Card key={section.key} className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="inline-flex items-center gap-2">
-                <Dot ok={sectionOk(section.key)} />
-                <SectionLabel right={open ? `${open} to mark` : undefined}>{section.title}</SectionLabel>
+                <Dot ok={sectionOk(section.key)} attempted={attempted} />
+                <SectionLabel right={open ? `${open} to mark${optional ? ", optional" : ""}` : undefined}>{section.title}</SectionLabel>
               </span>
               {!disabled && open ? (
-                <button type="button" onClick={() => allGood(section.key)} className="min-h-11 rounded-control border border-green bg-green-soft px-4 text-sm font-bold text-green">
-                  All GOOD
-                </button>
+                <span className="flex gap-2">
+                  <button type="button" onClick={() => allGood(section.key)} className="min-h-11 rounded-control border border-green bg-green-soft px-4 text-sm font-bold text-green">
+                    All GOOD
+                  </button>
+                  <button type="button" onClick={() => allNa(section.key)} className="min-h-11 rounded-control border border-line-strong bg-chip px-4 text-sm font-bold text-muted">
+                    All N/A
+                  </button>
+                </span>
               ) : null}
             </div>
             {sectionItems.map((it) => {
@@ -284,7 +312,7 @@ export function InspectionForm({
                     {it.label}
                     {it.editedBy ? <span className="ml-2 text-xs font-medium text-muted">edited by {it.editedBy}</span> : null}
                   </p>
-                  <StatusButtons value={it.status} onPick={(s) => setItemStatus(it.key, s)} disabled={disabled} />
+                  <StatusButtons value={it.status} onPick={(s) => setItemStatus(it.key, s)} disabled={disabled} statuses={ITEM_STATUSES} />
                   {needsDetail || it.remarks ? (
                     <label className="flex flex-col gap-1">
                       <span className="text-xs font-semibold text-muted">Remarks{needsDetail ? " (required)" : ""}</span>
@@ -310,7 +338,7 @@ export function InspectionForm({
       <Card className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-2">
           <SectionLabel>Tyres (all required)</SectionLabel>
-          <Dot ok={tyresOk} />
+          <Dot ok={tyresOk} attempted={attempted} />
         </div>
         {[...TYRE_POSITIONS, { key: "spare", label: "Spare (optional)" }].map((p) => {
           const cond = (measurements[`tyre_${p.key}_cond`] ?? "").split(",").filter(Boolean);
@@ -357,7 +385,7 @@ export function InspectionForm({
       <Card className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-2">
           <SectionLabel>Numbers (all required)</SectionLabel>
-          <Dot ok={numbersOk} />
+          <Dot ok={numbersOk} attempted={attempted} />
         </div>
         {["Brake pads", "Battery test", "Air conditioning"].map((g) => (
           <div key={g} className="flex flex-col gap-2">
@@ -390,11 +418,12 @@ export function InspectionForm({
       <div id="item-prescan">
         <Card className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
-            <SectionLabel>Pre-scan (Autel fault code report, PDF)</SectionLabel>
-            <Dot ok={filesFor({ isPrescan: true }).length > 0} />
+            <SectionLabel right={prescanFiles.length ? `${prescanFiles.length} attached` : "optional"}>Pre-scan (Autel fault code report, PDF)</SectionLabel>
+            {prescanFiles.length ? <Dot ok attempted={attempted} /> : null}
           </div>
-          <InspectionMedia inspectionId={inspectionId} files={filesFor({ isPrescan: true })} where={{ isPrescan: true }} accept="pdf" disabled={disabled} onAdded={addFile({ isPrescan: true })} />
-          <PrescanToggle inspectionId={inspectionId} initial={prescanVisible} disabled={disabled} />
+          <p className="text-xs text-muted">Optional. The technician or the workshop manager can attach it now or later, from the tablet or a PC.</p>
+          <InspectionMedia inspectionId={inspectionId} files={prescanFiles} where={{ isPrescan: true }} accept="pdf" disabled={disabled && !canAddPrescan} onAdded={addFile({ isPrescan: true })} />
+          {showPrescanToggle ? <PrescanToggle inspectionId={inspectionId} initial={prescanVisible} /> : null}
         </Card>
       </div>
 
@@ -415,12 +444,15 @@ export function InspectionForm({
           ) : null}
           <ProblemsBar
             problems={problems}
+            attempted={attempted}
+            progress={progress}
             onJump={jumpTo}
             submitLabel={submitLabel}
             onSubmit={
               submitAction
                 ? () => {
                     if (problems.length) {
+                      setAttempted(true);
                       jumpTo(problems[0].key);
                       return;
                     }

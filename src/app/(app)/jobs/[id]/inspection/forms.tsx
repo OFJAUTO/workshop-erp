@@ -3,20 +3,27 @@
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { Textarea } from "@/components/ui";
 
-/** The workshop manager approves with a note. */
-export function ApproveForm({ action }: { action: FormAction }) {
+/** The workshop manager approves with a note. Without a pre-scan attached it asks first. */
+export function ApproveForm({ action, hasPrescan }: { action: FormAction; hasPrescan: boolean }) {
   return (
-    <ActionForm action={action} className="flex flex-col gap-3">
-      {(v) => (
-        <>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-semibold">Your note (required)</span>
-            <Textarea name="manager_note" defaultValue={v.manager_note} rows={3} required />
-          </label>
-          <SubmitButton>Approve report</SubmitButton>
-        </>
-      )}
-    </ActionForm>
+    <div
+      onSubmitCapture={(e) => {
+        if (!hasPrescan && !window.confirm("No pre-scan attached. Approve anyway?")) e.preventDefault();
+      }}
+    >
+      <ActionForm action={action} className="flex flex-col gap-3">
+        {(v) => (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-sm font-semibold">Your note (required)</span>
+              <Textarea name="manager_note" defaultValue={v.manager_note} rows={3} required />
+            </label>
+            {!hasPrescan ? <p className="text-xs text-amber font-semibold">No pre-scan PDF is attached yet. You can still approve.</p> : null}
+            <SubmitButton>Approve report</SubmitButton>
+          </>
+        )}
+      </ActionForm>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { ITEM_STATUSES, cleanMeasurementValue } from "@/lib/inspection";
+import { CHECK_STATUSES, ITEM_STATUSES, cleanMeasurementValue } from "@/lib/inspection";
 import { inspectionLocked, type InspectionRow } from "@/lib/inspection-data";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -10,6 +10,8 @@ type Body = {
   inspectionId?: string;
   item?: { key: string; status?: string | null; remarks?: string; parts_needed?: string; labour_hours?: string | number | null };
   sectionAllGood?: string;
+  /** Every item of a section gets one status, for example N/A. */
+  sectionAll?: { key: string; status: string };
   finding?: { requestId: string; found?: string; needs?: string; status?: string | null };
   measurements?: Record<string, string>;
   technicianNotes?: string;
@@ -35,7 +37,8 @@ export async function POST(request: NextRequest) {
   const isTech = role === "technician" && insp.technician_id === staff.id;
   const isManager = can(role, "approveInspections");
   if (body.prescanVisible !== undefined) {
-    if (!(isManager || role === "service_advisor" || isTech)) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
+    // Show to customer / Hide from customer belongs to advisors and the owner.
+    if (!can(role, "sendReport")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
     await admin.from("inspections").update({ show_prescan_to_customer: !!body.prescanVisible, updated_by: staff.id }).eq("id", insp.id);
     return NextResponse.json({ ok: true });
   }
@@ -69,9 +72,15 @@ export async function POST(request: NextRequest) {
     const { error } = await admin.from("inspection_items").update({ status: "good", ...stamp }).eq("inspection_id", insp.id).eq("section_key", String(body.sectionAllGood)).is("status", null);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  if (body.sectionAll) {
+    const status = String(body.sectionAll.status ?? "");
+    if (!(ITEM_STATUSES as readonly string[]).includes(status)) return NextResponse.json({ error: "Bad status." }, { status: 400 });
+    const { error } = await admin.from("inspection_items").update({ status, ...stamp, ...reviewStamp }).eq("inspection_id", insp.id).eq("section_key", String(body.sectionAll.key));
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   if (body.finding) {
     const status = body.finding.status ? String(body.finding.status) : null;
-    if (status && !(ITEM_STATUSES as readonly string[]).includes(status)) return NextResponse.json({ error: "Bad status." }, { status: 400 });
+    if (status && !(CHECK_STATUSES as readonly string[]).includes(status)) return NextResponse.json({ error: "Bad status." }, { status: 400 });
     const row: Record<string, unknown> = { inspection_id: insp.id, job_request_id: String(body.finding.requestId), ...stamp, created_by: staff.id };
     if ("found" in body.finding) row.found = String(body.finding.found ?? "").trim().slice(0, 2000) || null;
     if ("needs" in body.finding) row.needs = String(body.finding.needs ?? "").trim().slice(0, 2000) || null;

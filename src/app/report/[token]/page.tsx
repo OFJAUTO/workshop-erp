@@ -6,7 +6,7 @@ import { ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, 
 import { loadInspection, type InspectionMediaRow } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { notifyStaff } from "@/lib/notifications";
-import { ROAD_TEST_ITEMS, type RoadTestRow } from "@/lib/road-test";
+import { ROAD_TEST_ITEMS, ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -24,7 +24,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const TONE: Record<ItemStatus, "green" | "amber" | "red"> = { good: "green", average: "amber", bad: "red" };
+const TONE: Record<ItemStatus, "green" | "amber" | "red" | "neutral"> = { good: "green", average: "amber", bad: "red", na: "neutral" };
 
 function Photos({ rows, urls }: { rows: InspectionMediaRow[]; urls: Record<string, string> }) {
   const shown = rows.filter((m) => m.kind !== "pdf");
@@ -62,7 +62,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
     </div>
   );
   if (!link) return shell(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
-  const [card, bundle, { data: rt }] = await Promise.all([loadJobCard(admin, link.job_id), loadInspection(link.job_id), admin.from("road_tests").select("id, job_id, inspector_id, status, items, not_possible_reason, started_at, done_at, created_at, updated_at").eq("job_id", link.job_id).maybeSingle()]);
+  const [card, bundle, { data: rt }] = await Promise.all([loadJobCard(admin, link.job_id), loadInspection(link.job_id), admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", link.job_id).maybeSingle()]);
   if (!card || !bundle || bundle.inspection.status !== "approved") return shell(<Notice tone="error">This report is not available yet.</Notice>);
   if (!link.opened_at) {
     await admin.from("report_links").update({ opened_at: new Date().toISOString(), status: "opened" }).eq("id", link.id);
@@ -70,7 +70,8 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
   }
   const insp = bundle.inspection;
   const roadTest = (rt as RoadTestRow | null) ?? null;
-  const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY);
+  // N/A items do not apply to this car and are left out of the customer's report.
+  const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY && i.status !== "na");
   const flagged = items.filter((i) => i.status === "bad" || i.status === "average").sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
   const sections = Array.from(new Map(items.map((i) => [i.section_key, i.section_title])).entries());
   const m = insp.measurements ?? {};
@@ -160,7 +161,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
         </ul>
       </section>
 
-      {roadTest && roadTest.status !== "not_started" ? (
+      {roadTest && roadTest.status !== "not_started" && roadTest.decision !== "not_needed" ? (
         <section className="bg-white border border-line rounded-card p-4 flex flex-col gap-2">
           <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Road test</h2>
           {roadTest.status === "not_possible" ? (

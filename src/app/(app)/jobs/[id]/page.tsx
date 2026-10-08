@@ -4,16 +4,17 @@ import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
-import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes } from "@/lib/inspection";
+import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf, workingTimeOf } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
+import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
-import { ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
+import { ROAD_TEST_DECISIONS, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -21,6 +22,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { assignJob, moveJob, setJobPriority, setPromisedDate } from "../actions";
+import { decideRoadTest, remindManager, setAssignmentNote } from "../assignment-actions";
 import { decideMove, requestMove } from "../move-actions";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MediaGallery } from "./MediaGallery";
@@ -42,11 +44,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, events, approvals, gateOut } = card;
-  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }] = await Promise.all([
+  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
-    admin.from("road_tests").select("id, job_id, inspector_id, status, items, not_possible_reason, started_at, done_at, created_at, updated_at").eq("job_id", id).maybeSingle(),
+    admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
     admin.from("move_requests").select("id, reason, status, to_status, decision_reason, decided_at, created_at, requester:staff!move_requests_requested_by_fkey(display_name), decider:staff!move_requests_decided_by_fkey(display_name)").eq("job_id", id).order("created_at", { ascending: false }),
     admin.from("report_links").select("id, token, status, sent_at, opened_at, created_at").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    admin.from("staff").select("display_name, department_id").eq("role_id", "workshop_manager").eq("is_active", true).order("display_name"),
+    job.assignment_note_by ? admin.from("staff").select("display_name").eq("id", job.assignment_note_by).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const roadTest = (rt as RoadTestRow | null) ?? null;
   const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
@@ -54,12 +58,17 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "" });
   const wt = workingTimeOf(settings);
-  const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: wt });
+  const timing = jobTiming(job.promised_at, job.is_open, clockOf(job, settings));
   const isVip = customer?.is_vip ?? customerPublic?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? customerPublic?.vip_note ?? vip?.vip_note ?? null;
   const customerName = customer?.company_name ?? customer?.full_name ?? customerPublic?.company_name ?? customerPublic?.full_name ?? "Customer";
 
-  const canAssign = can(role, "assignJobs") && job.is_open;
+  // The department's workshop manager(s), by name, for "Waiting on …".
+  const deptManagers = (managers ?? []).filter((m) => jobConcernsSide(job.department, sideOfDepartment(m.department_id))).map((m) => m.display_name);
+  const managerLabel = deptManagers.length ? deptManagers.join(" or ") : job.department === "bodyshop" ? "the bodyshop manager" : "the workshop manager";
+  const managesThisJob = role === "owner" || (role === "workshop_manager" && jobConcernsSide(job.department, sideOfDepartment(staff.department_id)));
+
+  const canAssign = can(role, "assignJobs") && managesThisJob && job.is_open;
   const canMove = can(role, "moveJobs") && job.is_open && job.status !== "gate_in_pending";
   const canRequestMove = !can(role, "moveJobs") && can(role, "requestMove") && job.is_open;
   const canEditGateIn = can(role, "editGateIn") && job.is_open;
@@ -67,6 +76,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending";
   const canPlan = can(role, "setPriority") && job.is_open;
   const canSendReport = can(role, "sendReport") && job.is_open && inspection?.inspection.status === "approved";
+  const canNote = can(role, "noteToManager") && job.is_open;
   const seesCustomerDetails = can(role, "viewCustomers");
 
   const { data: technicians } = canAssign
@@ -106,13 +116,19 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     stage_entered_at: job.stage_entered_at,
     assigneeName: card.assignee?.display_name ?? null,
     advisorName,
-    managerLabel: job.department === "bodyshop" ? "the bodyshop manager" : "the workshop manager",
+    managerLabel,
     inspection: insp ? { status: insp.status, technician_id: insp.technician_id, submitted_at: insp.submitted_at, approved_at: insp.approved_at } : null,
     roadTest,
     approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
     gateInComplete: check.complete,
   });
   const myMove = role === "owner" || step.actorRole === role || (step.actorRole === "gate_in" && can(role, "editGateIn"));
+
+  // Waiting for a technician: how long, against the assignment target.
+  const waitingForAssignment = job.is_open && job.status === "pending_inspection" && !job.assigned_to;
+  const assignmentTarget = Number(settings.assignment_target_minutes) || 30;
+  const waitedMinutes = waitingForAssignment ? workingMinutesSince(job.first_approval_at ?? job.stage_entered_at, wt) : 0;
+  const canRemind = canNote && waitingForAssignment && (waitedMinutes >= assignmentTarget || role === "owner");
 
   const inspectionState = (() => {
     if (job.department === "bodyshop") return { text: "Bodyshop path (later phase)", tone: "neutral" as const };
@@ -128,6 +144,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const mapHref = gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
   const overrides = events.filter((e) => e.event_type === "override");
   const pendingMove = moveRequests.find((m) => m.status === "pending");
+  const defaultRoadTest = roadTest?.decision ?? (gateIn?.condition === "does_not_run" ? "not_possible" : "needed");
 
   return (
     <>
@@ -171,6 +188,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <p className="text-[15px] font-medium whitespace-pre-wrap">{vipNote}</p>
         </Card>
       ) : null}
+      {job.assignment_note && (managesThisJob || canNote) ? (
+        <Notice tone="info">
+          Note to the workshop manager from {(noteBy as { display_name: string } | null)?.display_name ?? "the advisor"}
+          {job.assignment_note_at ? `, ${formatDateTime(job.assignment_note_at)}` : ""}: {job.assignment_note}
+        </Notice>
+      ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
@@ -201,7 +224,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </section>
         </div>
 
-        <Card className="flex flex-col gap-3 border-ink">
+        <section className="rounded-card bg-track border border-ink p-5 flex flex-col gap-3">
           <SectionLabel>Next step</SectionLabel>
           {step.done ? (
             <p className="text-sm">
@@ -212,14 +235,28 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           ) : null}
           <p className="text-[15px] font-semibold">{step.next}</p>
           <p className="text-sm text-muted">
-            Waiting on <span className="font-semibold text-ink">{step.waitingOn}</span> · {waitedText(step.since)}
+            Waiting on <span className="font-semibold text-ink">{step.waitingOn}</span> · {waitedText(step.since, wt)}
           </p>
           {step.action && myMove && job.is_open ? (
             <LinkButton href={step.action.href} size="lg" className="w-full">
               {step.action.label}
             </LinkButton>
           ) : null}
-        </Card>
+          {waitingForAssignment && canNote ? (
+            <div className="flex flex-col gap-2 border-t border-ink/20 pt-3">
+              {job.assignment_reminded_at ? <p className="text-xs text-muted">Manager reminded {formatDateTime(job.assignment_reminded_at)}.</p> : null}
+              {canRemind ? (
+                <form action={remindManager.bind(null, id)}>
+                  <Button type="submit" tone="secondary" size="md" className="w-full">
+                    Remind manager
+                  </Button>
+                </form>
+              ) : (
+                <p className="text-xs text-muted">Remind manager opens after {assignmentTarget} working minutes.</p>
+              )}
+            </div>
+          ) : null}
+        </section>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -233,7 +270,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={`flex flex-col gap-2 ${toneCls[inspectionState.tone]} ${job.stage === "inspection" || job.stage === "quote" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Inspection report</span>
           <span className="text-sm font-semibold">{inspectionState.text}</span>
-          {roadTest ? <span className="text-xs text-muted">{ROAD_TEST_STATUS_LABELS[roadTest.status]}</span> : null}
+          {roadTest ? <span className="text-xs text-muted">{roadTestLine(roadTest)}</span> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {insp ? (
               <LinkButton href={`/jobs/${id}/inspection`} tone={insp.status === "submitted" && can(role, "approveInspections") ? "primary" : "secondary"} size="md">
@@ -306,7 +343,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                   { label: "Cleanliness", value: labelOf(CLEANLINESS, gateIn.cleanliness) },
                   { label: "Dash cam", value: gateIn.dash_cam ? "Fitted, to be disconnected" : "Not fitted" },
                   { label: "Major damage", value: gateIn.major_damage ? "Yes" : "No" },
-                  { label: "Mileage", value: `${gateIn.mileage.toLocaleString("en-GB")} km` },
+                  { label: "Mileage", value: describeMileage(gateIn.mileage, gateIn.mileage_unit ?? "km") },
                   { label: "Keys", value: `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}` },
                   { label: "Old parts returned to customer", value: gateIn.old_parts_return ? "Yes" : "No" },
                   { label: "Notes", value: gateIn.notes ? <span className="whitespace-pre-wrap">{gateIn.notes}</span> : null },
@@ -417,11 +454,54 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                     </option>
                   ))}
                 </Select>
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold">Road test</span>
+                  <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
+                </div>
+                <Textarea name="road_test_note" rows={1} placeholder="Note (required when the road test is not possible)" defaultValue={roadTest?.decision_note ?? ""} />
                 <Button type="submit" disabled={!check.complete || (!job.first_approval_at && role !== "owner")}>
                   {job.assigned_to ? "Reassign" : "Assign"}
                 </Button>
                 {!check.complete ? <p className="text-xs text-amber font-semibold">Blocked until the gate-in media is complete.</p> : null}
                 {check.complete && !job.first_approval_at ? <p className="text-xs text-amber font-semibold">Blocked until the customer approves the job card.</p> : null}
+              </form>
+            </Card>
+          ) : waitingForAssignment ? (
+            <Card className="flex flex-col gap-2">
+              <SectionLabel>Assign technician</SectionLabel>
+              <p className="text-sm">
+                Waiting on <span className="font-semibold">{managerLabel}</span> to assign a technician · {waitedText(job.first_approval_at ?? job.stage_entered_at, wt)}
+              </p>
+            </Card>
+          ) : null}
+
+          {canAssign && job.assigned_to && roadTest && job.department !== "bodyshop" ? (
+            <Card className="flex flex-col gap-3">
+              <SectionLabel>Road test choice</SectionLabel>
+              <p className="text-sm">
+                {roadTest.decision ? ROAD_TEST_DECISION_LABELS[roadTest.decision] : "Not chosen yet"}
+                {roadTest.decision_note ? <span className="text-muted"> · {roadTest.decision_note}</span> : null}
+                <span className="text-muted"> · {roadTestLine(roadTest)}</span>
+              </p>
+              <form action={decideRoadTest.bind(null, id)} className="flex flex-col gap-3">
+                <ChoiceButtons name="road_test" columns={3} defaultValue={roadTest.decision ?? defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
+                <Textarea name="road_test_note" rows={1} required placeholder="Why the change (required)" />
+                <Button type="submit" tone="secondary" size="md">
+                  Save road test choice
+                </Button>
+                <p className="text-xs text-muted">Choosing No road test or Not possible opens the inspection for the technician at once.</p>
+              </form>
+            </Card>
+          ) : null}
+
+          {canNote && job.is_open && !job.assigned_to ? (
+            <Card className="flex flex-col gap-3">
+              <SectionLabel>Note to the workshop manager</SectionLabel>
+              <form action={setAssignmentNote.bind(null, id)} className="flex flex-col gap-3">
+                <Textarea name="assignment_note" rows={2} maxLength={500} defaultValue={job.assignment_note ?? ""} placeholder="Short note about this car for whoever assigns it" />
+                <Button type="submit" tone="secondary" size="md">
+                  {job.assignment_note ? "Update note" : "Send note"}
+                </Button>
               </form>
             </Card>
           ) : null}

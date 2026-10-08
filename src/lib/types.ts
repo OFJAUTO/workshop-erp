@@ -106,6 +106,7 @@ export type VehicleRow = {
   colour: string | null;
   fuel_type: FuelType | null;
   last_mileage: number | null;
+  mileage_unit: "km" | "mi";
   notes: string | null;
   is_active: boolean;
   created_at: string;
@@ -187,6 +188,11 @@ export type JobRow = {
   stage_entered_at: string;
   is_open: boolean;
   department: "mechanical" | "bodyshop" | "both" | null;
+  assignment_note: string | null;
+  assignment_note_by: string | null;
+  assignment_note_at: string | null;
+  assignment_reminded_at: string | null;
+  assignment_overdue_notified_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -201,6 +207,8 @@ export type GateInRow = {
   cleanliness: "clean" | "average" | "dirty" | "very_dirty";
   dash_cam: boolean;
   mileage: number;
+  mileage_unit: "km" | "mi";
+  mileage_miles: number | null;
   keys_count: number;
   keys_keychain: boolean;
   customer_requests: string;

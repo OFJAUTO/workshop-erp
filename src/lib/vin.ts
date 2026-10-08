@@ -29,3 +29,22 @@ export function makeFromVin(vin: string): string | null {
   if (v.length < 3) return null;
   return WMI[v.slice(0, 3)] ?? null;
 }
+
+/** The 10th character of a VIN is the model year. The codes repeat every 30 years (A = 1980 or 2010). */
+const YEAR_CODES = "ABCDEFGHJKLMNPRSTVWXY123456789";
+
+/**
+ * Model year read from the VIN, or null when the character is not a year code.
+ * Where a code could mean two years 30 years apart, the recent one wins, as long as it is not
+ * further ahead than next year's models.
+ */
+export function modelYearFromVin(vin: string, now = new Date()): number | null {
+  const v = vin.trim().toUpperCase();
+  if (v.length < 10) return null;
+  const idx = YEAR_CODES.indexOf(v[9]);
+  if (idx < 0) return null;
+  const latestAllowed = now.getFullYear() + 1;
+  let year = 1980 + idx;
+  while (year + 30 <= latestAllowed) year += 30;
+  return year;
+}

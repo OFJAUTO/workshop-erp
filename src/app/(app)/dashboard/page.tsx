@@ -5,7 +5,8 @@ import { signCarPictures } from "@/lib/car-pictures";
 import { formatMinutes, jobConcernsSide, sideOfDepartment, type InspectionStatus } from "@/lib/inspection";
 import { nextStepOf } from "@/lib/next-step";
 import { inspectionOverTarget, inspectionWorkingMinutes } from "@/lib/inspection-data";
-import { STATUS_LABELS, formatPromised, hoursInStage, jobTiming, urgencyRank, workingTimeOf, type JobStatus, type Priority, type Stage } from "@/lib/jobs";
+import { STATUS_LABELS, clockOf, formatPromised, hoursInStage, jobTiming, urgencyRank, workingTimeOf, type JobStatus, type Priority, type Stage } from "@/lib/jobs";
+import { roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
@@ -29,7 +30,7 @@ type Row = JobRow & {
   } | null;
   assignee: { display_name: string } | null;
   approval: { sent_at: string | null; opened_at: string | null; approved_at: string | null; approver_name: string | null; created_at: string }[] | null;
-  road_test: { status: "not_started" | "done" | "not_possible" }[] | null;
+  road_test: Pick<RoadTestRow, "status" | "decision">[] | null;
   gate_in: { condition: string; dash_cam: boolean; is_complete: boolean; major_damage: boolean } | null;
   inspection: { status: InspectionStatus; technician_id: string | null; started_at: string | null; submitted_at: string | null; approved_at: string | null; elapsed_minutes: number | null; target_minutes: number | null }[] | null;
 };
@@ -47,11 +48,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true);
   const all = (data ?? []) as unknown as Row[];
-  const clockFor = (j: Row) => ({ stage: j.stage, enteredAt: j.stage_entered_at, targetHours: settings.stage_target_hours, workingTime });
+  const clockFor = (j: Row) => clockOf(j, settings);
 
   const customerIds = Array.from(new Set(all.map((j) => j.customer_id)));
   const [{ data: names }, pictures] = await Promise.all([
@@ -152,7 +153,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <li key={j.id} className="py-2 flex flex-wrap items-center justify-between gap-2">
                         <span className="font-semibold">
                           {r.plate} · {r.title}
-                          <span className="text-muted font-normal"> · {r.assignee ?? ""} · {j.road_test?.[0]?.status && j.road_test[0].status !== "not_started" ? "road test done" : "road test pending"}</span>
+                          <span className="text-muted font-normal"> · {r.assignee ?? ""}{roadTestWaiting(j.road_test?.[0] ?? null) ? " · road test pending" : ""}</span>
                         </span>
                         <LinkButton href={`/jobs/${j.id}/inspection`} size="md">
                           Review

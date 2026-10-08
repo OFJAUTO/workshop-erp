@@ -1,8 +1,9 @@
 /** Plain words for where a job is: what just finished, what happens next, and whose move it is. */
 
 import type { InspectionStatus } from "./inspection";
-import type { JobStatus } from "./jobs";
-import type { RoadTestRow } from "./road-test";
+import { formatWait, workingMinutesSince, type JobStatus } from "./jobs";
+import { roadTestWaiting, type RoadTestRow } from "./road-test";
+import type { WorkingTime } from "./working-time";
 
 export type NextStepInput = {
   status: JobStatus;
@@ -15,7 +16,7 @@ export type NextStepInput = {
   advisorName: string | null;
   managerLabel: string;
   inspection: { status: InspectionStatus; technician_id: string | null; submitted_at: string | null; approved_at: string | null } | null;
-  roadTest: Pick<RoadTestRow, "status"> | null;
+  roadTest: Pick<RoadTestRow, "status" | "decision"> | null;
   approval: { sent_at: string | null; opened_at: string | null; approved_at: string | null; approver_name: string | null } | null;
   gateInComplete: boolean;
 };
@@ -54,18 +55,20 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
     return { done: { label: "Approval link sent", by: j.advisorName }, next: "The customer approves the job card.", waitingOn: "the customer", actorRole: "customer", action: null, since: j.approval.sent_at, line: "Waiting on the customer to approve the job card" };
   }
   if (j.status === "pending_inspection" && !j.assigned_to) {
-    return { done: { label: "Customer approved the job card", by: j.approval?.approver_name ?? null }, next: "Assign a technician.", waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Assign", href: "/assign" }, since: j.first_approval_at ?? j.stage_entered_at, line: `Waiting on ${j.managerLabel} to assign` };
+    return { done: { label: "Customer approved the job card", by: j.approval?.approver_name ?? null }, next: `${j.managerLabel} assigns a technician.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Assign", href: "/assign" }, since: j.first_approval_at ?? j.stage_entered_at, line: `Waiting on ${j.managerLabel} to assign a technician` };
+  }
+  if (j.status === "pending_inspection" && roadTestWaiting(road)) {
+    return { done: { label: `Assigned to ${tech}`, by: null }, next: "The QC inspector does the road test. The inspection opens after it.", waitingOn: "the QC inspector", actorRole: "qc_inspector", action: { label: "Road test", href: `/road-tests/${jobId}` }, since: j.stage_entered_at, line: "Waiting for road test" };
   }
   if (j.status === "pending_inspection" || (j.status === "in_inspection" && (!insp || insp.status === "not_started"))) {
     return { done: { label: `Assigned to ${tech}`, by: null }, next: "Start the inspection on the tablet.", waitingOn: tech, actorRole: "technician", action: { label: "Open on the tablet", href: `/my-jobs/${jobId}` }, since: j.stage_entered_at, line: `Pending inspection, waiting on ${tech}` };
   }
   if (j.status === "in_inspection" && insp) {
     if (insp.status === "in_progress" || insp.status === "returned") {
-      const roadWait = road && road.status === "not_started" ? " and the QC road test" : "";
+      const roadWait = road && road.status === "not_started" && road.decision !== "not_needed" ? " and the QC road test" : "";
       return { done: { label: insp.status === "returned" ? "Report sent back for changes" : "Inspection started", by: tech }, next: `${tech} finishes the inspection report${roadWait}.`, waitingOn: tech, actorRole: "technician", action: { label: "Open the report", href: `/my-jobs/${jobId}` }, since: j.stage_entered_at, line: `In inspection, waiting on ${tech}` };
     }
     if (insp.status === "submitted") {
-      if (road && road.status === "not_started") return { done: { label: "Report submitted", by: tech }, next: "The QC inspector does the road test, then the workshop manager reviews.", waitingOn: "the QC inspector", actorRole: "qc_inspector", action: { label: "Road test", href: `/road-tests/${jobId}` }, since: insp.submitted_at ?? j.stage_entered_at, line: "Report submitted, waiting on the QC road test" };
       return { done: { label: "Report submitted", by: tech }, next: "The workshop manager reviews and approves the report.", waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Review the report", href: `/jobs/${jobId}/inspection` }, since: insp.submitted_at ?? j.stage_entered_at, line: `Report submitted, waiting on ${j.managerLabel}` };
     }
   }
@@ -82,10 +85,7 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
   return { done: null, next: "", waitingOn: "", actorRole: null, action: null, since: j.stage_entered_at, line: "" };
 }
 
-/** "2 h 10 min" or "3 days" since a moment. */
-export function waitedText(sinceIso: string, now = new Date()) {
-  const min = Math.max(0, Math.round((now.getTime() - Date.parse(sinceIso)) / 60000));
-  if (min < 60) return `${min} min`;
-  if (min < 48 * 60) return `${Math.floor(min / 60)} h ${min % 60} min`;
-  return `${Math.round(min / 1440)} days`;
+/** "2 h 10 min" or "3 days" since a moment, on the same working-hours clock as the stage timers. */
+export function waitedText(sinceIso: string, wt: WorkingTime, now = new Date()) {
+  return formatWait(workingMinutesSince(sinceIso, wt, now), wt);
 }

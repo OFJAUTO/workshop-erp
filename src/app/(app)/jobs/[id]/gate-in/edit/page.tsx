@@ -28,6 +28,8 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
           mode="edit"
           requests={card.requests.map((r) => r.text)}
           requestsLocked={g.is_complete}
+          mileageUnit={g.mileage_unit ?? "km"}
+          mileageContext={{ modelYear: card.vehicle.model_year, lastKm: null, lastVisitAt: null }}
           initialValues={{
             department: card.job.department ?? "",
             vip: card.customer?.is_vip ?? card.vip?.is_vip ? "on" : "",
@@ -39,7 +41,8 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
             cleanliness: g.cleanliness,
             dash_cam: g.dash_cam ? "yes" : "no",
             major_damage: g.major_damage ? "yes" : "no",
-            mileage: g.mileage.toString(),
+            mileage_entered: String(g.mileage_unit === "mi" ? (g.mileage_miles ?? Math.round(g.mileage / 1.609344)) : g.mileage),
+            mileage_unit: g.mileage_unit ?? "km",
             keys_count: g.keys_count.toString(),
             keys_keychain: g.keys_keychain ? "yes" : "no",
             notes: g.notes ?? "",

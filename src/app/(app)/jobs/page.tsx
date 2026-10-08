@@ -6,7 +6,7 @@ import { Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatDate } from "@/lib/format";
-import { STATUS_LABELS, jobTiming, urgencyRank, workingTimeOf } from "@/lib/jobs";
+import { STATUS_LABELS, clockOf, jobTiming, urgencyRank } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
@@ -33,7 +33,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
     .eq("is_open", !closed)
     .order(closed ? "gated_out_at" : "gated_in_at", { ascending: false })
     .limit(200);
-  const clockFor = (j: Row) => ({ stage: j.stage, enteredAt: j.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: workingTimeOf(settings) });
+  const clockFor = (j: Row) => clockOf(j, settings);
   const rows = ((data ?? []) as unknown as Row[]).sort((a, b) => {
     if (closed) return 0;
     const ra = urgencyRank(a, clockFor(a));

@@ -5,7 +5,7 @@ import { formatDateTime } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { CONDITIONS, labelOf } from "@/lib/jobs";
-import { ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
+import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
@@ -23,7 +23,7 @@ export default async function RoadTestPage({ params }: { params: Promise<{ jobId
   const [card, bundle, { data: test }] = await Promise.all([
     loadJobCard(supabase, jobId),
     loadInspection(jobId),
-    supabase.from("road_tests").select("id, job_id, inspector_id, status, items, not_possible_reason, started_at, done_at, created_at, updated_at").eq("job_id", jobId).maybeSingle(),
+    supabase.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", jobId).maybeSingle(),
   ]);
   if (!card) notFound();
   const rt = (test as RoadTestRow | null) ?? null;
@@ -45,6 +45,11 @@ export default async function RoadTestPage({ params }: { params: Promise<{ jobId
       />
       {card.gateIn?.condition && card.gateIn.condition !== "runs_drives" ? <Notice tone="error">Gate-in condition: {labelOf(CONDITIONS, card.gateIn.condition)}. If the car cannot be driven, mark the road test not possible.</Notice> : null}
       {card.gateIn?.dash_cam ? <Notice tone="error">Dash cam fitted: disconnect before driving.</Notice> : null}
+      {rt?.decision ? (
+        <Notice tone="info">
+          Workshop manager: {ROAD_TEST_DECISION_LABELS[rt.decision]}{rt.decision_note ? ` · ${rt.decision_note}` : ""}{rt.decision === "needed" && rt.status === "not_started" ? ". The technician's inspection opens once you submit the road test." : ""}
+        </Notice>
+      ) : null}
       <Card className="flex flex-col gap-2">
         <SectionLabel right={`${card.requests.length}`}>Customer requests</SectionLabel>
         <ol className="list-decimal pl-5 text-[15px] font-medium flex flex-col gap-0.5">

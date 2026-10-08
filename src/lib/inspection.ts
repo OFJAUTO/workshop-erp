@@ -1,8 +1,15 @@
 /** The mechanical inspection: checklist shape, default sections, measurements, tyres, statuses and the completeness rules. */
 
-export const ITEM_STATUSES = ["good", "average", "bad"] as const;
+/** Checklist items: GOOD, AVERAGE, BAD or N/A (does not apply; counts as answered, needs no remark, left out of the customer's report). */
+export const ITEM_STATUSES = ["good", "average", "bad", "na"] as const;
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
-export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = { good: "GOOD", average: "AVERAGE", bad: "BAD" };
+/** Customer requests and the road test have no N/A. */
+export const CHECK_STATUSES = ["good", "average", "bad"] as const;
+export type CheckStatus = (typeof CHECK_STATUSES)[number];
+export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = { good: "GOOD", average: "AVERAGE", bad: "BAD", na: "N/A" };
+
+/** The "Other" section is optional: an unmarked item there does not block the report. */
+export const OPTIONAL_SECTION_KEY = "other";
 
 export const INSPECTION_STATUSES = ["not_started", "in_progress", "submitted", "returned", "approved"] as const;
 export type InspectionStatus = (typeof INSPECTION_STATUSES)[number];
@@ -269,7 +276,6 @@ export type ReportState = {
   items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string }[];
   findings: { requestId: string; text: string; status: ItemStatus | null; found: string }[];
   measurements: Record<string, string>;
-  hasPrescan: boolean;
 };
 
 export function reportProblemsOf(s: ReportState): ReportProblem[] {
@@ -282,7 +288,9 @@ export function reportProblemsOf(s: ReportState): ReportProblem[] {
   for (const i of s.items) {
     if (i.sectionKey === ROAD_TEST_SECTION_KEY) continue;
     const short = i.label.length > 28 ? i.label.slice(0, 26) + "…" : i.label;
-    if (!i.status) out.push({ key: i.key, label: `${short}: not marked` });
+    if (!i.status) {
+      if (i.sectionKey !== OPTIONAL_SECTION_KEY) out.push({ key: i.key, label: `${short}: not marked` });
+    }
     else if ((i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
   }
   for (const p of TYRE_POSITIONS) {
@@ -299,8 +307,14 @@ export function reportProblemsOf(s: ReportState): ReportProblem[] {
     if (m.optional || m.key.startsWith("tyre_")) continue;
     if (!s.measurements[m.key]?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });
   }
-  if (!s.hasPrescan) out.push({ key: "prescan", label: "Scan report missing" });
   return out;
+}
+
+/** "12 of 99 done": every required answer on the report, for the neutral progress shown before Submit is tapped. */
+export function reportProgressOf(s: ReportState): { done: number; total: number } {
+  const required = s.findings.length + s.items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY && i.sectionKey !== OPTIONAL_SECTION_KEY).length + TYRE_POSITIONS.length * 4 + MEASUREMENTS.filter((m) => !m.optional && !m.key.startsWith("tyre_")).length;
+  const open = reportProblemsOf(s).length;
+  return { done: Math.max(0, required - open), total: required };
 }
 
 /** The tyre action with the worst outcome decides the Tyres item: replace now = BAD, replace soon = AVERAGE. */

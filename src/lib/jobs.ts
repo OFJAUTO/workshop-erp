@@ -134,7 +134,44 @@ export function labelOf(list: readonly { value: string; label: string }[], value
 
 export type Timing = { tone: "green" | "amber" | "red" | "neutral"; label: string; daysOver: number };
 
-export type StageClock = { stage: Stage; enteredAt: string; targetHours: Record<string, number>; workingTime?: WorkingTime };
+export type StageClock = {
+  stage: Stage;
+  enteredAt: string;
+  targetHours: Record<string, number>;
+  workingTime?: WorkingTime;
+  /** Set while the car waits for a technician: amber past the target, red at double. */
+  assignmentWait?: { since: string; targetMinutes: number };
+};
+
+type ClockSettings = { stage_target_hours: Record<string, number>; assignment_target_minutes?: number | string; opening_hour: number | string; closing_hour: number | string; working_days: string[] };
+
+/** The stage clock for one job from the settings, including the assignment wait when the car has no technician yet. */
+export function clockOf(job: { stage: Stage; stage_entered_at: string; status: JobStatus; assigned_to: string | null; first_approval_at: string | null }, settings: ClockSettings): StageClock {
+  const waiting = job.status === "pending_inspection" && !job.assigned_to;
+  return {
+    stage: job.stage,
+    enteredAt: job.stage_entered_at,
+    targetHours: settings.stage_target_hours,
+    workingTime: workingTimeOf(settings),
+    assignmentWait: waiting ? { since: job.first_approval_at ?? job.stage_entered_at, targetMinutes: Number(settings.assignment_target_minutes) || 30 } : undefined,
+  };
+}
+
+/** Working minutes since a moment. */
+export function workingMinutesSince(sinceIso: string, wt: WorkingTime, now = new Date()) {
+  return Math.round(workingHoursBetween(sinceIso, now, wt) * 60);
+}
+
+/** "25 min", "2 h 10 min" or "3 days" of working time. */
+export function formatWait(minutes: number, wt?: WorkingTime) {
+  const min = Math.max(0, Math.round(minutes));
+  const dayMinutes = wt && wt.closeHour > wt.openHour ? (wt.closeHour - wt.openHour) * 60 : 24 * 60;
+  if (min < 60) return `${min} min`;
+  if (min < dayMinutes * 2) return `${Math.floor(min / 60)} h ${min % 60} min`;
+  return `${Math.round(min / dayMinutes)} days`;
+}
+
+const TONE_RANK: Record<Timing["tone"], number> = { red: 0, amber: 1, green: 2, neutral: 3 };
 
 /** The working-time settings in the shape the stage clock needs. */
 export function workingTimeOf(settings: { opening_hour: number | string; closing_hour: number | string; working_days: string[] }): WorkingTime {
@@ -160,6 +197,18 @@ export function feeNotice(template: string | null | undefined, amount: number | 
  */
 export function jobTiming(promisedAt: string | null, isOpen: boolean, clock?: StageClock, now = new Date()): Timing {
   if (!isOpen) return { tone: "neutral", label: "Closed", daysOver: 0 };
+  const base = baseTiming(promisedAt, clock, now);
+  if (!clock?.assignmentWait) return base;
+  // Waiting for a technician: the assignment target decides the colour, unless the promised date is worse.
+  const wt = clock.workingTime ?? { openHour: 0, closeHour: 24, workingDays: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] };
+  const minutes = workingMinutesSince(clock.assignmentWait.since, wt, now);
+  const target = clock.assignmentWait.targetMinutes;
+  const tone: Timing["tone"] = target > 0 && minutes >= target * 2 ? "red" : target > 0 && minutes >= target ? "amber" : "green";
+  const wait: Timing = { tone, label: `${formatWait(minutes, wt)} waiting to assign`, daysOver: base.daysOver };
+  return TONE_RANK[base.tone] < TONE_RANK[wait.tone] ? base : wait;
+}
+
+function baseTiming(promisedAt: string | null, clock: StageClock | undefined, now: Date): Timing {
   if (!promisedAt) {
     if (!clock) return { tone: "neutral", label: "No promised date", daysOver: 0 };
     const hours = hoursInStage(clock, now);

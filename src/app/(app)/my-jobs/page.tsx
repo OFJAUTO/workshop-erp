@@ -6,30 +6,46 @@ import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
-import { STATUS_LABELS, formatPromised, jobTiming, urgencyRank, workingTimeOf } from "@/lib/jobs";
+import type { InspectionStatus } from "@/lib/inspection";
+import { STATUS_LABELS, clockOf, formatPromised, jobTiming, urgencyRank } from "@/lib/jobs";
+import { roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
+import { SubmittedOverlay } from "./SubmittedOverlay";
 
 type Row = JobRow & {
   vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   gate_in: { dash_cam: boolean; customer_requests: string } | null;
   requests: { id: string; position: number; text: string; is_active: boolean }[] | null;
+  inspection: { status: InspectionStatus; is_active: boolean }[] | null;
+  road_test: Pick<RoadTestRow, "status" | "decision">[] | null;
 };
 
-/** The technician's list: cars assigned to them. The full technician screen arrives in Phase 6. */
-export default async function MyJobsPage() {
+/** What the technician sees on each card: where the car is from their point of view. */
+function technicianLine(j: Row): { text: string; tone: "neutral" | "amber" | "green" | "red" | "ink" } {
+  const insp = j.inspection?.find((i) => i.is_active) ?? j.inspection?.[0] ?? null;
+  if (insp?.status === "submitted") return { text: "Submitted, waiting for the workshop manager", tone: "amber" };
+  if (insp?.status === "returned") return { text: "Sent back by the workshop manager: open it and fix", tone: "red" };
+  if (insp?.status === "approved") return { text: "Report approved", tone: "green" };
+  if (roadTestWaiting(j.road_test?.[0] ?? null)) return { text: "Waiting for road test", tone: "ink" };
+  return { text: STATUS_LABELS[j.status], tone: "neutral" };
+}
+
+/** The technician's list: cars assigned to them. */
+export default async function MyJobsPage({ searchParams }: { searchParams: Promise<{ submitted?: string }> }) {
   const staff = await requirePermission("viewOwnJobs");
+  const { submitted } = await searchParams;
   const settings = await getSettings();
   const supabase = await createClient();
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active), inspection:inspections(status, is_active), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true)
     .eq("assigned_to", staff.id);
-  const clockFor = (j: Row) => ({ stage: j.stage, enteredAt: j.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: workingTimeOf(settings) });
+  const clockFor = (j: Row) => clockOf(j, settings);
   const rows = ((data ?? []) as unknown as Row[]).sort((a, b) => {
     const ra = urgencyRank(a, clockFor(a));
     const rb = urgencyRank(b, clockFor(b));
@@ -49,10 +65,12 @@ export default async function MyJobsPage() {
     for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
     return 0;
   });
+  const submittedJob = submitted ? rows.find((j) => j.id === submitted) : null;
 
   return (
     <>
-      <LiveRefresh tables={["jobs"]} pollMs={60000} />
+      {submitted ? <SubmittedOverlay jobNumber={submittedJob?.job_number ?? ""} /> : null}
+      <LiveRefresh tables={["jobs", "inspections", "road_tests"]} pollMs={60000} />
       <PageHeader title="My jobs" subtitle={`${rows.length} car${rows.length === 1 ? "" : "s"} assigned to you`} />
       {rows.length === 0 ? (
         <Empty title="No cars assigned to you right now" />
@@ -60,6 +78,7 @@ export default async function MyJobsPage() {
         <div className="flex flex-col gap-3">
           {rows.map((j) => {
             const timing = jobTiming(j.promised_at, j.is_open, clockFor(j));
+            const line = technicianLine(j);
             return (
               <Link key={j.id} href={`/my-jobs/${j.id}`} className="block">
                 <Card className="flex flex-col gap-3 hover:border-ink">
@@ -85,9 +104,9 @@ export default async function MyJobsPage() {
                       )}
                     </div>
                   </div>
-                  <span className="text-sm font-bold">
-                    {STATUS_LABELS[j.status]}
-                    {j.promised_at ? ` · promised ${formatPromised(j.promised_at)}` : ""}
+                  <span className="flex flex-wrap items-center gap-2 text-sm font-bold">
+                    <Badge tone={line.tone}>{line.text}</Badge>
+                    {j.promised_at ? <span className="text-muted font-semibold">promised {formatPromised(j.promised_at)}</span> : null}
                   </span>
                   <StageTrack stage={j.stage} timing={timing} compact />
                 </Card>

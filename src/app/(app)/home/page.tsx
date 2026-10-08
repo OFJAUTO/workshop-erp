@@ -18,6 +18,7 @@ export default async function HomePage() {
   if (role === "gate_in") redirect("/gate-in");
   if (can(role, "viewDashboard")) redirect("/dashboard");
   if (role === "technician") redirect("/my-jobs");
+  if (role === "qc_inspector") redirect("/road-tests");
   const today = new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
     day: "numeric",

@@ -9,7 +9,9 @@ import { blankToNull, normalisePhone } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
 import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
+import { toMiles } from "@/lib/mileage";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { ROAD_TEST_DECISION_LABELS, type RoadTestDecision } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -43,13 +45,46 @@ async function logEvent(
   });
 }
 
-/** Workshop manager hands the car to a technician. Blocked until the gate-in media is complete. */
+/** The road test choice the manager makes while assigning: needed, not needed, or not possible with a compulsory note. */
+function readRoadTestChoice(formData: FormData): { decision: RoadTestDecision; note: string | null } | string {
+  const decision = String(formData.get("road_test") ?? "");
+  const note = blankToNull(formData.get("road_test_note"));
+  if (decision !== "needed" && decision !== "not_needed" && decision !== "not_possible") return "Choose Road test needed, No road test or Road test not possible.";
+  if (decision === "not_possible" && (!note || note.length < 3)) return "Say why the road test is not possible.";
+  return { decision, note };
+}
+
+/** Writes the manager's road test choice on the job's road test record and tells the QC inspector when one is needed. */
+async function applyRoadTestChoice(jobId: string, jobNumber: string, technician: { id: string; display_name: string } | null, choice: { decision: RoadTestDecision; note: string | null }, by: { id: string; display_name: string }) {
+  const admin = createAdminClient();
+  const { data: existing } = await admin.from("road_tests").select("id, status, decision").eq("job_id", jobId).maybeSingle();
+  const now = new Date().toISOString();
+  const row: Record<string, unknown> = { job_id: jobId, decision: choice.decision, decision_note: choice.note, decided_by: by.id, decided_at: now, updated_by: by.id };
+  if (!existing) Object.assign(row, { created_by: by.id });
+  if (choice.decision === "not_possible") Object.assign(row, { status: "not_possible", not_possible_reason: choice.note, done_at: existing?.status === "done" ? undefined : now });
+  else if (existing?.status === "not_possible" && existing.decision === "not_possible") Object.assign(row, { status: "not_started", not_possible_reason: null, done_at: null });
+  const { error } = await admin.from("road_tests").upsert(row, { onConflict: "job_id" });
+  if (error) throw new Error(error.message);
+  const changed = existing?.decision !== choice.decision;
+  if (changed || !existing) {
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "road_test_decision", note: `${ROAD_TEST_DECISION_LABELS[choice.decision]} (${by.display_name})${choice.note ? `: ${choice.note}` : ""}`, created_by: by.id });
+  }
+  if (choice.decision === "needed" && (changed || !existing) && existing?.status !== "done") {
+    await notifyRoles(["qc_inspector"], { type: "road_test_assigned", title: `Road test needed · ${jobNumber}`, body: `${technician ? `Technician ${technician.display_name}. ` : ""}The inspection waits for your road test.`, jobId, href: `/road-tests/${jobId}` });
+  }
+  return { changed, wasWaiting: existing?.decision === "needed" && existing.status === "not_started" };
+}
+
+/** Workshop manager hands the car to a technician and says whether a road test is needed. Blocked until the gate-in media is complete. */
 export async function assignJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("assignJobs");
   const technicianId = String(formData.get("technician") ?? "");
   const supabase = await createClient();
   const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
+  const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
+  const choice = readRoadTestChoice(formData);
+  if (typeof choice === "string") redirect(`${back}?error=` + encodeURIComponent(choice));
 
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
@@ -77,17 +112,14 @@ export async function assignJob(jobId: string, formData: FormData) {
   if (jobRow?.department !== "bodyshop") {
     const settings = await getSettings();
     await ensureInspection(jobId, tech.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
-    const { data: existingRoad } = await createAdminClient().from("road_tests").select("id").eq("job_id", jobId).maybeSingle();
-    if (!existingRoad) {
-      await createAdminClient().from("road_tests").insert({ job_id: jobId, created_by: staff.id, updated_by: staff.id });
-      await notifyRoles(["qc_inspector"], { type: "road_test_assigned", title: `Road test needed · ${jobRow?.job_number ?? ""}`, body: `Assigned to ${tech.display_name} by ${staff.display_name}. Do it before, during or after the inspection.`, jobId, href: `/road-tests/${jobId}` });
-    }
+    await applyRoadTestChoice(jobId, jobRow?.job_number ?? "", { id: tech.id, display_name: tech.display_name }, choice, { id: staff.id, display_name: staff.display_name });
   }
-  await notifyStaff([tech.id], { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
+  const waitsForRoadTest = jobRow?.department !== "bodyshop" && choice.decision === "needed";
+  await notifyStaff([tech.id], { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: waitsForRoadTest ? `Assigned by ${staff.display_name}. The QC inspector does the road test first; you are told when the inspection opens.` : `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
   refresh(jobId);
   revalidatePath("/assign");
-  const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
-  redirect(`${back}?message=` + encodeURIComponent(`Assigned to ${tech.display_name}.`));
+  revalidatePath("/road-tests");
+  redirect(`${back}?message=` + encodeURIComponent(`Assigned to ${tech.display_name}. ${ROAD_TEST_DECISION_LABELS[choice.decision]}.`));
 }
 
 /** Manual stage move for the owner and workshop manager until later phases automate it. */
@@ -149,7 +181,9 @@ const amendSchema = z.object({
   cleanliness: z.enum(["clean", "average", "dirty", "very_dirty"]),
   dash_cam: z.enum(["yes", "no"]),
   major_damage: z.enum(["yes", "no"]),
-  mileage: z.string().regex(/^\d{1,7}$/, "Enter the mileage in km."),
+  mileage: z.string().regex(/^\d{1,7}$/, "Enter the mileage."),
+  mileage_unit: z.enum(["km", "mi"]),
+  mileage_entered: z.string().trim(),
   keys_count: z.string().regex(/^\d{1,2}$/, "Enter how many keys were received."),
   keys_keychain: z.enum(["yes", "no"]),
   notes: z.string().trim(),
@@ -171,6 +205,8 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     dash_cam: get("dash_cam"),
     major_damage: get("major_damage"),
     mileage: get("mileage"),
+    mileage_unit: get("mileage_unit") || "km",
+    mileage_entered: get("mileage_entered"),
     keys_count: get("keys_count"),
     keys_keychain: get("keys_keychain"),
     notes: get("notes"),
@@ -201,6 +237,8 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
       dash_cam: d.dash_cam === "yes",
       major_damage: d.major_damage === "yes",
       mileage: Number(d.mileage),
+      mileage_unit: d.mileage_unit,
+      mileage_miles: d.mileage_unit === "mi" && d.mileage_entered !== "" && Number.isFinite(Number(d.mileage_entered)) ? Number(d.mileage_entered) : toMiles(Number(d.mileage)),
       keys_count: Number(d.keys_count),
       keys_keychain: d.keys_keychain === "yes",
       notes: blankToNull(d.notes),
@@ -211,6 +249,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   if (error) return { error: error.message, values };
   const dept = String(formData.get("department") ?? "");
   if (["mechanical", "bodyshop", "both"].includes(dept)) await supabase.from("jobs").update({ department: dept }).eq("id", jobId);
+  await supabase.from("vehicles").update({ mileage_unit: d.mileage_unit }).eq("id", (await supabase.from("jobs").select("vehicle_id").eq("id", jobId).maybeSingle()).data?.vehicle_id ?? "");
 
   if (!gi?.is_complete) {
     // Request lines can be rewritten until the gate-in is complete: retire the old ones, add the new ones.

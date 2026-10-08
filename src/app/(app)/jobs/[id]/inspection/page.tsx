@@ -7,7 +7,8 @@ import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_S
 import { inspectionLocked, inspectionWorkingMinutes, loadInspection, type InspectionMediaRow } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { workingTimeOf } from "@/lib/jobs";
-import { ROAD_TEST_ITEMS, ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
+import { PrescanToggle } from "@/components/PrescanToggle";
+import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_ITEMS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
@@ -18,7 +19,7 @@ import { ApproveForm, RequestChangeForm, ReturnForm } from "./forms";
 
 export const dynamic = "force-dynamic";
 
-const TONE: Record<ItemStatus, "green" | "amber" | "red"> = { good: "green", average: "amber", bad: "red" };
+const TONE: Record<ItemStatus, "green" | "amber" | "red" | "neutral"> = { good: "green", average: "amber", bad: "red", na: "neutral" };
 
 function Files({ rows, urls }: { rows: InspectionMediaRow[]; urls: Record<string, string> }) {
   if (!rows.length) return null;
@@ -68,7 +69,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
     loadJobCard(supabase, id),
     loadInspection(id),
     getSettings(),
-    supabase.from("road_tests").select("id, job_id, inspector_id, status, items, not_possible_reason, started_at, done_at, created_at, updated_at").eq("job_id", id).maybeSingle(),
+    supabase.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
   ]);
   if (!card) notFound();
   const { job, vehicle, requests } = card;
@@ -78,8 +79,10 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const isTech = role === "technician" && job.assigned_to === staff.id;
   const isManager = role === "workshop_manager" && (!job.department || job.department === "both" || sideOfDepartment(staff.department_id) === null || sideOfDepartment(staff.department_id) === job.department);
   const approvedForAdvisor = role === "service_advisor" && bundle?.inspection.status === "approved";
-  const allowed = role === "owner" || isTech || isManager || approvedForAdvisor || role === "qc_inspector" || role === "accounts" || role === "parts";
-  if (!allowed) redirect(role === "technician" ? "/my-jobs" : role === "service_advisor" ? `/jobs/${id}?error=${encodeURIComponent("The report opens for you once the workshop manager has approved it.")}` : "/home");
+  // The QC inspector reads approved reports only.
+  const approvedForQc = role === "qc_inspector" && bundle?.inspection.status === "approved";
+  const allowed = role === "owner" || isTech || isManager || approvedForAdvisor || approvedForQc || role === "accounts" || role === "parts";
+  if (!allowed) redirect(role === "technician" ? "/my-jobs" : role === "service_advisor" ? `/jobs/${id}?error=${encodeURIComponent("The report opens for you once the workshop manager has approved it.")}` : role === "qc_inspector" ? "/road-tests" : "/home");
 
   if (!bundle) {
     return (
@@ -102,7 +105,6 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const flagged = items.filter((i) => i.status === "average" || i.status === "bad");
   const prescans = bundle.media.filter((m) => m.is_prescan);
   const pendingChange = bundle.changeRequests.find((c) => c.status === "pending");
-  const roadDone = !!roadTest && roadTest.status !== "not_started";
   const m = insp.measurements ?? {};
   const reviewing = canApprove && insp.status === "submitted";
   const unlockHours = Number(settings.inspection_unlock_hours) || 1;
@@ -129,13 +131,13 @@ export default async function InspectionReportPage({ params }: { params: Promise
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
             <Badge tone={insp.status === "approved" ? "green" : insp.status === "returned" ? "red" : insp.status === "submitted" ? "amber" : "outline"}>{INSPECTION_STATUS_LABELS[insp.status]}</Badge>
-            <Badge tone={roadDone ? "green" : "amber"}>{ROAD_TEST_STATUS_LABELS[roadTest?.status ?? "not_started"]}</Badge>
+            {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
             {locked ? <Badge tone="ink">Locked</Badge> : null}
           </span>
         }
         actions={
           <>
-            {role !== "technician" ? (
+            {can(role, "viewJobs") ? (
               <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">
                 Job card
               </LinkButton>
@@ -155,7 +157,6 @@ export default async function InspectionReportPage({ params }: { params: Promise
       />
 
       {reviewing ? <Notice tone="info">You are reviewing. You can change any item, remark, parts list, number or photo before approving; each change is stamped with your name and the technician&apos;s original is kept.</Notice> : null}
-      {reviewing && !roadDone ? <Notice tone="error">The QC road test is not done yet. Approval waits for it (or for &quot;road test not possible&quot;).</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-6">
@@ -168,7 +169,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 { label: "Submitted", value: insp.submitted_at ? formatDateTime(insp.submitted_at) : null },
                 { label: "Inspection time (working)", value: insp.started_at ? `${formatMinutes(workingMin)} of ${formatMinutes(target)} target${(insp.overrun_minutes ?? 0) > 0 ? ` · ${formatMinutes(insp.overrun_minutes!)} over` : workingMin > target ? " · over target" : ""}` : null },
                 { label: "Items flagged", value: `${flagged.length} of ${items.length} (${items.filter((i) => i.status === "bad").length} bad, ${items.filter((i) => i.status === "average").length} average)` },
-                { label: "Road test", value: roadTest ? `${ROAD_TEST_STATUS_LABELS[roadTest.status]}${roadTest.not_possible_reason ? `: ${roadTest.not_possible_reason}` : ""}${roadTest.done_at ? ` · ${formatDateTime(roadTest.done_at)}` : ""}` : "Not done yet" },
+                { label: "Road test", value: roadTest ? `${roadTestLine(roadTest)}${roadTest.done_at && roadTest.status === "done" ? ` · ${formatDateTime(roadTest.done_at)}` : ""}${roadTest.decision ? ` · manager: ${ROAD_TEST_DECISION_LABELS[roadTest.decision]}${roadTest.decision_note ? `, ${roadTest.decision_note}` : ""}` : ""}` : "No road test record" },
                 ...(insp.approved_at ? [{ label: "Approved", value: `${formatDateTime(insp.approved_at)} by ${bundle.approver?.display_name ?? ""}` }] : []),
                 ...(insp.manager_note ? [{ label: "Workshop manager's note", value: <span className="whitespace-pre-wrap">{insp.manager_note}</span> }] : []),
                 ...(insp.return_reason && insp.status === "returned" ? [{ label: "Sent back because", value: insp.return_reason }] : []),
@@ -177,7 +178,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           </Card>
 
           {reviewing ? (
-            <InspectionForm inspectionId={insp.id} {...formProps} readOnly={false} submitAction={null} />
+            <InspectionForm inspectionId={insp.id} {...formProps} readOnly={false} submitAction={null} showPrescanToggle={can(role, "sendReport")} />
           ) : (
             <>
               <Card className="flex flex-col gap-3">
@@ -222,7 +223,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 const rows = items.filter((i) => i.section_key === key);
                 return (
                   <Card key={key} className="flex flex-col gap-2">
-                    <SectionLabel right={`${rows.filter((i) => i.status === "good").length} good · ${rows.filter((i) => i.status === "average").length} average · ${rows.filter((i) => i.status === "bad").length} bad`}>{title}</SectionLabel>
+                    <SectionLabel right={`${rows.filter((i) => i.status === "good").length} good · ${rows.filter((i) => i.status === "average").length} average · ${rows.filter((i) => i.status === "bad").length} bad${rows.some((i) => i.status === "na") ? ` · ${rows.filter((i) => i.status === "na").length} N/A` : ""}`}>{title}</SectionLabel>
                     <ul className="flex flex-col divide-y divide-line">
                       {rows.map((i) => (
                         <li key={i.id} className="py-2 flex flex-col gap-1.5">
@@ -271,8 +272,9 @@ export default async function InspectionReportPage({ params }: { params: Promise
 
           <Card className="flex flex-col gap-2">
             <SectionLabel>Road test (QC inspector)</SectionLabel>
+            {roadTest?.decision ? <p className="text-xs text-muted">Workshop manager: {ROAD_TEST_DECISION_LABELS[roadTest.decision]}{roadTest.decision_note ? ` · ${roadTest.decision_note}` : ""}</p> : null}
             {!roadTest || roadTest.status === "not_started" ? (
-              <p className="text-sm text-muted">Not done yet.</p>
+              <p className="text-sm text-muted">{roadTest?.decision === "not_needed" ? "No road test for this car." : "Not done yet."}</p>
             ) : roadTest.status === "not_possible" ? (
               <p className="text-sm">Not possible: {roadTest.not_possible_reason}</p>
             ) : (
@@ -301,14 +303,14 @@ export default async function InspectionReportPage({ params }: { params: Promise
               <SectionLabel right={`${prescans.length}`}>Pre-scan (fault code report)</SectionLabel>
               <Files rows={prescans} urls={bundle.mediaUrls} />
               {!prescans.length ? <p className="text-sm text-muted">Not attached yet.</p> : null}
-              <p className="text-xs text-muted">{insp.show_prescan_to_customer ? "Shown to the customer with the report." : "Hidden from the customer."}</p>
+              {can(role, "sendReport") && prescans.length ? <PrescanToggle inspectionId={insp.id} initial={insp.show_prescan_to_customer} /> : <p className="text-xs text-muted">{insp.show_prescan_to_customer ? "Shown to the customer with the report." : "Hidden from the customer."}</p>}
             </Card>
           ) : null}
 
           {canApprove && insp.status === "submitted" ? (
             <Card className="flex flex-col gap-4 border-ink">
               <SectionLabel>Workshop manager&apos;s decision</SectionLabel>
-              {roadDone ? <ApproveForm action={approveInspection.bind(null, id)} /> : <p className="text-sm font-semibold text-amber">Approval waits for the QC road test.</p>}
+              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} />
               <ReturnForm action={returnInspection.bind(null, id)} />
             </Card>
           ) : null}

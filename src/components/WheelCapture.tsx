@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MediaCapture } from "./MediaCapture";
 import { saveMediaDetails } from "@/lib/upload-client";
@@ -33,6 +33,17 @@ export function WheelCapture({
 
   const hasPhoto = wheel.photo || uploaded;
 
+  // Set on another device (the phone, or the PC): the page refreshes live, so take the new value when it arrives.
+  const synced = useRef(wheel.conditions.join(","));
+  useEffect(() => {
+    const incoming = wheel.conditions.join(",");
+    if (incoming === synced.current || saving) return;
+    synced.current = incoming;
+    setPicked(wheel.conditions);
+    setSaved(wheel.conditions.length > 0);
+    setError(null);
+  }, [wheel.conditions, saving]);
+
   async function choose(value: string) {
     const next = picked.includes(value)
       ? picked.filter((v) => v !== value)
@@ -46,6 +57,7 @@ export function WheelCapture({
     setSaving(true);
     try {
       await saveMediaDetails(jobId, { wheel: { kind: wheel.kind, conditions: next } }, token);
+      synced.current = next.join(",");
       setSaved(true);
       router.refresh();
     } catch (err) {
@@ -56,7 +68,7 @@ export function WheelCapture({
   }
 
   return (
-    <div className={`flex flex-col gap-2 rounded-card border p-3 ${wheel.done || saved ? "border-green" : "border-line"}`}>
+    <div className={`flex flex-col gap-2 rounded-card border p-3 ${hasPhoto && saved && picked.length > 0 ? "border-green bg-green-soft/40" : "border-line"}`}>
       <MediaCapture
         jobId={jobId}
         kind={wheel.kind}

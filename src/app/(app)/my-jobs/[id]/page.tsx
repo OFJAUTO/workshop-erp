@@ -7,10 +7,11 @@ import { PriorityBadge } from "@/components/JobBadges";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { INSPECTION_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus } from "@/lib/inspection";
+import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus } from "@/lib/inspection";
 import { inspectionLocked, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { CONDITIONS, STATUS_LABELS, formatPromised, labelOf, workingTimeOf } from "@/lib/jobs";
+import { ROAD_TEST_ITEMS, ROAD_TEST_SELECT, roadTestLine, roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
@@ -21,16 +22,19 @@ import { InspectionForm } from "./InspectionForm";
 
 export const dynamic = "force-dynamic";
 
-/** The technician's screen for one car: requests first, warnings, the inspection report; gate-in photos folded away. */
+const TONE: Record<ItemStatus, "green" | "amber" | "red" | "neutral"> = { good: "green", average: "amber", bad: "red", na: "neutral" };
+
+/** The technician's screen for one car: requests first, the road test result, the inspection report; gate-in photos folded away. */
 export default async function TechnicianJobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; message?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id } = await params;
   const { error, message } = await searchParams;
   const supabase = await createClient();
-  const [card, bundle, settings] = await Promise.all([loadJobCard(supabase, id), loadInspection(id), getSettings()]);
+  const [card, bundle, settings, { data: rt }] = await Promise.all([loadJobCard(supabase, id), loadInspection(id), getSettings(), supabase.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle()]);
   if (!card) notFound();
   const { job, vehicle, customer, vip, gateIn, requests, media } = card;
+  const roadTest = (rt as RoadTestRow | null) ?? null;
   const mine = job.assigned_to === staff.id;
   const manager = can(role, "approveInspections");
   // Technicians open only their own cars; office roles may look.
@@ -44,8 +48,11 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const target = insp?.target_minutes ?? (Number(settings.inspection_target_minutes) || 90);
   const over = !!insp?.started_at && workingMin > target;
   const locked = insp ? inspectionLocked(insp) : false;
+  const waitingRoadTest = roadTestWaiting(roadTest) && role !== "owner";
   const canFill = !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked));
+  const canAddPrescan = !!insp && mine && insp.technician_id === staff.id && insp.status === "submitted";
   const condition = gateIn ? labelOf(CONDITIONS, gateIn.condition) : "";
+  const statusText = insp?.status === "submitted" ? "Submitted, waiting for manager" : waitingRoadTest ? "Waiting for road test" : STATUS_LABELS[job.status];
 
   const formProps = insp && bundle
     ? {
@@ -64,7 +71,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "inspections"]} jobId={id} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "inspections", "road_tests"]} jobId={id} pollMs={60000} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={
@@ -76,7 +83,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{condition}</Badge> : condition ? <Badge tone="green">{condition}</Badge> : null}
             {job.promised_at ? <Badge tone="outline">Promised {formatPromised(job.promised_at)}</Badge> : null}
-            <Badge tone="outline">{STATUS_LABELS[job.status]}</Badge>
+            <Badge tone={insp?.status === "submitted" ? "amber" : "outline"}>{statusText}</Badge>
           </span>
         }
         actions={manager || role === "service_advisor" || role === "owner" ? <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton> : undefined}
@@ -107,6 +114,37 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         )}
       </section>
 
+      {roadTest && job.department !== "bodyshop" ? (
+        <Card className={`flex flex-col gap-3 ${roadTestWaiting(roadTest) ? "border-ink" : ""}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <SectionLabel>Road test (QC inspector)</SectionLabel>
+            <Badge tone={roadTest.status === "done" ? "green" : roadTestWaiting(roadTest) ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge>
+          </div>
+          {roadTestWaiting(roadTest) ? (
+            <Notice tone="info">The workshop manager asked for a road test first. Your inspection opens as soon as the QC inspector submits it; you will be told.</Notice>
+          ) : roadTest.status === "done" ? (
+            <ul className="divide-y divide-line text-sm">
+              {ROAD_TEST_ITEMS.map((it) => {
+                const v = roadTest.items[it.key];
+                return (
+                  <li key={it.key} className="py-1.5 flex flex-wrap items-center gap-2">
+                    {v?.status ? <Badge tone={TONE[v.status]}>{ITEM_STATUS_LABELS[v.status]}</Badge> : null}
+                    <span className="font-semibold">{it.label}</span>
+                    {v?.remarks ? <span className="text-muted">· {v.remarks}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : roadTest.status === "not_possible" ? (
+            <p className="text-sm">Not possible: {roadTest.not_possible_reason ?? roadTest.decision_note}</p>
+          ) : roadTest.decision === "not_needed" ? (
+            <p className="text-sm">The workshop manager decided no road test is needed{roadTest.decision_note ? `: ${roadTest.decision_note}` : "."}</p>
+          ) : (
+            <p className="text-sm text-muted">Not done yet. It does not hold up your inspection.</p>
+          )}
+        </Card>
+      ) : null}
+
       <Card className={`flex flex-col gap-4 ${over && insp?.status === "in_progress" ? "border-red-bar" : ""}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionLabel>Inspection</SectionLabel>
@@ -114,7 +152,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         </div>
         {!job.first_approval_at ? <Notice tone="info">The customer has not yet approved the job card. The inspection starts after that.</Notice> : null}
         {!insp ? (
-          mine && job.first_approval_at ? (
+          mine && job.first_approval_at && !waitingRoadTest ? (
             <form action={startInspection.bind(null, id)} className="flex flex-col gap-2">
               <p className="text-sm text-muted">Press start when you begin. The time counts as labour on this job.</p>
               <Button type="submit" size="lg">
@@ -122,12 +160,12 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
               </Button>
             </form>
           ) : (
-            <p className="text-sm text-muted">{job.assigned_to ? "The inspection has not started yet." : "Waiting for the workshop manager to assign a technician."}</p>
+            <p className="text-sm text-muted">{waitingRoadTest ? "Waiting for road test." : job.assigned_to ? "The inspection has not started yet." : "Waiting for the workshop manager to assign a technician."}</p>
           )
         ) : insp.status === "not_started" || insp.status === "returned" ? (
           <>
             {insp.return_reason && insp.status === "returned" ? <Notice tone="error">Sent back by the workshop manager: {insp.return_reason}</Notice> : null}
-            {(insp.technician_id === staff.id || manager) && job.first_approval_at ? (
+            {(insp.technician_id === staff.id || manager) && job.first_approval_at && !waitingRoadTest ? (
               <form action={startInspection.bind(null, id)} className="flex flex-col gap-2">
                 <p className="text-sm text-muted">{insp.status === "returned" ? "Open the report again to make the changes, then submit it again." : "Press start when you begin. The time counts as labour on this job."}</p>
                 <Button type="submit" size="lg">
@@ -135,7 +173,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
                 </Button>
               </form>
             ) : (
-              <p className="text-sm text-muted">Assigned to {bundle?.technician?.display_name ?? "a technician"}.</p>
+              <p className="text-sm text-muted">{waitingRoadTest ? "Waiting for road test." : `Assigned to ${bundle?.technician?.display_name ?? "a technician"}.`}</p>
             )}
           </>
         ) : (
@@ -152,7 +190,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             {insp.submitted_at ? <span className="text-muted">Submitted {formatDateTime(insp.submitted_at)}</span> : null}
           </div>
         )}
-        {insp?.status === "submitted" ? <Notice tone="info">Submitted. The workshop manager will approve it or send it back.</Notice> : null}
+        {insp?.status === "submitted" ? <Notice tone="info">Submitted, waiting for the workshop manager. The report is read only unless it is sent back. You can still attach the pre-scan PDF below.</Notice> : null}
         {insp?.status === "approved" ? (
           <Notice tone="success">
             Approved by {bundle?.approver?.display_name ?? "the workshop manager"} on {formatDateTime(insp.approved_at)}.{" "}
@@ -170,7 +208,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
       {insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved") ? (
         <>
-          <InspectionForm inspectionId={insp.id} {...formProps} readOnly={!canFill} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} />
+          <InspectionForm inspectionId={insp.id} {...formProps} readOnly={!canFill} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>

@@ -1,23 +1,27 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { JumpButton, ProblemsBar, formProblems, jumpTo, type Problem } from "./FormAssist";
+import { JumpButton, ProblemsBar, formFields, jumpTo, type Problem } from "./FormAssist";
 
 /**
- * Drops into any plain form: watches the fields, lists what is still missing in the bar at the
- * bottom, jumps to the field on tap, and adds the round arrow button. Every choice group counts
- * as required.
+ * Drops into any plain form: watches the fields, shows neutral progress in the bar at the
+ * bottom, and after a Submit with something missing lists the problems in red, jumping to the
+ * field on tap. Every choice group counts as required.
  */
 export function GateInAssist({ submitLabel }: { submitLabel: string }) {
   const anchor = useRef<HTMLSpanElement>(null);
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     const form = anchor.current?.closest("form");
     if (!form) return;
     const compute = () => {
       for (const el of Array.from(form.elements) as HTMLInputElement[]) if (el.type === "radio") el.dataset.required = "true";
-      setProblems(formProblems(form));
+      const fields = formFields(form);
+      setProblems(fields.filter((f) => !f.valid).map((f) => ({ key: f.key, label: `${f.label}: missing` })));
+      setProgress({ done: fields.filter((f) => f.valid).length, total: fields.length });
     };
     const t = setTimeout(compute, 0);
     form.addEventListener("input", compute);
@@ -29,33 +33,34 @@ export function GateInAssist({ submitLabel }: { submitLabel: string }) {
     };
   }, []);
 
+  const jump = (key: string) => {
+    const form = anchor.current?.closest("form");
+    const el = form?.querySelector<HTMLElement>(`[name="${key}"]`);
+    const box = el?.closest<HTMLElement>("[data-field]") ?? el;
+    if (box) {
+      if (!box.id) box.id = `item-${key}`;
+      jumpTo(box.id.replace(/^item-/, ""));
+    }
+  };
+
   return (
     <>
       <span ref={anchor} className="hidden" />
       <ProblemsBar
         problems={problems}
-        onJump={(key) => {
-          const form = anchor.current?.closest("form");
-          const el = form?.querySelector<HTMLElement>(`[name="${key}"]`);
-          const box = el?.closest<HTMLElement>("[data-field]") ?? el;
-          if (box) {
-            if (!box.id) box.id = `item-${key}`;
-            jumpTo(box.id.replace(/^item-/, ""));
-          }
-        }}
+        attempted={attempted}
+        progress={progress}
+        onJump={jump}
         submitLabel={submitLabel}
         onSubmit={() => {
           const form = anchor.current?.closest("form");
           if (!form) return;
-          const p = formProblems(form);
+          const fields = formFields(form);
+          const p = fields.filter((f) => !f.valid).map((f) => ({ key: f.key, label: `${f.label}: missing` }));
           if (p.length) {
+            setAttempted(true);
             setProblems(p);
-            const el = form.querySelector<HTMLElement>(`[name="${p[0].key}"]`);
-            const box = el?.closest<HTMLElement>("[data-field]") ?? el;
-            if (box) {
-              if (!box.id) box.id = `item-${p[0].key}`;
-              jumpTo(box.id.replace(/^item-/, ""));
-            }
+            jump(p[0].key);
             return;
           }
           form.requestSubmit();

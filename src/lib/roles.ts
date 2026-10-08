@@ -25,6 +25,8 @@ export const ALL_ROLES = Object.keys(ROLE_LABELS) as RoleId[];
 export const OFFICE_AND_WORKSHOP: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in");
 /** Office roles: everyone except gate-in and technicians (technicians see My jobs and the Workshop list only). */
 export const OFFICE: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in" && r !== "technician");
+/** Office roles minus the QC inspector, who sees road tests, approved reports and the workshop list only. */
+export const OFFICE_NO_QC: RoleId[] = OFFICE.filter((r) => r !== "qc_inspector");
 
 /** Roles whose logins are kept short because they see money. */
 export const SENSITIVE_ROLES: RoleId[] = ["owner", "accounts"];
@@ -50,15 +52,15 @@ export const PERMISSIONS = {
   manageTablets: ["owner"],
   manageSettings: ["owner"],
   viewAudit: ["owner"],
-  viewCustomers: ["owner", "service_advisor", "parts", "qc_inspector", "accounts"],
+  viewCustomers: ["owner", "service_advisor", "parts", "accounts"],
   editCustomers: ["owner", "service_advisor"],
-  viewVehicles: OFFICE,
+  viewVehicles: OFFICE_NO_QC,
   editVehicles: ["owner", "service_advisor"],
   gateIn: ["owner", "service_advisor", "gate_in"],
   viewPartCosts: ["owner", "accounts", "service_advisor", "parts"],
   viewTechnicianCostRate: ["owner", "accounts"],
   viewProfitPanel: ["owner", "accounts", "service_advisor"],
-  viewJobs: OFFICE,
+  viewJobs: OFFICE_NO_QC,
   viewOwnJobs: ["owner", "technician"],
   viewWorkshopList: ["owner", "technician", "workshop_manager", "qc_inspector", "service_advisor", "parts", "accounts"],
   editGateIn: ["owner", "service_advisor", "gate_in"],
@@ -66,12 +68,13 @@ export const PERMISSIONS = {
   assignJobs: ["owner", "workshop_manager"],
   moveJobs: ["owner"],
   requestMove: ["owner", "workshop_manager", "service_advisor"],
+  noteToManager: ["owner", "service_advisor"],
   setPriority: ["owner", "workshop_manager", "service_advisor", "gate_in"],
   gateOut: ["owner", "service_advisor", "accounts"],
   overrideKeys: ["owner", "workshop_manager"],
   approveRelease: ["owner", "accounts"],
-  viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "parts", "qc_inspector"],
-  viewCalendar: OFFICE,
+  viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "parts"],
+  viewCalendar: OFFICE_NO_QC,
   bookAppointments: ["owner", "service_advisor"],
   approveInspections: ["owner", "workshop_manager"],
   decideInspectionChanges: ["owner"],
@@ -102,6 +105,6 @@ export const ROLE_PHASE1_SUMMARY: Record<RoleId, string[]> = {
   gate_in: ["Gate cars in with photos and video; nothing else"],
   technician: ["See the cars assigned to you and the workshop list"],
   parts: ["See customers and cars"],
-  qc_inspector: ["Road tests and QC"],
+  qc_inspector: ["Road tests, approved inspection reports (view only) and the workshop list"],
   accounts: ["See customers and cars"],
 };

@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { PublicShell } from "@/components/Shell";
-import { Button, Card, Field, Input, Notice } from "@/components/ui";
+import { Button, Card, Field, Input, LinkButton, Notice } from "@/components/ui";
 
 export default async function LoginPage({
   searchParams,
@@ -39,12 +38,9 @@ export default async function LoginPage({
             </form>
           </Card>
 
-          <p className="text-sm text-muted text-center">
-            Using a workshop tablet?{" "}
-            <Link href="/tablet" className="font-semibold text-ink underline underline-offset-4">
-              Tap your name and enter your PIN
-            </Link>
-          </p>
+          <LinkButton href="/tablet" tone="secondary" size="lg" className="w-full">
+            Workshop tablet or phone: tap your name
+          </LinkButton>
           <p className="text-xs text-faint text-center">Forgot your password? Ask the owner for a new setup link.</p>
         </div>
       </div>

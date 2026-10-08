@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Textarea } from "./ui";
 import { saveMediaDetails } from "@/lib/upload-client";
@@ -13,11 +13,22 @@ export function DamageNote({ jobId, initial, token }: { jobId: string; initial: 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Typed on another device: take the new note when the page refreshes, unless this one is mid-edit.
+  const synced = useRef(initial);
+  useEffect(() => {
+    if (initial === synced.current) return;
+    synced.current = initial;
+    setSavedValue(initial);
+    setValue((current) => (current.trim() === savedValue ? initial : current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial]);
+
   async function save() {
     setSaving(true);
     setError(null);
     try {
       await saveMediaDetails(jobId, { damageNote: value }, token);
+      synced.current = value.trim();
       setSavedValue(value.trim());
       router.refresh();
     } catch (err) {

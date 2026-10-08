@@ -30,6 +30,7 @@ const NUMBER_KEYS = [
   "appointment_missed_after_minutes",
   "inspection_target_minutes",
   "inspection_unlock_hours",
+  "assignment_target_minutes",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -71,6 +72,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   appointment_missed_after_minutes: [5, 1440, "Booking counts as missed after"],
   inspection_target_minutes: [10, 1440, "Inspection target"],
   inspection_unlock_hours: [1, 72, "Approved report opens for"],
+  assignment_target_minutes: [5, 1440, "Assignment target"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];

@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   }
   const admin = createAdminClient();
   const settings = await getSettings();
-  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0, inspectionWarnings: 0 };
+  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0, inspectionWarnings: 0, assignmentWarnings: 0 };
 
   // 1. Video retention
   const months = Number(settings.video_retention_months) || 12;
@@ -138,6 +138,20 @@ export async function GET(request: NextRequest) {
       await notifyRoles(["owner"], n);
       await admin.from("inspections").update({ overdue_warned_at: new Date().toISOString() }).eq("id", i.id);
       report.inspectionWarnings++;
+    }
+  }
+
+  // 5. Cars waiting for a technician past the assignment target: tell the owner once.
+  {
+    const wt = workingTimeOf(settings);
+    const target = Number(settings.assignment_target_minutes) || 30;
+    const { data: waiting } = await admin.from("jobs").select("id, job_number, first_approval_at, stage_entered_at, department").eq("is_open", true).eq("status", "pending_inspection").is("assigned_to", null).is("assignment_overdue_notified_at", null).limit(100);
+    for (const j of waiting ?? []) {
+      const minutes = Math.round(workingHoursBetween((j.first_approval_at ?? j.stage_entered_at) as string, new Date(), wt) * 60);
+      if (minutes <= target) continue;
+      await notifyRoles(["owner"], { type: "assignment_overdue", title: `Still not assigned · ${j.job_number}`, body: `${minutes} working minutes since the customer approved, against a target of ${target}. The ${j.department === "bodyshop" ? "bodyshop" : "workshop"} manager has not assigned a technician.`, jobId: j.id as string, href: `/jobs/${j.id}` });
+      await admin.from("jobs").update({ assignment_overdue_notified_at: new Date().toISOString() }).eq("id", j.id);
+      report.assignmentWarnings++;
     }
   }
 

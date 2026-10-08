@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { CarPicture } from "@/components/CarPicture";
+import { TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Button, Card, Empty, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { Badge, Button, Card, ChoiceButtons, Empty, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatDateTime } from "@/lib/format";
 import { JOB_DEPARTMENTS, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
-import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
+import { STATUS_LABELS, clockOf, jobTiming, type JobStatus, type Stage } from "@/lib/jobs";
+import { ROAD_TEST_DECISIONS } from "@/lib/road-test";
+import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { assignJob } from "../jobs/actions";
@@ -15,25 +18,34 @@ type Row = {
   id: string;
   job_number: string;
   status: JobStatus;
+  stage: Stage;
+  stage_entered_at: string;
   department: string | null;
   priority: "high" | "normal" | "low";
+  promised_at: string | null;
+  is_open: boolean;
   gated_in_at: string;
   first_approval_at: string | null;
   assigned_to: string | null;
+  assignment_note: string | null;
+  assignment_note_at: string | null;
   vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   customer: { full_name: string; company_name: string | null; is_vip: boolean } | null;
-  gate_in: { is_complete: boolean } | null;
+  gate_in: { is_complete: boolean; condition: string } | null;
+  note_by: { display_name: string } | null;
 };
 
-/** The workshop manager's "To assign" list for their department, with each technician's current load. */
-export default async function AssignPage() {
+/** The workshop manager's "To assign" list for their department, with each technician's current load and the road test choice. */
+export default async function AssignPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requirePermission("assignJobs");
+  const { message, error } = await searchParams;
   const side = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
+  const settings = await getSettings();
   const supabase = await createClient();
   const [{ data: jobs }, { data: techs }, { data: load }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("id, job_number, status, department, priority, gated_in_at, first_approval_at, assigned_to, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name, is_vip), gate_in:gate_ins(is_complete)")
+      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, assignment_note, assignment_note_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customer_public(full_name, company_name, is_vip), gate_in:gate_ins(is_complete, condition), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
       .eq("is_open", true)
       .is("assigned_to", null)
       .in("status", ["gate_in_pending", "pending_approval", "pending_inspection"])
@@ -52,45 +64,73 @@ export default async function AssignPage() {
 
   const renderList = (items: Row[], canAssign: boolean) => (
     <div className="flex flex-col gap-3">
-      {items.map((j) => (
-        <Card key={j.id} className="flex flex-col md:flex-row md:items-center gap-4">
-          <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full md:w-44" />
-          <div className="flex-1 min-w-0 flex flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <Link href={`/jobs/${j.id}`} className="text-[17px] font-extrabold tracking-[0.03em] hover:underline underline-offset-4">
-                {j.vehicle ? formatPlate(j.vehicle) : j.job_number}
-              </Link>
-              {j.customer?.is_vip ? <Badge tone="ink">VIP</Badge> : null}
-              {j.priority === "high" ? <Badge tone="outline">High priority</Badge> : null}
-              <Badge tone="neutral">{deptLabel(j.department)}</Badge>
+      {items.map((j) => {
+        const timing = jobTiming(j.promised_at, j.is_open, clockOf(j, settings));
+        const defaultRoadTest = j.gate_in?.condition === "does_not_run" ? "not_possible" : "needed";
+        return (
+          <Card key={j.id} className={`flex flex-col gap-4 ${timing.tone === "red" ? "border-red-bar" : timing.tone === "amber" ? "border-amber-bar" : ""}`}>
+            <div className="flex flex-col md:flex-row md:items-center gap-4">
+              <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full md:w-44" />
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/jobs/${j.id}`} className="text-[17px] font-extrabold tracking-[0.03em] hover:underline underline-offset-4">
+                    {j.vehicle ? formatPlate(j.vehicle) : j.job_number}
+                  </Link>
+                  {j.customer?.is_vip ? <Badge tone="ink">VIP</Badge> : null}
+                  {j.priority === "high" ? <Badge tone="outline">High priority</Badge> : null}
+                  <Badge tone="neutral">{deptLabel(j.department)}</Badge>
+                  {j.status === "pending_inspection" ? <TimingBadge timing={timing} /> : null}
+                  {j.gate_in?.condition === "does_not_run" ? <Badge tone="red">Does not run</Badge> : null}
+                </div>
+                <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
+                <span className="text-xs text-muted">
+                  {j.customer?.company_name ?? j.customer?.full_name} · {j.job_number} · gated in {formatDateTime(j.gated_in_at)} · {STATUS_LABELS[j.status]}
+                </span>
+                {j.assignment_note ? (
+                  <p className="text-sm rounded-control bg-chip px-3 py-2">
+                    <span className="font-bold">Note from {j.note_by?.display_name ?? "the advisor"}:</span> {j.assignment_note}
+                  </p>
+                ) : null}
+              </div>
             </div>
-            <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
-            <span className="text-xs text-muted">
-              {j.customer?.company_name ?? j.customer?.full_name} · {j.job_number} · gated in {formatDateTime(j.gated_in_at)} · {STATUS_LABELS[j.status]}
-            </span>
-          </div>
-          {canAssign ? (
-            <form action={assignJob.bind(null, j.id)} className="flex flex-col sm:flex-row gap-2 md:w-80">
-              <input type="hidden" name="back" value="/assign" />
-              <Select name="technician" defaultValue="" required className="flex-1">
-                <option value="" disabled>
-                  Choose a technician…
-                </option>
-                {technicians.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.display_name} · {counts.get(t.id) ?? 0} car{(counts.get(t.id) ?? 0) === 1 ? "" : "s"}
-                  </option>
-                ))}
-              </Select>
-              <Button type="submit" size="md">
-                Assign
-              </Button>
-            </form>
-          ) : (
-            <span className="text-xs text-muted md:w-80">{j.status === "gate_in_pending" ? "Gate-in photos or video still missing." : "Waiting for the customer to approve the job card."}</span>
-          )}
-        </Card>
-      ))}
+            {canAssign ? (
+              <form action={assignJob.bind(null, j.id)} className="flex flex-col gap-3 border-t border-line pt-4">
+                <input type="hidden" name="back" value="/assign" />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <label className="flex flex-col gap-1" data-field>
+                    <span className="text-sm font-semibold" data-field-label>Technician</span>
+                    <Select name="technician" defaultValue="" required>
+                      <option value="" disabled>
+                        Choose a technician…
+                      </option>
+                      {technicians.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.display_name} · {counts.get(t.id) ?? 0} car{(counts.get(t.id) ?? 0) === 1 ? "" : "s"}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-semibold">Road test</span>
+                    <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
+                  </div>
+                </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold">Note <span className="font-medium text-muted">(required when the road test is not possible)</span></span>
+                  <Textarea name="road_test_note" rows={1} placeholder="For example: does not start, or no plates" />
+                </label>
+                <div>
+                  <Button type="submit" size="md">
+                    Assign
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <span className="text-xs text-muted">{j.status === "gate_in_pending" ? "Gate-in photos or video still missing." : "Waiting for the customer to approve the job card."}</span>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 
@@ -98,6 +138,8 @@ export default async function AssignPage() {
     <>
       <LiveRefresh tables={["jobs", "gate_ins", "approval_requests"]} pollMs={60000} />
       <PageHeader title="To assign" subtitle={side ? `${side === "mechanical" ? "Mechanical" : "Bodyshop"} cars waiting for a technician` : "All cars waiting for a technician"} />
+      {message ? <p className="rounded-control bg-green-soft px-4 py-3 text-sm font-semibold text-green">{message}</p> : null}
+      {error ? <p className="rounded-control bg-red-soft px-4 py-3 text-sm font-semibold text-red">{error}</p> : null}
       <Card className="flex flex-wrap gap-2 items-center">
         <SectionLabel>Technicians</SectionLabel>
         {technicians.map((t) => (
@@ -110,6 +152,7 @@ export default async function AssignPage() {
       </Card>
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${ready.length}`}>Ready to assign (customer approved)</SectionLabel>
+        <p className="text-xs text-muted">Target: {Number(settings.assignment_target_minutes) || 30} working minutes from the customer&apos;s approval. Past it the card turns amber, then red, and the owner is told.</p>
         {ready.length ? renderList(ready, true) : <Empty title="Nothing waiting to be assigned" />}
       </section>
       <section className="flex flex-col gap-3">

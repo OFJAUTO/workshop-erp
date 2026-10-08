@@ -1,21 +1,28 @@
+import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Card, Empty, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
+import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 
 type Row = { job_id: string; job_number: string; status: JobStatus; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: string | null; model: string | null; technician: string | null };
 
-/** The workshop list: every car in the workshop with its technician. View only; rows do not open. */
+/** The workshop list: every car in the workshop with its status and technician. View only; the QC inspector can open approved reports from here. */
 export default async function WorkshopListPage() {
-  await requirePermission("viewWorkshopList");
+  const staff = await requirePermission("viewWorkshopList");
+  const role = staff.role_id as RoleId;
   const supabase = await createClient();
   const { data } = await supabase.from("workshop_board").select("job_id, job_number, status, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make, model, technician").order("gated_in_at", { ascending: false });
   const rows = (data ?? []) as Row[];
+  // Approved reports open for everyone except technicians (the QC inspector reads them here).
+  const showReports = role !== "technician";
+  const { data: approved } = showReports && rows.length ? await supabase.from("inspections").select("job_id").eq("status", "approved").eq("is_active", true).in("job_id", rows.map((r) => r.job_id)) : { data: [] as { job_id: string }[] };
+  const approvedJobs = new Set((approved ?? []).map((a) => a.job_id));
   return (
     <>
-      <LiveRefresh tables={["jobs"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "inspections"]} pollMs={60000} />
       <PageHeader title="Workshop list" subtitle={`${rows.length} car${rows.length === 1 ? "" : "s"} in the workshop`} />
       {rows.length === 0 ? (
         <Empty title="No cars in the workshop" />
@@ -28,6 +35,15 @@ export default async function WorkshopListPage() {
                 <span className="font-semibold flex-1 min-w-40">{[r.make, r.model].filter(Boolean).join(" ") || "Make and model not set"}</span>
                 <span className="text-sm text-muted w-40">{STATUS_LABELS[r.status] ?? r.status}</span>
                 <span className="text-sm font-semibold w-40">{r.technician ?? "Not assigned"}</span>
+                {showReports && approvedJobs.has(r.job_id) ? (
+                  <Link href={`/jobs/${r.job_id}/inspection`} className="text-sm font-bold underline underline-offset-4">
+                    Report
+                  </Link>
+                ) : showReports && can(role, "viewJobs") ? (
+                  <Link href={`/jobs/${r.job_id}`} className="text-sm font-bold underline underline-offset-4">
+                    Job card
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>

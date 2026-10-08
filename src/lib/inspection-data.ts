@@ -201,6 +201,5 @@ export function reportProblems(b: InspectionBundle, requests: { id: string; text
       return { requestId: r.id, text: r.text, status: f?.status ?? null, found: f?.found ?? "" };
     }),
     measurements: Object.fromEntries(Object.entries(b.inspection.measurements ?? {}).map(([k, v]) => [k, String(v)])),
-    hasPrescan: b.media.some((m) => m.is_prescan),
   }).map((p) => p.label);
 }

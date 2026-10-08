@@ -6,7 +6,7 @@ import { ImageCropper } from "@/components/ImageCropper";
 import { ModelYearSelect } from "@/components/ModelYearSelect";
 import { SearchSelect } from "@/components/SearchSelect";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
-import { makeFromVin } from "@/lib/vin";
+import { makeFromVin, modelYearFromVin } from "@/lib/vin";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES, type VehicleMakeRow, type VehicleModelRow } from "@/lib/types";
 
 export type VariantMap = Record<string, string[]>;
@@ -38,6 +38,8 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
   const [make, setMake] = useState({ id: v.make_id || "", text: v.make_text || "" });
   const [model, setModel] = useState({ id: v.model_id || "", text: v.model_text || "" });
   const [vinMake, setVinMake] = useState<string | null>(null);
+  // The model year: read from the VIN and marked "from VIN" until the advisor picks one themselves.
+  const [year, setYear] = useState<{ value: string; fromVin: boolean }>({ value: v.model_year_other || v.model_year_choice || "", fromVin: false });
 
   const makeOptions = makes.map((m) => ({ id: m.id, label: m.name }));
   const modelOptions = models.filter((m) => m.make_id === make.id).map((m) => ({ id: m.id, label: m.name }));
@@ -53,6 +55,8 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
       const hit = makes.find((m) => m.name.toLowerCase() === detected.toLowerCase());
       setMake(hit ? { id: hit.id, text: hit.name } : { id: "__new__", text: detected });
     }
+    const vinYear = modelYearFromVin(next);
+    setYear((cur) => (cur.value && !cur.fromVin ? cur : vinYear ? { value: String(vinYear), fromVin: true } : cur.fromVin ? { value: "", fromVin: false } : cur));
   }
 
   const makeWarning = vinMake && make.text && make.text.toLowerCase() !== vinMake.toLowerCase() ? `The VIN suggests ${vinMake}. Check the make.` : null;
@@ -135,9 +139,9 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <SearchSelect name="make" label="Make" options={makeOptions} value={make} onChange={(m) => { setMake(m); setModel({ id: "", text: "" }); }} placeholder="Type to search…" warning={makeWarning} />
               <SearchSelect name="model" label="Model" options={modelOptions} value={model} onChange={setModel} placeholder={make.text ? "Type to search…" : "Choose the make first"} disabled={!make.text} />
-              <Field label="Variant" hint="For example: 4S, Turbo S, GTS.">
+              <Field label="Variant" optional hint="For example: 4S, Turbo S, GTS.">
                 <>
-                  <Input name="variant" defaultValue={v.variant} required list="variant-suggestions" autoComplete="off" />
+                  <Input name="variant" defaultValue={v.variant} list="variant-suggestions" autoComplete="off" />
                   <datalist id="variant-suggestions">
                     {variantSuggestions.map((s) => (
                       <option key={s} value={s} />
@@ -145,8 +149,8 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
                   </datalist>
                 </>
               </Field>
-              <Field label="Model year">
-                <ModelYearSelect defaultValue={v.model_year_other || v.model_year_choice} />
+              <Field label="Model year" hint={year.fromVin ? "Read from the 10th character of the VIN. Change it if the car's papers say otherwise." : undefined}>
+                <ModelYearSelect value={year.value} onChange={(value) => setYear({ value, fromVin: false })} fromVin={year.fromVin} />
               </Field>
             </div>
             <Field label="Fuel" hint="Electric cars record battery percentage instead of fuel level.">

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Card, DescriptionList, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
+import { describeMileage } from "@/lib/mileage";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
@@ -25,7 +26,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("vehicles")
     .select(
-      "id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
+      "id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, mileage_unit, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
     )
     .eq("id", vehicleId)
     .maybeSingle();
@@ -34,11 +35,11 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
 
   const { data: history } = await supabase
     .from("jobs")
-    .select("id, job_number, status, gated_in_at, gated_out_at, is_open, gate_in:gate_ins(customer_requests, mileage)")
+    .select("id, job_number, status, gated_in_at, gated_out_at, is_open, gate_in:gate_ins(customer_requests, mileage, mileage_unit)")
     .eq("vehicle_id", v.id)
     .order("gated_in_at", { ascending: false })
     .limit(5);
-  type Hist = { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean; gate_in: { customer_requests: string; mileage: number } | null };
+  type Hist = { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean; gate_in: { customer_requests: string; mileage: number; mileage_unit: "km" | "mi" } | null };
   const visits = (history ?? []) as unknown as Hist[];
   const openVisit = visits.find((h) => h.is_open);
   if (openVisit) redirect(`/jobs/${openVisit.id}`);
@@ -70,6 +71,8 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             pictureMode={v.photo_path ? "optional" : "required"}
             branches={settings.branches}
             requests={appointment ? [appointment.reason] : []}
+            mileageUnit={v.mileage_unit ?? "km"}
+            mileageContext={{ modelYear: v.model_year, lastKm: v.last_mileage, lastVisitAt: visits[0]?.gated_in_at ?? null }}
             initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "", department: appointment?.department ?? "" }}
           />
         </div>
@@ -87,7 +90,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             <DescriptionList
               items={[
                 { label: "VIN", value: v.vin ? <span className="font-mono">{v.vin}</span> : null },
-                { label: "Last known mileage", value: v.last_mileage != null ? `${v.last_mileage.toLocaleString("en-GB")} km` : null },
+                { label: "Last known mileage", value: v.last_mileage != null ? describeMileage(v.last_mileage, v.mileage_unit ?? "km") : null },
               ]}
             />
           </Card>
@@ -103,7 +106,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
                     <Link href={`/jobs/${h.id}`} className="font-semibold hover:underline underline-offset-4">
                       {formatDate(h.gated_in_at)} · {h.job_number}
                     </Link>
-                    <span className="text-xs text-muted">{STATUS_LABELS[h.status]}{h.gate_in?.mileage ? ` · ${h.gate_in.mileage.toLocaleString("en-GB")} km` : ""}</span>
+                    <span className="text-xs text-muted">{STATUS_LABELS[h.status]}{h.gate_in?.mileage ? ` · ${describeMileage(h.gate_in.mileage, h.gate_in.mileage_unit ?? "km")}` : ""}</span>
                     {h.gate_in?.customer_requests ? <span className="text-xs">{h.gate_in.customer_requests.slice(0, 140)}</span> : null}
                   </li>
                 ))}
