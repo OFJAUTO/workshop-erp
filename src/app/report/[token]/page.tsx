@@ -8,7 +8,7 @@ import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { notifyStaff } from "@/lib/notifications";
 import { ROAD_TEST_ITEMS, ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
-import { PRODUCTION_SITE_URL } from "@/lib/site";
+import { customerPageMetadata } from "@/lib/customer-pages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { PrintButton, ToggleBlock } from "./ReportControls";
@@ -16,12 +16,7 @@ import { PrintButton, ToggleBlock } from "./ReportControls";
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  return {
-    title: "OFJ Automotive, Vehicle Inspection Report",
-    description: "Your vehicle's inspection report with photos and findings",
-    openGraph: { title: "OFJ Automotive, Vehicle Inspection Report", description: "Your vehicle's inspection report with photos and findings", siteName: "OFJ Automotive", images: [{ url: `${PRODUCTION_SITE_URL}/logo.jpg`, width: 1206, height: 618 }], type: "website" },
-    robots: { index: false, follow: false },
-  };
+  return customerPageMetadata("OFJ Automotive, Vehicle Inspection Report", "Your vehicle's inspection report with photos and findings");
 }
 
 const TONE: Record<ItemStatus, "green" | "amber" | "red" | "neutral"> = { good: "green", average: "amber", bad: "red", na: "neutral" };

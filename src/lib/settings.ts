@@ -41,7 +41,7 @@ const DEFAULTS = {
   inspection_unlock_hours: 1,
   assignment_target_minutes: 30,
   whatsapp_report_template:
-    "Dear [name], the inspection report for your [make model] ([plate]) is ready: [link]. Please read it and we will follow with the quotation. Thank you, [advisor], OFJ Automotive",
+    "Dear [name], the inspection of your [make model] ([plate]) is complete. Please review the report with our findings and photos: [link]. Thank you, [advisor], OFJ Automotive",
   inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],
   appointment_reminder_hours_before: 1,
   appointment_evening_reminder_hour: 18,

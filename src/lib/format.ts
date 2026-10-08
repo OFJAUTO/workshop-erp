@@ -31,3 +31,9 @@ export function blankToNull(value: FormDataEntryValue | null | undefined): strin
   const s = typeof value === "string" ? value.trim() : "";
   return s === "" ? null : s;
 }
+
+/** "8 Oct 23:05": short enough for a stage card. */
+export function formatDayTime(iso: string | null | undefined) {
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Dubai" }).format(new Date(iso));
+}

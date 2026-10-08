@@ -24,10 +24,9 @@ import { formatPlate } from "@/lib/types";
 import { assignJob, moveJob, setJobPriority, setPromisedDate } from "../actions";
 import { decideRoadTest, remindManager, setAssignmentNote } from "../assignment-actions";
 import { decideMove, requestMove } from "../move-actions";
-import { ApprovalPanel } from "./ApprovalPanel";
 import { MediaGallery } from "./MediaGallery";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
-import { ReportLinkPanel, SendReportButton, type ReportLinkRow } from "./ReportLinkPanel";
+import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
 
 export const dynamic = "force-dynamic";
 
@@ -84,18 +83,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     : { data: [] as { id: string; display_name: string; department_id: string | null }[] };
 
   const latestApproval = approvals[0] ?? null;
-  const activeLink = link ?? (latestApproval && !latestApproval.approved_at ? `${site}/approve/${latestApproval.token}` : null);
-  const activeRequestId = req ?? latestApproval?.id ?? null;
-  const fill = (t: string, linkUrl: string) =>
-    t
-      .replaceAll("[name]", latestApproval?.sent_to_name || customerName)
-      .replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" "))
-      .replaceAll("[plate]", formatPlate(vehicle))
-      .replaceAll("[link]", linkUrl)
-      .replaceAll("[advisor]", staff.display_name);
-  const messageTemplate = activeLink ? fill(settings.whatsapp_approval_template, activeLink) : null;
-  const reportUrl = reportLink ? `${site}/report/${reportLink.token}` : null;
-  const reportMessage = reportUrl ? fill(settings.whatsapp_report_template, reportUrl) : null;
+  void link;
+  void req;
+  // The WhatsApp messages: car details filled here; the recipient's name and the link are filled in the centre window.
+  const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name);
+  const approvalTemplate = fillCar(settings.whatsapp_approval_template);
+  const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", customerName);
+  const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
   const insp = inspection?.inspection ?? null;
   const inspectionMinutes = insp ? inspectionWorkingMinutes(insp, wt) : 0;
@@ -237,10 +231,21 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <p className="text-sm text-muted">
             Waiting on <span className="font-semibold text-ink">{step.waitingOn}</span> · {waitedText(step.since, wt)}
           </p>
-          {step.action && myMove && job.is_open ? (
+          {step.action && myMove && job.is_open && step.action.href !== `/jobs/${id}#approval` ? (
             <LinkButton href={step.action.href} size="lg" className="w-full">
               {step.action.label}
             </LinkButton>
+          ) : null}
+          {canPlan ? (
+            <form action={setPromisedDate.bind(null, id)} className="flex flex-wrap items-end gap-2 border-t border-ink/20 pt-3">
+              <label className="flex flex-col gap-1 flex-1 min-w-40">
+                <span className="text-xs font-semibold text-muted">Promised date</span>
+                <Input name="promised_at" type="date" defaultValue={job.promised_at ?? ""} required />
+              </label>
+              <Button type="submit" tone="secondary" size="md">
+                {job.promised_at ? "Change" : "Set"}
+              </Button>
+            </form>
           ) : null}
           {waitingForAssignment && canNote ? (
             <div className="flex flex-col gap-2 border-t border-ink/20 pt-3">
@@ -262,10 +267,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Card className={`flex flex-col gap-2 ${toneCls[approvalState.tone]} ${job.stage === "gate_in" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job card approval</span>
-          <span className="text-sm font-semibold">{approvalState.text}</span>
-          <a href="#approval" className="text-xs font-semibold underline underline-offset-4">
-            Approval link
-          </a>
+          {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
+          <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
         </Card>
         <Card className={`flex flex-col gap-2 ${toneCls[inspectionState.tone]} ${job.stage === "inspection" || job.stage === "quote" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Inspection report</span>
@@ -277,13 +280,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {insp.status === "submitted" && can(role, "approveInspections") ? "Review" : "Open report"}
               </LinkButton>
             ) : null}
-            {canSendReport && !reportLink ? <SendReportButton jobId={id} /> : null}
-            {canSendReport && reportLink ? (
-              <a href="#report-link" className="inline-flex min-h-10 items-center rounded-control border border-ink px-3 text-sm font-bold">
-                {reportLink.status === "opened" ? "Opened by the customer" : reportLink.status === "sent" ? "Sent, not yet opened" : "Link created"}
-              </a>
-            ) : null}
           </div>
+          {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
         </Card>
         {["Quotation", "Parts", "Invoice"].map((name) => (
           <Card key={name} className="flex flex-col gap-2 bg-canvas opacity-70">
@@ -407,39 +405,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </div>
 
         <div className="flex flex-col gap-6">
-          <div id="approval">
-            {canSend || approvals.length ? (
-              <ApprovalPanel
-                jobId={id}
-                canSend={canSend}
-                complete={check.complete}
-                latest={latestApproval}
-                approvedAt={job.first_approval_at}
-                link={activeLink}
-                activeRequestId={activeRequestId}
-                customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null}
-                contacts={customer ? await loadApproverContacts(customer.id) : []}
-                messageTemplate={messageTemplate}
-                hidePhone={!seesCustomerDetails}
-              />
-            ) : null}
-          </div>
-
-          {canSendReport || reportLink ? (
-            <ReportLinkPanel jobId={id} link={reportLink} url={reportUrl} message={reportMessage} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} />
-          ) : null}
-
-          {canPlan ? (
-            <Card className="flex flex-col gap-3">
-              <SectionLabel>Promised date</SectionLabel>
-              <form action={setPromisedDate.bind(null, id)} className="flex flex-col gap-3">
-                <Input name="promised_at" type="date" defaultValue={job.promised_at ?? ""} required />
-                <Button type="submit" tone="secondary">
-                  {job.promised_at ? "Change promised date" : "Set promised date"}
-                </Button>
-              </form>
-            </Card>
-          ) : null}
 
           {canAssign ? (
             <Card className="flex flex-col gap-3">

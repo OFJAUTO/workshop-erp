@@ -322,7 +322,8 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   await logEvent(supabase, jobId, staff.id, { event_type: "approval_created", note: `Approval link created for ${name || phone}` });
   refresh(jobId);
   const site = await getSiteUrl();
-  redirect(`/jobs/${jobId}?link=${encodeURIComponent(`${site}/approve/${token}`)}&req=${created.id}`);
+  // The link comes back to the button that was clicked; the centre window shows the message.
+  return { success: "Link created.", values: { ...values, link: `${site}/approve/${token}`, req: created.id } };
 }
 
 /** Records that the link was actually sent (Open WhatsApp or Copy link). */

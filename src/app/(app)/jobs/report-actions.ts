@@ -7,7 +7,7 @@ import { newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export type ReportLinkState = { error?: string; ok?: boolean };
+export type ReportLinkState = { error?: string; ok?: boolean; id?: string; token?: string };
 
 /**
  * Owner or advisor creates the customer's link to the approved inspection report.
@@ -24,15 +24,17 @@ export async function createReportLink(jobId: string, _prev: ReportLinkState, _f
   if (!bundle) return { error: "This job has no inspection report yet." };
   if (bundle.inspection.status !== "approved") return { error: "The report can be sent once the workshop manager has approved it." };
   const admin = createAdminClient();
-  const { data: existing, error: readError } = await admin.from("report_links").select("id").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: existing, error: readError } = await admin.from("report_links").select("id, token").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (readError) return { error: `Could not check for an existing link: ${readError.message}` };
-  if (!existing) {
-    const { error } = await admin.from("report_links").insert({ job_id: jobId, inspection_id: bundle.inspection.id, token: newToken(), created_by: staff.id, updated_by: staff.id });
-    if (error) return { error: `Could not create the link: ${error.message}` };
+  let row = existing as { id: string; token: string } | null;
+  if (!row) {
+    const { data: created, error } = await admin.from("report_links").insert({ job_id: jobId, inspection_id: bundle.inspection.id, token: newToken(), created_by: staff.id, updated_by: staff.id }).select("id, token").single();
+    if (error || !created) return { error: `Could not create the link: ${error?.message ?? "unknown error"}` };
+    row = created as { id: string; token: string };
     await admin.from("job_events").insert({ job_id: jobId, event_type: "report_link_created", note: `Inspection report link created by ${staff.display_name}`, created_by: staff.id });
   }
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true };
+  return { ok: true, id: row.id, token: row.token };
 }
 
 /** Records that the link went to the customer (Open WhatsApp or Copy link). */

@@ -7,28 +7,15 @@ import { loadJobCard } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, labelOf, feeNotice } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
-import { PRODUCTION_SITE_URL } from "@/lib/site";
+import { customerPageMetadata } from "@/lib/customer-pages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
 
 export const dynamic = "force-dynamic";
 
-/** What WhatsApp shows in the link preview. Customers never see the words "Workshop ERP". */
 export async function generateMetadata(): Promise<Metadata> {
-  return {
-    title: "OFJ Automotive, Vehicle Check-In",
-    description: "Review your vehicle's check-in video and job card, then approve to begin",
-    openGraph: {
-      title: "OFJ Automotive, Vehicle Check-In",
-      description: "Review your vehicle's check-in video and job card, then approve to begin",
-      siteName: "OFJ Automotive",
-      images: [{ url: `${PRODUCTION_SITE_URL}/logo.jpg`, width: 1206, height: 618 }],
-      type: "website",
-    },
-    twitter: { card: "summary_large_image", title: "OFJ Automotive, Vehicle Check-In", images: [`${PRODUCTION_SITE_URL}/logo.jpg`] },
-    robots: { index: false, follow: false },
-  };
+  return customerPageMetadata("OFJ Automotive, Vehicle Check-In", "Review your vehicle's check-in video and job card, then approve to begin");
 }
 
 /** The page the customer opens from the WhatsApp link. No login. Phone first. */
