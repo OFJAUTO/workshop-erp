@@ -36,6 +36,15 @@ const DEFAULTS = {
   opening_hour: 8,
   closing_hour: 17,
   appointments_per_day: 8,
+  appointment_reminder_hours_before: 1,
+  appointment_evening_reminder_hour: 18,
+  appointment_missed_after_minutes: 30,
+  whatsapp_reminder_car_drop:
+    "Dear [name], a reminder that your [car] is booked to be dropped at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
+  whatsapp_reminder_we_collect:
+    "Dear [name], a reminder that OFJ Automotive will collect your [car] tomorrow, [date] at [time], from [address], for [reason]. Please have the keys ready. Thank you, [advisor], OFJ Automotive",
+  whatsapp_reminder_customer_collects:
+    "Dear [name], your [car] is ready for collection at OFJ Automotive tomorrow, [date] at [time]. Thank you, [advisor], OFJ Automotive",
   whatsapp_reminder_template:
     "Dear [name], a reminder of your appointment at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
   whatsapp_approval_template:

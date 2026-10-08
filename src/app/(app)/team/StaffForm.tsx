@@ -1,5 +1,7 @@
 "use client";
 
+import { PERSON_COLOURS } from "@/lib/calendar";
+
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ChoiceButtons, Field, Input } from "@/components/ui";
 import { ALL_ROLES, DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId } from "@/lib/roles";
@@ -33,6 +35,23 @@ export function StaffForm({
               defaultValue={v.role_id}
               options={ALL_ROLES.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
             />
+          </Field>
+
+          <Field label="Colour on the calendar" hint="Shows whose booking it is. Used for service advisors and the owner.">
+            <div className="flex flex-wrap gap-2">
+              {PERSON_COLOURS.map((c) => (
+                <label key={c.value} className="cursor-pointer" title={c.label}>
+                  <input type="radio" name="colour" value={c.value} defaultChecked={v.colour === c.value} className="peer sr-only" />
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-transparent peer-checked:border-ink peer-focus-visible:ring-2 peer-focus-visible:ring-ink/30">
+                    <span className="block h-7 w-7 rounded-full" style={{ background: c.value }} />
+                  </span>
+                </label>
+              ))}
+              <label className="cursor-pointer" title="No colour">
+                <input type="radio" name="colour" value="" defaultChecked={!v.colour} className="peer sr-only" />
+                <span className="flex h-11 min-w-11 items-center justify-center rounded-full border-2 border-transparent px-2 text-xs font-semibold text-muted peer-checked:border-ink">None</span>
+              </label>
+            </div>
           </Field>
 
           <Field label="Department">

@@ -11,6 +11,7 @@ export type StaffRow = {
   login_type: "password" | "pin" | "both";
   is_head_accountant: boolean;
   photo_path: string | null;
+  colour: string | null;
   is_active: boolean;
   disabled_at: string | null;
   created_at: string;
@@ -327,12 +328,18 @@ export type AppointmentRow = {
   starts_at: string;
   duration_minutes: number;
   advisor_id: string | null;
-  status: "booked" | "arrived" | "no_show" | "cancelled";
+  kind: "customer_visit" | "car_drop" | "we_collect" | "customer_collects";
+  status: "booked" | "arrived" | "done" | "no_show" | "cancelled";
   job_id: string | null;
   notes: string | null;
   cancel_reason: string | null;
+  collect_address: string | null;
+  collect_method: "our_recovery" | "outside_recovery" | "our_driver" | null;
   reminder_sent_at: string | null;
   reminder_notified_at: string | null;
+  notified_hour_before_at: string | null;
+  notified_evening_before_at: string | null;
+  missed_notified_at: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

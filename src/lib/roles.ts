@@ -63,7 +63,7 @@ export const PERMISSIONS = {
   approveRelease: ["owner", "accounts"],
   viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "gate_in", "parts", "qc_inspector"],
   viewCalendar: ALL_ROLES,
-  bookAppointments: ["owner", "workshop_manager", "service_advisor"],
+  bookAppointments: ["owner", "service_advisor"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

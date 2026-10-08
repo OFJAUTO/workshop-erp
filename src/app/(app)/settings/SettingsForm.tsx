@@ -126,8 +126,28 @@ export function SettingsForm({
             <Field label="Appointments per day" hint="A day shows as full at this number.">
               <Input name="appointments_per_day" defaultValue={v.appointments_per_day} inputMode="numeric" required className="max-w-40" />
             </Field>
-            <Field label="WhatsApp appointment reminder" hint="Sent the day before. Placeholders: [name], [date], [time], [reason], [car], [advisor].">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Bell reminder (hours before)" hint="The assigned person is told this long before a booking. Also the day before at opening time. Checked hourly.">
+                <Input name="appointment_reminder_hours_before" defaultValue={v.appointment_reminder_hours_before} inputMode="numeric" required />
+              </Field>
+              <Field label="Evening reminder hour (collections)" hint="For 'We collect the car', the assigned person is also told the evening before, from this hour.">
+                <Input name="appointment_evening_reminder_hour" defaultValue={v.appointment_evening_reminder_hour} inputMode="numeric" required />
+              </Field>
+              <Field label="Counts as missed after (minutes)" hint="Shows Not arrived or Not collected and notifies the assigned person.">
+                <Input name="appointment_missed_after_minutes" defaultValue={v.appointment_missed_after_minutes} inputMode="numeric" required />
+              </Field>
+            </div>
+            <Field label="WhatsApp reminder: customer coming in" hint="Sent the day before. Placeholders: [name], [date], [time], [reason], [car], [advisor].">
               <Textarea name="whatsapp_reminder_template" defaultValue={v.whatsapp_reminder_template} rows={3} required />
+            </Field>
+            <Field label="WhatsApp reminder: car only arriving">
+              <Textarea name="whatsapp_reminder_car_drop" defaultValue={v.whatsapp_reminder_car_drop} rows={3} required />
+            </Field>
+            <Field label="WhatsApp reminder: we collect the car" hint="Also [address].">
+              <Textarea name="whatsapp_reminder_we_collect" defaultValue={v.whatsapp_reminder_we_collect} rows={3} required />
+            </Field>
+            <Field label="WhatsApp reminder: customer collects">
+              <Textarea name="whatsapp_reminder_customer_collects" defaultValue={v.whatsapp_reminder_customer_collects} rows={3} required />
             </Field>
           </Card>
 

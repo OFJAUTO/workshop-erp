@@ -26,7 +26,7 @@ export default async function StaffDetailPage({
   const [{ data: staffData }, { data: privData }, { data: deviceRows }] = await Promise.all([
     supabase
       .from("staff")
-      .select("id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, is_active, disabled_at, created_at, updated_at")
+      .select("id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, colour, is_active, disabled_at, created_at, updated_at")
       .eq("id", id)
       .maybeSingle(),
     supabase.from("staff_private").select("staff_id, phone, email, pin_hash, pin_failed_attempts, pin_locked_until, pin_updated_at").eq("staff_id", id).maybeSingle(),
@@ -93,6 +93,7 @@ export default async function StaffDetailPage({
                 email: priv?.email ?? "",
                 phone: priv?.phone ?? "",
                 is_head_accountant: staff.is_head_accountant ? "on" : "",
+                colour: staff.colour ?? "",
               }}
             />
           </Card>

@@ -13,7 +13,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const supabase = await createClient();
   let query = supabase
     .from("staff")
-    .select("id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, is_active, disabled_at, created_at, updated_at")
+    .select("id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, colour, is_active, disabled_at, created_at, updated_at")
     .order("is_active", { ascending: false })
     .order("role_id")
     .order("display_name");

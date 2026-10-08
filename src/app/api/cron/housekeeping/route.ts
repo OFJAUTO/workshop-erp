@@ -68,30 +68,57 @@ export async function GET(request: NextRequest) {
     report.remindersSent++;
   }
 
-  // 3. Appointment reminders for tomorrow
+  // 3. Booking reminders for the assigned person (hourly, so "an hour before" means within the next hour).
+  const nowIso = new Date().toISOString();
   const dubaiHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", hour12: false }).format(new Date()));
-  if (dubaiHour >= 8) {
-    const tomorrow = addDays(dubaiDate(), 1);
-    const { data: appts } = await admin
-      .from("appointments")
-      .select("id, reason, starts_at, advisor_id, customer:customers(full_name, company_name)")
-      .eq("is_active", true)
-      .eq("status", "booked")
-      .is("reminder_notified_at", null)
-      .gte("starts_at", dayStartIso(tomorrow))
-      .lt("starts_at", dayStartIso(addDays(tomorrow, 1)))
-      .limit(100);
-    for (const a of appts ?? []) {
-      const c = a.customer as unknown as { full_name: string; company_name: string | null } | null;
-      const n = {
-        type: "appointment_reminder",
-        title: `Send tomorrow's reminder: ${c?.company_name ?? c?.full_name ?? "customer"} at ${dubaiTimeOf(a.starts_at)}`,
-        body: a.reason,
-        href: `/calendar/${a.id}`,
-      };
-      if (a.advisor_id) await notifyStaff([a.advisor_id], n);
-      else await notifyRoles(["service_advisor", "workshop_manager"], n);
-      await admin.from("appointments").update({ reminder_notified_at: new Date().toISOString() }).eq("id", a.id);
+  const tomorrow = addDays(dubaiDate(), 1);
+  const apptSelect = "id, kind, reason, starts_at, advisor_id, customer:customers(full_name, company_name)";
+  type Appt = { id: string; kind: string; reason: string; starts_at: string; advisor_id: string | null; customer: { full_name: string; company_name: string | null } | null };
+  const who = (a: Appt) => a.customer?.company_name ?? a.customer?.full_name ?? "customer";
+  const tell = async (a: Appt, type: string, title: string) => {
+    const n = { type, title, body: a.reason, href: `/calendar/${a.id}` };
+    if (a.advisor_id) await notifyStaff([a.advisor_id], n);
+    else await notifyRoles(["service_advisor", "owner"], n);
+  };
+
+  // 3a. The day before, from opening time.
+  if (dubaiHour >= (Number(settings.opening_hour) || 8)) {
+    const { data } = await admin.from("appointments").select(apptSelect).eq("is_active", true).eq("status", "booked").is("reminder_notified_at", null).gte("starts_at", dayStartIso(tomorrow)).lt("starts_at", dayStartIso(addDays(tomorrow, 1))).limit(100);
+    for (const a of (data ?? []) as unknown as Appt[]) {
+      await tell(a, "appointment_reminder", `Tomorrow ${dubaiTimeOf(a.starts_at)}: ${who(a)}. Send the customer reminder.`);
+      await admin.from("appointments").update({ reminder_notified_at: nowIso }).eq("id", a.id);
+      report.appointmentReminders++;
+    }
+  }
+  // 3b. The evening before, for cars we collect, so the recovery can be arranged.
+  if (dubaiHour >= (Number(settings.appointment_evening_reminder_hour) || 18)) {
+    const { data } = await admin.from("appointments").select(apptSelect).eq("is_active", true).eq("status", "booked").eq("kind", "we_collect").is("notified_evening_before_at", null).gte("starts_at", dayStartIso(tomorrow)).lt("starts_at", dayStartIso(addDays(tomorrow, 1))).limit(100);
+    for (const a of (data ?? []) as unknown as Appt[]) {
+      await tell(a, "appointment_reminder", `Collection tomorrow ${dubaiTimeOf(a.starts_at)}: ${who(a)}. Arrange the recovery.`);
+      await admin.from("appointments").update({ notified_evening_before_at: nowIso }).eq("id", a.id);
+      report.appointmentReminders++;
+    }
+  }
+  // 3c. Shortly before the booking.
+  const hoursBefore = Number(settings.appointment_reminder_hours_before) || 1;
+  {
+    const until = new Date(Date.now() + hoursBefore * 3600000).toISOString();
+    const { data } = await admin.from("appointments").select(apptSelect).eq("is_active", true).eq("status", "booked").is("notified_hour_before_at", null).gt("starts_at", nowIso).lte("starts_at", until).limit(100);
+    for (const a of (data ?? []) as unknown as Appt[]) {
+      await tell(a, "appointment_reminder", `At ${dubaiTimeOf(a.starts_at)}: ${who(a)}`);
+      await admin.from("appointments").update({ notified_hour_before_at: nowIso }).eq("id", a.id);
+      report.appointmentReminders++;
+    }
+  }
+  // 3d. Time passed with nothing recorded.
+  const graceMinutes = Number(settings.appointment_missed_after_minutes) || 30;
+  {
+    const cutoff = new Date(Date.now() - graceMinutes * 60000).toISOString();
+    const { data } = await admin.from("appointments").select(apptSelect).eq("is_active", true).eq("status", "booked").is("missed_notified_at", null).lt("starts_at", cutoff).limit(100);
+    for (const a of (data ?? []) as unknown as Appt[]) {
+      const label = a.kind === "we_collect" || a.kind === "customer_collects" ? "Not collected" : "Not arrived";
+      await tell(a, "appointment_missed", `${label}: ${who(a)} at ${dubaiTimeOf(a.starts_at)}`);
+      await admin.from("appointments").update({ missed_notified_at: nowIso }).eq("id", a.id);
       report.appointmentReminders++;
     }
   }

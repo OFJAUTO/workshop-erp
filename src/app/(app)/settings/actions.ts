@@ -24,6 +24,9 @@ const NUMBER_KEYS = [
   "opening_hour",
   "closing_hour",
   "appointments_per_day",
+  "appointment_reminder_hours_before",
+  "appointment_evening_reminder_hour",
+  "appointment_missed_after_minutes",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -36,6 +39,9 @@ const TEXT_KEYS = [
   "inspection_fee_notice",
   "inspection_fee_notice_ar",
   "whatsapp_reminder_template",
+  "whatsapp_reminder_car_drop",
+  "whatsapp_reminder_we_collect",
+  "whatsapp_reminder_customer_collects",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -56,6 +62,9 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   opening_hour: [0, 23, "Opening hour"],
   closing_hour: [1, 24, "Closing hour"],
   appointments_per_day: [1, 100, "Appointments per day"],
+  appointment_reminder_hours_before: [1, 72, "Booking reminder hours before"],
+  appointment_evening_reminder_hour: [0, 23, "Evening reminder hour"],
+  appointment_missed_after_minutes: [5, 1440, "Booking counts as missed after"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -97,7 +106,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
     if (key === "whatsapp_approval_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
-    if (key === "whatsapp_reminder_template" && text.length < 10) return { error: "Enter the WhatsApp reminder message.", values };
+    if (key.startsWith("whatsapp_reminder") && text.length < 10) return { error: "Enter every WhatsApp reminder message.", values };
     updates.push({ key, value: text });
   }
 

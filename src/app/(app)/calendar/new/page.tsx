@@ -13,20 +13,21 @@ export default async function NewAppointmentPage({ searchParams }: { searchParam
   const supabase = await createClient();
   const data = await loadAppointmentFormData(supabase);
   const date = isDateString(sp.date) ? sp.date : dubaiDate();
-  const advisorId = staff.role_id === "service_advisor" ? staff.id : "";
+  const advisorId = staff.role_id === "service_advisor" || staff.role_id === "owner" ? staff.id : "";
   const vehicle = sp.vehicle ? data.vehicles.find((v) => v.id === sp.vehicle) : undefined;
   const customerId = vehicle?.customerId ?? sp.customer ?? "";
 
   return (
     <>
-      <PageHeader title="Book appointment" subtitle="Customer, car, reason, date and time. The customer gets a WhatsApp reminder the day before." />
+      <PageHeader title="New booking" subtitle="Choose the type first. The customer gets a WhatsApp reminder the day before; you get a bell reminder the day before and an hour before." />
       <AppointmentForm
         action={createAppointment}
         customers={data.customers}
         vehicles={data.vehicles}
         advisors={data.advisors}
-        initialValues={{ date, time: "09:00", duration_minutes: "60", advisor_id: advisorId, customer_id: customerId, vehicle_id: vehicle?.id ?? "" }}
-        submitLabel="Book appointment"
+        jobs={data.jobs}
+        initialValues={{ date, time: "09:00", duration_minutes: "30", advisor_id: advisorId, customer_id: customerId, vehicle_id: vehicle?.id ?? "" }}
+        submitLabel="Save booking"
       />
     </>
   );

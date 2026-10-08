@@ -349,6 +349,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     .update({ status: "closed", stage: "ready", is_open: false, gated_out_at: new Date().toISOString(), gated_out_by: staff.id })
     .eq("id", jobId);
   if (jobError) return { error: jobError.message, values };
+  await createAdminClient().from("appointments").update({ status: "done", updated_by: staff.id }).eq("job_id", jobId).eq("kind", "customer_collects").eq("status", "booked");
 
   await logEvent(supabase, jobId, staff.id, {
     event_type: "gate_out",

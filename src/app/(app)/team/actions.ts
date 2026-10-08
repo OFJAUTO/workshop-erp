@@ -28,6 +28,7 @@ const staffSchema = z
     phone: z.string().trim().optional(),
     pin: z.string().trim().optional(),
     is_head_accountant: z.boolean(),
+    colour: z.string().trim().regex(/^(#[0-9a-f]{6})?$/, "Choose a colour from the list."),
   })
   .superRefine((d, ctx) => {
     if ((d.login_type === "password" || d.login_type === "both") && !z.email().safeParse(d.email ?? "").success) {
@@ -54,6 +55,7 @@ function parseStaff(formData: FormData) {
     phone: formData.get("phone") ?? "",
     pin: formData.get("pin") ?? "",
     is_head_accountant: formData.get("is_head_accountant") === "on",
+    colour: String(formData.get("colour") ?? "").toLowerCase(),
   });
 }
 
@@ -93,6 +95,7 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
     employee_number: blankToNull(d.employee_number),
     login_type: d.login_type,
     is_head_accountant: d.is_head_accountant,
+    colour: d.colour || null,
     created_by: owner.id,
     updated_by: owner.id,
   });
@@ -145,6 +148,7 @@ export async function updateStaff(id: string, _state: FormState, formData: FormD
       department_id: d.department_id,
       employee_number: blankToNull(d.employee_number),
       is_head_accountant: d.is_head_accountant,
+      colour: d.colour || null,
     })
     .eq("id", id);
   if (error) {

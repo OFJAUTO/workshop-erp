@@ -11,7 +11,8 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "owner_approval_needed", label: "Something needs the owner's approval", locked: true },
   { type: "catalog_review", label: "New make or model added during gate-in" },
   { type: "appointment_booked", label: "An appointment was booked for you" },
-  { type: "appointment_reminder", label: "Appointment tomorrow: send the customer reminder" },
+  { type: "appointment_reminder", label: "Booking reminders: the day before, an hour before, the evening before a collection" },
+  { type: "appointment_missed", label: "Booking missed: not arrived or not collected" },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };

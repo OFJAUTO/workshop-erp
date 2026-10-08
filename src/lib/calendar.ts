@@ -1,16 +1,83 @@
 /** Calendar helpers. All dates are Dubai dates (YYYY-MM-DD); Dubai has no daylight saving time. */
 
-export const APPOINTMENT_STATUSES = ["booked", "arrived", "no_show", "cancelled"] as const;
+export const APPOINTMENT_STATUSES = ["booked", "arrived", "done", "no_show", "cancelled"] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 
 export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
   booked: "Booked",
   arrived: "Arrived, gated in",
+  done: "Done",
   no_show: "No-show",
   cancelled: "Cancelled",
 };
 
-export const DURATIONS = [30, 45, 60, 90, 120, 180] as const;
+/** The four kinds of booking, chosen first with one tap. */
+export const BOOKING_KINDS = ["customer_visit", "car_drop", "we_collect", "customer_collects"] as const;
+export type BookingKind = (typeof BOOKING_KINDS)[number];
+
+export const BOOKING_KIND_LABELS: Record<BookingKind, string> = {
+  customer_visit: "Customer coming in",
+  car_drop: "Car only arriving",
+  we_collect: "We collect the car",
+  customer_collects: "Customer collects",
+};
+
+export const BOOKING_KIND_SHORT: Record<BookingKind, string> = {
+  customer_visit: "Customer visit",
+  car_drop: "Car drop-off",
+  we_collect: "We collect",
+  customer_collects: "Collection",
+};
+
+export const BOOKING_KIND_HINTS: Record<BookingKind, string> = {
+  customer_visit: "With or without the car being left",
+  car_drop: "Dropped by a driver or recovery",
+  we_collect: "From the customer's address",
+  customer_collects: "Finished car, linked to its job card",
+};
+
+export const COLLECT_METHODS = [
+  { value: "our_recovery", label: "Our recovery" },
+  { value: "outside_recovery", label: "Outside recovery" },
+  { value: "our_driver", label: "Our driver" },
+] as const;
+export type CollectMethod = (typeof COLLECT_METHODS)[number]["value"];
+
+/** "Not arrived" for people and cars coming to us; "Not collected" for collections either way. */
+export function missedLabel(kind: BookingKind) {
+  return kind === "we_collect" || kind === "customer_collects" ? "Not collected" : "Not arrived";
+}
+
+/** A booking whose time has passed with nothing recorded. */
+export function isMissed(a: { status: string; starts_at: string }, graceMinutes: number, now = new Date()) {
+  return a.status === "booked" && Date.parse(a.starts_at) + graceMinutes * 60000 < now.getTime();
+}
+
+/** Durations for a customer visit only; the other kinds have a date and time. */
+export const DURATIONS = [15, 30, 45, 60] as const;
+
+/** Colours a person can be given on the Team page. */
+export const PERSON_COLOURS = [
+  { value: "#111113", label: "Black" },
+  { value: "#2563eb", label: "Blue" },
+  { value: "#16a34a", label: "Green" },
+  { value: "#d97706", label: "Orange" },
+  { value: "#dc2626", label: "Red" },
+  { value: "#7c3aed", label: "Purple" },
+  { value: "#0891b2", label: "Teal" },
+  { value: "#db2777", label: "Pink" },
+  { value: "#65a30d", label: "Lime" },
+  { value: "#78716c", label: "Grey" },
+] as const;
+
+/** The person's own colour, or a steady fallback from their id until the owner assigns one. */
+export function colourFor(person: { id: string; colour?: string | null } | null | undefined) {
+  if (!person) return "#9ca3af";
+  if (person.colour) return person.colour;
+  let h = 0;
+  for (const ch of person.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return PERSON_COLOURS[h % PERSON_COLOURS.length].value;
+}
 
 export type CalendarView = "day" | "week" | "month";
 
@@ -28,6 +95,11 @@ export function dubaiDateOf(iso: string | Date) {
 /** The Dubai clock time (HH:MM) of a moment. */
 export function dubaiTimeOf(iso: string | Date) {
   return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+}
+
+/** The Dubai hour (0 to 23) of a moment. */
+export function dubaiHourOf(iso: string | Date) {
+  return Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", hour12: false }).format(new Date(iso)));
 }
 
 /** Midnight at the start of a Dubai date, as an ISO moment. */

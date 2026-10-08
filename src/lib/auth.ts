@@ -18,7 +18,7 @@ export const getCurrentStaff = cache(async (): Promise<CurrentStaff | null> => {
   const { data } = await supabase
     .from("staff")
     .select(
-      "id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, is_active, disabled_at, created_at, updated_at",
+      "id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, colour, is_active, disabled_at, created_at, updated_at",
     )
     .eq("id", user.id)
     .maybeSingle();
