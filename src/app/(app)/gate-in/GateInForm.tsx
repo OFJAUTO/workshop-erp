@@ -179,7 +179,7 @@ export function GateInForm({
                   ]}
                 />
                 </Field>
-                <p className="text-xs text-muted">The promised date is set at the quotation stage, or from the job card at any time.</p>
+                <p className="text-xs text-muted">The promised date is set in the quotation, once every part has its delivery date.</p>
               </Card>
             </div>
           </div>

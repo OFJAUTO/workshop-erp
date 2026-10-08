@@ -236,16 +236,24 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               {step.action.label}
             </LinkButton>
           ) : null}
-          {canPlan ? (
-            <form action={setPromisedDate.bind(null, id)} className="flex flex-wrap items-end gap-2 border-t border-ink/20 pt-3">
-              <label className="flex flex-col gap-1 flex-1 min-w-40">
-                <span className="text-xs font-semibold text-muted">Promised date</span>
-                <Input name="promised_at" type="date" defaultValue={job.promised_at ?? ""} required />
-              </label>
-              <Button type="submit" tone="secondary" size="md">
-                {job.promised_at ? "Change" : "Set"}
-              </Button>
-            </form>
+          {job.promised_at ? (
+            <div className="flex flex-col gap-2 border-t border-ink/20 pt-3">
+              <p className="text-sm">
+                Promised date <span className="font-semibold">{formatPromised(job.promised_at)}</span>
+              </p>
+              {can(role, "sendApproval") && job.is_open ? (
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-xs font-semibold text-muted underline underline-offset-4">Change the promised date (with a reason)</summary>
+                  <form action={setPromisedDate.bind(null, id)} className="mt-2 flex flex-col gap-2">
+                    <Input name="promised_at" type="date" defaultValue={job.promised_at} required />
+                    <Textarea name="reason" rows={2} required placeholder="Why the date changes (logged)" />
+                    <Button type="submit" tone="secondary" size="md">
+                      Change promised date
+                    </Button>
+                  </form>
+                </details>
+              ) : null}
+            </div>
           ) : null}
           {waitingForAssignment && canNote ? (
             <div className="flex flex-col gap-2 border-t border-ink/20 pt-3">

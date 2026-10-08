@@ -33,3 +33,12 @@ Given by the owner on 7 October 2026. Recorded, not built.
 - Leaving the workshop: when a car is Ready, the advisor chooses Customer collects / Customer's driver collects / Delivery by recovery.
 - Delivery by recovery uses our own truck or an outside company; both must be possible. Outline: book address, date, time and any fee, shown on the Calendar; the payment rule applies before loading; photos or video and a keys check at loading, stamped "Left workshop"; photos and customer confirmation at the door, stamped "Delivered" with time and location; the job closes only after Delivered.
 - The same booking works in reverse for collecting a car from a customer.
+
+## Promised date (owner notes, 8 October 2026)
+
+- No promised date box on the job card at any stage before the quotation; the date depends on parts availability.
+- The promised date is set only inside the quotation, as the last step before sending, once every part has its delivery date.
+- Suggest it automatically: the latest part delivery date plus the working days the labour needs. The advisor can change it.
+- Compulsory before the quotation can be sent; warn if it is earlier than the latest part delivery date.
+- Once set it shows on the job card and dashboard as read only. The owner or an advisor can change it later with a reason, which is logged (built: the Next step panel on the job card); the customer's quote page shows the current date.
+- A quick job from an estimate or a fixed-price package with no parts follows the same rule: the date is set in the quotation.

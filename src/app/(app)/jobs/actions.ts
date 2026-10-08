@@ -152,19 +152,25 @@ export async function setJobPriority(jobId: string, formData: FormData) {
   redirect(`/jobs/${jobId}`);
 }
 
-/** The promised date is set at the quotation stage or from the job card at any time. */
+/**
+ * The promised date is set inside the quotation (next phase), once every part has its delivery date.
+ * Afterwards the owner or an advisor can change it here, with a reason that is logged.
+ */
 export async function setPromisedDate(jobId: string, formData: FormData) {
-  const staff = await requirePermission("setPriority");
+  const staff = await requirePermission("sendApproval");
   const date = String(formData.get("promised_at") ?? "").trim();
+  const reason = blankToNull(formData.get("reason"));
+  if (!reason || reason.length < 3) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Write the reason for changing the promised date."));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Choose the promised date."));
   if (date < dubaiDate()) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The promised date cannot be in the past."));
   const supabase = await createClient();
   const { data: job } = await supabase.from("jobs").select("promised_at, is_open").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}`);
+  if (!job.promised_at) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The promised date is set in the quotation, once every part has its delivery date."));
   if (job.promised_at === date) redirect(`/jobs/${jobId}`);
   const { error } = await supabase.from("jobs").update({ promised_at: date }).eq("id", jobId);
   if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
-  await logEvent(supabase, jobId, staff.id, { event_type: "promised_date", note: `Promised date ${job.promised_at ?? "none"} → ${date}` });
+  await logEvent(supabase, jobId, staff.id, { event_type: "promised_date", note: `Promised date ${job.promised_at} → ${date}: ${reason}` });
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=` + encodeURIComponent("Promised date saved."));
 }
