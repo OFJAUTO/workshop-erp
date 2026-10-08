@@ -173,37 +173,28 @@ export default async function ApprovalPage({
 
       <Card className="flex flex-col gap-3">
         <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Terms and conditions</h2>
-        <details className="rounded-control border border-line">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-bold">Read the terms in English</summary>
-          <div className="px-4 pb-4 text-sm leading-relaxed whitespace-pre-wrap">{req.terms_text}</div>
-        </details>
-        {req.terms_text_ar ? (
-          <details className="rounded-control border border-line" dir="rtl">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-bold">اقرأ الشروط والأحكام بالعربية</summary>
-            <div className="px-4 pb-4 text-sm leading-relaxed whitespace-pre-wrap">{req.terms_text_ar}</div>
-          </details>
-        ) : null}
-        <Link href={`/terms?t=${encodeURIComponent(token)}`} className="text-xs text-muted underline underline-offset-4" target="_blank">
-          Open the terms on their own page
+        <p className="text-sm text-muted">The full terms open on their own page, in English and Arabic. A button there brings you back here.</p>
+        <Link href={`/terms?t=${encodeURIComponent(token)}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-control border-2 border-ink bg-white px-4 text-sm font-bold">
+          Read the terms and conditions
         </Link>
       </Card>
 
       {!approved ? (
-        <Card className="flex flex-col gap-4">
+        <section id="approval" className="rounded-card border border-line bg-chip p-5 flex flex-col gap-4 scroll-mt-4">
           <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Your approval</h2>
           <p className="text-sm text-muted">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
           <form method="post" action={`/api/approve/${token}`} className="flex flex-col gap-4">
             {feeNoticeEn ? (
-              <div className="rounded-control bg-chip px-3 py-2.5 flex flex-col gap-1.5">
-                <span className="text-sm font-semibold">{feeNoticeEn}</span>
+              <div className="rounded-control border border-line-strong bg-white px-3 py-2.5 flex flex-col gap-1.5">
+                <span className="text-sm font-bold">{feeNoticeEn}</span>
                 {feeNoticeAr ? (
-                  <span className="text-sm font-semibold" dir="rtl" lang="ar">
+                  <span className="text-sm font-bold" dir="rtl" lang="ar">
                     {feeNoticeAr}
                   </span>
                 ) : null}
               </div>
             ) : null}
-            <label className="flex items-start gap-3 cursor-pointer rounded-control border border-line-strong p-3 has-[:checked]:border-ink">
+            <label className="flex items-start gap-3 cursor-pointer rounded-control border border-line-strong bg-white p-3 has-[:checked]:border-ink">
               <input type="checkbox" name="agree" required className="mt-1 h-5 w-5 accent-ink shrink-0" />
               <span className="flex flex-col gap-2">
                 <span className="text-sm font-medium">{declaration}</span>
@@ -219,7 +210,7 @@ export default async function ApprovalPage({
               Approve
             </Button>
           </form>
-        </Card>
+        </section>
       ) : null}
     </Branded>
   );
@@ -241,22 +232,52 @@ function Branded({
       <header className="bg-sidebar text-white px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <Logo onDark className="h-9" alt={companyName} />
-          <span className="text-sm font-bold truncate">Vehicle Check-In</span>
+          {/* On a PC the title sits in the bar; on a phone it moves to its own line below. */}
+          <span className="hidden sm:inline text-sm font-bold truncate">Vehicle Check-In</span>
         </div>
         {advisor?.phone ? (
           <div className="flex items-center gap-2 shrink-0">
-            <a href={`tel:${advisor.phone}`} className="inline-flex min-h-10 items-center rounded-control border border-white/40 px-3 text-xs font-bold">
-              Call {advisor.name}
+            {/* Phone: two round icon buttons. */}
+            <a href={`tel:${advisor.phone}`} aria-label={`Call ${advisor.name}`} title={`Call ${advisor.name}`} className="sm:hidden inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/50">
+              <PhoneIcon />
             </a>
             {waDigits ? (
-              <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center rounded-control bg-white px-3 text-xs font-bold text-ink">
-                WhatsApp
+              <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" aria-label="WhatsApp the advisor" title="WhatsApp" className="sm:hidden inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-ink">
+                <WhatsAppIcon />
+              </a>
+            ) : null}
+            {/* PC: buttons with text. */}
+            <a href={`tel:${advisor.phone}`} className="hidden sm:inline-flex min-h-10 items-center gap-2 rounded-control border border-white/40 px-3 text-xs font-bold">
+              <PhoneIcon /> Call {advisor.name}
+            </a>
+            {waDigits ? (
+              <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" className="hidden sm:inline-flex min-h-10 items-center gap-2 rounded-control bg-white px-3 text-xs font-bold text-ink">
+                <WhatsAppIcon /> WhatsApp
               </a>
             ) : null}
           </div>
         ) : null}
       </header>
+      <div className="sm:hidden bg-white border-b border-line px-4 py-2.5">
+        <span className="block text-base font-extrabold">Vehicle Check-In</span>
+      </div>
       <main className="mx-auto max-w-2xl px-4 py-5 flex flex-col gap-4">{children}</main>
     </div>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.8 2.1z" />
+    </svg>
+  );
+}
+
+function WhatsAppIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3.3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 2.4 1 2.9.8 3.4.7.5 0 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3l-2-1c-.3-.1-.5-.2-.7.2l-.9 1.1c-.2.2-.3.2-.6.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.6-.5h-.6z" />
+    </svg>
   );
 }

@@ -23,6 +23,58 @@ const KIND_LABEL: Record<GateInMediaRow["kind"], string> = {
 
 type Slide = { key: string; url: string; label: string; detail?: string };
 
+/**
+ * A video with a real frame as its preview picture instead of a black box. The browser is
+ * asked to show the frame half a second in; as a fallback a frame is drawn into a canvas and
+ * used as the poster once the file's first bytes arrive.
+ */
+function VideoPreview({ url }: { url: string }) {
+  const [poster, setPoster] = useState<string | null>(null);
+  const ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const probe = document.createElement("video");
+    probe.crossOrigin = "anonymous";
+    probe.muted = true;
+    probe.playsInline = true;
+    probe.preload = "metadata";
+    probe.src = url;
+    const onLoaded = () => {
+      try {
+        probe.currentTime = Math.min(0.5, Math.max(0, (probe.duration || 1) / 10));
+      } catch {
+        // ignore
+      }
+    };
+    const onSeeked = () => {
+      if (cancelled || !probe.videoWidth) return;
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, 640 / probe.videoWidth);
+      canvas.width = Math.round(probe.videoWidth * scale);
+      canvas.height = Math.round(probe.videoHeight * scale);
+      try {
+        canvas.getContext("2d")?.drawImage(probe, 0, 0, canvas.width, canvas.height);
+        setPoster(canvas.toDataURL("image/jpeg", 0.8));
+      } catch {
+        // Cross-origin without CORS headers: keep the browser's own frame.
+      }
+      probe.removeAttribute("src");
+      probe.load();
+    };
+    probe.addEventListener("loadedmetadata", onLoaded);
+    probe.addEventListener("seeked", onSeeked);
+    return () => {
+      cancelled = true;
+      probe.removeEventListener("loadedmetadata", onLoaded);
+      probe.removeEventListener("seeked", onSeeked);
+      probe.removeAttribute("src");
+    };
+  }, [url]);
+
+  return <video ref={ref} src={`${url}#t=0.5`} poster={poster ?? undefined} controls playsInline preload="metadata" className="w-full rounded-card bg-black aspect-video" />;
+}
+
 function captionFor(p: GateInMediaRow, compact: boolean) {
   const parts = [KIND_LABEL[p.kind]];
   if (isWheelKind(p.kind) && p.wheel_condition?.length) parts.push(wheelConditionText(p.wheel_condition));
@@ -231,7 +283,7 @@ export function MediaGallery({
             const url = urls[v.storage_path];
             return (
               <figure key={v.id} className="flex flex-col gap-1">
-                {url ? <video src={url} controls playsInline preload="metadata" className="w-full rounded-card bg-black aspect-video" /> : <div className="aspect-video rounded-card bg-chip" />}
+                {url ? <VideoPreview url={url} /> : <div className="aspect-video rounded-card bg-chip" />}
                 <figcaption className="text-xs font-semibold">
                   {KIND_LABEL[v.kind]}
                   {v.duration_s ? ` · ${v.duration_s}s` : ""}
