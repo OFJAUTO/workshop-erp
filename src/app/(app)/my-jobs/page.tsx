@@ -4,7 +4,7 @@ import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, PageHeader } from "@/components/ui";
-import { requireStaff } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { STATUS_LABELS, formatPromised, jobTiming, urgencyRank, workingTimeOf } from "@/lib/jobs";
 import { getSettings } from "@/lib/settings";
@@ -19,7 +19,7 @@ type Row = JobRow & {
 
 /** The technician's list: cars assigned to them. The full technician screen arrives in Phase 6. */
 export default async function MyJobsPage() {
-  const staff = await requireStaff();
+  const staff = await requirePermission("viewJobs");
   const settings = await getSettings();
   const supabase = await createClient();
   const { data } = await supabase

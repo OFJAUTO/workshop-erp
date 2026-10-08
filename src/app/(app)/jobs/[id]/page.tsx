@@ -4,7 +4,7 @@ import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
-import { requireStaff } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf, workingTimeOf } from "@/lib/jobs";
@@ -27,7 +27,7 @@ export default async function JobPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string }>;
 }) {
-  const staff = await requireStaff();
+  const staff = await requirePermission("viewJobs");
   const { id } = await params;
   const { message, error, link, req } = await searchParams;
   const role = staff.role_id as RoleId;

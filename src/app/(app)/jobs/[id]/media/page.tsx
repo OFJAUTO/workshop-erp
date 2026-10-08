@@ -16,7 +16,8 @@ import { MediaGallery } from "../MediaGallery";
 export const dynamic = "force-dynamic";
 
 export default async function JobMediaPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("editGateIn");
+  const staff = await requirePermission("editGateIn");
+  const gateInOnly = staff.role_id === "gate_in";
   const { id } = await params;
   const supabase = await createClient();
   const card = await loadJobCard(supabase, id);
@@ -35,8 +36,8 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
         subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
         actions={
-          <LinkButton href={`/jobs/${id}`} tone={check.complete ? "primary" : "secondary"} size="lg">
-            {check.complete ? "Open job card" : "Finish later (video pending)"}
+          <LinkButton href={gateInOnly ? "/gate-in" : `/jobs/${id}`} tone={check.complete ? "primary" : "secondary"} size="lg">
+            {check.complete ? (gateInOnly ? "Done, next car" : "Open job card") : "Finish later (video pending)"}
           </LinkButton>
         }
       />

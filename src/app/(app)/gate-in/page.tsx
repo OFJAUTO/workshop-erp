@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Badge, Button, Card, Empty, Input, LinkButton, PageHeader } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
 import { BarcodeScan } from "./BarcodeScan";
@@ -12,11 +13,22 @@ type Row = VehicleRow & {
 };
 
 export default async function GateInSearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  await requirePermission("gateIn");
+  const staff = await requirePermission("gateIn");
+  const gateInOnly = staff.role_id === "gate_in";
   const { q = "" } = await searchParams;
   const term = q.trim().replace(/\s+/g, "");
 
   const supabase = await createClient();
+  // The person's own gate-ins still waiting for photos or video.
+  const { data: pendingRows } = await supabase
+    .from("jobs")
+    .select("id, job_number, gated_in_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+    .eq("status", "gate_in_pending")
+    .eq("gated_in_by", staff.id)
+    .order("gated_in_at", { ascending: false })
+    .limit(10);
+  type Pending = { id: string; job_number: string; gated_in_at: string; vehicle: (Pick<VehicleRow, "has_plate" | "plate_country" | "plate_emirate" | "plate_code" | "plate_number" | "vin"> & { make: { name: string } | null; model: { name: string } | null }) | null };
+  const pending = (pendingRows ?? []) as unknown as Pending[];
   let rows: Row[] = [];
   let openJobs = new Map<string, { id: string; job_number: string }>();
   if (term) {
@@ -43,6 +55,25 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
   return (
     <>
       <PageHeader title="Gate in a car" subtitle="Find the car by plate or VIN. New car? Add the customer and car in one step." actions={<LinkButton href="/gate-in/new-car" tone="secondary" size="lg">New customer and car</LinkButton>} />
+
+      {pending.length ? (
+        <Card className="flex flex-col gap-3 border-amber-bar">
+          <SectionLabel right={`${pending.length}`}>Your gate-ins still waiting for photos or video</SectionLabel>
+          <ul className="flex flex-col divide-y divide-line">
+            {pending.map((p) => (
+              <li key={p.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3">
+                <span className="flex flex-col">
+                  <span className="font-bold">{p.vehicle ? formatPlate(p.vehicle) : p.job_number}</span>
+                  <span className="text-xs text-muted">{[p.vehicle?.make?.name, p.vehicle?.model?.name].filter(Boolean).join(" ")} · {p.job_number} · {formatDateTime(p.gated_in_at)}</span>
+                </span>
+                <LinkButton href={`/jobs/${p.id}/media`} size="md">
+                  Finish photos and video
+                </LinkButton>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       <Card className="flex flex-col gap-4">
         <form className="flex flex-wrap gap-2" action="/gate-in">
@@ -81,17 +112,25 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
                 </span>
                 <div className="flex flex-wrap gap-2 mt-1">
                   {open ? (
-                    <LinkButton href={`/jobs/${open.id}`} tone="secondary" size="lg">
-                      Open job card
-                    </LinkButton>
+                    gateInOnly ? (
+                      <LinkButton href={`/jobs/${open.id}/media`} tone="secondary" size="lg">
+                        Photos and video
+                      </LinkButton>
+                    ) : (
+                      <LinkButton href={`/jobs/${open.id}`} tone="secondary" size="lg">
+                        Open job card
+                      </LinkButton>
+                    )
                   ) : (
                     <LinkButton href={`/gate-in/new?vehicle=${v.id}`} size="lg">
                       Gate in this car
                     </LinkButton>
                   )}
-                  <LinkButton href={`/vehicles/${v.id}`} tone="ghost" size="lg">
-                    Car details
-                  </LinkButton>
+                  {!gateInOnly ? (
+                    <LinkButton href={`/vehicles/${v.id}`} tone="ghost" size="lg">
+                      Car details
+                    </LinkButton>
+                  ) : null}
                 </div>
               </Card>
             );

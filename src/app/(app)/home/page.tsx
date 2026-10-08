@@ -15,6 +15,7 @@ function greeting() {
 export default async function HomePage() {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
+  if (role === "gate_in") redirect("/gate-in");
   if (can(role, "viewDashboard")) redirect("/dashboard");
   if (role === "technician") redirect("/my-jobs");
   const today = new Intl.DateTimeFormat("en-GB", {

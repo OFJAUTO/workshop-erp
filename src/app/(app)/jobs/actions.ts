@@ -213,7 +213,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   }
   await logEvent(supabase, jobId, staff.id, { event_type: "amendment", note: "Gate-in details amended" });
   refresh(jobId);
-  redirect(`/jobs/${jobId}?message=` + encodeURIComponent("Amendments saved and logged."));
+  redirect(`/jobs/${jobId}${staff.role_id === "gate_in" ? "/media" : ""}?message=` + encodeURIComponent("Amendments saved and logged."));
 }
 
 /* ---------------------------------------------------------------------------

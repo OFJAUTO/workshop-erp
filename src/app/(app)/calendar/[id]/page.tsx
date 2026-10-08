@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BookingIcon } from "@/components/BookingIcons";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
-import { requireStaff } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { APPOINTMENT_STATUS_LABELS, BOOKING_KIND_LABELS, COLLECT_METHODS, colourFor, dubaiDateOf, dubaiTimeOf, fillTemplate, formatDayHeading, formatShortDay, isMissed, missedLabel } from "@/lib/calendar";
 import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
@@ -12,7 +12,7 @@ import { markReminderSent, setAppointmentStatus } from "../actions";
 import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, canEditAppointment, reminderTemplateFor, type AppointmentFull } from "../form-data";
 
 export default async function AppointmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
-  const staff = await requireStaff();
+  const staff = await requirePermission("viewCalendar");
   const role = staff.role_id as RoleId;
   const { id } = await params;
   const { message, error } = await searchParams;
