@@ -1,4 +1,4 @@
-/** The mechanical inspection: checklist shape, default sections, measurements, statuses. Shared by screens and actions. */
+/** The mechanical inspection: checklist shape, default sections, measurements, tyres, statuses and the completeness rules. */
 
 export const ITEM_STATUSES = ["good", "average", "bad"] as const;
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
@@ -16,6 +16,9 @@ export const INSPECTION_STATUS_LABELS: Record<InspectionStatus, string> = {
 
 export type ChecklistItem = { key: string; label: string };
 export type ChecklistSection = { key: string; title: string; items: ChecklistItem[] };
+
+/** The road test used to be a checklist section; it now belongs to the QC inspector. Old reports hide it. */
+export const ROAD_TEST_SECTION_KEY = "diagnostics_and_road_test";
 
 export const JOB_DEPARTMENTS = [
   { value: "mechanical", label: "Mechanical" },
@@ -137,22 +140,59 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Interior lights",
   ]),
   section("Air conditioning", ["A/C compressor / expansion valve / condenser / evaporator / pipes", "Cabin filter"]),
-  section("Diagnostics and road test", ["Road test: noises, vibration, pulling, gearbox behaviour, braking"]),
   section("Other", ["Other"]),
 ];
 
-/** Compulsory numbers, fixed (not part of the editable checklist). */
-export type MeasurementField = { key: string; label: string; unit?: string; kind: "number" | "year" | "choice"; choices?: { value: string; label: string }[]; group: string };
+/** Tyres: four positions, plus an optional spare. */
+export const TYRE_POSITIONS = [
+  { key: "fl", label: "Front left" },
+  { key: "fr", label: "Front right" },
+  { key: "rl", label: "Rear left" },
+  { key: "rr", label: "Rear right" },
+] as const;
+export const TYRE_CONDITIONS = [
+  { value: "good", label: "Good" },
+  { value: "worn_out", label: "Worn out" },
+  { value: "cracked", label: "Cracked" },
+  { value: "uneven_wear", label: "Uneven wear" },
+  { value: "bulge_cut", label: "Bulge or cut" },
+  { value: "puncture_repair", label: "Puncture or repair" },
+] as const;
+export const TYRE_ACTIONS = [
+  { value: "none", label: "None" },
+  { value: "replace_soon", label: "Replace soon" },
+  { value: "replace_now", label: "Replace now" },
+] as const;
+
+/** "Good" stands alone; the other conditions combine. Stored as a comma-separated list. */
+export function cleanTyreConditions(values: string[]) {
+  const allowed = new Set(TYRE_CONDITIONS.map((c) => c.value));
+  const unique = Array.from(new Set(values.filter((v) => allowed.has(v as (typeof TYRE_CONDITIONS)[number]["value"]))));
+  if (unique.includes("good")) return ["good"];
+  return TYRE_CONDITIONS.map((c) => c.value).filter((v) => unique.includes(v)) as string[];
+}
+
+/** Cleans one saved measurement value: tyre conditions and actions must be known choices; everything else is free text. Returns null when the key is not allowed. */
+export function cleanMeasurementValue(key: string, raw: string): string | null {
+  const value = raw.trim().slice(0, 40);
+  const tyre = /^tyre_(fl|fr|rl|rr|spare)_(cond|action)$/.exec(key);
+  if (tyre) {
+    if (tyre[2] === "cond") return cleanTyreConditions(value.split(",")).join(",");
+    return TYRE_ACTIONS.some((a) => a.value === value) ? value : "";
+  }
+  return MEASUREMENTS.some((m) => m.key === key) ? value : null;
+}
+
+/** Compulsory numbers, fixed (not part of the editable checklist). Tyre conditions and actions sit beside them. */
+export type MeasurementField = { key: string; label: string; unit?: string; kind: "number" | "year" | "choice"; choices?: { value: string; label: string }[]; group: string; optional?: boolean };
 
 export const MEASUREMENTS: MeasurementField[] = [
-  { key: "tyre_fl_tread", label: "Front left tread", unit: "mm", kind: "number", group: "Tyres" },
-  { key: "tyre_fl_year", label: "Front left tyre year", kind: "year", group: "Tyres" },
-  { key: "tyre_fr_tread", label: "Front right tread", unit: "mm", kind: "number", group: "Tyres" },
-  { key: "tyre_fr_year", label: "Front right tyre year", kind: "year", group: "Tyres" },
-  { key: "tyre_rl_tread", label: "Rear left tread", unit: "mm", kind: "number", group: "Tyres" },
-  { key: "tyre_rl_year", label: "Rear left tyre year", kind: "year", group: "Tyres" },
-  { key: "tyre_rr_tread", label: "Rear right tread", unit: "mm", kind: "number", group: "Tyres" },
-  { key: "tyre_rr_year", label: "Rear right tyre year", kind: "year", group: "Tyres" },
+  ...TYRE_POSITIONS.flatMap((p) => [
+    { key: `tyre_${p.key}_tread`, label: `${p.label} tread`, unit: "mm", kind: "number" as const, group: "Tyres" },
+    { key: `tyre_${p.key}_year`, label: `${p.label} tyre year`, kind: "year" as const, group: "Tyres" },
+  ]),
+  { key: "tyre_spare_tread", label: "Spare tread", unit: "mm", kind: "number", group: "Spare tyre", optional: true },
+  { key: "tyre_spare_year", label: "Spare tyre year", kind: "year", group: "Spare tyre", optional: true },
   { key: "pad_front", label: "Front brake pads", unit: "mm", kind: "number", group: "Brake pads" },
   { key: "pad_rear", label: "Rear brake pads", unit: "mm", kind: "number", group: "Brake pads" },
   { key: "battery_voltage", label: "Battery voltage", unit: "V", kind: "number", group: "Battery test" },
@@ -172,6 +212,7 @@ export const MEASUREMENTS: MeasurementField[] = [
 
 export function measurementMissing(values: Record<string, string | number | null | undefined>) {
   return MEASUREMENTS.filter((m) => {
+    if (m.optional) return false;
     const v = values[m.key];
     return v === undefined || v === null || String(v).trim() === "";
   });
@@ -215,4 +256,57 @@ export function formatMinutes(min: number) {
   const h = Math.floor(m / 60);
   const r = m % 60;
   return r ? `${h} h ${r} min` : `${h} h`;
+}
+
+/* ---------------------------------------------------------------------------
+   Completeness: the same rules on the technician's screen and on the server.
+   Keys are the anchors the bottom bar jumps to.
+   --------------------------------------------------------------------------- */
+
+export type ReportProblem = { key: string; label: string };
+
+export type ReportState = {
+  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string }[];
+  findings: { requestId: string; text: string; status: ItemStatus | null; found: string }[];
+  measurements: Record<string, string>;
+  hasPrescan: boolean;
+};
+
+export function reportProblemsOf(s: ReportState): ReportProblem[] {
+  const out: ReportProblem[] = [];
+  for (const f of s.findings) {
+    const short = f.text.length > 28 ? f.text.slice(0, 26) + "…" : f.text;
+    if (!f.status) out.push({ key: `req-${f.requestId}`, label: `${short}: not marked` });
+    else if (!f.found.trim()) out.push({ key: `req-${f.requestId}`, label: `${short}: what was found` });
+  }
+  for (const i of s.items) {
+    if (i.sectionKey === ROAD_TEST_SECTION_KEY) continue;
+    const short = i.label.length > 28 ? i.label.slice(0, 26) + "…" : i.label;
+    if (!i.status) out.push({ key: i.key, label: `${short}: not marked` });
+    else if ((i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
+  }
+  for (const p of TYRE_POSITIONS) {
+    const tread = s.measurements[`tyre_${p.key}_tread`];
+    const year = s.measurements[`tyre_${p.key}_year`];
+    const cond = s.measurements[`tyre_${p.key}_cond`];
+    const action = s.measurements[`tyre_${p.key}_action`];
+    if (!tread?.trim()) out.push({ key: `m-tyre_${p.key}_tread`, label: `${p.label} tread: missing` });
+    if (!year?.trim()) out.push({ key: `m-tyre_${p.key}_year`, label: `${p.label} tyre year: missing` });
+    if (!cond?.trim()) out.push({ key: `m-tyre_${p.key}_cond`, label: `${p.label} tyre condition: not marked` });
+    if (!action?.trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre action: not marked` });
+  }
+  for (const m of MEASUREMENTS) {
+    if (m.optional || m.key.startsWith("tyre_")) continue;
+    if (!s.measurements[m.key]?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });
+  }
+  if (!s.hasPrescan) out.push({ key: "prescan", label: "Scan report missing" });
+  return out;
+}
+
+/** The tyre action with the worst outcome decides the Tyres item: replace now = BAD, replace soon = AVERAGE. */
+export function tyreItemStatus(measurements: Record<string, string>): ItemStatus | null {
+  const actions = TYRE_POSITIONS.map((p) => measurements[`tyre_${p.key}_action`]).concat([measurements.tyre_spare_action ?? ""]);
+  if (actions.includes("replace_now")) return "bad";
+  if (actions.includes("replace_soon")) return "average";
+  return null;
 }

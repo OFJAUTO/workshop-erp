@@ -29,6 +29,7 @@ const NUMBER_KEYS = [
   "appointment_evening_reminder_hour",
   "appointment_missed_after_minutes",
   "inspection_target_minutes",
+  "inspection_unlock_hours",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -44,6 +45,7 @@ const TEXT_KEYS = [
   "whatsapp_reminder_car_drop",
   "whatsapp_reminder_we_collect",
   "whatsapp_reminder_customer_collects",
+  "whatsapp_report_template",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -68,6 +70,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   appointment_evening_reminder_hour: [0, 23, "Evening reminder hour"],
   appointment_missed_after_minutes: [5, 1440, "Booking counts as missed after"],
   inspection_target_minutes: [10, 1440, "Inspection target"],
+  inspection_unlock_hours: [1, 72, "Approved report opens for"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -107,7 +110,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "company_name" && text.length < 2) return { error: "Enter the company name.", values };
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
-    if (key === "whatsapp_approval_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if ((key === "whatsapp_approval_template" || key === "whatsapp_report_template") && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
     if (key.startsWith("whatsapp_reminder") && text.length < 10) return { error: "Enter every WhatsApp reminder message.", values };
     updates.push({ key, value: text });

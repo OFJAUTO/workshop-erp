@@ -47,7 +47,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
 
   // Started from the calendar: the appointment's reason becomes the first request line.
   const { data: appointment } = appointmentId
-    ? await supabase.from("appointments").select("id, reason, status").eq("id", appointmentId).maybeSingle()
+    ? await supabase.from("appointments").select("id, reason, status, department").eq("id", appointmentId).maybeSingle()
     : { data: null };
 
   return (
@@ -70,7 +70,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             pictureMode={v.photo_path ? "optional" : "required"}
             branches={settings.branches}
             requests={appointment ? [appointment.reason] : []}
-            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "" }}
+            initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "", department: appointment?.department ?? "" }}
           />
         </div>
 

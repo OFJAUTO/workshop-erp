@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
-import { checklistItems, measurementMissing, type ChecklistSection, type InspectionStatus, type ItemStatus } from "./inspection";
+import { checklistItems, reportProblemsOf, type ChecklistSection, type InspectionStatus, type ItemStatus } from "./inspection";
 import { workingHoursBetween, type WorkingTime } from "./working-time";
 
 export const INSPECTION_BUCKET = "inspection-media";
@@ -27,6 +27,10 @@ export type InspectionRow = {
   overdue_warned_at: string | null;
   show_prescan_to_customer: boolean;
   unlocked_until: string | null;
+  measurements_original: Record<string, string | number> | null;
+  measurements_edited_by: string | null;
+  measurements_edited_at: string | null;
+  measurements_edited_by_name?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -43,9 +47,13 @@ export type InspectionItemRow = {
   remarks: string | null;
   parts_needed: string | null;
   labour_hours: number | null;
+  edited_by: string | null;
+  edited_at: string | null;
+  original: Record<string, unknown> | null;
+  edited_by_name?: string | null;
 };
 
-export type InspectionFindingRow = { id: string; inspection_id: string; job_request_id: string; found: string | null; needs: string | null; status: ItemStatus | null };
+export type InspectionFindingRow = { id: string; inspection_id: string; job_request_id: string; found: string | null; needs: string | null; status: ItemStatus | null; edited_by: string | null; edited_at: string | null; original: Record<string, unknown> | null; edited_by_name?: string | null };
 
 export type InspectionMediaRow = {
   id: string;
@@ -87,7 +95,7 @@ export type InspectionBundle = {
 };
 
 const INSPECTION_SELECT =
-  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, created_at, updated_at";
+  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, created_at, updated_at";
 
 /** The mechanical inspection of a job with everything attached, or null when none exists yet. */
 export async function loadInspection(jobId: string, path: "mechanical" | "bodyshop" = "mechanical"): Promise<InspectionBundle | null> {
@@ -96,8 +104,8 @@ export async function loadInspection(jobId: string, path: "mechanical" | "bodysh
   if (!insp) return null;
   const inspection = insp as unknown as InspectionRow;
   const [{ data: items }, { data: findings }, { data: media }, { data: changes }, { data: tech }, { data: approver }] = await Promise.all([
-    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours").eq("inspection_id", inspection.id).order("position"),
-    admin.from("inspection_findings").select("id, inspection_id, job_request_id, found, needs, status").eq("inspection_id", inspection.id),
+    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original").eq("inspection_id", inspection.id).order("position"),
+    admin.from("inspection_findings").select("id, inspection_id, job_request_id, found, needs, status, edited_by, edited_at, original").eq("inspection_id", inspection.id),
     admin.from("inspection_media").select("id, inspection_id, item_key, job_request_id, kind, is_prescan, storage_path, caption, duration_s, taken_at, uploaded_by").eq("inspection_id", inspection.id).order("taken_at"),
     admin
       .from("inspection_change_requests")
@@ -116,10 +124,18 @@ export async function loadInspection(jobId: string, path: "mechanical" | "bodysh
     );
     for (const s of signed ?? []) if (s.path && s.signedUrl) mediaUrls[s.path] = s.signedUrl;
   }
+  // Names of the people who edited during review.
+  const editorIds = new Set<string>();
+  for (const i of (items ?? []) as InspectionItemRow[]) if (i.edited_by) editorIds.add(i.edited_by);
+  for (const f of (findings ?? []) as InspectionFindingRow[]) if (f.edited_by) editorIds.add(f.edited_by);
+  if (inspection.measurements_edited_by) editorIds.add(inspection.measurements_edited_by);
+  const { data: editors } = editorIds.size ? await admin.from("staff").select("id, display_name").in("id", Array.from(editorIds)) : { data: [] as { id: string; display_name: string }[] };
+  const editorName = new Map((editors ?? []).map((e) => [e.id, e.display_name]));
+  inspection.measurements_edited_by_name = inspection.measurements_edited_by ? (editorName.get(inspection.measurements_edited_by) ?? null) : null;
   return {
     inspection,
-    items: (items ?? []) as InspectionItemRow[],
-    findings: (findings ?? []) as InspectionFindingRow[],
+    items: ((items ?? []) as InspectionItemRow[]).map((i) => ({ ...i, edited_by_name: i.edited_by ? (editorName.get(i.edited_by) ?? null) : null })),
+    findings: ((findings ?? []) as InspectionFindingRow[]).map((f) => ({ ...f, edited_by_name: f.edited_by ? (editorName.get(f.edited_by) ?? null) : null })),
     media: mediaRows,
     mediaUrls,
     changeRequests: (changes ?? []) as unknown as ChangeRequestRow[],
@@ -176,24 +192,15 @@ export function inspectionLocked(insp: Pick<InspectionRow, "status" | "unlocked_
   return !(insp.unlocked_until && Date.parse(insp.unlocked_until) > now.getTime());
 }
 
-/** What still has to be done before the report can go to the manager. */
-export function reportProblems(b: InspectionBundle, requestIds: string[]): string[] {
-  const problems: string[] = [];
-  const unmarked = b.items.filter((i) => !i.status);
-  if (unmarked.length) problems.push(`${unmarked.length} checklist item${unmarked.length === 1 ? "" : "s"} not marked yet.`);
-  for (const i of b.items) {
-    if (i.status === "average" || i.status === "bad") {
-      if (!i.remarks) problems.push(`"${i.item_label}": add a remark.`);
-      if (!b.media.some((m) => m.item_key === i.item_key && m.kind !== "pdf")) problems.push(`"${i.item_label}": add at least one photo or video.`);
-    }
-  }
-  for (const rid of requestIds) {
-    const f = b.findings.find((x) => x.job_request_id === rid);
-    if (!f || !f.status || !f.found) problems.push("Every customer request needs what was found and a status.");
-  }
-  const missing = measurementMissing(b.inspection.measurements ?? {});
-  if (missing.length) problems.push(`Numbers missing: ${missing.map((m) => m.label).join(", ")}.`);
-  if (!b.media.some((m) => m.is_prescan)) problems.push("Attach the pre-scan PDF from the Autel scanner.");
-  return Array.from(new Set(problems));
+/** What still has to be done before the report can go to the manager (same rules as the technician's screen). */
+export function reportProblems(b: InspectionBundle, requests: { id: string; text: string }[]): string[] {
+  return reportProblemsOf({
+    items: b.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, status: i.status, remarks: i.remarks ?? "" })),
+    findings: requests.map((r) => {
+      const f = b.findings.find((x) => x.job_request_id === r.id);
+      return { requestId: r.id, text: r.text, status: f?.status ?? null, found: f?.found ?? "" };
+    }),
+    measurements: Object.fromEntries(Object.entries(b.inspection.measurements ?? {}).map(([k, v]) => [k, String(v)])),
+    hasPrescan: b.media.some((m) => m.is_prescan),
+  }).map((p) => p.label);
 }
-

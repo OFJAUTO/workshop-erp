@@ -27,6 +27,7 @@ export default async function EditAppointmentPage({ params }: { params: Promise<
         jobs={formData.jobs}
         initialValues={{
           kind: a.kind,
+          department: a.department ?? "",
           customer_mode: "existing",
           customer_id: a.customer_id,
           vehicle_id: a.vehicle_id ?? "",

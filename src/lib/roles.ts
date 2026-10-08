@@ -23,6 +23,8 @@ export const ALL_ROLES = Object.keys(ROLE_LABELS) as RoleId[];
 
 /** Everyone except the gate-in role, which sees the gate-in screen only. */
 export const OFFICE_AND_WORKSHOP: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in");
+/** Office roles: everyone except gate-in and technicians (technicians see My jobs and the Workshop list only). */
+export const OFFICE: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in" && r !== "technician");
 
 /** Roles whose logins are kept short because they see money. */
 export const SENSITIVE_ROLES: RoleId[] = ["owner", "accounts"];
@@ -40,6 +42,7 @@ export const DEPARTMENT_LABELS: Record<DepartmentId, string> = {
 /**
  * What each role may do. These mirror the database rules; the database is
  * the final word, this list only decides what the screens show.
+ * The owner can do everything, always (see `can`).
  */
 export const PERMISSIONS = {
   manageTeam: ["owner"],
@@ -47,33 +50,42 @@ export const PERMISSIONS = {
   manageTablets: ["owner"],
   manageSettings: ["owner"],
   viewAudit: ["owner"],
-  viewCustomers: ["owner", "workshop_manager", "service_advisor", "parts", "qc_inspector", "accounts"],
-  editCustomers: ["owner", "workshop_manager", "service_advisor"],
-  viewVehicles: OFFICE_AND_WORKSHOP,
-  editVehicles: ["owner", "workshop_manager", "service_advisor"],
-  gateIn: ["owner", "workshop_manager", "service_advisor", "gate_in"],
+  viewCustomers: ["owner", "service_advisor", "parts", "qc_inspector", "accounts"],
+  editCustomers: ["owner", "service_advisor"],
+  viewVehicles: OFFICE,
+  editVehicles: ["owner", "service_advisor"],
+  gateIn: ["owner", "service_advisor", "gate_in"],
   viewPartCosts: ["owner", "accounts", "service_advisor", "parts"],
   viewTechnicianCostRate: ["owner", "accounts"],
   viewProfitPanel: ["owner", "accounts", "service_advisor"],
-  viewJobs: OFFICE_AND_WORKSHOP,
-  editGateIn: ["owner", "workshop_manager", "service_advisor", "gate_in"],
-  sendApproval: ["owner", "workshop_manager", "service_advisor"],
+  viewJobs: OFFICE,
+  viewOwnJobs: ["owner", "technician"],
+  viewWorkshopList: ["owner", "technician", "workshop_manager", "qc_inspector", "service_advisor", "parts", "accounts"],
+  editGateIn: ["owner", "service_advisor", "gate_in"],
+  sendApproval: ["owner", "service_advisor"],
   assignJobs: ["owner", "workshop_manager"],
-  moveJobs: ["owner", "workshop_manager"],
+  moveJobs: ["owner"],
+  requestMove: ["owner", "workshop_manager", "service_advisor"],
   setPriority: ["owner", "workshop_manager", "service_advisor", "gate_in"],
-  gateOut: ["owner", "workshop_manager", "service_advisor", "accounts"],
+  gateOut: ["owner", "service_advisor", "accounts"],
   overrideKeys: ["owner", "workshop_manager"],
   approveRelease: ["owner", "accounts"],
   viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "parts", "qc_inspector"],
-  viewCalendar: OFFICE_AND_WORKSHOP,
+  viewCalendar: OFFICE,
+  bookAppointments: ["owner", "service_advisor"],
   approveInspections: ["owner", "workshop_manager"],
   decideInspectionChanges: ["owner"],
-  bookAppointments: ["owner", "service_advisor"],
+  roadTest: ["owner", "qc_inspector"],
+  sendReport: ["owner", "service_advisor"],
+  viewOverrides: ["owner"],
+  viewAs: ["owner"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
 
+/** The owner sees everything and has every action; other roles only what their list says. */
 export function can(role: RoleId, permission: Permission): boolean {
+  if (role === "owner") return true;
   return (PERMISSIONS[permission] as readonly RoleId[]).includes(role);
 }
 
@@ -85,11 +97,11 @@ export const ROLE_PHASE1_SUMMARY: Record<RoleId, string[]> = {
     "Add and edit customers, contacts and cars",
     "Change settings and read the change log",
   ],
-  workshop_manager: ["Add and edit customers, contacts and cars", "See registered tablets"],
+  workshop_manager: ["Assign technicians, review inspection reports, see cars in the workshop"],
   service_advisor: ["Add and edit customers, contacts and cars"],
   gate_in: ["Gate cars in with photos and video; nothing else"],
-  technician: ["See cars (plate, model, photos) and VIP handling notes"],
+  technician: ["See the cars assigned to you and the workshop list"],
   parts: ["See customers and cars"],
-  qc_inspector: ["See customers and cars"],
+  qc_inspector: ["Road tests and QC"],
   accounts: ["See customers and cars"],
 };

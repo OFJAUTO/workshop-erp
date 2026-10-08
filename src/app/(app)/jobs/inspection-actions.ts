@@ -27,13 +27,15 @@ async function logEvent(jobId: string, by: string, event_type: string, note: str
 }
 
 async function jobOf(jobId: string) {
-  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, stage, department, assigned_to, gated_in_by, is_open").eq("id", jobId).maybeSingle();
+  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, stage, department, assigned_to, gated_in_by, is_open, first_approval_at").eq("id", jobId).maybeSingle();
   return data;
 }
 
 /** The technician starts the clock. */
 export async function startInspection(jobId: string) {
   const staff = await requireStaff();
+  const gate = await jobOf(jobId);
+  if (gate && !gate.first_approval_at && staff.role_id !== "owner") redirect(`/my-jobs/${jobId}?error=${encodeURIComponent("The customer has not approved the job card yet. The inspection starts after that.")}`);
   let bundle = await loadInspection(jobId);
   if (!bundle) {
     // Cars assigned before the inspection existed: set it up now for the assigned technician.
@@ -69,8 +71,8 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
   if (insp.technician_id !== staff.id && !can(staff.role_id as RoleId, "approveInspections")) return { error: "This car is assigned to someone else.", values };
   if (insp.status !== "in_progress" && insp.status !== "returned") return { error: "The report is not open.", values };
   const admin = createAdminClient();
-  const { data: requests } = await admin.from("job_requests").select("id").eq("job_id", jobId).eq("is_active", true);
-  const problems = reportProblems(bundle, (requests ?? []).map((r) => r.id));
+  const { data: requests } = await admin.from("job_requests").select("id, text").eq("job_id", jobId).eq("is_active", true);
+  const problems = reportProblems(bundle, (requests ?? []) as { id: string; text: string }[]);
   if (problems.length) return { error: problems.slice(0, 4).join(" "), values };
 
   const settings = await getSettings();
@@ -104,6 +106,8 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   const bundle = await loadInspection(jobId);
   if (!bundle || bundle.inspection.status !== "submitted") return { error: "There is no submitted report to approve.", values };
   const admin = createAdminClient();
+  const { data: road } = await admin.from("road_tests").select("status").eq("job_id", jobId).maybeSingle();
+  if (!road || road.status === "not_started") return { error: "The QC road test is not done yet. Approval waits for it (or for \"road test not possible\").", values };
   const now = new Date().toISOString();
   await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, updated_by: staff.id }).eq("id", bundle.inspection.id);
   const job = await jobOf(jobId);
@@ -176,7 +180,8 @@ export async function decideInspectionChange(jobId: string, requestId: string, f
   const now = new Date();
   await admin.from("inspection_change_requests").update({ status: decision, decided_by: staff.id, decided_at: now.toISOString(), decision_note: note, updated_by: staff.id }).eq("id", req.id);
   if (decision === "approved") {
-    await admin.from("inspections").update({ unlocked_until: new Date(now.getTime() + 24 * 3600000).toISOString(), updated_by: staff.id }).eq("id", req.inspection_id);
+    const hours = Number((await getSettings()).inspection_unlock_hours) || 1;
+    await admin.from("inspections").update({ unlocked_until: new Date(now.getTime() + hours * 3600000).toISOString(), updated_by: staff.id }).eq("id", req.inspection_id);
   }
   await logEvent(jobId, staff.id, "inspection_change_decided", `Owner ${decision} the change request${note ? `: ${note}` : ""}`);
   const job = await jobOf(jobId);
@@ -184,7 +189,7 @@ export async function decideInspectionChange(jobId: string, requestId: string, f
     await notifyStaff([req.requested_by], {
       type: "inspection_change_decided",
       title: `Change request ${decision} · ${job?.job_number ?? ""}`,
-      body: decision === "approved" ? "The report is open for 24 hours. Make the change now." : (note ?? "The owner refused the change."),
+      body: decision === "approved" ? "The report is open for a short time. Make the change now." : (note ?? "The owner refused the change."),
       jobId,
       href: `/jobs/${jobId}/inspection`,
     });

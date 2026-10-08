@@ -19,7 +19,7 @@ type Row = JobRow & {
 
 /** The technician's list: cars assigned to them. The full technician screen arrives in Phase 6. */
 export default async function MyJobsPage() {
-  const staff = await requirePermission("viewJobs");
+  const staff = await requirePermission("viewOwnJobs");
   const settings = await getSettings();
   const supabase = await createClient();
   const { data } = await supabase

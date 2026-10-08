@@ -5,11 +5,12 @@ import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHe
 import { requirePermission } from "@/lib/auth";
 import { APPOINTMENT_STATUS_LABELS, BOOKING_KIND_LABELS, COLLECT_METHODS, colourFor, dubaiDateOf, dubaiTimeOf, fillTemplate, formatDayHeading, formatShortDay, isMissed, missedLabel } from "@/lib/calendar";
 import { formatDateTime } from "@/lib/format";
+import { JOB_DEPARTMENTS } from "@/lib/inspection";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { markReminderSent, setAppointmentStatus } from "../actions";
-import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, canEditAppointment, reminderTemplateFor, type AppointmentFull } from "../form-data";
+import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, canEditAppointment, fillCustomerNames, reminderTemplateFor, type AppointmentFull } from "../form-data";
 
 export default async function AppointmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requirePermission("viewCalendar");
@@ -20,6 +21,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
   const [{ data }, settings] = await Promise.all([supabase.from("appointments").select(APPOINTMENT_SELECT).eq("id", id).maybeSingle(), getSettings()]);
   if (!data) notFound();
   const a = data as unknown as AppointmentFull;
+  await fillCustomerNames(supabase, [a]);
   const canEdit = can(role, "bookAppointments") && canEditAppointment(staff, a);
   const canGateIn = can(role, "gateIn");
   const date = dubaiDateOf(a.starts_at);
@@ -85,7 +87,8 @@ export default async function AppointmentPage({ params, searchParams }: { params
             items={[
               { label: "Type", value: BOOKING_KIND_LABELS[a.kind] },
               { label: "Customer", value: <Link href={`/customers/${a.customer_id}`} className="font-semibold hover:underline underline-offset-4">{appointmentCustomerName(a)}</Link> },
-              { label: "Phone", value: a.customer?.phone ?? null },
+              ...(a.customer?.phone ? [{ label: "Phone", value: a.customer.phone }] : []),
+              ...(a.department ? [{ label: "Department", value: JOB_DEPARTMENTS.find((d) => d.value === a.department)?.label ?? a.department }] : []),
               { label: "Car", value: a.vehicle_id ? <Link href={`/vehicles/${a.vehicle_id}`} className="font-semibold hover:underline underline-offset-4">{appointmentCarText(a)}</Link> : appointmentCarText(a) },
               { label: a.kind === "customer_collects" ? "Note" : "Reason for visit", value: a.reason },
               ...(a.kind === "we_collect"

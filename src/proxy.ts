@@ -63,6 +63,11 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // "View as" is view only: while the owner looks at the system as someone else, nothing can be changed.
+  if (request.method !== "GET" && request.method !== "HEAD" && request.cookies.get("erp_view_as")?.value && !pathname.startsWith("/api/view-as") && !pathname.startsWith("/api/auth")) {
+    return NextResponse.json({ error: "View only. You are looking at the system as someone else. Press Exit on the yellow bar to make changes." }, { status: 403 });
+  }
+
   // The old vercel.app address always sends people to the company address.
   const host = request.headers.get("host") ?? "";
   if (host.endsWith(".vercel.app")) {

@@ -30,6 +30,7 @@ export type DashRow = {
   dashCam: boolean;
   majorDamage: boolean;
   timing: Timing;
+  statusLine: string;
   inspectionLabel: string | null;
   urgency: (number | string)[];
 };
@@ -245,7 +246,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                     </span>
                   </div>
                   <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
-                    <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
+                    <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
                     <StageTrack stage={j.stage} timing={j.timing} />
                   </div>
                 </Card>

@@ -90,6 +90,9 @@ export function SettingsForm({
               <Field label="Inspection target (minutes of working time)" hint="Past this the department manager and the owner are warned and the card turns red.">
                 <Input name="inspection_target_minutes" defaultValue={v.inspection_target_minutes} inputMode="numeric" required />
               </Field>
+              <Field label="Approved report opens for (hours)" hint="After the owner approves a change request, the report can be edited for this long.">
+                <Input name="inspection_unlock_hours" defaultValue={v.inspection_unlock_hours} inputMode="numeric" required />
+              </Field>
             </div>
             <Field label="Target hours per stage" hint="Without a promised date a car turns amber past the target and red at double.">
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
@@ -103,6 +106,9 @@ export function SettingsForm({
             </Field>
             <Field label="WhatsApp approval message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_approval_template" defaultValue={v.whatsapp_approval_template} rows={4} required />
+            </Field>
+            <Field label="WhatsApp inspection report message" hint="Sent with the customer's link to the approved report. Placeholders: [name], [make model], [plate], [link], [advisor].">
+              <Textarea name="whatsapp_report_template" defaultValue={v.whatsapp_report_template} rows={3} required />
             </Field>
             <Field label="Terms and conditions (English)" hint="Shown in full on the approval page. Every approval keeps the exact version shown.">
               <Textarea name="terms_and_conditions" defaultValue={v.terms_and_conditions} rows={10} />

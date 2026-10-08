@@ -6,6 +6,7 @@ import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { SearchSelect } from "@/components/SearchSelect";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Select, Textarea } from "@/components/ui";
 import { BOOKING_KINDS, BOOKING_KIND_HINTS, BOOKING_KIND_LABELS, COLLECT_METHODS, DURATIONS, type BookingKind } from "@/lib/calendar";
+import { JOB_DEPARTMENTS } from "@/lib/inspection";
 
 export type CustomerOption = { id: string; label: string; phone: string };
 export type VehicleOption = { id: string; customerId: string; label: string };
@@ -154,6 +155,11 @@ function Fields({ v, customers, vehicles, advisors, jobs, submitLabel }: { v: Re
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>{kind === "we_collect" ? "Collection" : "When"}</SectionLabel>
+            {kind !== "customer_collects" ? (
+              <Field label="Department" hint="Which side of the workshop the car comes for. Gate-in started from this booking carries it over.">
+                <ChoiceButtons name="department" columns={3} defaultValue={v.department} options={JOB_DEPARTMENTS.map((d) => ({ value: d.value, label: d.label }))} />
+              </Field>
+            ) : null}
             {kind === "we_collect" ? (
               <>
                 <Field label="Collection address">

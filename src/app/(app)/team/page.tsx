@@ -4,9 +4,10 @@ import { requirePermission } from "@/lib/auth";
 import { DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { StaffRow } from "@/lib/types";
+import { startViewAs } from "./view-as-actions";
 
 export default async function TeamPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
-  await requirePermission("manageTeam");
+  const owner = await requirePermission("manageTeam");
   const { show } = await searchParams;
   const showAll = show === "all";
 
@@ -56,7 +57,8 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
             <SectionLabel right={`${g.people.length}`}>{ROLE_LABELS[g.role]}</SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
               {g.people.map((p) => (
-                <Link key={p.id} href={`/team/${p.id}`} className="block">
+                <div key={p.id} className="flex flex-col gap-2">
+                <Link href={`/team/${p.id}`} className="block h-full">
                   <Card className="flex items-center gap-4 hover:border-ink h-full">
                     <Avatar name={p.full_name} photoUrl={p.photo_path ? urlByPath.get(p.photo_path) : null} size={80} />
                     <span className="flex flex-col gap-1.5 min-w-0">
@@ -74,6 +76,14 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                     </span>
                   </Card>
                 </Link>
+                {p.id !== owner.id && p.is_active && !owner.viewingAs ? (
+                  <form action={startViewAs.bind(null, p.id)}>
+                    <button type="submit" className="min-h-10 w-full rounded-control border border-line-strong bg-white px-3 text-xs font-bold hover:border-ink">
+                      View as {p.display_name}
+                    </button>
+                  </form>
+                ) : null}
+                </div>
               ))}
             </div>
           </section>

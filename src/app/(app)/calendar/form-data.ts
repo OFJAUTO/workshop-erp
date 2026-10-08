@@ -42,11 +42,12 @@ export async function loadAppointmentFormData(supabase: Client): Promise<{ custo
 }
 
 export const APPOINTMENT_SELECT =
-  "id, kind, customer_id, vehicle_id, vehicle_text, reason, starts_at, duration_minutes, advisor_id, status, job_id, notes, cancel_reason, collect_address, collect_method, reminder_sent_at, reminder_notified_at, notified_hour_before_at, notified_evening_before_at, missed_notified_at, is_active, created_at, created_by, updated_at, updated_by, customer:customers(full_name, company_name, phone, is_vip), vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), advisor:staff!appointments_advisor_id_fkey(id, display_name, colour), job:jobs(job_number, gated_out_at, is_open)";
+  "id, kind, department, customer_id, vehicle_id, vehicle_text, reason, starts_at, duration_minutes, advisor_id, status, job_id, notes, cancel_reason, collect_address, collect_method, reminder_sent_at, reminder_notified_at, notified_hour_before_at, notified_evening_before_at, missed_notified_at, is_active, created_at, created_by, updated_at, updated_by, customer:customers(full_name, company_name, phone, is_vip), vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), advisor:staff!appointments_advisor_id_fkey(id, display_name, colour), job:jobs(job_number, gated_out_at, is_open)";
 
 export type AppointmentFull = {
   id: string;
   kind: BookingKind;
+  department: "mechanical" | "bodyshop" | "both" | null;
   customer_id: string;
   vehicle_id: string | null;
   vehicle_text: string | null;
@@ -101,5 +102,17 @@ export function reminderTemplateFor(kind: BookingKind, settings: { whatsapp_remi
       return settings.whatsapp_reminder_customer_collects;
     default:
       return settings.whatsapp_reminder_template;
+  }
+}
+
+/** Roles that may not read customers still get the name (never the phone) through the limited view. */
+export async function fillCustomerNames(supabase: Client, appts: AppointmentFull[]) {
+  const missing = appts.filter((a) => !a.customer);
+  if (!missing.length) return;
+  const { data } = await supabase.from("customer_public").select("id, full_name, company_name, is_vip").in("id", Array.from(new Set(missing.map((a) => a.customer_id))));
+  const byId = new Map((data ?? []).map((c) => [c.id, c]));
+  for (const a of missing) {
+    const c = byId.get(a.customer_id);
+    if (c) a.customer = { full_name: c.full_name, company_name: c.company_name, phone: "", is_vip: c.is_vip };
   }
 }

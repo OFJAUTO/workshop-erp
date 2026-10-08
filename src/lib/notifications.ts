@@ -21,6 +21,11 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "inspection_overdue", label: "Inspection taking too long", locked: true },
   { type: "inspection_change_requested", label: "A change to an approved report needs the owner's approval", locked: true },
   { type: "inspection_change_decided", label: "Your change request was decided", locked: true },
+  { type: "move_requested", label: "A special move needs the owner's approval", locked: true },
+  { type: "move_decided", label: "A special move was decided", locked: true },
+  { type: "road_test_assigned", label: "A car needs a road test", locked: true },
+  { type: "road_test_done", label: "Road test done", locked: true },
+  { type: "report_opened", label: "Customer opened the inspection report", locked: true },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };

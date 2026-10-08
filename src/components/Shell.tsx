@@ -13,11 +13,14 @@ export function Shell({
   nav = [],
   user,
   footer,
+  viewingAs = null,
   children,
 }: {
   nav?: NavItem[];
   user?: { id: string; name: string; role: string; photoUrl: string | null };
   footer?: ReactNode;
+  /** The owner is looking at the system as this person (view only). */
+  viewingAs?: { realId: string; realName: string } | null;
   children: ReactNode;
 }) {
   return (
@@ -41,6 +44,16 @@ export function Shell({
         {footer ? <div className="shrink-0 ml-auto md:ml-0">{footer}</div> : null}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col relative">
+        {viewingAs && user ? (
+          <div className="bg-amber-soft border-b-2 border-amber-bar px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="font-bold">
+              Viewing as {user.name} ({user.role}). View only: nothing can be changed.
+            </span>
+            <a href="/api/view-as/exit" className="inline-flex min-h-10 items-center rounded-control bg-ink px-4 text-sm font-bold text-white">
+              Exit
+            </a>
+          </div>
+        ) : null}
         {/* Bell at the top right of the page area, level with the page title. */}
         {user ? (
           <div className="absolute top-5 right-4 sm:right-6 lg:right-8 z-30">

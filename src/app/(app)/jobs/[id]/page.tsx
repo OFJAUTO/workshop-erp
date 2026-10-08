@@ -1,59 +1,73 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, formatMinutes } from "@/lib/inspection";
+import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes } from "@/lib/inspection";
 import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf, workingTimeOf } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
+import { nextStepOf, waitedText } from "@/lib/next-step";
+import { ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { assignJob, moveJob, setJobPriority, setPromisedDate } from "../actions";
+import { decideMove, requestMove } from "../move-actions";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MediaGallery } from "./MediaGallery";
+import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
+import { ReportLinkPanel, type ReportLinkRow } from "./ReportLinkPanel";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string }>;
-}) {
+type MoveRequestRow = { id: string; reason: string; status: "pending" | "approved" | "refused"; to_status: string | null; decision_reason: string | null; decided_at: string | null; created_at: string; requester: { display_name: string } | null; decider: { display_name: string } | null };
+
+export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string }> }) {
   const staff = await requirePermission("viewJobs");
   const { id } = await params;
   const { message, error, link, req } = await searchParams;
   const role = staff.role_id as RoleId;
 
   const supabase = await createClient();
+  const admin = createAdminClient();
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
-  const { job, vehicle, customer, vip, gateIn, requests, media, events, approvals, gateOut } = card;
+  const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, events, approvals, gateOut } = card;
+  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }] = await Promise.all([
+    job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
+    admin.from("road_tests").select("id, job_id, inspector_id, status, items, not_possible_reason, started_at, done_at, created_at, updated_at").eq("job_id", id).maybeSingle(),
+    admin.from("move_requests").select("id, reason, status, to_status, decision_reason, decided_at, created_at, requester:staff!move_requests_requested_by_fkey(display_name), decider:staff!move_requests_decided_by_fkey(display_name)").eq("job_id", id).order("created_at", { ascending: false }),
+    admin.from("report_links").select("id, token, status, sent_at, opened_at, created_at").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const roadTest = (rt as RoadTestRow | null) ?? null;
+  const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
+  const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
+
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "" });
-  const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: workingTimeOf(settings) });
-  const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
-  const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
+  const wt = workingTimeOf(settings);
+  const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: wt });
+  const isVip = customer?.is_vip ?? customerPublic?.is_vip ?? vip?.is_vip ?? false;
+  const vipNote = customer?.vip_note ?? customerPublic?.vip_note ?? vip?.vip_note ?? null;
+  const customerName = customer?.company_name ?? customer?.full_name ?? customerPublic?.company_name ?? customerPublic?.full_name ?? "Customer";
 
   const canAssign = can(role, "assignJobs") && job.is_open;
-  const inspection = job.department !== "bodyshop" ? await loadInspection(id) : null;
-  const inspectionMinutes = inspection ? inspectionWorkingMinutes(inspection.inspection, workingTimeOf(settings)) : 0;
-  const inspectionOver = !!inspection && inspection.inspection.status === "in_progress" && inspectionOverTarget(inspection.inspection, workingTimeOf(settings));
-  const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
   const canMove = can(role, "moveJobs") && job.is_open && job.status !== "gate_in_pending";
+  const canRequestMove = !can(role, "moveJobs") && can(role, "requestMove") && job.is_open;
   const canEditGateIn = can(role, "editGateIn") && job.is_open;
   const canSend = can(role, "sendApproval") && job.is_open;
   const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending";
   const canPlan = can(role, "setPriority") && job.is_open;
-  const isTechnician = role === "technician";
+  const canSendReport = can(role, "sendReport") && job.is_open && inspection?.inspection.status === "approved";
+  const seesCustomerDetails = can(role, "viewCustomers");
 
   const { data: technicians } = canAssign
     ? await supabase.from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name")
@@ -62,30 +76,73 @@ export default async function JobPage({
   const latestApproval = approvals[0] ?? null;
   const activeLink = link ?? (latestApproval && !latestApproval.approved_at ? `${site}/approve/${latestApproval.token}` : null);
   const activeRequestId = req ?? latestApproval?.id ?? null;
-  const customerName = customer?.company_name ?? customer?.full_name ?? latestApproval?.sent_to_name ?? "Customer";
-  const messageTemplate = activeLink
-    ? settings.whatsapp_approval_template
-        .replaceAll("[name]", latestApproval?.sent_to_name || customerName)
-        .replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" "))
-        .replaceAll("[plate]", formatPlate(vehicle))
-        .replaceAll("[link]", activeLink)
-        .replaceAll("[advisor]", staff.display_name)
-    : null;
+  const fill = (t: string, linkUrl: string) =>
+    t
+      .replaceAll("[name]", latestApproval?.sent_to_name || customerName)
+      .replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" "))
+      .replaceAll("[plate]", formatPlate(vehicle))
+      .replaceAll("[link]", linkUrl)
+      .replaceAll("[advisor]", staff.display_name);
+  const messageTemplate = activeLink ? fill(settings.whatsapp_approval_template, activeLink) : null;
+  const reportUrl = reportLink ? `${site}/report/${reportLink.token}` : null;
+  const reportMessage = reportUrl ? fill(settings.whatsapp_report_template, reportUrl) : null;
 
-  const mapHref =
-    gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
+  const insp = inspection?.inspection ?? null;
+  const inspectionMinutes = insp ? inspectionWorkingMinutes(insp, wt) : 0;
+  const inspectionOver = !!insp && insp.status === "in_progress" && inspectionOverTarget(insp, wt);
+  const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
+  const inspItems = (inspection?.items ?? []).filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY);
+  const badCount = inspItems.filter((i) => i.status === "bad").length;
+  const avgCount = inspItems.filter((i) => i.status === "average").length;
+
+  const stageIndex = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"].indexOf(job.stage);
+  const advisorName = card.gatedInBy ?? null;
+  const step = nextStepOf(id, {
+    status: job.status,
+    is_open: job.is_open,
+    assigned_to: job.assigned_to,
+    first_approval_at: job.first_approval_at,
+    gated_in_at: job.gated_in_at,
+    stage_entered_at: job.stage_entered_at,
+    assigneeName: card.assignee?.display_name ?? null,
+    advisorName,
+    managerLabel: job.department === "bodyshop" ? "the bodyshop manager" : "the workshop manager",
+    inspection: insp ? { status: insp.status, technician_id: insp.technician_id, submitted_at: insp.submitted_at, approved_at: insp.approved_at } : null,
+    roadTest,
+    approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
+    gateInComplete: check.complete,
+  });
+  const myMove = role === "owner" || step.actorRole === role || (step.actorRole === "gate_in" && can(role, "editGateIn"));
+
+  const inspectionState = (() => {
+    if (job.department === "bodyshop") return { text: "Bodyshop path (later phase)", tone: "neutral" as const };
+    if (!insp) return stageIndex > 1 ? { text: "Skipped (moved manually)", tone: "neutral" as const } : { text: job.assigned_to ? "Assigned, not started" : "Not started", tone: "neutral" as const };
+    if (insp.status === "approved") return { text: `Approved by ${inspection?.approver?.display_name ?? "the manager"}, ${formatDate(insp.approved_at)}, ${formatMinutes(insp.elapsed_minutes ?? inspectionMinutes)}, ${badCount} bad, ${avgCount} average`, tone: "green" as const };
+    if (insp.status === "submitted") return { text: `Submitted by ${inspection?.technician?.display_name ?? "the technician"}, ${formatDate(insp.submitted_at)}, ${formatMinutes(insp.elapsed_minutes ?? inspectionMinutes)}, ${badCount} bad, ${avgCount} average${can(role, "approveInspections") ? " · waiting for you" : ""}`, tone: "amber" as const };
+    if (insp.status === "returned") return { text: `Sent back to ${inspection?.technician?.display_name ?? "the technician"}: ${insp.return_reason ?? ""}`, tone: "red" as const };
+    if (insp.status === "in_progress") return { text: `In progress · ${inspection?.technician?.display_name ?? ""}${showInspectionTime ? ` · ${formatMinutes(inspectionMinutes)} running` : ""}${inspectionOver ? " · over target" : ""}`, tone: inspectionOver ? ("red" as const) : ("amber" as const) };
+    return { text: `${INSPECTION_STATUS_LABELS[insp.status]}${inspection?.technician ? ` · ${inspection.technician.display_name}` : ""}`, tone: "neutral" as const };
+  })();
+  const approvalState = latestApproval?.approved_at || job.first_approval_at ? { text: `Approved${latestApproval?.approver_name ? ` by ${latestApproval.approver_name}` : ""}, ${formatDate(latestApproval?.approved_at ?? job.first_approval_at)}`, tone: "green" as const } : latestApproval?.opened_at ? { text: "Opened by the customer, not yet approved", tone: "amber" as const } : latestApproval?.sent_at ? { text: `Sent ${formatDate(latestApproval.sent_at)}, not yet opened`, tone: "amber" as const } : latestApproval ? { text: "Link created, not sent yet", tone: "neutral" as const } : { text: check.complete ? "Not sent yet" : "Gate-in photos and video pending", tone: "neutral" as const };
+  const toneCls = { green: "border-green", amber: "border-amber-bar", red: "border-red-bar", neutral: "border-line" };
+  const mapHref = gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
+  const overrides = events.filter((e) => e.event_type === "override");
+  const pendingMove = moveRequests.find((m) => m.status === "pending");
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests"]} jobId={id} />
+      <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests"]} jobId={id} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
-            {isVip ? <Badge tone="ink">VIP</Badge> : null}
             <PriorityBadge priority={job.priority} />
+            {isVip ? <Badge tone="ink">VIP</Badge> : null}
+            {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
+            {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
+            {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
             <TimingBadge timing={timing} />
             {!job.is_open ? <Badge tone="neutral">Closed</Badge> : null}
           </span>
@@ -108,8 +165,6 @@ export default async function JobPage({
 
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-
-      {gateIn?.dash_cam && isTechnician ? <Notice tone="error">Dash cam fitted: disconnect before starting work.</Notice> : null}
       {isVip && vipNote ? (
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>
@@ -117,68 +172,117 @@ export default async function JobPage({
         </Card>
       ) : null}
 
-      <Card className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-lg font-extrabold">{STATUS_LABELS[job.status]}</span>
-          <span className="text-sm text-muted">
-            {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date yet"}
-            {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
-          </span>
-        </div>
-        <StageTrack stage={job.stage} timing={timing} />
-        {job.status === "gate_in_pending" ? (
-          <p className="text-sm font-semibold text-amber">
-            Incomplete, video pending. The approval link cannot be created and the car cannot be assigned until both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos are uploaded.
-          </p>
-        ) : null}
-      </Card>
-
-      {job.department !== "bodyshop" && (inspection || job.assigned_to) ? (
-        <Card className={`flex flex-col gap-3 ${inspectionOver ? "border-red-bar" : ""}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <SectionLabel>Inspection{job.department ? ` · ${JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label ?? ""}` : ""}</SectionLabel>
-            <div className="flex flex-wrap gap-2">
-              <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="md">
-                {inspection ? "Open report" : "Report"}
-              </LinkButton>
-              {role === "technician" || can(role, "approveInspections") ? (
-                <LinkButton href={`/my-jobs/${id}`} tone="ghost" size="md">
-                  Technician screen
-                </LinkButton>
-              ) : null}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 flex flex-col gap-4">
+          <Card className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-lg font-extrabold">{STATUS_LABELS[job.status]}</span>
+              <span className="text-sm text-muted">
+                {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date yet"}
+                {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
+              </span>
             </div>
-          </div>
-          {inspection ? (
+            <StageTrack stage={job.stage} timing={timing} />
+          </Card>
+          <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
+            <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
+            {requests.length ? (
+              <ol className="flex flex-col gap-1.5">
+                {requests.map((r, i) => (
+                  <li key={r.id} className="flex gap-3 text-[16px] font-semibold leading-snug">
+                    <span className="w-6 shrink-0 text-muted">{i + 1}.</span>
+                    <span>{r.text}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-[16px] font-semibold whitespace-pre-wrap">{gateIn?.customer_requests}</p>
+            )}
+          </section>
+        </div>
+
+        <Card className="flex flex-col gap-3 border-ink">
+          <SectionLabel>Next step</SectionLabel>
+          {step.done ? (
             <p className="text-sm">
-              <span className="font-bold">{INSPECTION_STATUS_LABELS[inspection.inspection.status]}</span>
-              {inspection.technician ? ` · ${inspection.technician.display_name}` : ""}
-              {inspection.inspection.started_at && showInspectionTime ? (
-                <span className={inspectionOver ? " font-bold text-red" : " text-muted"}>
-                  {" "}· {inspection.inspection.status === "in_progress" ? "running " : ""}{formatMinutes(inspectionMinutes)} of {formatMinutes(inspection.inspection.target_minutes ?? (Number(settings.inspection_target_minutes) || 90))} target{inspectionOver ? " · over target" : ""}
-                </span>
-              ) : null}
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-white text-xs font-bold mr-2">✓</span>
+              <span className="font-semibold">{step.done.label}</span>
+              {step.done.by ? <span className="text-muted"> · {step.done.by}</span> : null}
             </p>
-          ) : (
-            <p className="text-sm text-muted">Assigned. The inspection starts when the technician presses start on the tablet.</p>
-          )}
+          ) : null}
+          <p className="text-[15px] font-semibold">{step.next}</p>
+          <p className="text-sm text-muted">
+            Waiting on <span className="font-semibold text-ink">{step.waitingOn}</span> · {waitedText(step.since)}
+          </p>
+          {step.action && myMove && job.is_open ? (
+            <LinkButton href={step.action.href} size="lg" className="w-full">
+              {step.action.label}
+            </LinkButton>
+          ) : null}
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Card className={`flex flex-col gap-2 ${toneCls[approvalState.tone]} ${job.stage === "gate_in" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job card approval</span>
+          <span className="text-sm font-semibold">{approvalState.text}</span>
+          <a href="#approval" className="text-xs font-semibold underline underline-offset-4">
+            Approval link
+          </a>
+        </Card>
+        <Card className={`flex flex-col gap-2 ${toneCls[inspectionState.tone]} ${job.stage === "inspection" || job.stage === "quote" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Inspection report</span>
+          <span className="text-sm font-semibold">{inspectionState.text}</span>
+          {roadTest ? <span className="text-xs text-muted">{ROAD_TEST_STATUS_LABELS[roadTest.status]}</span> : null}
+          <div className="flex flex-wrap gap-2 mt-auto">
+            {insp ? (
+              <LinkButton href={`/jobs/${id}/inspection`} tone={insp.status === "submitted" && can(role, "approveInspections") ? "primary" : "secondary"} size="md">
+                {insp.status === "submitted" && can(role, "approveInspections") ? "Review" : "Open report"}
+              </LinkButton>
+            ) : null}
+            {canSendReport ? (
+              <a href="#report-link" className="inline-flex min-h-10 items-center rounded-control border border-ink px-3 text-sm font-bold">
+                Send to customer
+              </a>
+            ) : null}
+          </div>
+        </Card>
+        {["Quotation", "Parts", "Invoice"].map((name) => (
+          <Card key={name} className="flex flex-col gap-2 bg-canvas opacity-70">
+            <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{name}</span>
+            <span className="text-sm font-semibold text-muted">Not started</span>
+          </Card>
+        ))}
+      </div>
+
+      {overrides.length ? (
+        <Card className="flex flex-col gap-2 border-red-bar">
+          <SectionLabel right={`${overrides.length}`}>Overrides on this job</SectionLabel>
+          <ul className="flex flex-col divide-y divide-line text-sm">
+            {overrides.map((e) => (
+              <li key={e.id} className="py-2">
+                <span className="text-xs text-muted">{formatDateTime(e.created_at)}</span> · <span className="font-semibold">{e.by_name}</span> · {e.note}
+              </li>
+            ))}
+          </ul>
         </Card>
       ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 flex flex-col gap-6">
-          <Card className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <SectionLabel>Gate-in</SectionLabel>
-              {canEditGateIn ? (
+        <div className="xl:col-span-2 flex flex-col gap-4">
+          <Collapsible title="Gate-in details" right={gateIn ? `${formatDateTime(job.gated_in_at)}` : undefined}>
+            {canEditGateIn ? (
+              <div>
                 <LinkButton href={`/jobs/${id}/gate-in/edit`} tone="ghost" size="md">
                   Amend
                 </LinkButton>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
             {gateIn ? (
               <DescriptionList
                 items={[
                   { label: "Gated in", value: `${formatDateTime(job.gated_in_at)} by ${card.gatedInBy ?? "unknown"}` },
+                  { label: "Department", value: JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label ?? "Not set" },
                   {
                     label: "Location",
                     value: (
@@ -198,112 +302,93 @@ export default async function JobPage({
                   },
                   { label: "Arrived by", value: labelOf(ARRIVED_BY, gateIn.arrived_by) },
                   { label: "Condition", value: labelOf(CONDITIONS, gateIn.condition) },
-                  {
-                    label: vehicle.fuel_type === "electric" ? "Battery" : "Fuel level",
-                    value: vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : null) : labelOf(FUEL_LEVELS, gateIn.fuel_level),
-                  },
+                  { label: vehicle.fuel_type === "electric" ? "Battery" : "Fuel level", value: vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : null) : labelOf(FUEL_LEVELS, gateIn.fuel_level) },
                   { label: "Cleanliness", value: labelOf(CLEANLINESS, gateIn.cleanliness) },
                   { label: "Dash cam", value: gateIn.dash_cam ? "Fitted, to be disconnected" : "Not fitted" },
                   { label: "Major damage", value: gateIn.major_damage ? "Yes" : "No" },
                   { label: "Mileage", value: `${gateIn.mileage.toLocaleString("en-GB")} km` },
                   { label: "Keys", value: `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}` },
                   { label: "Old parts returned to customer", value: gateIn.old_parts_return ? "Yes" : "No" },
-                  {
-                    label: "Customer requests",
-                    value: requests.length ? (
-                      <ol className="list-decimal pl-5 flex flex-col gap-0.5">
-                        {requests.map((r) => (
-                          <li key={r.id}>{r.text}</li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <span className="whitespace-pre-wrap">{gateIn.customer_requests}</span>
-                    ),
-                  },
                   { label: "Notes", value: gateIn.notes ? <span className="whitespace-pre-wrap">{gateIn.notes}</span> : null },
                 ]}
               />
             ) : (
               <p className="text-sm text-muted">No gate-in record.</p>
             )}
-          </Card>
-
-          <Card className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <SectionLabel right={`${media.length}`}>Video and photos</SectionLabel>
-              {canEditGateIn && job.is_open ? (
-                <LinkButton href={`/jobs/${id}/media`} tone="ghost" size="md">
-                  Add more
-                </LinkButton>
-              ) : null}
-            </div>
-            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} />
-          </Card>
-
-          {gateOut ? (
-            <Card className="flex flex-col gap-4">
-              <SectionLabel>Gate-out</SectionLabel>
+            {gateOut ? (
               <DescriptionList
                 items={[
                   { label: "Gated out", value: `${formatDateTime(job.gated_out_at)} by ${card.gatedOutBy ?? "unknown"}` },
                   { label: "Keys returned", value: `${gateOut.keys_returned}, ${gateOut.keychain_returned ? "with keychain" : "no keychain"}${gateOut.keys_match ? "" : " (did not match gate-in)"}` },
                   { label: "Keys override", value: gateOut.keys_override_reason },
                   { label: "Dash cam reconnected", value: gateOut.dash_cam_reconnected == null ? "Not fitted" : gateOut.dash_cam_reconnected ? "Yes" : "No" },
-                  { label: "Notes", value: gateOut.notes },
+                  { label: "Gate-out notes", value: gateOut.notes },
                 ]}
               />
-            </Card>
-          ) : null}
+            ) : null}
+          </Collapsible>
 
-          <Card className="flex flex-col gap-3">
-            <SectionLabel right={`${events.length}`}>History</SectionLabel>
+          <Collapsible title="Vehicle and customer details">
+            <DescriptionList
+              items={[
+                { label: "Customer", value: seesCustomerDetails && customer ? <Link href={`/customers/${customer.id}`} className="font-semibold underline underline-offset-4">{customerName}</Link> : customerName },
+                ...(seesCustomerDetails && customer ? [{ label: "Phone", value: customer.phone }, { label: "Customer number", value: customer.customer_number }] : []),
+                { label: "Car", value: <Link href={`/vehicles/${vehicle.id}`} className="font-semibold underline underline-offset-4">{vehicleTitle(vehicle)}</Link> },
+                { label: "Plate", value: formatPlate(vehicle) },
+                { label: "VIN", value: vehicle.vin ? <span className="font-mono">{vehicle.vin}</span> : null },
+                { label: "Colour", value: vehicle.colour },
+              ]}
+            />
+          </Collapsible>
+
+          <Collapsible title="Gate-in photos and videos" right={`${media.length}`}>
+            {canEditGateIn && job.is_open ? (
+              <div>
+                <LinkButton href={`/jobs/${id}/media`} tone="ghost" size="md">
+                  Add more
+                </LinkButton>
+              </div>
+            ) : null}
+            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} />
+          </Collapsible>
+
+          <Collapsible title="History" right={`${events.length}`}>
             <ul className="flex flex-col divide-y divide-line">
               {events.map((e) => (
-                <li key={e.id} className="py-2.5 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4">
+                <li key={e.id} className={`py-2.5 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4 ${e.event_type === "override" ? "text-red" : ""}`}>
                   <span className="text-xs text-muted sm:w-36 shrink-0">{formatDateTime(e.created_at)}</span>
                   <span className="text-sm">
                     <span className="font-semibold">{e.by_name ?? "System"}</span>
                     {" · "}
-                    {e.note ??
-                      (e.to_status ? `${e.from_status ? STATUS_LABELS[e.from_status as keyof typeof STATUS_LABELS] + " → " : ""}${STATUS_LABELS[e.to_status as keyof typeof STATUS_LABELS]}` : e.event_type)}
+                    {e.note ?? (e.to_status ? `${e.from_status ? STATUS_LABELS[e.from_status as keyof typeof STATUS_LABELS] + " → " : ""}${STATUS_LABELS[e.to_status as keyof typeof STATUS_LABELS]}` : e.event_type)}
                   </span>
                 </li>
               ))}
             </ul>
-          </Card>
+          </Collapsible>
         </div>
 
         <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-3">
-            <SectionLabel>Customer</SectionLabel>
-            {customer ? (
-              <Link href={`/customers/${customer.id}`} className="flex flex-col gap-0.5 hover:underline underline-offset-4">
-                <span className="font-bold">{customer.company_name ?? customer.full_name}</span>
-                <span className="text-sm text-muted">
-                  {customer.phone} · {customer.customer_number}
-                </span>
-              </Link>
-            ) : (
-              <p className="text-sm text-muted">Customer details are not shown for your role.</p>
-            )}
-            <Link href={`/vehicles/${vehicle.id}`} className="text-sm underline underline-offset-4">
-              Car details and history
-            </Link>
-          </Card>
+          <div id="approval">
+            {canSend || approvals.length ? (
+              <ApprovalPanel
+                jobId={id}
+                canSend={canSend}
+                complete={check.complete}
+                latest={latestApproval}
+                approvedAt={job.first_approval_at}
+                link={activeLink}
+                activeRequestId={activeRequestId}
+                customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null}
+                contacts={customer ? await loadApproverContacts(customer.id) : []}
+                messageTemplate={messageTemplate}
+                hidePhone={!seesCustomerDetails}
+              />
+            ) : null}
+          </div>
 
-          {canSend || approvals.length ? (
-            <ApprovalPanel
-              jobId={id}
-              canSend={canSend}
-              complete={check.complete}
-              latest={latestApproval}
-              approvedAt={job.first_approval_at}
-              link={activeLink}
-              activeRequestId={activeRequestId}
-              customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null}
-              contacts={customer ? await loadApproverContacts(customer.id) : []}
-              messageTemplate={messageTemplate}
-            />
+          {canSendReport || reportLink ? (
+            <ReportLinkPanel jobId={id} link={reportLink} url={reportUrl} message={reportMessage} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} />
           ) : null}
 
           {canPlan ? (
@@ -314,7 +399,6 @@ export default async function JobPage({
                 <Button type="submit" tone="secondary">
                   {job.promised_at ? "Change promised date" : "Set promised date"}
                 </Button>
-                <p className="text-xs text-muted">Until a date is set, the card shows the time in the current stage.</p>
               </form>
             </Card>
           ) : null}
@@ -333,33 +417,51 @@ export default async function JobPage({
                     </option>
                   ))}
                 </Select>
-                <Button type="submit" disabled={!check.complete}>
+                <Button type="submit" disabled={!check.complete || (!job.first_approval_at && role !== "owner")}>
                   {job.assigned_to ? "Reassign" : "Assign"}
                 </Button>
                 {!check.complete ? <p className="text-xs text-amber font-semibold">Blocked until the gate-in media is complete.</p> : null}
-                {check.complete && !job.first_approval_at ? <p className="text-xs text-muted">The customer has not yet approved the job card.</p> : null}
+                {check.complete && !job.first_approval_at ? <p className="text-xs text-amber font-semibold">Blocked until the customer approves the job card.</p> : null}
               </form>
             </Card>
           ) : null}
 
-          {canMove ? (
-            <Card className="flex flex-col gap-3">
-              <SectionLabel>Move to step</SectionLabel>
-              <form action={moveJob.bind(null, id)} className="flex flex-col gap-3">
-                <Select name="status" defaultValue={job.status}>
-                  {MANUAL_STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {STATUS_LABELS[s]}
-                    </option>
-                  ))}
-                </Select>
-                <Button type="submit" tone="secondary">
-                  Move
-                </Button>
-                <p className="text-xs text-muted">Owner and workshop manager only. Manual moves are logged.</p>
-              </form>
-            </Card>
-          ) : null}
+          <div id="moves" className="flex flex-col gap-6">
+            {pendingMove ? (
+              <Card className="flex flex-col gap-3 border-amber-bar">
+                <SectionLabel>Special move requested</SectionLabel>
+                <p className="text-sm">
+                  <span className="font-semibold">{pendingMove.requester?.display_name}</span> · {formatDateTime(pendingMove.created_at)}: {pendingMove.reason}
+                </p>
+                {can(role, "moveJobs") ? <DecideMoveForm action={decideMove.bind(null, id, pendingMove.id)} currentStatus={job.status} /> : <p className="text-xs text-muted">Waiting for the owner.</p>}
+              </Card>
+            ) : null}
+            {canRequestMove && !pendingMove ? (
+              <Card className="flex flex-col gap-3">
+                <SectionLabel>Request special move</SectionLabel>
+                <p className="text-xs text-muted">Only the owner can move a job past a gate. Ask with a reason; the owner is notified.</p>
+                <RequestMoveForm action={requestMove.bind(null, id)} />
+              </Card>
+            ) : null}
+            {canMove ? (
+              <Card className="flex flex-col gap-3">
+                <SectionLabel>Move to step (owner)</SectionLabel>
+                <form action={moveJob.bind(null, id)} className="flex flex-col gap-3">
+                  <Select name="status" defaultValue={job.status}>
+                    {MANUAL_STATUS_OPTIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS_LABELS[s]}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button type="submit" tone="secondary">
+                    Move
+                  </Button>
+                  <p className="text-xs text-muted">Owner only. Every move is logged.</p>
+                </form>
+              </Card>
+            ) : null}
+          </div>
 
           {canPlan ? (
             <Card className="flex flex-col gap-3">
@@ -381,12 +483,6 @@ export default async function JobPage({
 
 async function loadApproverContacts(customerId: string) {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("customer_contacts")
-    .select("id, name, phone, can_approve")
-    .eq("customer_id", customerId)
-    .eq("is_active", true)
-    .eq("can_approve", true)
-    .order("name");
+  const { data } = await supabase.from("customer_contacts").select("id, name, phone, can_approve").eq("customer_id", customerId).eq("is_active", true).eq("can_approve", true).order("name");
   return (data ?? []) as { id: string; name: string; phone: string; can_approve: boolean }[];
 }

@@ -9,7 +9,7 @@ import { blankToNull, normalisePhone } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
 import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
-import { notifyStaff } from "@/lib/notifications";
+import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -48,11 +48,12 @@ export async function assignJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("assignJobs");
   const technicianId = String(formData.get("technician") ?? "");
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
 
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
+  if (!job.first_approval_at && staff.role_id !== "owner") redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The customer has not approved the job card yet. No inspection before that."));
 
   const { data: tech } = await supabase.from("staff").select("id, display_name, role_id, is_active").eq("id", technicianId).maybeSingle();
   if (!tech || !tech.is_active) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Choose a technician."));
@@ -76,6 +77,11 @@ export async function assignJob(jobId: string, formData: FormData) {
   if (jobRow?.department !== "bodyshop") {
     const settings = await getSettings();
     await ensureInspection(jobId, tech.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
+    const { data: existingRoad } = await createAdminClient().from("road_tests").select("id").eq("job_id", jobId).maybeSingle();
+    if (!existingRoad) {
+      await createAdminClient().from("road_tests").insert({ job_id: jobId, created_by: staff.id, updated_by: staff.id });
+      await notifyRoles(["qc_inspector"], { type: "road_test_assigned", title: `Road test needed · ${jobRow?.job_number ?? ""}`, body: `Assigned to ${tech.display_name} by ${staff.display_name}. Do it before, during or after the inspection.`, jobId, href: `/road-tests/${jobId}` });
+    }
   }
   await notifyStaff([tech.id], { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
   refresh(jobId);

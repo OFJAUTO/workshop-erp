@@ -29,13 +29,15 @@ import { getSettings, type Settings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { markReminderSent } from "./actions";
-import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, reminderTemplateFor, type AppointmentFull } from "./form-data";
+import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
+import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, fillCustomerNames, reminderTemplateFor, type AppointmentFull } from "./form-data";
 
 type JobLite = {
   id: string;
   job_number: string;
   promised_at: string | null;
   gated_out_at: string | null;
+  department: string | null;
   vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null;
 };
 
@@ -61,15 +63,18 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   const supabase = await createClient();
   const [{ data: appts }, { data: due }, { data: out }, { data: reminders }] = await Promise.all([
     supabase.from("appointments").select(APPOINTMENT_SELECT).eq("is_active", true).gte("starts_at", dayStartIso(from)).lt("starts_at", dayStartIso(to)).order("starts_at"),
-    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, ${VEHICLE}`).eq("is_open", true).gte("promised_at", from).lt("promised_at", to).order("promised_at"),
-    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, ${VEHICLE}`).gte("gated_out_at", dayStartIso(from)).lt("gated_out_at", dayStartIso(to)).order("gated_out_at"),
+    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, department, ${VEHICLE}`).eq("is_open", true).gte("promised_at", from).lt("promised_at", to).order("promised_at"),
+    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, department, ${VEHICLE}`).gte("gated_out_at", dayStartIso(from)).lt("gated_out_at", dayStartIso(to)).order("gated_out_at"),
     supabase.from("appointments").select(APPOINTMENT_SELECT).eq("is_active", true).eq("status", "booked").gte("starts_at", dayStartIso(tomorrow)).lt("starts_at", dayStartIso(addDays(tomorrow, 1))).order("starts_at"),
   ]);
   const mine = (a: AppointmentFull) => who === "all" || a.advisor_id === staff.id || a.created_by === staff.id;
+  const managerView = role === "workshop_manager";
+  const side = managerView ? sideOfDepartment(staff.department_id) : null;
   const appointments = ((appts ?? []) as unknown as AppointmentFull[]).filter(mine);
-  const dueJobs = (due ?? []) as unknown as JobLite[];
-  const outJobs = (out ?? []) as unknown as JobLite[];
-  const tomorrowAppts = ((reminders ?? []) as unknown as AppointmentFull[]).filter(mine);
+  const dueJobs = ((due ?? []) as unknown as JobLite[]).filter((j) => !managerView || jobConcernsSide(j.department, side));
+  const outJobs = ((out ?? []) as unknown as JobLite[]).filter((j) => !managerView || jobConcernsSide(j.department, side));
+  const tomorrowAppts = managerView ? [] : ((reminders ?? []) as unknown as AppointmentFull[]).filter(mine);
+  await fillCustomerNames(supabase, [...appointments, ...tomorrowAppts]);
 
   const byDay = new Map<string, { appts: AppointmentFull[]; due: JobLite[]; out: JobLite[] }>();
   for (const d of days) byDay.set(d, { appts: [], due: [], out: [] });
@@ -161,7 +166,13 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
         </div>
 
         <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-3">
+          {managerView ? (
+            <Card className="flex flex-col gap-2">
+              <SectionLabel>Your department</SectionLabel>
+              <p className="text-sm text-muted">Cars expected to arrive for {side === "bodyshop" ? "the bodyshop" : side === "mechanical" ? "mechanical" : "your department"}, and promised dates of its jobs. View only.</p>
+            </Card>
+          ) : null}
+          <Card className={`flex flex-col gap-3 ${managerView ? "hidden" : ""}`}>
             <SectionLabel right={`${tomorrowAppts.length}`}>Reminders for tomorrow</SectionLabel>
             <p className="text-xs text-muted">{formatShortDay(tomorrow)}. Open WhatsApp with the message ready, then mark it sent.</p>
             {tomorrowAppts.length === 0 ? (

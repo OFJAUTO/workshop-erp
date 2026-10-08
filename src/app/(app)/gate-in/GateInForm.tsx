@@ -3,7 +3,8 @@
 import { JOB_DEPARTMENTS } from "@/lib/inspection";
 
 import { useState } from "react";
-import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
+import { ActionForm, type FormAction } from "@/components/forms";
+import { GateInAssist } from "@/components/GateInAssist";
 import { ImageCropper } from "@/components/ImageCropper";
 import { RequestsList } from "@/components/RequestsList";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Textarea } from "@/components/ui";
@@ -176,7 +177,7 @@ export function GateInForm({
           </div>
 
           <div>
-            <SubmitButton>{mode === "create" ? "Save and continue to photos and video" : "Save amendments"}</SubmitButton>
+            <GateInAssist submitLabel={mode === "create" ? "Save and continue to photos and video" : "Save amendments"} />
           </div>
         </>
       )}

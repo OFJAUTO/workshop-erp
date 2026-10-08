@@ -330,6 +330,7 @@ export type AppointmentRow = {
   duration_minutes: number;
   advisor_id: string | null;
   kind: "customer_visit" | "car_drop" | "we_collect" | "customer_collects";
+  department: "mechanical" | "bodyshop" | "both" | null;
   status: "booked" | "arrived" | "done" | "no_show" | "cancelled";
   job_id: string | null;
   notes: string | null;

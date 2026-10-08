@@ -63,3 +63,21 @@ input[type="number"]::-webkit-inner-spin-button {
 .logo-on-light {
   mix-blend-mode: multiply;
 }
+
+/* The bell shakes for a second when a notification arrives. */
+@keyframes bell-shake {
+  0% { transform: rotate(0); }
+  15% { transform: rotate(14deg); }
+  30% { transform: rotate(-12deg); }
+  45% { transform: rotate(10deg); }
+  60% { transform: rotate(-8deg); }
+  75% { transform: rotate(4deg); }
+  100% { transform: rotate(0); }
+}
+.bell-shake { animation: bell-shake 1s ease-in-out; transform-origin: 50% 0; }
+
+/* Printing the customer report: only the report, no buttons. */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+}

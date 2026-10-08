@@ -4,6 +4,7 @@ import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, S
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
+import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehiclePhotoRow, type VehicleRow } from "@/lib/types";
 import { addVehiclePhoto, setVehicleActive, setVehicleProfilePhoto } from "../actions";
@@ -49,7 +50,12 @@ export default async function VehiclePage({
   const v = vData as unknown as Row;
   const photos = (photosData ?? []) as VehiclePhotoRow[];
 
-  const { data: vipRow } = await supabase.from("customer_vip_flags").select("is_vip, vip_note").eq("id", v.customer_id).maybeSingle();
+  const [{ data: vipRow }, { data: pub }, { data: visitRows }] = await Promise.all([
+    supabase.from("customer_vip_flags").select("is_vip, vip_note").eq("id", v.customer_id).maybeSingle(),
+    supabase.from("customer_public").select("full_name, company_name").eq("id", v.customer_id).maybeSingle(),
+    supabase.from("jobs").select("id, job_number, status, gated_in_at, gated_out_at, is_open").eq("vehicle_id", id).order("gated_in_at", { ascending: false }),
+  ]);
+  const visits = (visitRows ?? []) as { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean }[];
 
   const allPaths = [...photos.map((p) => p.storage_path), ...(v.photo_path ? [v.photo_path] : [])];
   const signed = allPaths.length ? await supabase.storage.from("vehicle-photos").createSignedUrls(allPaths, 3600) : { data: [] };
@@ -121,6 +127,33 @@ export default async function VehiclePage({
             />
           </Card>
 
+          <Card className="flex flex-col gap-3">
+            <SectionLabel right={`${visits.length}`}>Visits</SectionLabel>
+            {visits.length === 0 ? (
+              <p className="text-sm text-muted">No job cards yet.</p>
+            ) : (
+              <ul className="flex flex-col divide-y divide-line">
+                {visits.map((j) => (
+                  <li key={j.id} className="py-2.5">
+                    {can(role, "viewJobs") ? (
+                      <Link href={`/jobs/${j.id}`} className="flex flex-wrap items-baseline gap-x-3 hover:underline underline-offset-4">
+                        <span className="font-bold">{j.job_number}</span>
+                        <span className="text-sm">{formatDateTime(j.gated_in_at)}</span>
+                        <span className="text-sm text-muted">{STATUS_LABELS[j.status]}{j.gated_out_at ? ` · out ${formatDateTime(j.gated_out_at)}` : ""}</span>
+                      </Link>
+                    ) : (
+                      <span className="flex flex-wrap items-baseline gap-x-3">
+                        <span className="font-bold">{j.job_number}</span>
+                        <span className="text-sm">{formatDateTime(j.gated_in_at)}</span>
+                        <span className="text-sm text-muted">{STATUS_LABELS[j.status]}</span>
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
           <section className="flex flex-col gap-3">
             <SectionLabel right={`${photos.length} photo${photos.length === 1 ? "" : "s"}`}>Photos</SectionLabel>
             {photos.length ? (
@@ -168,6 +201,8 @@ export default async function VehiclePage({
                   {v.customer.phone} · {v.customer.customer_number}
                 </span>
               </Link>
+            ) : pub ? (
+              <p className="font-bold">{pub.company_name ?? pub.full_name}</p>
             ) : (
               <p className="text-sm text-muted">Customer details are not shown for your role.</p>
             )}

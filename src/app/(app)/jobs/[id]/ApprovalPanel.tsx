@@ -28,6 +28,7 @@ export function ApprovalPanel({
   customer,
   contacts,
   messageTemplate,
+  hidePhone = false,
 }: {
   jobId: string;
   canSend: boolean;
@@ -41,6 +42,8 @@ export function ApprovalPanel({
   contacts: { id: string; name: string; phone: string }[];
   /** Ready-made WhatsApp message with the link already filled in. */
   messageTemplate: string | null;
+  /** Roles that may not see customer details get the name only. */
+  hidePhone?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const [, startTransition] = useTransition();
@@ -91,7 +94,7 @@ export function ApprovalPanel({
                   : latest
                     ? `Created ${formatDateTime(latest.created_at)}`
                     : ""}
-            {latest ? ` · to ${latest.sent_to_name ? `${latest.sent_to_name} (${latest.sent_to_phone})` : latest.sent_to_phone}` : ""}
+            {latest ? ` · to ${hidePhone ? (latest.sent_to_name ?? "the customer") : latest.sent_to_name ? `${latest.sent_to_name} (${latest.sent_to_phone})` : latest.sent_to_phone}` : ""}
           </span>
         </div>
       ) : (

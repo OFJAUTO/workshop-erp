@@ -30,6 +30,7 @@ const schema = z
     duration_minutes: z.coerce.number(),
     advisor_id: z.string().trim(),
     notes: z.string().trim(),
+    department: z.string().trim(),
   })
   .superRefine((d, ctx) => {
     if (!isDateString(d.date)) ctx.addIssue({ code: "custom", message: "Choose the date.", path: ["date"] });
@@ -38,6 +39,7 @@ const schema = z
       return;
     }
     if (d.reason.length < 2) ctx.addIssue({ code: "custom", message: "Enter the reason for the visit.", path: ["reason"] });
+    if (!["mechanical", "bodyshop", "both"].includes(d.department)) ctx.addIssue({ code: "custom", message: "Choose the department: Mechanical, Bodyshop or Both.", path: ["department"] });
     if (d.customer_mode === "existing" && !d.customer_id) ctx.addIssue({ code: "custom", message: "Choose the customer.", path: ["customer_id"] });
     if (d.customer_mode === "new" && d.new_name.length < 2) ctx.addIssue({ code: "custom", message: "Enter the new customer's name.", path: ["new_name"] });
     if (d.customer_mode === "new" && normalisePhone(d.new_phone).length < 7) ctx.addIssue({ code: "custom", message: "Enter the new customer's phone number.", path: ["new_phone"] });
@@ -68,6 +70,7 @@ function parse(formData: FormData) {
     duration_minutes: get("duration_minutes") || "30",
     advisor_id: get("advisor_id"),
     notes: get("notes"),
+    department: get("department"),
   });
 }
 
@@ -118,6 +121,7 @@ async function buildRow(supabase: Client, d: Parsed): Promise<Record<string, unk
 
   return {
     kind: d.kind,
+    department: d.kind === "customer_collects" ? null : d.department,
     customer_id: customerId,
     vehicle_id: vehicleId,
     vehicle_text: vehicleId ? null : blankToNull(d.vehicle_text),

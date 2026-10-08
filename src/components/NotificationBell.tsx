@@ -6,8 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 
 type Item = { id: number; staff_id?: string; type: string; title: string; body: string | null; job_id: string | null; href: string | null; read_at: string | null; created_at: string };
 
-const SOUND_KEY = "erp_notif_sound";
+const VOLUME_KEY = "erp_notif_volume";
 const POLL_MS = 30000;
+/** Anything that needs the owner's personal approval gets the louder, longer sound. */
+const OWNER_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested"]);
+type Volume = "off" | "low" | "normal";
 
 function timeAgo(iso: string) {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -17,10 +20,37 @@ function timeAgo(iso: string) {
   return `${Math.round(s / 86400)} d ago`;
 }
 
+/** A short chime made on the spot (no sound files): two notes, or three rising notes for owner approvals. */
+function chime(kind: "normal" | "owner", volume: Volume) {
+  if (volume === "off") return;
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new Ctx();
+    const gainLevel = volume === "low" ? 0.08 : 0.25;
+    const notes = kind === "owner" ? [523, 659, 784, 1047] : [880, 1175];
+    const len = kind === "owner" ? 0.22 : 0.16;
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = kind === "owner" ? "triangle" : "sine";
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * len;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(gainLevel, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + len);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + len);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), notes.length * len * 1000 + 300);
+  } catch {
+    // no sound available
+  }
+}
+
 /**
- * Bell with unread count at the top right of the page, a panel below it, live arrival
- * with a corner pop-up and optional sound. New notifications arrive over the live
- * connection; a timer and a refresh on returning to the tab cover any dropped connection.
+ * Bell with unread count at the top right of the page, a panel below it, live arrival with a
+ * chime, a one-second shake, the count on the browser tab, and a corner pop-up.
  */
 export function NotificationBell({ staffId }: { staffId: string }) {
   const router = useRouter();
@@ -28,23 +58,36 @@ export function NotificationBell({ staffId }: { staffId: string }) {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<Item | null>(null);
-  const [sound, setSound] = useState(() => {
+  const [shake, setShake] = useState(false);
+  const [volume, setVolume] = useState<Volume>(() => {
     try {
-      return typeof localStorage !== "undefined" && localStorage.getItem(SOUND_KEY) === "1";
+      const v = typeof localStorage !== "undefined" ? localStorage.getItem(VOLUME_KEY) : null;
+      return v === "off" || v === "low" ? v : "normal";
     } catch {
-      return false;
+      return "normal";
     }
   });
   const box = useRef<HTMLDivElement>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
   const known = useRef<Set<number>>(new Set());
+  const baseTitle = useRef<string>("");
+
+  // The count on the browser tab.
+  useEffect(() => {
+    if (!baseTitle.current) baseTitle.current = document.title.replace(/^\(\d+\)\s*/, "");
+    document.title = unread > 0 ? `(${unread}) ${baseTitle.current}` : baseTitle.current;
+  }, [unread]);
 
   const announce = useCallback((n: Item) => {
     setToast(n);
     setTimeout(() => setToast((t) => (t?.id === n.id ? null : t)), 8000);
+    setShake(true);
+    setTimeout(() => setShake(false), 1100);
+    let v: Volume = "normal";
     try {
-      if (localStorage.getItem(SOUND_KEY) === "1" && document.hidden) audio.current?.play().catch(() => {});
+      const s = localStorage.getItem(VOLUME_KEY);
+      if (s === "off" || s === "low") v = s;
     } catch {}
+    chime(OWNER_TYPES.has(n.type) ? "owner" : "normal", v);
   }, []);
 
   const load = useCallback(
@@ -53,7 +96,6 @@ export function NotificationBell({ staffId }: { staffId: string }) {
         const res = await fetch("/api/notifications", { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as { items: Item[]; unread: number };
-        // Anything unread that we have not seen before gets the pop-up (when the live connection missed it).
         if (!quiet) {
           const fresh = data.items.filter((i) => !i.read_at && !known.current.has(i.id));
           if (fresh.length && known.current.size) announce(fresh[0]);
@@ -125,18 +167,17 @@ export function NotificationBell({ staffId }: { staffId: string }) {
     await fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ all: true }) }).catch(() => {});
   }
 
-  function toggleSound() {
-    const next = !sound;
-    setSound(next);
+  function cycleVolume() {
+    const next: Volume = volume === "normal" ? "low" : volume === "low" ? "off" : "normal";
+    setVolume(next);
     try {
-      localStorage.setItem(SOUND_KEY, next ? "1" : "0");
+      localStorage.setItem(VOLUME_KEY, next);
     } catch {}
-    if (next) audio.current?.play().catch(() => {});
+    if (next !== "off") chime("normal", next);
   }
 
   return (
     <div ref={box} className="relative shrink-0">
-      <audio ref={audio} preload="auto" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YTtvT18AAAAA" />
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -144,7 +185,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
         aria-expanded={open}
         className={`relative inline-flex h-11 w-11 items-center justify-center rounded-control border bg-white text-ink hover:bg-chip ${open ? "border-ink" : "border-line-strong"}`}
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={shake ? "bell-shake" : ""}>
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
@@ -158,8 +199,8 @@ export function NotificationBell({ staffId }: { staffId: string }) {
           <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
             <span className="text-sm font-extrabold">Notifications</span>
             <div className="flex items-center gap-3">
-              <button type="button" onClick={toggleSound} className="min-h-9 text-xs font-semibold text-muted hover:text-ink">
-                Sound {sound ? "on" : "off"}
+              <button type="button" onClick={cycleVolume} className="min-h-9 text-xs font-semibold text-muted hover:text-ink" title="Sound: normal, low or off. The shake and the count always stay.">
+                Sound {volume}
               </button>
               {unread > 0 ? (
                 <button type="button" onClick={markAll} className="min-h-9 text-xs font-semibold text-muted hover:text-ink">
@@ -174,7 +215,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
               <li key={n.id}>
                 <button type="button" onClick={() => openItem(n)} className={`w-full px-4 py-3 text-left hover:bg-canvas ${n.read_at ? "" : "bg-chip/60"}`}>
                   <span className="flex items-start gap-2">
-                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : "bg-red-bar"}`} />
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : OWNER_TYPES.has(n.type) ? "bg-ink" : "bg-red-bar"}`} />
                     <span className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-semibold leading-snug">{n.title}</span>
                       {n.body ? <span className="text-xs text-muted">{n.body}</span> : null}
@@ -194,11 +235,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
       ) : null}
 
       {toast ? (
-        <button
-          type="button"
-          onClick={() => openItem(toast)}
-          className="fixed bottom-4 right-4 z-50 max-w-sm rounded-card border border-ink bg-white text-ink shadow-2xl px-4 py-3 text-left"
-        >
+        <button type="button" onClick={() => openItem(toast)} className="fixed bottom-4 right-4 z-50 max-w-sm rounded-card border border-ink bg-white text-ink shadow-2xl px-4 py-3 text-left">
           <span className="block text-sm font-bold">{toast.title}</span>
           {toast.body ? <span className="block text-xs text-muted">{toast.body}</span> : null}
           <span className="block text-[11px] text-faint mt-1">Tap to open</span>

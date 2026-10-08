@@ -15,7 +15,7 @@ export async function authoriseInspectionUpload(inspectionId: string) {
   const { data } = await admin.from("inspections").select("id, technician_id, status, unlocked_until").eq("id", inspectionId).maybeSingle();
   if (!data) return null;
   const role = staff.role_id as RoleId;
-  const allowed = (role === "technician" && data.technician_id === staff.id) || can(role, "approveInspections") || role === "service_advisor";
+  const allowed = (role === "technician" && data.technician_id === staff.id) || can(role, "approveInspections") || role === "service_advisor" || role === "qc_inspector";
   if (!allowed) return null;
   if (data.status === "submitted" && role === "technician") return null;
   if (inspectionLocked(data)) return null;

@@ -19,11 +19,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const nav: NavItem[] = [
-    { href: "/home", label: "Home", show: role !== "gate_in" },
+    { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") },
     { href: "/assign", label: "To assign", show: can(role, "assignJobs") },
     { href: "/my-jobs", label: "My jobs", show: role === "technician" },
+    { href: "/workshop", label: "Workshop list", show: role === "technician" },
+    { href: "/road-tests", label: "Road tests", show: can(role, "roadTest") },
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") },
     { href: "/customers", label: "Customers", show: can(role, "viewCustomers") },
@@ -32,6 +34,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/team/tablets", label: "Tablets", show: can(role, "viewTablets") && !can(role, "manageTeam") },
     { href: "/settings", label: "Settings", show: can(role, "manageSettings") },
     { href: "/audit", label: "Change log", show: can(role, "viewAudit") },
+    { href: "/overrides", label: "Overrides", show: can(role, "viewOverrides") },
   ]
     .filter((n) => n.show)
     .map(({ href, label }) => ({ href, label }));
@@ -42,6 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Shell
         nav={nav}
         user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
+        viewingAs={staff.viewingAs}
         footer={
           <form method="post" action="/api/auth/signout">
             <button

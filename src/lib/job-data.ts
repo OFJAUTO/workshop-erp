@@ -25,6 +25,8 @@ export type JobCard = {
   /** Null when the viewer's role may not see customer details. */
   customer: { id: string; customer_number: string; full_name: string; company_name: string | null; phone: string; is_vip: boolean; vip_note: string | null } | null;
   vip: { is_vip: boolean; vip_note: string | null } | null;
+  /** Name and VIP mark only, readable by every role. */
+  customerPublic: { full_name: string; company_name: string | null; is_vip: boolean; vip_note: string | null } | null;
   gateIn: GateInRow | null;
   requests: JobRequestRow[];
   media: GateInMediaRow[];
@@ -46,7 +48,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
   const { data: job } = await client.from("jobs").select(JOB_SELECT).eq("id", jobId).maybeSingle();
   if (!job) return null;
 
-  const [{ data: vehicle }, { data: customer }, { data: vip }, { data: gateIn }, { data: events }, { data: approvals }, { data: gateOut }, { data: requests }] =
+  const [{ data: vehicle }, { data: customer }, { data: vip }, { data: gateIn }, { data: events }, { data: approvals }, { data: gateOut }, { data: requests }, { data: customerPublic }] =
     await Promise.all([
       client
         .from("vehicles")
@@ -80,6 +82,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
         .eq("job_id", jobId)
         .maybeSingle(),
       client.from("job_requests").select("id, job_id, position, text, is_active").eq("job_id", jobId).eq("is_active", true).order("position"),
+      client.from("customer_public").select("full_name, company_name, is_vip, vip_note").eq("id", job.customer_id).maybeSingle(),
     ]);
   if (!vehicle) return null;
 
@@ -110,6 +113,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
     vehicle: vehicle as unknown as JobCard["vehicle"],
     customer: (customer as JobCard["customer"]) ?? null,
     vip: (vip as JobCard["vip"]) ?? null,
+    customerPublic: (customerPublic as JobCard["customerPublic"]) ?? null,
     gateIn: (gateIn as GateInRow | null) ?? null,
     requests: ((requests ?? []) as JobRequestRow[]),
     media,

@@ -127,8 +127,8 @@ export function Field({
   optional?: boolean;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-semibold">
+    <label className="flex flex-col gap-1.5" data-field>
+      <span className="text-sm font-semibold" data-field-label>
         {label}
         {optional ? <span className="text-muted font-medium"> (optional)</span> : null}
       </span>
@@ -142,12 +142,16 @@ export function Field({
 const controlClass =
   "min-h-11 w-full rounded-control border border-line-strong bg-white px-3.5 text-[15px] outline-none focus:border-ink focus:ring-2 focus:ring-ink/10 disabled:bg-canvas disabled:text-muted";
 
+const WORDY_TYPES = new Set([undefined, "text", "search", "url"]);
+
+/** Text boxes get English spell check by default (a standing rule); numbers, emails, dates and codes do not. */
 export function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={`${controlClass} ${className}`} {...props} />;
+  const wordy = WORDY_TYPES.has(props.type) && props.inputMode !== "numeric" && props.inputMode !== "decimal" && props.inputMode !== "tel";
+  return <input spellCheck={wordy ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
 }
 
 export function Textarea({ className = "", ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
+  return <textarea spellCheck lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
 }
 
 export function Select({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
