@@ -17,9 +17,9 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
-    title: "OFJ Automotive, Inspection Report",
-    description: "Your vehicle's inspection report",
-    openGraph: { title: "OFJ Automotive, Inspection Report", description: "Your vehicle's inspection report", siteName: "OFJ Automotive", images: [{ url: `${PRODUCTION_SITE_URL}/logo.jpg`, width: 1206, height: 618 }], type: "website" },
+    title: "OFJ Automotive, Vehicle Inspection Report",
+    description: "Your vehicle's inspection report with photos and findings",
+    openGraph: { title: "OFJ Automotive, Vehicle Inspection Report", description: "Your vehicle's inspection report with photos and findings", siteName: "OFJ Automotive", images: [{ url: `${PRODUCTION_SITE_URL}/logo.jpg`, width: 1206, height: 618 }], type: "website" },
     robots: { index: false, follow: false },
   };
 }

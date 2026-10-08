@@ -27,7 +27,7 @@ import { decideMove, requestMove } from "../move-actions";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { MediaGallery } from "./MediaGallery";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
-import { ReportLinkPanel, type ReportLinkRow } from "./ReportLinkPanel";
+import { ReportLinkPanel, SendReportButton, type ReportLinkRow } from "./ReportLinkPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -277,9 +277,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {insp.status === "submitted" && can(role, "approveInspections") ? "Review" : "Open report"}
               </LinkButton>
             ) : null}
-            {canSendReport ? (
+            {canSendReport && !reportLink ? <SendReportButton jobId={id} /> : null}
+            {canSendReport && reportLink ? (
               <a href="#report-link" className="inline-flex min-h-10 items-center rounded-control border border-ink px-3 text-sm font-bold">
-                Send to customer
+                {reportLink.status === "opened" ? "Opened by the customer" : reportLink.status === "sent" ? "Sent, not yet opened" : "Link created"}
               </a>
             ) : null}
           </div>
