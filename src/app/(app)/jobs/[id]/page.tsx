@@ -7,7 +7,7 @@ import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHe
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf, workingTimeOf } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -37,7 +37,7 @@ export default async function JobPage({
   if (!card) notFound();
   const { job, vehicle, customer, vip, gateIn, requests, media, events, approvals, gateOut } = card;
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "" });
-  const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours });
+  const timing = jobTiming(job.promised_at, job.is_open, { stage: job.stage, enteredAt: job.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: workingTimeOf(settings) });
   const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
 

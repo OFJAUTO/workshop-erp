@@ -30,6 +30,11 @@ const DEFAULTS = {
   stage_target_hours: { gate_in: 2, inspection: 4, quote: 4, approval: 24, parts: 48, work: 24, qc: 2, wash: 2, ready: 24 } as Record<string, number>,
   branches: [{ name: "OFJ Automotive (Al Quoz, Dubai)", address: "" }] as Branch[],
   approval_reminder_hours: 4,
+  inspection_fee_aed: 750,
+  inspection_fee_notice: "If no work is approved after the inspection, an inspection fee of AED [amount] will apply.",
+  inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [amount] درهمًا.",
+  opening_hour: 8,
+  closing_hour: 17,
   whatsapp_approval_template:
     "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection: [link]. Thank you, [advisor], OFJ Automotive",
 };

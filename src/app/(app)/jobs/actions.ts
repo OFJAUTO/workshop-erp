@@ -6,7 +6,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus } from "@/lib/jobs";
+import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -254,6 +254,9 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
       terms_text_ar: blankToNull(settings.terms_and_conditions_ar),
       declaration_text: settings.declaration_text,
       declaration_text_ar: settings.declaration_text_ar,
+      inspection_fee_aed: Number(settings.inspection_fee_aed) || 0,
+      inspection_fee_notice: feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed),
+      inspection_fee_notice_ar: feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed),
     })
     .select("id")
     .single();

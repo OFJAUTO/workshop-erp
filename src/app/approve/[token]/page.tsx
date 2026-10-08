@@ -4,7 +4,7 @@ import { Logo } from "@/components/Logo";
 import { Button, Card, DescriptionList, Field, Input, Notice } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { loadJobCard } from "@/lib/job-data";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, labelOf } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, labelOf, feeNotice } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -46,7 +46,7 @@ export default async function ApprovalPage({
 
   const { data: req } = await admin
     .from("approval_requests")
-    .select("id, job_id, status, opened_at, approved_at, approver_name, terms_text, terms_text_ar, declaration_text, declaration_text_ar, sent_to_name, sent_by")
+    .select("id, job_id, status, opened_at, approved_at, approver_name, terms_text, terms_text_ar, declaration_text, declaration_text_ar, inspection_fee_aed, inspection_fee_notice, inspection_fee_notice_ar, sent_to_name, sent_by")
     .eq("token", token)
     .maybeSingle();
 
@@ -99,6 +99,9 @@ export default async function ApprovalPage({
   const location = gateIn.location_type === "branch" ? (gateIn.location_name ?? "") : [gateIn.location_name, gateIn.location_address].filter(Boolean).join(", ");
   const declaration = req.declaration_text ?? settings.declaration_text;
   const declarationAr = req.declaration_text_ar ?? settings.declaration_text_ar;
+  // Approvals created before the notice existed fall back to the current setting.
+  const feeNoticeEn = req.inspection_fee_notice ?? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed);
+  const feeNoticeAr = req.inspection_fee_notice_ar ?? feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed);
   const waDigits = advisor?.phone ? advisor.phone.replace(/[^\d]/g, "") : "";
 
   return (
@@ -190,6 +193,16 @@ export default async function ApprovalPage({
           <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Your approval</h2>
           <p className="text-sm text-muted">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
           <form method="post" action={`/api/approve/${token}`} className="flex flex-col gap-4">
+            {feeNoticeEn ? (
+              <div className="rounded-control bg-chip px-3 py-2.5 flex flex-col gap-1.5">
+                <span className="text-sm font-semibold">{feeNoticeEn}</span>
+                {feeNoticeAr ? (
+                  <span className="text-sm font-semibold" dir="rtl" lang="ar">
+                    {feeNoticeAr}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <label className="flex items-start gap-3 cursor-pointer rounded-control border border-line-strong p-3 has-[:checked]:border-ink">
               <input type="checkbox" name="agree" required className="mt-1 h-5 w-5 accent-ink shrink-0" />
               <span className="flex flex-col gap-2">

@@ -26,3 +26,10 @@ Given by the owner on 7 October 2026. Recorded, not built.
 ## Hosting
 
 - Supabase is on the Pro plan since 7 October 2026. Compute size decision pending (see Phase 1 Part 1 notes).
+
+## Inspection fee and leaving the workshop (owner notes, 8 October 2026)
+
+- Inspection fee: when a customer declines all quoted work, the inspection fee (setting, AED 750, shown on the approval page) is added to the invoice automatically before gate-out.
+- Leaving the workshop: when a car is Ready, the advisor chooses Customer collects / Customer's driver collects / Delivery by recovery.
+- Delivery by recovery uses our own truck or an outside company; both must be possible. Outline: book address, date, time and any fee, shown on the Calendar; the payment rule applies before loading; photos or video and a keys check at loading, stamped "Left workshop"; photos and customer confirmation at the door, stamped "Delivered" with time and location; the job closes only after Delivered.
+- The same booking works in reverse for collecting a car from a customer.

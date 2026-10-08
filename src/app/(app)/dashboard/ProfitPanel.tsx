@@ -1,8 +1,8 @@
-import { Card, SectionLabel } from "@/components/ui";
+import { Card } from "@/components/ui";
 
 /**
  * Daily profit target panel. Green at or above target, yellow at the threshold,
- * red below. Until invoicing is live it shows a clear "starts with invoicing" state.
+ * red below. Until invoicing is live it is a single thin line so the cars start higher.
  */
 export function ProfitPanel({
   targetAed,
@@ -22,13 +22,12 @@ export function ProfitPanel({
   const fmt = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
   if (!live) {
     return (
-      <Card className="flex flex-wrap items-center justify-between gap-4 border-dashed">
-        <div className="flex flex-col gap-1">
-          <SectionLabel>Daily profit target</SectionLabel>
-          <span className="text-2xl font-extrabold text-faint">Starts with invoicing</span>
-          <span className="text-sm text-muted">Target {fmt(targetAed)} per working day. Figures appear once invoices are issued in the system (Phase 4).</span>
-        </div>
-      </Card>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-dashed border-line bg-white px-4 py-2 text-sm">
+        <span className="text-xs font-extrabold uppercase tracking-[0.08em]">Daily profit target</span>
+        <span className="text-muted">
+          {fmt(targetAed)} per working day · figures start with invoicing (Phase 4)
+        </span>
+      </div>
     );
   }
   const effective = invoicedAed + carryAed;

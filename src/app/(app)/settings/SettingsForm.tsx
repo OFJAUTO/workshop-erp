@@ -84,6 +84,9 @@ export function SettingsForm({
               <Field label="Approval link reminder (hours)" hint="Remind the advisor if a sent link is not opened in time.">
                 <Input name="approval_reminder_hours" defaultValue={v.approval_reminder_hours} inputMode="numeric" required />
               </Field>
+              <Field label="Inspection fee (AED)" hint="Charged when no work is approved after the inspection.">
+                <Input name="inspection_fee_aed" defaultValue={v.inspection_fee_aed} inputMode="numeric" required />
+              </Field>
             </div>
             <Field label="Target hours per stage" hint="Without a promised date a car turns amber past the target and red at double.">
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
@@ -109,6 +112,12 @@ export function SettingsForm({
             </Field>
             <Field label="Declaration (Arabic)">
               <Textarea name="declaration_text_ar" defaultValue={v.declaration_text_ar} rows={3} dir="rtl" lang="ar" />
+            </Field>
+            <Field label="Inspection fee notice (English)" hint="Shown above the tick box on the approval page. [amount] is replaced by the fee. Every approval keeps the exact wording and amount shown.">
+              <Textarea name="inspection_fee_notice" defaultValue={v.inspection_fee_notice} rows={2} required />
+            </Field>
+            <Field label="Inspection fee notice (Arabic)">
+              <Textarea name="inspection_fee_notice_ar" defaultValue={v.inspection_fee_notice_ar} rows={2} dir="rtl" lang="ar" />
             </Field>
           </Card>
 
@@ -149,7 +158,15 @@ export function SettingsForm({
                 <Input name="profit_target_yellow_percent" defaultValue={v.profit_target_yellow_percent} inputMode="numeric" required />
               </Field>
             </div>
-            <Field label="Working days" hint="Days that count towards the daily target.">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <Field label="Opens at (hour, 0 to 23)" hint="Stage timers count working hours only.">
+                <Input name="opening_hour" defaultValue={v.opening_hour} inputMode="numeric" required />
+              </Field>
+              <Field label="Closes at (hour, 1 to 24)" hint="A car gated in after closing starts its timer at opening time on the next working day.">
+                <Input name="closing_hour" defaultValue={v.closing_hour} inputMode="numeric" required />
+              </Field>
+            </div>
+            <Field label="Working days" hint="Days that count towards the daily target and the stage timers.">
               <div className="flex flex-wrap gap-2">
                 {DAYS.map((d) => (
                   <label key={d.id} className="cursor-pointer">

@@ -6,7 +6,7 @@ import { StageTrack } from "@/components/StageTrack";
 import { Badge, Card, Empty, PageHeader } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
-import { STATUS_LABELS, formatPromised, jobTiming, urgencyRank } from "@/lib/jobs";
+import { STATUS_LABELS, formatPromised, jobTiming, urgencyRank, workingTimeOf } from "@/lib/jobs";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
@@ -29,7 +29,7 @@ export default async function MyJobsPage() {
     )
     .eq("is_open", true)
     .eq("assigned_to", staff.id);
-  const clockFor = (j: Row) => ({ stage: j.stage, enteredAt: j.stage_entered_at, targetHours: settings.stage_target_hours });
+  const clockFor = (j: Row) => ({ stage: j.stage, enteredAt: j.stage_entered_at, targetHours: settings.stage_target_hours, workingTime: workingTimeOf(settings) });
   const rows = ((data ?? []) as unknown as Row[]).sort((a, b) => {
     const ra = urgencyRank(a, clockFor(a));
     const rb = urgencyRank(b, clockFor(b));

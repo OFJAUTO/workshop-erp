@@ -1,5 +1,7 @@
 /** Shared vocabulary for job cards: the nine-step track, statuses in plain words, timing colours. */
 
+import { workingHoursBetween, type WorkingTime } from "./working-time";
+
 export const STAGES = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"] as const;
 export type Stage = (typeof STAGES)[number];
 
@@ -132,7 +134,24 @@ export function labelOf(list: readonly { value: string; label: string }[], value
 
 export type Timing = { tone: "green" | "amber" | "red" | "neutral"; label: string; daysOver: number };
 
-export type StageClock = { stage: Stage; enteredAt: string; targetHours: Record<string, number> };
+export type StageClock = { stage: Stage; enteredAt: string; targetHours: Record<string, number>; workingTime?: WorkingTime };
+
+/** The working-time settings in the shape the stage clock needs. */
+export function workingTimeOf(settings: { opening_hour: number | string; closing_hour: number | string; working_days: string[] }): WorkingTime {
+  return { openHour: Number(settings.opening_hour), closeHour: Number(settings.closing_hour), workingDays: settings.working_days ?? [] };
+}
+
+/** Hours spent in the current stage: working hours only when the clock carries the opening hours. */
+export function hoursInStage(clock: StageClock, now = new Date()) {
+  if (clock.workingTime) return workingHoursBetween(clock.enteredAt, now, clock.workingTime);
+  return Math.max(0, (now.getTime() - Date.parse(clock.enteredAt)) / 3600000);
+}
+
+/** The inspection fee notice with the amount filled in. */
+export function feeNotice(template: string | null | undefined, amount: number | string) {
+  const n = Number(amount);
+  return String(template ?? "").replaceAll("[amount]", Number.isFinite(n) ? n.toLocaleString("en-GB") : String(amount));
+}
 
 /**
  * Green on time, amber due today, red overdue, based on the promised date.
@@ -143,11 +162,13 @@ export function jobTiming(promisedAt: string | null, isOpen: boolean, clock?: St
   if (!isOpen) return { tone: "neutral", label: "Closed", daysOver: 0 };
   if (!promisedAt) {
     if (!clock) return { tone: "neutral", label: "No promised date", daysOver: 0 };
-    const hours = Math.max(0, (now.getTime() - Date.parse(clock.enteredAt)) / 3600000);
+    const hours = hoursInStage(clock, now);
     const target = Number(clock.targetHours[clock.stage] ?? 0);
-    const text = hours < 1 ? `${Math.round(hours * 60)} min` : hours < 48 ? `${Math.round(hours)} h` : `${Math.round(hours / 24)} days`;
+    // With opening hours, a "day" is one working day.
+    const dayHours = clock.workingTime && clock.workingTime.closeHour > clock.workingTime.openHour ? clock.workingTime.closeHour - clock.workingTime.openHour : 24;
+    const text = hours < 1 ? `${Math.round(hours * 60)} min` : hours < dayHours * 2 ? `${Math.round(hours)} h` : `${Math.round(hours / dayHours)} days`;
     const label = `${text} in ${STAGE_LABELS[clock.stage]}`;
-    if (target > 0 && hours >= target * 2) return { tone: "red", label, daysOver: Math.floor(hours / 24) };
+    if (target > 0 && hours >= target * 2) return { tone: "red", label, daysOver: Math.floor(hours / dayHours) };
     if (target > 0 && hours >= target) return { tone: "amber", label, daysOver: 0 };
     return { tone: "green", label, daysOver: 0 };
   }

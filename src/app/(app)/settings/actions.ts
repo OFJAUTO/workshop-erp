@@ -20,6 +20,9 @@ const NUMBER_KEYS = [
   "supplier_invoice_pending_red_days",
   "video_retention_months",
   "approval_reminder_hours",
+  "inspection_fee_aed",
+  "opening_hour",
+  "closing_hour",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -29,6 +32,8 @@ const TEXT_KEYS = [
   "declaration_text",
   "declaration_text_ar",
   "whatsapp_approval_template",
+  "inspection_fee_notice",
+  "inspection_fee_notice_ar",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -45,6 +50,9 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   supplier_invoice_pending_red_days: [1, 365, "Supplier invoice red days"],
   video_retention_months: [1, 120, "Video retention"],
   approval_reminder_hours: [1, 168, "Approval link reminder"],
+  inspection_fee_aed: [0, 1000000, "Inspection fee"],
+  opening_hour: [0, 23, "Opening hour"],
+  closing_hour: [1, 24, "Closing hour"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -85,8 +93,11 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
     if (key === "whatsapp_approval_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
     updates.push({ key, value: text });
   }
+
+  if (Number(formData.get("closing_hour")) <= Number(formData.get("opening_hour"))) return { error: "The closing hour must be after the opening hour.", values };
 
   const byMake = overrides(formData, "markup_make__");
   if (typeof byMake === "string") return { error: byMake, values };
