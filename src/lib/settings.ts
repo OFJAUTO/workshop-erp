@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { createAdminClient } from "./supabase/admin";
+import { DEFAULT_CHECKLIST, type ChecklistSection } from "./inspection";
 
 export type Branch = { name: string; address: string };
 
@@ -36,6 +37,8 @@ const DEFAULTS = {
   opening_hour: 8,
   closing_hour: 17,
   appointments_per_day: 8,
+  inspection_target_minutes: 90,
+  inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],
   appointment_reminder_hours_before: 1,
   appointment_evening_reminder_hour: 18,
   appointment_missed_after_minutes: 30,

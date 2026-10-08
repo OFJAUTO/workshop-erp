@@ -29,6 +29,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
           requests={card.requests.map((r) => r.text)}
           requestsLocked={g.is_complete}
           initialValues={{
+            department: card.job.department ?? "",
             vip: card.customer?.is_vip ?? card.vip?.is_vip ? "on" : "",
             vip_note: card.customer?.vip_note ?? card.vip?.vip_note ?? "",
             arrived_by: g.arrived_by,

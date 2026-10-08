@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /** Records the customer's approval: name, time, and the exact terms shown. Then tells the advisor and the workshop manager. */
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
 
   const { data: job } = await admin
     .from("jobs")
-    .select("job_number, status, first_approval_at, gated_in_by, vehicle:vehicles(plate_number, plate_code, has_plate, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+    .select("job_number, status, first_approval_at, gated_in_by, department, vehicle:vehicles(plate_number, plate_code, has_plate, vin, make:vehicle_makes(name), model:vehicle_models(name))")
     .eq("id", req.job_id)
     .maybeSingle();
   const update: Record<string, unknown> = { first_approval_at: job?.first_approval_at ?? now };
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     jobId: req.job_id,
     href: `/jobs/${req.job_id}`,
   });
-  await notifyRoles(["workshop_manager"], {
+  await notifyManagers(job?.department ?? null, {
     type: "job_awaiting_assignment",
     title: `${carText} approved, waiting to be assigned`,
     body: `${job?.job_number ?? ""} · approved by ${name}`,

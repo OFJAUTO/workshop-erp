@@ -13,6 +13,14 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "appointment_booked", label: "An appointment was booked for you" },
   { type: "appointment_reminder", label: "Booking reminders: the day before, an hour before, the evening before a collection" },
   { type: "appointment_missed", label: "Booking missed: not arrived or not collected" },
+  { type: "job_gated_in", label: "Car gated in (workshop manager heads-up)" },
+  { type: "job_assigned", label: "A car was assigned to you", locked: true },
+  { type: "inspection_submitted", label: "Inspection report ready to approve", locked: true },
+  { type: "inspection_returned", label: "Inspection report sent back to you", locked: true },
+  { type: "inspection_approved", label: "Inspection report approved, ready for the quote", locked: true },
+  { type: "inspection_overdue", label: "Inspection taking too long", locked: true },
+  { type: "inspection_change_requested", label: "A change to an approved report needs the owner's approval", locked: true },
+  { type: "inspection_change_decided", label: "Your change request was decided", locked: true },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
@@ -51,4 +59,15 @@ export async function notifyRoles(roles: RoleId[], n: NotificationInput) {
   const admin = createAdminClient();
   const { data } = await admin.from("staff").select("id").in("role_id", roles).eq("is_active", true);
   await notifyStaff((data ?? []).map((s) => s.id), n);
+}
+
+/** The workshop managers of a department: mechanical, bodyshop (incl. paint and PPF), or all for "both" and unknown. */
+export async function notifyManagers(jobDepartment: string | null | undefined, n: NotificationInput) {
+  const admin = createAdminClient();
+  const { data } = await admin.from("staff").select("id, department_id").eq("role_id", "workshop_manager").eq("is_active", true);
+  const side = (d: string | null) => (d === "mechanical" ? "mechanical" : d === "bodyshop" || d === "paint" || d === "ppf_tint" ? "bodyshop" : null);
+  const ids = (data ?? [])
+    .filter((m) => !jobDepartment || jobDepartment === "both" || !side(m.department_id) || side(m.department_id) === jobDepartment)
+    .map((m) => m.id);
+  await notifyStaff(ids, n);
 }

@@ -25,7 +25,7 @@ export default async function MyJobsPage() {
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active)",
     )
     .eq("is_open", true)
     .eq("assigned_to", staff.id);
@@ -61,7 +61,7 @@ export default async function MyJobsPage() {
           {rows.map((j) => {
             const timing = jobTiming(j.promised_at, j.is_open, clockFor(j));
             return (
-              <Link key={j.id} href={`/jobs/${j.id}`} className="block">
+              <Link key={j.id} href={`/my-jobs/${j.id}`} className="block">
                 <Card className="flex flex-col gap-3 hover:border-ink">
                   <div className="flex flex-col sm:flex-row gap-4">
                     <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full sm:w-44" />

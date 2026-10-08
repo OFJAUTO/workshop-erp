@@ -5,6 +5,8 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, formatMinutes } from "@/lib/inspection";
+import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
 import { formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, formatPromised, jobTiming, labelOf, workingTimeOf } from "@/lib/jobs";
@@ -42,6 +44,10 @@ export default async function JobPage({
   const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
 
   const canAssign = can(role, "assignJobs") && job.is_open;
+  const inspection = job.department !== "bodyshop" ? await loadInspection(id) : null;
+  const inspectionMinutes = inspection ? inspectionWorkingMinutes(inspection.inspection, workingTimeOf(settings)) : 0;
+  const inspectionOver = !!inspection && inspection.inspection.status === "in_progress" && inspectionOverTarget(inspection.inspection, workingTimeOf(settings));
+  const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
   const canMove = can(role, "moveJobs") && job.is_open && job.status !== "gate_in_pending";
   const canEditGateIn = can(role, "editGateIn") && job.is_open;
   const canSend = can(role, "sendApproval") && job.is_open;
@@ -126,6 +132,37 @@ export default async function JobPage({
           </p>
         ) : null}
       </Card>
+
+      {job.department !== "bodyshop" && (inspection || job.assigned_to) ? (
+        <Card className={`flex flex-col gap-3 ${inspectionOver ? "border-red-bar" : ""}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <SectionLabel>Inspection{job.department ? ` · ${JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label ?? ""}` : ""}</SectionLabel>
+            <div className="flex flex-wrap gap-2">
+              <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="md">
+                {inspection ? "Open report" : "Report"}
+              </LinkButton>
+              {role === "technician" || can(role, "approveInspections") ? (
+                <LinkButton href={`/my-jobs/${id}`} tone="ghost" size="md">
+                  Technician screen
+                </LinkButton>
+              ) : null}
+            </div>
+          </div>
+          {inspection ? (
+            <p className="text-sm">
+              <span className="font-bold">{INSPECTION_STATUS_LABELS[inspection.inspection.status]}</span>
+              {inspection.technician ? ` · ${inspection.technician.display_name}` : ""}
+              {inspection.inspection.started_at && showInspectionTime ? (
+                <span className={inspectionOver ? " font-bold text-red" : " text-muted"}>
+                  {" "}· {inspection.inspection.status === "in_progress" ? "running " : ""}{formatMinutes(inspectionMinutes)} of {formatMinutes(inspection.inspection.target_minutes ?? (Number(settings.inspection_target_minutes) || 90))} target{inspectionOver ? " · over target" : ""}
+                </span>
+              ) : null}
+            </p>
+          ) : (
+            <p className="text-sm text-muted">Assigned. The inspection starts when the technician presses start on the tablet.</p>
+          )}
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-6">

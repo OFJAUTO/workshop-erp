@@ -7,7 +7,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { notifyRoles } from "@/lib/notifications";
+import { notifyManagers, notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -49,6 +49,7 @@ const gateInSchema = z
     notes: z.string().trim(),
     old_parts_return: z.enum(["yes", "no"], { message: "Does the customer want old parts returned?" }),
     priority: z.enum(["high", "normal", "low"], { message: "Choose the priority." }),
+    department: z.enum(["mechanical", "bodyshop", "both"], { message: "Choose Mechanical, Bodyshop or Both." }),
     is_electric: z.string(),
     location_choice: z.string().trim().min(1, "Choose the gate-in location."),
     location_address: z.string().trim(),
@@ -81,6 +82,7 @@ function parseGateIn(formData: FormData) {
   const get = (k: string) => formData.get(k) ?? "";
   return gateInSchema.safeParse({
     arrived_by: get("arrived_by"),
+    department: get("department"),
     condition: get("condition"),
     fuel_level: get("fuel_level"),
     battery_percent: get("battery_percent"),
@@ -146,7 +148,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
 
   const { data: job, error: jobError } = await supabase
     .from("jobs")
-    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: d.priority, gated_in_by: staff.id })
+    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: d.priority, department: d.department, gated_in_by: staff.id })
     .select("id, job_number")
     .single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
@@ -206,6 +208,13 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     created_by: staff.id,
   });
   await supabase.from("vehicles").update({ last_mileage: Number(d.mileage) }).eq("id", vehicleId);
+  await notifyManagers(d.department, {
+    type: "job_gated_in",
+    title: `Car gated in · ${job.job_number}`,
+    body: `${d.department === "both" ? "Mechanical and bodyshop" : d.department === "bodyshop" ? "Bodyshop" : "Mechanical"} · gated in by ${staff.display_name}`,
+    jobId: job.id,
+    href: `/jobs/${job.id}`,
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/jobs");

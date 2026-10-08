@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
+import { cleanChecklist } from "@/lib/inspection";
 import { STAGES } from "@/lib/jobs";
 import { createClient } from "@/lib/supabase/server";
 
@@ -27,6 +28,7 @@ const NUMBER_KEYS = [
   "appointment_reminder_hours_before",
   "appointment_evening_reminder_hour",
   "appointment_missed_after_minutes",
+  "inspection_target_minutes",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -65,6 +67,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   appointment_reminder_hours_before: [1, 72, "Booking reminder hours before"],
   appointment_evening_reminder_hour: [0, 23, "Evening reminder hour"],
   appointment_missed_after_minutes: [5, 1440, "Booking counts as missed after"],
+  inspection_target_minutes: [10, 1440, "Inspection target"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -171,4 +174,24 @@ export async function reviewCatalogEntry(kind: "make" | "model", id: string, for
     await supabase.from(table).update({ needs_review: false, is_active: false }).eq("id", id);
   }
   revalidatePath("/settings/catalog");
+}
+
+/** The inspection checklist editor (owner). Saved as one setting; reports keep the version they started with. */
+export async function saveInspectionChecklist(_state: FormState, formData: FormData): Promise<FormState> {
+  await requirePermission("manageSettings");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(formData.get("checklist") ?? "[]"));
+  } catch {
+    return { error: "The checklist could not be read." };
+  }
+  const clean = cleanChecklist(parsed);
+  if (typeof clean === "string") return { error: clean };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("settings")
+    .upsert({ key: "inspection_checklist", value: clean, label: "Inspection checklist", description: "Sections and items of the mechanical inspection report." }, { onConflict: "key" });
+  if (error) return { error: error.message };
+  revalidatePath("/", "layout");
+  return { success: "Checklist saved." };
 }

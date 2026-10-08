@@ -7,7 +7,9 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
+import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
+import { notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -70,8 +72,16 @@ export async function assignJob(jobId: string, formData: FormData) {
     to_staff: tech.id,
     note: `Assigned to ${tech.display_name}`,
   });
+  const { data: jobRow } = await supabase.from("jobs").select("job_number, department").eq("id", jobId).maybeSingle();
+  if (jobRow?.department !== "bodyshop") {
+    const settings = await getSettings();
+    await ensureInspection(jobId, tech.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
+  }
+  await notifyStaff([tech.id], { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
   refresh(jobId);
-  redirect(`/jobs/${jobId}?message=` + encodeURIComponent(`Assigned to ${tech.display_name}.`));
+  revalidatePath("/assign");
+  const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
+  redirect(`${back}?message=` + encodeURIComponent(`Assigned to ${tech.display_name}.`));
 }
 
 /** Manual stage move for the owner and workshop manager until later phases automate it. */
@@ -193,6 +203,8 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     })
     .eq("job_id", jobId);
   if (error) return { error: error.message, values };
+  const dept = String(formData.get("department") ?? "");
+  if (["mechanical", "bodyshop", "both"].includes(dept)) await supabase.from("jobs").update({ department: dept }).eq("id", jobId);
 
   if (!gi?.is_complete) {
     // Request lines can be rewritten until the gate-in is complete: retire the old ones, add the new ones.

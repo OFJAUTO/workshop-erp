@@ -2,6 +2,8 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
+import { formatMinutes, type InspectionStatus } from "@/lib/inspection";
+import { inspectionOverTarget, inspectionWorkingMinutes } from "@/lib/inspection-data";
 import { formatPromised, hoursInStage, jobTiming, urgencyRank, workingTimeOf, type JobStatus, type Priority, type Stage } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -27,6 +29,7 @@ type Row = JobRow & {
   customer: { full_name: string; company_name: string | null } | null;
   assignee: { display_name: string } | null;
   gate_in: { condition: string; dash_cam: boolean; is_complete: boolean; major_damage: boolean } | null;
+  inspection: { status: InspectionStatus; started_at: string | null; submitted_at: string | null; elapsed_minutes: number | null; target_minutes: number | null }[] | null;
 };
 
 const CONDITION_SHORT: Record<string, string> = { runs_drives: "Runs and drives", needs_assistance: "Needs assistance", does_not_run: "Does not run" };
@@ -42,7 +45,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, started_at, submitted_at, elapsed_minutes, target_minutes)",
     )
     .eq("is_open", true);
   const all = (data ?? []) as unknown as Row[];
@@ -58,8 +61,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const seesCustomers = can(role, "viewCustomers");
   const now = new Date();
 
+  const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
   const rows: DashRow[] = all.map((j) => {
     const clock = clockFor(j);
+    const insp = j.inspection?.find((i) => i.status === "in_progress" || i.status === "submitted" || i.status === "approved") ?? null;
+    const inspMinutes = insp && insp.started_at ? inspectionWorkingMinutes(insp, workingTime, now) : 0;
+    const inspOver = !!insp && insp.status === "in_progress" && inspectionOverTarget(insp, workingTime, now);
+    const baseTiming = jobTiming(j.promised_at, j.is_open, clock, now);
     return {
       id: j.id,
       jobNumber: j.job_number,
@@ -80,8 +88,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       conditionShort: j.gate_in ? (CONDITION_SHORT[j.gate_in.condition] ?? "") : "",
       dashCam: !!j.gate_in?.dash_cam,
       majorDamage: !!j.gate_in?.major_damage,
-      timing: jobTiming(j.promised_at, j.is_open, clock, now),
-      urgency: [...urgencyRank(j, clock, vipIds.has(j.customer_id))],
+      timing: inspOver ? { tone: "red" as const, label: `Inspection ${formatMinutes(inspMinutes)} · over target`, daysOver: baseTiming.daysOver } : baseTiming,
+      inspectionLabel: insp && insp.started_at && showInspectionTime ? `Inspection ${insp.status === "in_progress" ? "running " : ""}${formatMinutes(inspMinutes)}` : null,
+      urgency: inspOver ? [0, ...urgencyRank(j, clock, vipIds.has(j.customer_id)).slice(1)] : [...urgencyRank(j, clock, vipIds.has(j.customer_id))],
     };
   });
 

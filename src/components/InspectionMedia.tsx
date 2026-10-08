@@ -1,0 +1,135 @@
+"use client";
+
+import { useState } from "react";
+import { putWithProgress } from "@/lib/upload-client";
+
+export type InspectionFile = { id: string; kind: "photo" | "video" | "pdf"; url: string | null; caption?: string | null; isPrescan?: boolean };
+
+const MAX_VIDEO_SECONDS = 60;
+
+function readDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => {
+      const d = v.duration;
+      URL.revokeObjectURL(v.src);
+      resolve(Number.isFinite(d) ? d : null);
+    };
+    v.onerror = () => resolve(null);
+    v.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadOne(inspectionId: string, file: File, where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }, onProgress: (p: number) => void) {
+  const type = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+  const kind = type.startsWith("video/") ? "video" : type === "application/pdf" ? "pdf" : "photo";
+  let duration: number | null = null;
+  if (kind === "video") {
+    duration = await readDuration(file);
+    if (duration !== null && duration > MAX_VIDEO_SECONDS + 1) throw new Error(`That video is ${Math.round(duration)} seconds. The limit is ${MAX_VIDEO_SECONDS} seconds. Please record a shorter one.`);
+  }
+  const prep = await fetch("/api/inspection-media/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inspectionId, contentType: type }) });
+  const p = (await prep.json()) as { path?: string; url?: string; error?: string };
+  if (!prep.ok || !p.path || !p.url) throw new Error(p.error ?? "Could not prepare the upload.");
+  await putWithProgress(p.url, file, type, onProgress);
+  const reg = await fetch("/api/inspection-media/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ inspectionId, path: p.path, kind, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan, duration: duration ?? undefined, caption: kind === "pdf" ? file.name.slice(0, 120) : undefined }),
+  });
+  const r = (await reg.json()) as { ok?: boolean; id?: string; url?: string | null; error?: string };
+  if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
+  return { id: r.id, kind, url: r.url ?? null, caption: kind === "pdf" ? file.name : null, isPrescan: !!where.isPrescan } as InspectionFile;
+}
+
+/**
+ * Photos, short videos (up to 60 seconds, with sound) or PDFs attached to one place in the
+ * report: a checklist item, a customer request, the pre-scan slot or the report as a whole.
+ */
+export function InspectionMedia({
+  inspectionId,
+  files,
+  where,
+  accept = "photo_video",
+  disabled = false,
+  compact = false,
+  onAdded,
+}: {
+  inspectionId: string;
+  files: InspectionFile[];
+  where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean };
+  accept?: "photo_video" | "pdf";
+  disabled?: boolean;
+  compact?: boolean;
+  onAdded?: (f: InspectionFile) => void;
+}) {
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    setError(null);
+    for (const file of list) {
+      setProgress(0);
+      try {
+        const added = await uploadOne(inspectionId, file, where, setProgress);
+        onAdded?.(added);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Upload failed.");
+      }
+    }
+    setProgress(null);
+  }
+
+  const btn = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-line-strong bg-white px-3 text-sm font-semibold ${disabled ? "opacity-50" : "cursor-pointer hover:border-ink"}`;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {files.length ? (
+        <div className={`flex flex-wrap gap-2 ${compact ? "" : ""}`}>
+          {files.map((f) =>
+            f.kind === "pdf" ? (
+              <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-control border border-line bg-chip px-3 text-sm font-semibold">
+                PDF · {f.caption ?? "scan report"}
+              </a>
+            ) : f.kind === "video" ? (
+              <video key={f.id} src={f.url ?? undefined} controls playsInline preload="metadata" className="h-24 w-36 rounded-control bg-black object-cover" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer"><img src={f.url ?? ""} alt={f.caption ?? "Photo"} className="h-24 w-24 rounded-control object-cover bg-chip" /></a>
+            ),
+          )}
+        </div>
+      ) : null}
+      {!disabled ? (
+        <div className="flex flex-wrap gap-2">
+          {accept === "pdf" ? (
+            <label className={btn}>
+              <input type="file" accept="application/pdf" multiple onChange={onChange} className="sr-only" disabled={progress !== null} />
+              + Add PDF
+            </label>
+          ) : (
+            <>
+              <label className={btn}>
+                <input type="file" accept="image/*" capture="environment" onChange={onChange} className="sr-only" disabled={progress !== null} />
+                + Photo
+              </label>
+              <label className={btn}>
+                <input type="file" accept="video/*" capture="environment" onChange={onChange} className="sr-only" disabled={progress !== null} />
+                + Video (60 s)
+              </label>
+            </>
+          )}
+        </div>
+      ) : null}
+      {progress !== null ? (
+        <div className="h-2 rounded-full bg-track overflow-hidden">
+          <div className="h-full bg-ink transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+        </div>
+      ) : null}
+      {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
+    </div>
+  );
+}

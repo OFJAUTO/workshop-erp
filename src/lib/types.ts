@@ -186,6 +186,7 @@ export type JobRow = {
   first_approval_at: string | null;
   stage_entered_at: string;
   is_open: boolean;
+  department: "mechanical" | "bodyshop" | "both" | null;
   created_at: string;
   updated_at: string;
 };

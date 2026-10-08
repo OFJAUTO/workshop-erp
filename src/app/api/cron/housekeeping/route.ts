@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { addDays, dayStartIso, dubaiTimeOf } from "@/lib/calendar";
-import { dubaiDate } from "@/lib/jobs";
-import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { dubaiDate, workingTimeOf } from "@/lib/jobs";
+import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { workingHoursBetween } from "@/lib/working-time";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
   }
   const admin = createAdminClient();
   const settings = await getSettings();
-  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0 };
+  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0, inspectionWarnings: 0 };
 
   // 1. Video retention
   const months = Number(settings.video_retention_months) || 12;
@@ -120,6 +121,23 @@ export async function GET(request: NextRequest) {
       await tell(a, "appointment_missed", `${label}: ${who(a)} at ${dubaiTimeOf(a.starts_at)}`);
       await admin.from("appointments").update({ missed_notified_at: nowIso }).eq("id", a.id);
       report.appointmentReminders++;
+    }
+  }
+
+  // 4. Inspections over their target: warn the department's manager and the owner once.
+  {
+    const wt = workingTimeOf(settings);
+    const { data: open } = await admin.from("inspections").select("id, job_id, started_at, target_minutes, technician_id, job:jobs(job_number, department)").eq("status", "in_progress").is("overdue_warned_at", null).not("started_at", "is", null).limit(100);
+    for (const i of open ?? []) {
+      const target = i.target_minutes ?? (Number(settings.inspection_target_minutes) || 90);
+      const minutes = Math.round(workingHoursBetween(i.started_at as string, new Date(), wt) * 60);
+      if (minutes <= target) continue;
+      const job = i.job as unknown as { job_number: string; department: string | null } | null;
+      const n = { type: "inspection_overdue", title: `Inspection taking too long · ${job?.job_number ?? ""}`, body: `${minutes} min of working time against a target of ${target} min.`, jobId: i.job_id as string, href: `/jobs/${i.job_id}/inspection` };
+      await notifyManagers(job?.department ?? null, n);
+      await notifyRoles(["owner"], n);
+      await admin.from("inspections").update({ overdue_warned_at: new Date().toISOString() }).eq("id", i.id);
+      report.inspectionWarnings++;
     }
   }
 

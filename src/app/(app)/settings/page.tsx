@@ -31,6 +31,7 @@ export default async function SettingsPage() {
     else if (row.key === "working_days") workingDays = Array.isArray(row.value) ? (row.value as string[]) : workingDays;
     else if (row.key === "stage_target_hours") stageHours = (row.value as Record<string, number>) ?? {};
     else if (row.key === "branches") branchesText = ((row.value as { name: string; address: string }[]) ?? []).map((b) => `${b.name} | ${b.address}`).join("\n");
+    else if (row.key === "inspection_checklist") continue;
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");
   }
 
@@ -44,9 +45,14 @@ export default async function SettingsPage() {
         title="Settings"
         subtitle="Changes apply immediately, without a rebuild. Every change is logged."
         actions={
-          <LinkButton href="/settings/catalog" tone="secondary">
-            Makes and models{pendingReview ? ` · ${pendingReview} to review` : ""}
-          </LinkButton>
+          <>
+            <LinkButton href="/settings/inspection" tone="secondary">
+              Inspection checklist
+            </LinkButton>
+            <LinkButton href="/settings/catalog" tone="secondary">
+              Makes and models{pendingReview ? ` · ${pendingReview} to review` : ""}
+            </LinkButton>
+          </>
         }
       />
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">

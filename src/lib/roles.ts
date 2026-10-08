@@ -66,6 +66,8 @@ export const PERMISSIONS = {
   approveRelease: ["owner", "accounts"],
   viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "parts", "qc_inspector"],
   viewCalendar: OFFICE_AND_WORKSHOP,
+  approveInspections: ["owner", "workshop_manager"],
+  decideInspectionChanges: ["owner"],
   bookAppointments: ["owner", "service_advisor"],
 } as const satisfies Record<string, readonly RoleId[]>;
 

@@ -87,6 +87,9 @@ export function SettingsForm({
               <Field label="Inspection fee (AED)" hint="Charged when no work is approved after the inspection.">
                 <Input name="inspection_fee_aed" defaultValue={v.inspection_fee_aed} inputMode="numeric" required />
               </Field>
+              <Field label="Inspection target (minutes of working time)" hint="Past this the department manager and the owner are warned and the card turns red.">
+                <Input name="inspection_target_minutes" defaultValue={v.inspection_target_minutes} inputMode="numeric" required />
+              </Field>
             </div>
             <Field label="Target hours per stage" hint="Without a promised date a car turns amber past the target and red at double.">
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">

@@ -22,6 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/home", label: "Home", show: role !== "gate_in" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") },
+    { href: "/assign", label: "To assign", show: can(role, "assignJobs") },
     { href: "/my-jobs", label: "My jobs", show: role === "technician" },
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") },

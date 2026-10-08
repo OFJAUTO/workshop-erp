@@ -30,6 +30,7 @@ export type DashRow = {
   dashCam: boolean;
   majorDamage: boolean;
   timing: Timing;
+  inspectionLabel: string | null;
   urgency: (number | string)[];
 };
 
@@ -231,6 +232,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                       {j.vip ? <Badge tone="ink">VIP</Badge> : null}
                       <PriorityBadge priority={j.priority} />
                       <TimingBadge timing={j.timing} />
+                      {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
                     </div>
                     <span className="text-sm font-semibold">{j.title}</span>
                     <span className="text-xs text-muted">

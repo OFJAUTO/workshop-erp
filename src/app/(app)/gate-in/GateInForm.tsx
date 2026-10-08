@@ -1,5 +1,7 @@
 "use client";
 
+import { JOB_DEPARTMENTS } from "@/lib/inspection";
+
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ImageCropper } from "@/components/ImageCropper";
@@ -143,6 +145,9 @@ export function GateInForm({
 
               <Card className="flex flex-col gap-5">
                 <SectionLabel>Plan</SectionLabel>
+                <Field label="Department" hint="Which side of the workshop the car goes to. Both: it moves on only when both sides are finished.">
+                  <ChoiceButtons name="department" columns={3} defaultValue={v.department} options={JOB_DEPARTMENTS.map((d) => ({ value: d.value, label: d.label }))} />
+                </Field>
                 <label className="flex items-center gap-3 min-h-11 cursor-pointer">
                   <input type="checkbox" name="vip" checked={vip} onChange={(e) => setVip(e.target.checked)} className="h-5 w-5 accent-ink" />
                   <span className="text-sm font-bold">VIP</span>
