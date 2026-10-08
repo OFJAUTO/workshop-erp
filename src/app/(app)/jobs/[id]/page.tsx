@@ -8,13 +8,18 @@ import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton,
 import { requirePermission } from "@/lib/auth";
 import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
+import { PARTS_BUCKET, PART_SELECT, loadQuoteSummary, signPaths, toPart } from "@/lib/quote-data";
+import { aed, quoteState } from "@/lib/quotes";
 import { ROAD_TEST_DECISIONS, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
+import { PartsConfirm, type ConfirmItem } from "@/components/PartsConfirm";
+import { confirmPart } from "../../parts/actions";
+import { newQuotation, startQuotation } from "../../quotes/actions";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -43,15 +48,20 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, events, approvals, gateOut } = card;
-  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }] = await Promise.all([
+  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
     admin.from("move_requests").select("id, reason, status, to_status, decision_reason, decided_at, created_at, requester:staff!move_requests_requested_by_fkey(display_name), decider:staff!move_requests_decided_by_fkey(display_name)").eq("job_id", id).order("created_at", { ascending: false }),
     admin.from("report_links").select("id, token, status, sent_at, opened_at, created_at").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     admin.from("staff").select("display_name, department_id").eq("role_id", "workshop_manager").eq("is_active", true).order("display_name"),
     job.assignment_note_by ? admin.from("staff").select("display_name").eq("id", job.assignment_note_by).maybeSingle() : Promise.resolve({ data: null }),
+    loadQuoteSummary(id),
+    admin.from("part_items").select(PART_SELECT).eq("job_id", id).eq("is_active", true).order("created_at"),
   ]);
   const roadTest = (rt as RoadTestRow | null) ?? null;
+  const partItems = ((partRows ?? []) as Record<string, unknown>[]).map(toPart);
+  const qState = quoteState(quoteSummary, inspection?.inspection.status === "approved");
+  const latestQuote = quoteSummary.quotation;
   const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
   const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
 
@@ -115,7 +125,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     roadTest,
     approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
     gateInComplete: check.complete,
+    quote: qState,
   });
+  const canQuote = (role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)))) && job.is_open && !staff.viewingAs;
+  const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
+  const quoteOpenStatuses = ["draft", "pending_owner", "sent", "opened"];
+  const pendingParts = partItems.filter((p) => p.confirm_status === "pending");
+  const diagramUrls = managesThisJob && pendingParts.length ? await signPaths(PARTS_BUCKET, pendingParts.map((p) => p.diagram_path).filter((x): x is string => !!x)) : {};
   const myMove = role === "owner" || step.actorRole === role || (step.actorRole === "gate_in" && can(role, "editGateIn"));
 
   // Waiting for a technician: how long, against the assignment target.
@@ -154,6 +170,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
+            {job.inspection_fee_due ? <Badge tone="red">Inspection fee due · AED {Number(settings.inspection_fee_aed).toLocaleString("en-GB")}</Badge> : null}
             <TimingBadge timing={timing} />
             {!job.is_open ? <Badge tone="neutral">Closed</Badge> : null}
           </span>
@@ -291,13 +308,72 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
           {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
         </Card>
-        {["Quotation", "Parts", "Invoice"].map((name) => (
-          <Card key={name} className="flex flex-col gap-2 bg-canvas opacity-70">
-            <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{name}</span>
-            <span className="text-sm font-semibold text-muted">Not started</span>
-          </Card>
-        ))}
+        <Card id="quotation" className={`flex flex-col gap-2 ${qState.tone === "green" ? "border-green" : qState.tone === "amber" ? "border-amber-bar" : qState.tone === "red" ? "border-red-bar" : "border-line"} ${job.stage === "quote" || job.stage === "approval" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Quotation</span>
+          <span className="text-sm font-semibold">{qState.text}</span>
+          {latestQuote ? (
+            <span className="text-xs text-muted">
+              {latestQuote.number} v{latestQuote.version}
+              {seesPrices ? ` · ${aed(latestQuote.status === "approved" || latestQuote.status === "partly_approved" ? latestQuote.approved_total_aed : latestQuote.total_aed)}` : ""}
+              {latestQuote.sent_at ? ` · sent ${formatDayTime(latestQuote.sent_at)}` : ""}
+              {latestQuote.opened_at ? ` · opened ${formatDayTime(latestQuote.opened_at)}` : ""}
+              {latestQuote.responded_at ? ` · ${latestQuote.approver_name} ${formatDayTime(latestQuote.responded_at)}` : ""}
+            </span>
+          ) : null}
+          <div className="flex flex-wrap gap-2 mt-auto">
+            {!latestQuote && canQuote && (inspection?.inspection.status === "approved" || role === "owner") ? (
+              <form action={startQuotation.bind(null, id)}>
+                <Button type="submit" size="md">Start quotation</Button>
+              </form>
+            ) : null}
+            {latestQuote && (seesPrices || role === "workshop_manager") ? (
+              <LinkButton href={`/jobs/${id}/quote/${latestQuote.id}`} tone={quoteOpenStatuses.includes(latestQuote.status) && canQuote ? "primary" : "secondary"} size="md">
+                {quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (qState.key === "ready" ? "Send quotation" : "Open quotation") : "Open quotation"}
+              </LinkButton>
+            ) : null}
+            {latestQuote && !quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (
+              <form action={newQuotation.bind(null, id)}>
+                <Button type="submit" tone="secondary" size="md">New quotation</Button>
+              </form>
+            ) : null}
+          </div>
+        </Card>
+        <Card className={`flex flex-col gap-2 ${partItems.length ? "" : "bg-canvas opacity-70"} ${job.stage === "parts" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Parts</span>
+          <span className="text-sm font-semibold">
+            {partItems.length === 0 ? (quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
+          </span>
+          {partItems.length ? (
+            <span className="text-xs text-muted">
+              {[
+                quoteSummary.waitingConfirm ? `${quoteSummary.waitingConfirm} waiting for the technician` : "",
+                quoteSummary.waitingPrices ? `${quoteSummary.waitingPrices} waiting for a price` : "",
+                partItems.filter((p) => p.order_status === "to_order").length ? `${partItems.filter((p) => p.order_status === "to_order").length} to order` : "",
+                partItems.filter((p) => p.order_status === "ordered").length ? `${partItems.filter((p) => p.order_status === "ordered").length} ordered` : "",
+                partItems.filter((p) => p.order_status === "received").length ? `${partItems.filter((p) => p.order_status === "received").length} received` : "",
+              ].filter(Boolean).join(" · ")}
+            </span>
+          ) : null}
+          {can(role, "priceParts") || seesPrices ? (
+            <div className="mt-auto">
+              <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton>
+            </div>
+          ) : null}
+        </Card>
+        <Card className="flex flex-col gap-2 bg-canvas opacity-70">
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Invoice</span>
+          <span className="text-sm font-semibold text-muted">{job.inspection_fee_due ? "Inspection fee due at gate-out" : "Not started"}</span>
+        </Card>
       </div>
+
+      {managesThisJob && pendingParts.length ? (
+        <PartsConfirm
+          title="Parts to confirm for the technician"
+          who="the technician"
+          items={pendingParts.map((p): ConfirmItem => ({ id: p.id, part_number: p.part_number, description: p.description, quantity: p.quantity, diagram_url: p.diagram_path ? (diagramUrls[p.diagram_path] ?? null) : null, request_label: null, requested_text: null, confirm_status: p.confirm_status, confirmed_quantity: p.confirmed_quantity, reject_note: p.reject_note }))}
+          action={confirmPart}
+        />
+      ) : null}
 
       {overrides.length ? (
         <Card className="flex flex-col gap-2 border-red-bar">

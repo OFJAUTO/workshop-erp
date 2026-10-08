@@ -40,6 +40,19 @@ const DEFAULTS = {
   inspection_target_minutes: 90,
   inspection_unlock_hours: 1,
   assignment_target_minutes: 30,
+  labour_rate_aed: 350,
+  labour_rate_by_department: {} as Record<string, number>,
+  deposit_threshold_aed: 5000,
+  deposit_percent: 50,
+  quote_validity_days: 7,
+  quote_owner_approval_above_aed: 0,
+  parts_pricing_target_hours: 4,
+  quote_send_target_hours: 4,
+  estimate_followup_days: 2,
+  whatsapp_quote_template:
+    "Dear [name], here is the quotation for your [make model] ([plate]): [link]. Please review the lines, approve what you would like us to do, and we will begin at once. Thank you, [advisor], OFJ Automotive",
+  whatsapp_estimate_template:
+    "Dear [name], here is our estimate for your [make model] ([plate]): [link]. The final price is confirmed once the vehicle is with us. Thank you, [advisor], OFJ Automotive",
   whatsapp_report_template:
     "Dear [name], the inspection of your [make model] ([plate]) is complete. Please review the report with our findings and photos: [link]. Thank you, [advisor], OFJ Automotive",
   inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],

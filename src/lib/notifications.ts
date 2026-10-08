@@ -31,6 +31,19 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "road_test_assigned", label: "A car needs a road test", locked: true },
   { type: "road_test_done", label: "Road test done", locked: true },
   { type: "report_opened", label: "Customer opened the inspection report", locked: true },
+  { type: "parts_request", label: "Parts to price on a new report (Parts)", locked: true },
+  { type: "parts_priced", label: "Every part on your quotation is priced and confirmed", locked: true },
+  { type: "parts_confirm_needed", label: "Parts listed for your car: confirm what you need", locked: true },
+  { type: "parts_confirmed", label: "The technician confirmed or rejected parts", locked: true },
+  { type: "quote_owner_approval", label: "A quotation needs the owner's approval", locked: true },
+  { type: "quote_opened", label: "Customer opened the quotation", locked: true },
+  { type: "quote_approved", label: "Customer approved a quotation", locked: true },
+  { type: "quote_declined", label: "Customer declined a quotation", locked: true },
+  { type: "quote_expired", label: "A quotation expired without a reply", locked: true },
+  { type: "parts_to_order", label: "Approved parts to order (Parts)", locked: true },
+  { type: "estimate_accepted", label: "Customer accepted an estimate", locked: true },
+  { type: "estimate_followup", label: "Estimate with no reply: follow up", locked: true },
+  { type: "quote_target", label: "Parts pricing or quotation past its target", locked: true },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };

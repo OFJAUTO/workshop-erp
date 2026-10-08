@@ -52,7 +52,7 @@ export const PERMISSIONS = {
   manageTablets: ["owner"],
   manageSettings: ["owner"],
   viewAudit: ["owner"],
-  viewCustomers: ["owner", "service_advisor", "parts", "accounts"],
+  viewCustomers: ["owner", "service_advisor", "accounts"],
   editCustomers: ["owner", "service_advisor"],
   viewVehicles: OFFICE_NO_QC,
   editVehicles: ["owner", "service_advisor"],
@@ -82,6 +82,13 @@ export const PERMISSIONS = {
   sendReport: ["owner", "service_advisor"],
   viewOverrides: ["owner"],
   viewAs: ["owner"],
+  viewQuotes: ["owner", "service_advisor", "accounts"],
+  editQuotes: ["owner", "service_advisor"],
+  approveQuotes: ["owner"],
+  priceParts: ["owner", "parts"],
+  confirmParts: ["owner", "technician", "workshop_manager"],
+  viewEstimates: ["owner", "service_advisor"],
+  managePackages: ["owner"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -104,7 +111,7 @@ export const ROLE_PHASE1_SUMMARY: Record<RoleId, string[]> = {
   service_advisor: ["Add and edit customers, contacts and cars"],
   gate_in: ["Gate cars in with photos and video; nothing else"],
   technician: ["See the cars assigned to you and the workshop list"],
-  parts: ["See customers and cars"],
+  parts: ["Price requests, exact parts and costs; approved parts to order"],
   qc_inspector: ["Road tests, approved inspection reports (view only) and the workshop list"],
   accounts: ["See customers and cars"],
 };

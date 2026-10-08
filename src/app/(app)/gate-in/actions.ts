@@ -161,9 +161,12 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     if (picError) return { error: picError, values };
   }
 
+  // An accepted estimate for this car becomes the quotation once the inspection is approved.
+  const estimateId = blankToNull(formData.get("estimate_id"));
+  const { data: estimate } = estimateId ? await supabase.from("quotations").select("id, number, status, vehicle_id").eq("id", estimateId).eq("kind", "estimate").maybeSingle() : { data: null };
   const { data: job, error: jobError } = await supabase
     .from("jobs")
-    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: d.priority, department: d.department, gated_in_by: staff.id })
+    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: d.priority, department: d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null })
     .select("id, job_number")
     .single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
@@ -215,6 +218,9 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     }
   }
 
+  if (estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId) {
+    await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Accepted estimate ${estimate.number} attached at gate-in`, created_by: staff.id });
+  }
   await supabase.from("job_events").insert({
     job_id: job.id,
     event_type: "gate_in",

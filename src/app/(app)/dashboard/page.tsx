@@ -7,6 +7,8 @@ import { nextStepOf } from "@/lib/next-step";
 import { inspectionOverTarget, inspectionWorkingMinutes } from "@/lib/inspection-data";
 import { STATUS_LABELS, clockOf, formatPromised, hoursInStage, jobTiming, urgencyRank, workingTimeOf, type JobStatus, type Priority, type Stage } from "@/lib/jobs";
 import { roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
+import { loadQuoteSummaries } from "@/lib/quote-data";
+import { quoteState } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
@@ -55,6 +57,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const clockFor = (j: Row) => clockOf(j, settings);
 
   const customerIds = Array.from(new Set(all.map((j) => j.customer_id)));
+  const quoteSummaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
   const [{ data: names }, pictures] = await Promise.all([
     all.length ? supabase.from("customer_public").select("id, full_name, company_name, is_vip").in("id", customerIds) : Promise.resolve({ data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] }),
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
@@ -86,6 +89,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       roadTest: j.road_test?.[0] ?? null,
       approval: latestApproval,
       gateInComplete: !!j.gate_in?.is_complete,
+      quote: quoteSummaries.has(j.id) ? quoteState(quoteSummaries.get(j.id)!, !!insp && insp.status === "approved") : null,
     });
     return {
       statusLine: step.line || STATUS_LABELS[j.status as JobStatus],

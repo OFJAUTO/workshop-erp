@@ -22,12 +22,14 @@ export default async function SettingsPage() {
   const initial: Record<string, string> = {};
   let makeOverrides: Record<string, number> = {};
   let departmentOverrides: Record<string, number> = {};
+  let labourOverrides: Record<string, number> = {};
   let workingDays: string[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
   let stageHours: Record<string, number> = {};
   let branchesText = "";
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
+    else if (row.key === "labour_rate_by_department") labourOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "working_days") workingDays = Array.isArray(row.value) ? (row.value as string[]) : workingDays;
     else if (row.key === "stage_target_hours") stageHours = (row.value as Record<string, number>) ?? {};
     else if (row.key === "branches") branchesText = ((row.value as { name: string; address: string }[]) ?? []).map((b) => `${b.name} | ${b.address}`).join("\n");
@@ -64,6 +66,7 @@ export default async function SettingsPage() {
             departments={departments}
             makeOverrides={makeOverrides}
             departmentOverrides={departmentOverrides}
+            labourOverrides={labourOverrides}
             workingDays={workingDays}
             stageHours={stageHours}
             branchesText={branchesText}

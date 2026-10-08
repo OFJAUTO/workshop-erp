@@ -3,6 +3,7 @@
 import type { InspectionStatus } from "./inspection";
 import { formatWait, workingMinutesSince, type JobStatus } from "./jobs";
 import { roadTestWaiting, type RoadTestRow } from "./road-test";
+import type { QuoteState } from "./quotes";
 import type { WorkingTime } from "./working-time";
 
 export type NextStepInput = {
@@ -19,6 +20,8 @@ export type NextStepInput = {
   roadTest: Pick<RoadTestRow, "status" | "decision"> | null;
   approval: { sent_at: string | null; opened_at: string | null; approved_at: string | null; approver_name: string | null } | null;
   gateInComplete: boolean;
+  /** The quotation's plain-word state, when the job is at or past the quote. */
+  quote?: QuoteState | null;
 };
 
 export type NextStep = {
@@ -28,7 +31,7 @@ export type NextStep = {
   next: string;
   waitingOn: string;
   /** Who should act: a role, to decide whether to show the main button to the viewer. */
-  actorRole: "gate_in" | "customer" | "workshop_manager" | "technician" | "qc_inspector" | "service_advisor" | "owner" | "accounts" | null;
+  actorRole: "gate_in" | "customer" | "workshop_manager" | "technician" | "qc_inspector" | "service_advisor" | "owner" | "accounts" | "parts" | null;
   /** Main action for the person whose move it is. */
   action: { label: string; href: string } | null;
   /** The moment the wait started. */
@@ -73,9 +76,19 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
     }
   }
   if (j.status === "pending_quote") {
-    return { done: { label: "Inspection report approved", by: null }, next: "Prepare the quotation (next phase) and send the report to the customer.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Open the report", href: `/jobs/${jobId}/inspection` }, since: insp?.approved_at ?? j.stage_entered_at, line: `Pending quote, waiting on ${advisor}` };
+    const since = insp?.approved_at ?? j.stage_entered_at;
+    const qs = j.quote;
+    if (!qs || qs.key === "none") return { done: { label: "Inspection report approved", by: null }, next: "Start the quotation and send the report to the customer.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Start the quotation", href: `/jobs/${jobId}#quotation` }, since, line: `Pending quote, waiting on ${advisor}` };
+    if (qs.key === "pending_parts") return { done: { label: "Quotation started", by: j.advisorName }, next: "Parts price the requests from the report.", waitingOn: "Parts", actorRole: "parts", action: { label: "Price the parts", href: `/parts/${jobId}` }, since, line: "Waiting for parts prices" };
+    if (qs.key === "pending_confirm") return { done: { label: "Parts listed", by: null }, next: `${tech} confirms the parts on the tablet.`, waitingOn: tech, actorRole: "technician", action: { label: "Confirm the parts", href: `/my-jobs/${jobId}` }, since, line: `Waiting for ${tech} to confirm the parts` };
+    if (qs.key === "pending_owner") return { done: { label: "Quotation ready", by: j.advisorName }, next: "The owner approves the quotation before it is sent.", waitingOn: "the owner", actorRole: "owner", action: { label: "Open the quotation", href: `/jobs/${jobId}#quotation` }, since, line: "Quotation waiting for the owner's approval" };
+    if (qs.key === "expired") return { done: { label: "Quotation expired", by: null }, next: "Re-send or revise the quotation.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Open the quotation", href: `/jobs/${jobId}#quotation` }, since, line: `Quotation expired, waiting on ${advisor}` };
+    return { done: { label: "Parts priced and confirmed", by: null }, next: "Send the quotation to the customer.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Send the quotation", href: `/jobs/${jobId}#quotation` }, since, line: `Quotation ready to send, waiting on ${advisor}` };
   }
-  if (j.status === "pending_customer_approval") return { done: { label: "Quotation sent", by: j.advisorName }, next: "The customer approves the quotation.", waitingOn: "the customer", actorRole: "customer", action: null, since: j.stage_entered_at, line: "Waiting on the customer to approve the quotation" };
+  if (j.status === "pending_customer_approval") {
+    if (j.quote?.key === "expired") return { done: { label: "Quotation sent", by: j.advisorName }, next: "The quotation expired. Re-send or revise it.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Open the quotation", href: `/jobs/${jobId}#quotation` }, since: j.stage_entered_at, line: `Quotation expired, waiting on ${advisor}` };
+    return { done: { label: j.quote?.key === "opened" ? "Quotation opened by the customer" : "Quotation sent", by: j.advisorName }, next: "The customer approves the quotation.", waitingOn: "the customer", actorRole: "customer", action: null, since: j.stage_entered_at, line: j.quote?.key === "opened" ? "Quotation opened, waiting on the customer" : "Waiting on the customer to approve the quotation" };
+  }
   if (j.status === "approved" || j.status === "waiting_parts") return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts are ordered and received.", waitingOn: "parts", actorRole: null, action: null, since: j.stage_entered_at, line: `${j.status === "approved" ? "Approved" : "Waiting for parts"}, waiting on parts` };
   if (j.status === "in_work") return { done: { label: "Parts ready", by: null }, next: `${tech} does the work.`, waitingOn: tech, actorRole: "technician", action: null, since: j.stage_entered_at, line: `In work, waiting on ${tech}` };
   if (j.status === "pending_qc") return { done: { label: "Work finished", by: tech }, next: "QC checks the car.", waitingOn: "the QC inspector", actorRole: "qc_inspector", action: null, since: j.stage_entered_at, line: "Pending QC, waiting on the QC inspector" };

@@ -21,6 +21,7 @@ export function SettingsForm({
   departments,
   makeOverrides,
   departmentOverrides,
+  labourOverrides,
   workingDays,
   stageHours,
   branchesText,
@@ -31,6 +32,7 @@ export function SettingsForm({
   departments: { id: string; label: string }[];
   makeOverrides: Record<string, number>;
   departmentOverrides: Record<string, number>;
+  labourOverrides: Record<string, number>;
   workingDays: string[];
   stageHours: Record<string, number>;
   branchesText: string;
@@ -231,6 +233,54 @@ export function SettingsForm({
                 ))}
               </div>
             </details>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Quotations and estimates</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Labour rate (AED per hour)" hint="Hours typed on a labour line times this rate.">
+                <Input name="labour_rate_aed" defaultValue={v.labour_rate_aed} inputMode="numeric" required />
+              </Field>
+              <Field label="Quotation validity (days)" hint="Quotations and estimates expire after this many days.">
+                <Input name="quote_validity_days" defaultValue={v.quote_validity_days} inputMode="numeric" required />
+              </Field>
+              <Field label="Owner approval above (AED)" hint="Quotations above this total need the owner before sending. 0 switches it off.">
+                <Input name="quote_owner_approval_above_aed" defaultValue={v.quote_owner_approval_above_aed} inputMode="numeric" required />
+              </Field>
+              <Field label="Deposit threshold (AED)" hint="When the parts on a quotation exceed this, a deposit is shown.">
+                <Input name="deposit_threshold_aed" defaultValue={v.deposit_threshold_aed} inputMode="numeric" required />
+              </Field>
+              <Field label="Deposit (percent of parts)">
+                <Input name="deposit_percent" defaultValue={v.deposit_percent} inputMode="numeric" required />
+              </Field>
+              <Field label="Estimate follow-up (days)" hint="Days after sending an estimate with no reply before the advisor is reminded.">
+                <Input name="estimate_followup_days" defaultValue={v.estimate_followup_days} inputMode="numeric" required />
+              </Field>
+              <Field label="Parts pricing target (hours)" hint="Working hours for Parts to price a request before it turns amber, red at double.">
+                <Input name="parts_pricing_target_hours" defaultValue={v.parts_pricing_target_hours} inputMode="numeric" required />
+              </Field>
+              <Field label="Quote sent after pricing (hours)" hint="Working hours for the advisor to send once the parts are priced.">
+                <Input name="quote_send_target_hours" defaultValue={v.quote_send_target_hours} inputMode="numeric" required />
+              </Field>
+            </div>
+            <details className="rounded-control border border-line p-4">
+              <summary className="cursor-pointer text-sm font-bold">Labour rate per department (optional)</summary>
+              <p className="text-xs text-muted mt-2 mb-3">Leave blank to use the general rate.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {departments.map((d) => (
+                  <Field key={d.id} label={d.label}>
+                    <Input name={`labour_dept__${d.id}`} defaultValue={labourOverrides[d.id]?.toString() ?? ""} inputMode="numeric" placeholder="AED/h" />
+                  </Field>
+                ))}
+              </div>
+            </details>
+            <Field label="WhatsApp quotation message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
+              <Textarea name="whatsapp_quote_template" defaultValue={v.whatsapp_quote_template} rows={3} required />
+            </Field>
+            <Field label="WhatsApp estimate message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
+              <Textarea name="whatsapp_estimate_template" defaultValue={v.whatsapp_estimate_template} rows={3} required />
+            </Field>
+            <p className="text-xs text-muted">Fixed-price packages are kept on their own page: Settings, Packages.</p>
           </Card>
 
           <Card className="flex flex-col gap-4">

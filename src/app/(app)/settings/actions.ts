@@ -31,6 +31,14 @@ const NUMBER_KEYS = [
   "inspection_target_minutes",
   "inspection_unlock_hours",
   "assignment_target_minutes",
+  "labour_rate_aed",
+  "deposit_threshold_aed",
+  "deposit_percent",
+  "quote_validity_days",
+  "quote_owner_approval_above_aed",
+  "parts_pricing_target_hours",
+  "quote_send_target_hours",
+  "estimate_followup_days",
 ] as const;
 const TEXT_KEYS = [
   "company_name",
@@ -47,6 +55,8 @@ const TEXT_KEYS = [
   "whatsapp_reminder_we_collect",
   "whatsapp_reminder_customer_collects",
   "whatsapp_report_template",
+  "whatsapp_quote_template",
+  "whatsapp_estimate_template",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -73,6 +83,14 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   inspection_target_minutes: [10, 1440, "Inspection target"],
   inspection_unlock_hours: [1, 72, "Approved report opens for"],
   assignment_target_minutes: [5, 1440, "Assignment target"],
+  labour_rate_aed: [0, 100000, "Labour rate"],
+  deposit_threshold_aed: [0, 10000000, "Deposit threshold"],
+  deposit_percent: [0, 100, "Deposit percent"],
+  quote_validity_days: [1, 365, "Quotation validity"],
+  quote_owner_approval_above_aed: [0, 100000000, "Owner approval above"],
+  parts_pricing_target_hours: [1, 1000, "Parts pricing target"],
+  quote_send_target_hours: [1, 1000, "Quote sent after pricing"],
+  estimate_followup_days: [1, 90, "Estimate follow-up"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -112,7 +130,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "company_name" && text.length < 2) return { error: "Enter the company name.", values };
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
-    if ((key === "whatsapp_approval_template" || key === "whatsapp_report_template") && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
     if (key.startsWith("whatsapp_reminder") && text.length < 10) return { error: "Enter every WhatsApp reminder message.", values };
     updates.push({ key, value: text });
@@ -127,6 +145,10 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   const byDept = overrides(formData, "cost_dept__");
   if (typeof byDept === "string") return { error: byDept, values };
   updates.push({ key: "technician_cost_rate_by_department", value: byDept });
+
+  const labourByDept = overrides(formData, "labour_dept__");
+  if (typeof labourByDept === "string") return { error: labourByDept, values };
+  updates.push({ key: "labour_rate_by_department", value: labourByDept });
 
   const stageHours: Record<string, number> = {};
   for (const s of STAGES) {

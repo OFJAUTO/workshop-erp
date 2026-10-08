@@ -6,6 +6,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { ensureInspection, inspectionLocked, loadInspection, reportProblems } from "@/lib/inspection-data";
+import { ensurePartRequests } from "@/lib/quote-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { ROAD_TEST_SELECT, roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
@@ -118,6 +119,11 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
     await admin.from("jobs").update({ status: "pending_quote", stage: "quote" }).eq("id", jobId);
   }
   await logEvent(jobId, staff.id, "inspection_approved", `Inspection report approved by ${staff.display_name}`, { from_status: job?.status ?? null, to_status: "pending_quote" });
+  // The technician's parts requests go to the Parts desk straight away.
+  const newRequests = await ensurePartRequests(jobId, staff.id);
+  if (newRequests > 0) {
+    await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job?.job_number ?? ""}`, body: `${newRequests} request${newRequests === 1 ? "" : "s"} from the approved inspection report. List the exact parts and prices.`, jobId, href: `/parts/${jobId}` });
+  }
   // The advisor: whoever created the approval link, else whoever gated the car in.
   const { data: approval } = await admin.from("approval_requests").select("sent_by, created_by").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
   const advisors = [approval?.sent_by, approval?.created_by, job?.gated_in_by].filter((x): x is string => !!x);

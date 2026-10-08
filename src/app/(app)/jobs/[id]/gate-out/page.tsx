@@ -24,6 +24,7 @@ export default async function GateOutPage({ params }: { params: Promise<{ id: st
     <>
       <PageHeader title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number} · ${STATUS_LABELS[card.job.status]}`} />
 
+      {card.job.inspection_fee_due ? <Notice tone="error">Inspection fee due: the customer declined the quotation. Collect the inspection fee before the car leaves (amount in Settings). Invoicing comes in a later phase.</Notice> : null}
       {card.job.status !== "ready" && card.job.status !== "pending_payment" ? (
         <Notice tone="info">This car is not marked ready yet ({STATUS_LABELS[card.job.status]}). Gate-out is still allowed and will be logged.</Notice>
       ) : null}

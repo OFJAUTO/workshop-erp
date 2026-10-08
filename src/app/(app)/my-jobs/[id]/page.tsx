@@ -17,6 +17,10 @@ import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
+import { PartsConfirm, type ConfirmItem } from "@/components/PartsConfirm";
+import { PARTS_BUCKET, signPaths } from "@/lib/quote-data";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { confirmPart } from "../../parts/actions";
 import { noteInspectionEdit, startInspection, submitInspection } from "../../jobs/inspection-actions";
 import { InspectionForm } from "./InspectionForm";
 
@@ -52,6 +56,12 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const canFill = !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked));
   const canAddPrescan = !!insp && mine && insp.technician_id === staff.id && insp.status === "submitted";
   const condition = gateIn ? labelOf(CONDITIONS, gateIn.condition) : "";
+  // Parts listed for this car: the technician confirms what he needs. No prices here.
+  const { data: partRows } = mine ? await createAdminClient().from("part_items").select("id, part_number, description, quantity, diagram_path, confirm_status, confirmed_quantity, reject_note, part_request_id").eq("job_id", id).eq("is_active", true).order("created_at") : { data: [] };
+  const { data: reqRows } = partRows?.length ? await createAdminClient().from("part_requests").select("id, label, requested_text").eq("job_id", id) : { data: [] };
+  const reqOf = new Map((reqRows ?? []).map((r) => [r.id, r]));
+  const diagramUrls = await signPaths(PARTS_BUCKET, (partRows ?? []).map((p) => p.diagram_path).filter((x): x is string => !!x));
+  const confirmItems: ConfirmItem[] = (partRows ?? []).map((p) => ({ id: p.id, part_number: p.part_number, description: p.description, quantity: Number(p.quantity), diagram_url: p.diagram_path ? (diagramUrls[p.diagram_path] ?? null) : null, request_label: p.part_request_id ? (reqOf.get(p.part_request_id)?.label ?? null) : null, requested_text: p.part_request_id ? (reqOf.get(p.part_request_id)?.requested_text ?? null) : null, confirm_status: p.confirm_status as ConfirmItem["confirm_status"], confirmed_quantity: p.confirmed_quantity === null ? null : Number(p.confirmed_quantity), reject_note: p.reject_note }));
   const statusText = insp?.status === "submitted" ? "Submitted, waiting for manager" : waitingRoadTest ? "Waiting for road test" : STATUS_LABELS[job.status];
 
   const formProps = insp && bundle
@@ -113,6 +123,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
           <p className="text-lg font-semibold whitespace-pre-wrap">{gateIn?.customer_requests}</p>
         )}
       </section>
+
+      {confirmItems.length ? <PartsConfirm items={confirmItems} action={confirmPart} /> : null}
 
       {roadTest && job.department !== "bodyshop" ? (
         <Card className={`flex flex-col gap-3 ${roadTestWaiting(roadTest) ? "border-ink" : ""}`}>

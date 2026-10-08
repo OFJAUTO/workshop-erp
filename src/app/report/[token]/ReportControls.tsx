@@ -24,10 +24,10 @@ export function ToggleBlock({ title, children, defaultOpen = true }: { title: st
 }
 
 /** Saves the page as a PDF through the browser's print dialog. */
-export function PrintButton() {
+export function PrintButton({ label = "Download the report as a PDF" }: { label?: string }) {
   return (
     <button type="button" onClick={() => window.print()} className="no-print inline-flex min-h-12 w-full items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white">
-      Download the report as a PDF
+      {label}
     </button>
   );
 }

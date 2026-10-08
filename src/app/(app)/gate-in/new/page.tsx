@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/format";
 import { describeMileage } from "@/lib/mileage";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
 import { getSettings } from "@/lib/settings";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
 import { createGateIn } from "../actions";
@@ -45,6 +46,15 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   if (openVisit) redirect(`/jobs/${openVisit.id}`);
 
   const settings = await getSettings();
+  const admin = createAdminClient();
+  // Declined work from earlier visits, and accepted estimates waiting for this car.
+  const [{ data: declined }, { data: estimates }] = await Promise.all([
+    admin.from("declined_work").select("id, title, details, amount_aed, declined_at").eq("vehicle_id", v.id).eq("is_active", true).order("declined_at", { ascending: false }).limit(10),
+    admin.from("quotations").select("id, number, total_aed, responded_at, approver_name").eq("kind", "estimate").eq("vehicle_id", v.id).eq("status", "approved").eq("is_active", true).order("responded_at", { ascending: false }),
+  ]);
+  const { data: attachedJobs } = (estimates ?? []).length ? await admin.from("jobs").select("estimate_id").in("estimate_id", (estimates ?? []).map((e) => e.id)) : { data: [] };
+  const used = new Set((attachedJobs ?? []).map((j) => j.estimate_id));
+  const openEstimates = (estimates ?? []).filter((e) => !used.has(e.id)).map((e) => ({ id: e.id, label: `${e.number} · AED ${Number(e.total_aed).toLocaleString("en-GB")}`, hint: `Accepted by ${e.approver_name ?? "the customer"} ${formatDate(e.responded_at)}` }));
 
   // Started from the calendar: the appointment's reason becomes the first request line.
   const { data: appointment } = appointmentId
@@ -73,6 +83,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             requests={appointment ? [appointment.reason] : []}
             mileageUnit={v.mileage_unit ?? "km"}
             mileageContext={{ modelYear: v.model_year, lastKm: v.last_mileage, lastVisitAt: visits[0]?.gated_in_at ?? null }}
+            estimates={openEstimates}
             initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "", department: appointment?.department ?? "" }}
           />
         </div>
@@ -115,8 +126,19 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
           </Card>
 
           <Card className="flex flex-col gap-2">
-            <SectionLabel>Previously declined work</SectionLabel>
-            <p className="text-sm text-muted">None recorded. Declined quote lines will appear here from the quotation phase.</p>
+            <SectionLabel right={declined?.length ? `${declined.length}` : undefined}>Previously declined work</SectionLabel>
+            {declined?.length ? (
+              <ul className="flex flex-col divide-y divide-line text-sm">
+                {declined.map((d) => (
+                  <li key={d.id} className="py-2 flex flex-col">
+                    <span className="font-semibold">{d.title}</span>
+                    <span className="text-xs text-muted">{d.details ? `${d.details} · ` : ""}{d.amount_aed != null ? `AED ${Number(d.amount_aed).toLocaleString("en-GB")} · ` : ""}declined {formatDate(d.declined_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">None recorded.</p>
+            )}
           </Card>
         </div>
       </div>

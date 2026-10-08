@@ -1,0 +1,117 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { requireStaff } from "@/lib/auth";
+import { formatDateTime } from "@/lib/format";
+import { dubaiDate, workingTimeOf } from "@/lib/jobs";
+import { labourRateFor, loadQuotation, minMarkupFor } from "@/lib/quote-data";
+import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
+import { can, type RoleId } from "@/lib/roles";
+import { getSettings } from "@/lib/settings";
+import { getSiteUrl } from "@/lib/site";
+import { formatPlate } from "@/lib/types";
+import { reviseQuotation } from "@/app/(app)/quotes/actions";
+import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
+
+export const dynamic = "force-dynamic";
+
+/** The estimate builder: the same lines and prices as a quotation, no promised date, sent to a page headed "Estimate". */
+export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  const { id } = await params;
+  const { message, error } = await searchParams;
+  const [bundle, settings, site] = await Promise.all([loadQuotation(id), getSettings(), getSiteUrl()]);
+  if (!bundle || bundle.quotation.kind !== "estimate") notFound();
+  const { quotation: q, vehicle, customer } = bundle;
+  const mine = q.created_by === staff.id;
+  if (!(role === "owner" || role === "accounts" || (can(role, "viewEstimates") && mine))) redirect("/estimates");
+  const canEdit = (role === "owner" || mine) && !staff.viewingAs && q.status === "draft";
+  const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
+  const template = settings.whatsapp_estimate_template
+    .replaceAll("[name]", customerName)
+    .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
+    .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
+    .replaceAll("[advisor]", staff.display_name);
+  const accepted = q.status === "approved" || q.status === "partly_approved";
+  const { data: attached } = await (await import("@/lib/supabase/admin")).createAdminClient().from("jobs").select("id, job_number").eq("estimate_id", q.id).maybeSingle();
+  const tone = accepted ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
+
+  return (
+    <>
+      <PageHeader
+        title={`${q.number} · Estimate`}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
+            <span>· {customerName}</span>
+            <Badge tone={tone}>{QUOTE_STATUS_LABELS[q.status]}</Badge>
+          </span>
+        }
+        actions={<LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>}
+      />
+      {message ? <Notice tone="success">{message}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {accepted ? (
+        <Card className="flex flex-col gap-2 border-green">
+          <SectionLabel>Accepted by {q.approver_name} · {formatDateTime(q.responded_at)}</SectionLabel>
+          {attached ? (
+            <p className="text-sm">
+              Attached to job <Link href={`/jobs/${attached.id}`} className="font-bold underline underline-offset-4">{attached.job_number}</Link>.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-muted">Book the car in. At gate-in, attach this estimate and it opens as the quotation, pre-filled.</p>
+              <div className="flex flex-wrap gap-2">
+                <LinkButton href={`/calendar/new?customer=${q.customer_id}&vehicle=${q.vehicle_id ?? ""}`} size="md">Book the car into the calendar</LinkButton>
+                {can(role, "gateIn") && q.vehicle_id ? <LinkButton href={`/gate-in/new?vehicle=${q.vehicle_id}`} tone="secondary" size="md">Gate in now</LinkButton> : null}
+              </div>
+            </>
+          )}
+        </Card>
+      ) : null}
+      <QuoteEditor
+        quotation={q}
+        lines={bundle.lines}
+        parts={[]}
+        packages={bundle.packages}
+        settings={{
+          labourRate: labourRateFor(settings, null),
+          minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
+          discountLimit: Number(settings.discount_limit_percent) || 0,
+          approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
+          technicianCostRate: role === "owner" || role === "accounts" ? Number(settings.technician_cost_rate_aed) || 0 : null,
+          depositThreshold: Number(settings.deposit_threshold_aed) || 0,
+          depositPercent: Number(settings.deposit_percent) || 50,
+          today: dubaiDate(),
+          workingTime: workingTimeOf(settings),
+        }}
+        readOnly={!canEdit}
+        showMargin={role !== "parts"}
+        showProfit={role === "owner" || role === "accounts"}
+        canSend={(role === "owner" || mine) && !staff.viewingAs}
+        isOwner={role === "owner"}
+        siteUrl={site}
+        messageTemplate={template}
+        phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
+        fromEstimate={false}
+      />
+      {(role === "owner" || mine) && !staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
+        <Card className="flex flex-col gap-2 max-w-xl">
+          <SectionLabel>Revise</SectionLabel>
+          <form action={reviseQuotation.bind(null, q.id)}>
+            <Button type="submit" tone="secondary" size="md">Start version {q.version + 1}</Button>
+          </form>
+        </Card>
+      ) : null}
+      <Card className="flex flex-col gap-2 max-w-xl">
+        <SectionLabel right={`${bundle.events.length}`}>History</SectionLabel>
+        <ul className="flex flex-col divide-y divide-line text-xs">
+          {bundle.events.map((e) => (
+            <li key={e.id} className="py-1.5"><span className="text-muted">{formatDateTime(e.created_at)}</span> · <span className="font-semibold">{e.by_name ?? "Customer"}</span> · {e.note}</li>
+          ))}
+        </ul>
+      </Card>
+    </>
+  );
+}

@@ -30,6 +30,7 @@ export function GateInForm({
   requestsLocked = false,
   mileageUnit = "km",
   mileageContext = { modelYear: null, lastKm: null, lastVisitAt: null },
+  estimates = [],
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -45,6 +46,8 @@ export function GateInForm({
   mileageUnit?: MileageUnit;
   /** What the mileage checks compare against. */
   mileageContext?: { modelYear: number | null; lastKm: number | null; lastVisitAt: string | null };
+  /** Accepted estimates for this car that no job has used yet. */
+  estimates?: { id: string; label: string; hint: string }[];
 }) {
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
@@ -154,6 +157,11 @@ export function GateInForm({
 
               <Card className="flex flex-col gap-5">
                 <SectionLabel>Plan</SectionLabel>
+                {estimates.length ? (
+                  <Field label="Accepted estimate" hint="Attach it and it opens as the quotation, pre-filled, once the inspection is approved.">
+                    <ChoiceButtons name="estimate_id" columns={2} defaultValue={v.estimate_id ?? estimates[0].id} options={[...estimates.map((e) => ({ value: e.id, label: e.label, hint: e.hint })), { value: "", label: "No estimate" }]} />
+                  </Field>
+                ) : null}
                 <Field label="Department" hint="Which side of the workshop the car goes to. Both: it moves on only when both sides are finished.">
                   <ChoiceButtons name="department" columns={3} defaultValue={v.department} options={JOB_DEPARTMENTS.map((d) => ({ value: d.value, label: d.label }))} />
                 </Field>

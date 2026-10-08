@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   }
   const admin = createAdminClient();
   const settings = await getSettings();
-  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0, inspectionWarnings: 0, assignmentWarnings: 0 };
+  const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0, inspectionWarnings: 0, assignmentWarnings: 0, quotesExpired: 0, estimateFollowUps: 0 };
 
   // 1. Video retention
   const months = Number(settings.video_retention_months) || 12;
@@ -152,6 +152,28 @@ export async function GET(request: NextRequest) {
       await notifyRoles(["owner"], { type: "assignment_overdue", title: `Still not assigned · ${j.job_number}`, body: `${minutes} working minutes since the customer approved, against a target of ${target}. The ${j.department === "bodyshop" ? "bodyshop" : "workshop"} manager has not assigned a technician.`, jobId: j.id as string, href: `/jobs/${j.id}` });
       await admin.from("jobs").update({ assignment_overdue_notified_at: new Date().toISOString() }).eq("id", j.id);
       report.assignmentWarnings++;
+    }
+  }
+
+  // 6. Quotations and estimates past their validity: mark expired and tell the advisor once.
+  {
+    const { data: stale } = await admin.from("quotations").select("id, number, kind, job_id, created_by, sent_by").in("status", ["sent", "opened"]).lt("valid_until", new Date().toISOString()).limit(100);
+    for (const q of stale ?? []) {
+      await admin.from("quotations").update({ status: "expired" }).eq("id", q.id);
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "quote_expired", note: `${q.number} expired without a reply` });
+      await notifyStaff([q.created_by, q.sent_by].filter((x): x is string => !!x), { type: "quote_expired", title: `${q.kind === "estimate" ? "Estimate" : "Quotation"} expired · ${q.number}`, body: "No reply from the customer. Re-send it or revise it.", jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}` : `/estimates/${q.id}` });
+      report.quotesExpired++;
+    }
+  }
+  // 7. Estimates with no reply: remind the advisor once after the set number of days.
+  {
+    const days = Number(settings.estimate_followup_days) || 2;
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const { data: quiet } = await admin.from("quotations").select("id, number, created_by, sent_by").eq("kind", "estimate").in("status", ["sent", "opened"]).is("reminded_at", null).lt("sent_at", cutoff).limit(100);
+    for (const q of quiet ?? []) {
+      await notifyStaff([q.created_by, q.sent_by].filter((x): x is string => !!x), { type: "estimate_followup", title: `Follow up the estimate · ${q.number}`, body: `No reply for ${days} day${days === 1 ? "" : "s"}. Call the customer.`, href: `/estimates/${q.id}` });
+      await admin.from("quotations").update({ reminded_at: new Date().toISOString() }).eq("id", q.id);
+      report.estimateFollowUps++;
     }
   }
 

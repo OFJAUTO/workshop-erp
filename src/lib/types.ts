@@ -193,6 +193,8 @@ export type JobRow = {
   assignment_note_at: string | null;
   assignment_reminded_at: string | null;
   assignment_overdue_notified_at: string | null;
+  estimate_id: string | null;
+  inspection_fee_due: boolean;
   created_at: string;
   updated_at: string;
 };
