@@ -17,6 +17,6 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
   if (!link) return new NextResponse("This link is not valid. Please ask the workshop for a new one.", { status: 404 });
   const [card, bundle, { data: rt }, settings] = await Promise.all([loadJobCard(admin, link.job_id), loadInspection(link.job_id), admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", link.job_id).maybeSingle(), getSettings()]);
   if (!card || !bundle || bundle.inspection.status !== "approved") return new NextResponse("This report is not available yet.", { status: 404 });
-  const pdf = await renderReportPdf(card, bundle, (rt as RoadTestRow | null) ?? null, settings);
+  const pdf = await renderReportPdf(card, bundle, (rt as RoadTestRow | null) ?? null, settings, token);
   return pdfResponse(pdf, `OFJ Inspection Report ${card.job.job_number}.pdf`);
 }

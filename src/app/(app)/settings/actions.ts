@@ -39,6 +39,11 @@ const NUMBER_KEYS = [
   "parts_pricing_target_hours",
   "quote_send_target_hours",
   "estimate_followup_days",
+  "next_invoice_number",
+  "consumables_default_aed",
+  "label_width_mm",
+  "label_height_mm",
+  "followup_days",
 ] as const;
 /** Settings that keep decimals (percentages like 1.9). */
 const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent"] as const;
@@ -67,6 +72,21 @@ const TEXT_KEYS = [
   "company_address",
   "company_phone",
   "company_email",
+  "company_legal_name",
+  "company_legal_name_ar",
+  "company_address_1",
+  "company_address_2",
+  "company_address_3",
+  "company_website",
+  "bank_name",
+  "bank_account_name",
+  "bank_account_number",
+  "bank_iban",
+  "bank_swift",
+  "document_currency",
+  "labour_rate_bodyshop_aed",
+  "whatsapp_ready_template",
+  "whatsapp_followup_template",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -101,6 +121,11 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   parts_pricing_target_hours: [1, 1000, "Parts pricing target"],
   quote_send_target_hours: [1, 1000, "Quote sent after pricing"],
   estimate_followup_days: [1, 90, "Estimate follow-up"],
+  next_invoice_number: [1, 100000000, "Next invoice number"],
+  consumables_default_aed: [0, 100000, "Consumables line"],
+  label_width_mm: [20, 200, "Label width"],
+  label_height_mm: [10, 200, "Label height"],
+  followup_days: [1, 90, "Follow-up after gate-out"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -147,7 +172,10 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "company_name" && text.length < 2) return { error: "Enter the company name.", values };
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
-    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && key !== "whatsapp_followup_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if (key === "company_legal_name" && text.length < 2) return { error: "Enter the legal name.", values };
+    if (key === "document_currency" && text !== "symbol" && text !== "aed") return { error: "Choose the currency shown on documents.", values };
+    if (key === "labour_rate_bodyshop_aed" && text && !(Number(text) >= 0)) return { error: "The bodyshop labour rate must be a number, or empty.", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
     if (key.startsWith("whatsapp_reminder") && text.length < 10) return { error: "Enter every WhatsApp reminder message.", values };
     updates.push({ key, value: text });
@@ -166,6 +194,14 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   const labourByDept = overrides(formData, "labour_dept__");
   if (typeof labourByDept === "string") return { error: labourByDept, values };
   updates.push({ key: "labour_rate_by_department", value: labourByDept });
+
+  const labourByMake = overrides(formData, "labour_make__");
+  if (typeof labourByMake === "string") return { error: labourByMake, values };
+  updates.push({ key: "labour_rate_by_make", value: labourByMake });
+
+  const qcChecks = String(formData.get("qc_general_checks") ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 60);
+  if (qcChecks.length === 0) return { error: "Enter at least one QC general check.", values };
+  updates.push({ key: "qc_general_checks", value: qcChecks });
 
   const stageHours: Record<string, number> = {};
   for (const s of STAGES) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
-import { Card, Field, Input, SectionLabel, Textarea } from "@/components/ui";
+import { Card, Field, Input, SectionLabel, Select, Textarea } from "@/components/ui";
 import { STAGE_LABELS, STAGES } from "@/lib/jobs";
 
 const DAYS: { id: string; label: string }[] = [
@@ -25,6 +25,8 @@ export function SettingsForm({
   workingDays,
   stageHours,
   branchesText,
+  labourByMake,
+  qcChecksText,
 }: {
   action: FormAction;
   initialValues: Record<string, string>;
@@ -36,6 +38,8 @@ export function SettingsForm({
   workingDays: string[];
   stageHours: Record<string, number>;
   branchesText: string;
+  labourByMake: Record<string, number>;
+  qcChecksText: string;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
@@ -51,8 +55,25 @@ export function SettingsForm({
                 <Input name="company_trn" defaultValue={v.company_trn} inputMode="numeric" maxLength={15} />
               </Field>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Legal name" hint="On the header of every PDF.">
+                <Input name="company_legal_name" defaultValue={v.company_legal_name} required />
+              </Field>
+              <Field label="Legal name in Arabic" optional>
+                <Input name="company_legal_name_ar" defaultValue={v.company_legal_name_ar} dir="rtl" lang="ar" />
+              </Field>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Company address" hint="In the header of every PDF.">
+              <Field label="Address line 1">
+                <Input name="company_address_1" defaultValue={v.company_address_1} />
+              </Field>
+              <Field label="Address line 2">
+                <Input name="company_address_2" defaultValue={v.company_address_2} />
+              </Field>
+              <Field label="Address line 3">
+                <Input name="company_address_3" defaultValue={v.company_address_3} />
+              </Field>
+              <Field label="Address on one line" hint="Older screens and messages.">
                 <Input name="company_address" defaultValue={v.company_address} />
               </Field>
               <Field label="Company phone" optional>
@@ -60,6 +81,33 @@ export function SettingsForm({
               </Field>
               <Field label="Company email" optional>
                 <Input name="company_email" defaultValue={v.company_email} type="email" inputMode="email" />
+              </Field>
+              <Field label="Website" optional>
+                <Input name="company_website" defaultValue={v.company_website} />
+              </Field>
+            </div>
+            <details className="rounded-control border border-line p-4">
+              <summary className="cursor-pointer text-sm font-bold">Bank transfer details (printed on invoices)</summary>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Bank"><Input name="bank_name" defaultValue={v.bank_name} /></Field>
+                <Field label="Account name"><Input name="bank_account_name" defaultValue={v.bank_account_name} /></Field>
+                <Field label="Account number"><Input name="bank_account_number" defaultValue={v.bank_account_number} inputMode="numeric" /></Field>
+                <Field label="IBAN"><Input name="bank_iban" defaultValue={v.bank_iban} /></Field>
+                <Field label="SWIFT"><Input name="bank_swift" defaultValue={v.bank_swift} /></Field>
+              </div>
+            </details>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Currency on customer documents" hint="The dirham symbol, or the letters AED. Staff screens always show AED.">
+                <Select name="document_currency" defaultValue={v.document_currency || "symbol"}>
+                  <option value="symbol">Dirham symbol</option>
+                  <option value="aed">AED</option>
+                </Select>
+              </Field>
+              <Field label="Next invoice number" hint="Numbering continues from here (INV-00001 and so on).">
+                <Input name="next_invoice_number" defaultValue={v.next_invoice_number} inputMode="numeric" required />
+              </Field>
+              <Field label="Consumables line (AED)" hint="Default amount of the standard Consumables line on an invoice.">
+                <Input name="consumables_default_aed" defaultValue={v.consumables_default_aed} inputMode="numeric" required />
               </Field>
             </div>
             <Field label="Branches" hint="One per line: Name | Address. The first one is the default at gate-in.">
@@ -297,13 +345,53 @@ export function SettingsForm({
             <Field label="WhatsApp estimate message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_estimate_template" defaultValue={v.whatsapp_estimate_template} rows={3} required />
             </Field>
+            <details className="rounded-control border border-line p-4">
+              <summary className="cursor-pointer text-sm font-bold">Standard labour rate per make (optional)</summary>
+              <p className="text-xs text-muted mt-2 mb-3">The advisor can go higher on a quotation, never lower. Only the owner can go below. Leave blank for the general rate.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {makes.map((m) => (
+                  <Field key={m} label={m}>
+                    <Input name={`labour_make__${m}`} defaultValue={labourByMake[m]?.toString() ?? ""} inputMode="numeric" placeholder="AED/h" />
+                  </Field>
+                ))}
+              </div>
+            </details>
+            <Field label="Bodyshop labour rate (AED per hour)" optional hint="Left empty until the bodyshop path is built.">
+              <Input name="labour_rate_bodyshop_aed" defaultValue={v.labour_rate_bodyshop_aed} inputMode="numeric" className="max-w-40" />
+            </Field>
             <p className="text-xs text-muted">The services list (categories, prices and default hours) is on its own page: Settings, Services.</p>
           </Card>
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>Parts</SectionLabel>
-            <Field label="Pending supplier invoice turns red after (days)" hint="Used from the parts phase.">
-              <Input name="supplier_invoice_pending_red_days" defaultValue={v.supplier_invoice_pending_red_days} inputMode="numeric" required className="max-w-40" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Pending supplier invoice turns red after (days)">
+                <Input name="supplier_invoice_pending_red_days" defaultValue={v.supplier_invoice_pending_red_days} inputMode="numeric" required />
+              </Field>
+              <Field label="Part label width (mm)" hint="The thermal label. Use Test print a label above.">
+                <Input name="label_width_mm" defaultValue={v.label_width_mm} inputMode="numeric" required />
+              </Field>
+              <Field label="Part label height (mm)">
+                <Input name="label_height_mm" defaultValue={v.label_height_mm} inputMode="numeric" required />
+              </Field>
+            </div>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>QC, car ready and follow-up</SectionLabel>
+            <Field label="QC general checks" hint="One per line. Every car gets these after its own complaints, work lines and parts.">
+              <Textarea name="qc_general_checks" defaultValue={v.qc_general_checks ?? qcChecksText} rows={8} required />
+            </Field>
+            <Field label="WhatsApp car ready message" hint="Sent with the invoice link. Placeholders: [name], [make model], [plate], [link], [advisor].">
+              <Textarea name="whatsapp_ready_template" defaultValue={v.whatsapp_ready_template} rows={3} required />
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Follow-up after gate-out (days)" hint="The advisor is reminded to call the customer.">
+                <Input name="followup_days" defaultValue={v.followup_days} inputMode="numeric" required />
+              </Field>
+            </div>
+            <Field label="WhatsApp follow-up message" hint="Placeholders: [name], [make model], [plate], [advisor].">
+              <Textarea name="whatsapp_followup_template" defaultValue={v.whatsapp_followup_template} rows={3} required />
             </Field>
           </Card>
 

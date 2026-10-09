@@ -23,6 +23,8 @@ export default async function SettingsPage() {
   let makeOverrides: Record<string, number> = {};
   let departmentOverrides: Record<string, number> = {};
   let labourOverrides: Record<string, number> = {};
+  let labourByMake: Record<string, number> = {};
+  let qcChecksText = "";
   let workingDays: string[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
   let stageHours: Record<string, number> = {};
   let branchesText = "";
@@ -30,6 +32,8 @@ export default async function SettingsPage() {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "labour_rate_by_department") labourOverrides = (row.value as Record<string, number>) ?? {};
+    else if (row.key === "labour_rate_by_make") labourByMake = (row.value as Record<string, number>) ?? {};
+    else if (row.key === "qc_general_checks") qcChecksText = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
     else if (row.key === "working_days") workingDays = Array.isArray(row.value) ? (row.value as string[]) : workingDays;
     else if (row.key === "stage_target_hours") stageHours = (row.value as Record<string, number>) ?? {};
     else if (row.key === "branches") branchesText = ((row.value as { name: string; address: string }[]) ?? []).map((b) => `${b.name} | ${b.address}`).join("\n");
@@ -51,6 +55,9 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/services" tone="secondary">
               Services
             </LinkButton>
+            <LinkButton href="/parts/labels/test?test=1" tone="secondary">
+              Test print a label
+            </LinkButton>
             <LinkButton href="/settings/inspection" tone="secondary">
               Inspection checklist
             </LinkButton>
@@ -70,6 +77,8 @@ export default async function SettingsPage() {
             makeOverrides={makeOverrides}
             departmentOverrides={departmentOverrides}
             labourOverrides={labourOverrides}
+            labourByMake={labourByMake}
+            qcChecksText={qcChecksText}
             workingDays={workingDays}
             stageHours={stageHours}
             branchesText={branchesText}

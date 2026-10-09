@@ -41,7 +41,7 @@ export type JobCard = {
 };
 
 const JOB_SELECT =
-  "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, assignment_note, assignment_note_by, assignment_note_at, assignment_reminded_at, assignment_overdue_notified_at, estimate_id, inspection_fee_due, created_at, updated_at";
+  "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, assignment_note, assignment_note_by, assignment_note_at, assignment_reminded_at, assignment_overdue_notified_at, estimate_id, inspection_fee_due, parts_state, work_started_at, work_completed_at, qc_round, rework_count, mileage_out, ready_to_invoice_at, ready_to_invoice_by, ready_token, ready_sent_at, followup_due_at, followup_done_at, created_at, updated_at";
 
 /** Everything a job card screen needs. `client` decides what the viewer may see (their own session, or the master key for public pages). */
 export async function loadJobCard(client: SupabaseClient, jobId: string): Promise<JobCard | null> {

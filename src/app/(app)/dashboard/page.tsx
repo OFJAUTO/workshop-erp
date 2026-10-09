@@ -13,6 +13,9 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
+import { dailyProfit } from "@/lib/profit";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
 
@@ -63,6 +66,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
   ]);
   const nameOf = new Map((names ?? []).map((n) => [n.id, n]));
+  const [profit, { data: clocked }] = await Promise.all([
+    can(role, "viewProfitPanel") ? dailyProfit(settings) : Promise.resolve(null),
+    createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
+  ]);
+  const onClock = (clocked ?? []) as unknown as { id: string; job_id: string; started_at: string; technician: { display_name: string } | null; job: { job_number: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null } | null } | null }[];
   const vipIds = new Set((names ?? []).filter((v) => v.is_vip).map((v) => v.id));
   const seesCustomers = can(role, "viewCustomers");
   const now = new Date();
@@ -129,14 +137,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         actions={can(role, "gateIn") ? <LinkButton href="/gate-in" size="lg">Gate in a car</LinkButton> : undefined}
       />
 
-      {can(role, "viewProfitPanel") ? (
+      {can(role, "viewProfitPanel") && profit ? (
         <ProfitPanel
-          targetAed={Number(settings.daily_profit_target_aed) || 0}
-          yellowPercent={Number(settings.profit_target_yellow_percent) || 80}
-          invoicedAed={0}
-          collectedAed={0}
-          carryAed={0}
-          live={false}
+          targetAed={profit.target}
+          yellowPercent={profit.yellowPercent}
+          invoicedAed={profit.invoicedProfit}
+          collectedAed={profit.collected}
+          carryAed={profit.carry}
+          live
+          provisional={profit.provisional}
+          count={profit.count}
         />
       ) : null}
 
@@ -175,9 +185,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <DashboardCars rows={rows} initialPending={pending} />
 
       <section className="flex flex-col gap-3">
-        <SectionLabel>On the clock</SectionLabel>
-        <Card className="border-dashed">
-          <p className="text-sm text-muted">Starts with the time clock (Phase 6). Technicians and their current jobs will appear here.</p>
+        <SectionLabel right={`${onClock.length}`}>On the clock</SectionLabel>
+        <Card className={onClock.length ? "" : "border-dashed"}>
+          {onClock.length === 0 ? <p className="text-sm text-muted">No technician has a job clock running.</p> : (
+            <ul className="divide-y divide-line text-sm">
+              {onClock.map((s) => (
+                <li key={s.id} className="py-2 flex flex-wrap items-center gap-3">
+                  <span className="font-semibold w-40">{s.technician?.display_name ?? "Technician"}</span>
+                  <span>{s.job?.vehicle ? formatPlate(s.job.vehicle) : ""} · {s.job?.job_number ?? ""}</span>
+                  <span className="ml-auto font-mono"><ElapsedTimer since={s.started_at} /></span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </section>
     </>

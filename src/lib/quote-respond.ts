@@ -1,6 +1,8 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
+import { newLabelCode } from "./parts-data";
+import { ensureWorkLines } from "./work-data";
 import { LINE_SELECT, PART_SELECT, logQuoteEvent, refreshQuoteTotals, toLine, toPart } from "./quote-data";
 import { aed, type QuoteLine, type QuoteRow } from "./quotes";
 import { getSettings } from "./settings";
@@ -86,21 +88,29 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
       if (!p) continue;
       const toOrder = p.availability !== "in_stock";
       if (toOrder) needsOrder = true;
-      await admin.from("part_items").update({ order_status: toOrder ? "to_order" : "received", updated_by: answer.by ?? null }).eq("id", p.id);
+      // A part on the shelf needs no purchase order: it counts as received from stock, with its label, ready to issue.
+      const fromStock = toOrder ? {} : { received_qty: Number(p.confirmed_quantity ?? p.quantity) || 1, label_code: newLabelCode() };
+      await admin.from("part_items").update({ order_status: toOrder ? "to_order" : "received", ...fromStock, updated_by: answer.by ?? null }).eq("id", p.id);
     } else if (l.advisor_added || l.unit_cost !== null) {
       // A part typed on the quotation (advisor's small part, or the owner's): it still has to be bought.
       needsOrder = true;
       await admin.from("part_items").insert({ job_id: job.id, description: l.title, quantity: l.quantity, cost_aed: l.unit_cost, availability: "to_order", confirm_status: "confirmed", confirmed_at: now, priced_at: now, order_status: "to_order", added_by_role: l.advisor_added ? "service_advisor" : "owner", created_by: answer.by ?? null, updated_by: answer.by ?? null });
     }
   }
-  const toStatus = needsOrder ? "waiting_parts" : "in_work";
-  await admin.from("jobs").update({ status: toStatus, stage: needsOrder ? "parts" : "work", ...(q.promised_at ? { promised_at: q.promised_at } : {}) }).eq("id", job.id);
-  await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: toStatus, note: `Quotation ${q.number} approved by ${answer.name}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${totalText} with VAT`, created_by: answer.by ?? null });
-  const body = `${answer.name} approved ${q.number} (${totalText}). ${needsOrder ? "Parts to order." : "Work can start."}`;
+  // An additional quotation (the car is already in work, QC or wash): the job never moves backwards.
+  // The new lines join the work order, the promised date can only move later, and the parts follow the normal ordering path.
+  const extra = ["in_work", "pending_qc", "pending_wash"].includes(job.status);
+  const { data: jobDates } = await admin.from("jobs").select("promised_at").eq("id", job.id).maybeSingle();
+  const laterPromise = q.promised_at && (!jobDates?.promised_at || q.promised_at > jobDates.promised_at) ? { promised_at: q.promised_at } : {};
+  const toStatus = extra ? "in_work" : needsOrder ? "waiting_parts" : "in_work";
+  await admin.from("jobs").update({ status: toStatus, stage: toStatus === "in_work" ? "work" : "parts", ...(extra ? laterPromise : q.promised_at ? { promised_at: q.promised_at } : {}) }).eq("id", job.id);
+  const madeLines = toStatus === "in_work" ? await ensureWorkLines(job.id, answer.by ?? null) : 0;
+  await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: toStatus, note: `Quotation ${q.number} approved by ${answer.name}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${totalText} with VAT${extra ? ` (additional work, ${madeLines} new line${madeLines === 1 ? "" : "s"} on the work order)` : ""}`, created_by: answer.by ?? null });
+  const body = `${answer.name} approved ${q.number} (${totalText}). ${extra ? "Additional work: the new lines are on the work order." : needsOrder ? "Parts to order." : "Work can start."}`;
   await notifyStaff(advisors, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   await notifyManagers(job.department ?? null, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `${answer.name} approved the quotation. See the To order list.`, jobId: job.id, href: "/parts" });
-  if (job.assigned_to && !needsOrder) await notifyStaff([job.assigned_to], { type: "quote_approved", title: `Work approved · ${job.job_number}`, body: "The customer approved the quotation. Work can start.", jobId: job.id, href: `/my-jobs/${job.id}` });
+  if (job.assigned_to && toStatus === "in_work") await notifyStaff([job.assigned_to], { type: "quote_approved", title: extra ? `Additional work approved · ${job.job_number}` : `Work approved · ${job.job_number}`, body: extra ? "The customer approved the additional work. The new lines are on your work order." : "The customer approved the quotation. Work can start.", jobId: job.id, href: `/my-jobs/${job.id}` });
   return { status };
 }
 

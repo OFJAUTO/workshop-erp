@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
+import { Money } from "@/components/Money";
 import { Badge, Notice } from "@/components/ui";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -7,7 +8,8 @@ import { INSPECTION_BUCKET } from "@/lib/inspection-data";
 import { feeNotice, formatPromised } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation, signPaths } from "@/lib/quote-data";
-import { URGENCY_LABELS, aed, isHidden, lineQuantityText, lineTotal, lineUnitPrice, quoteTotals, type QuoteLine } from "@/lib/quotes";
+import { URGENCY_LABELS, isHidden, lineQuantityText, lineTotal, lineUnitPrice, quoteTotals, type QuoteLine } from "@/lib/quotes";
+import { type Currency } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -36,6 +38,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const { error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
+  const currency: Currency = String(settings.document_currency) === "aed" ? "aed" : "symbol";
   const shell = (children: React.ReactNode, title = "Your Quotation") => (
     <div className="min-h-screen bg-canvas">
       <header className="bg-sidebar text-white px-4 py-3 flex items-center gap-3">
@@ -119,10 +122,10 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
                 <span className="font-semibold">{l.title}</span>
                 {l.urgency && !isEstimate ? <Badge tone={l.urgency === "urgent" ? "red" : "neutral"}>{URGENCY_LABELS[l.urgency]}</Badge> : null}
               </span>
-              <span className="font-bold">{aed(lineTotal(l))}</span>
+              <span className="font-bold"><Money amount={lineTotal(l)} currency={currency} /></span>
             </div>
             <span className="text-xs text-muted">
-              {lineQuantityText(l)} × {aed(lineUnitPrice(l))}
+              {lineQuantityText(l)} × <Money amount={lineUnitPrice(l)} currency={currency} />
               {l.discount_percent ? ` · ${l.discount_percent}% discount applied` : ""}
             </span>
             {l.details ? <p className="whitespace-pre-wrap">{l.details}</p> : null}
@@ -143,16 +146,16 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const totalsSection = (
     <section className="bg-white border border-line rounded-card p-4 text-sm">
       <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
-        <dt className="text-muted">Subtotal</dt><dd className="text-right">{aed(totals.subtotal)}</dd>
+        <dt className="text-muted">Subtotal</dt><dd className="text-right"><Money amount={totals.subtotal} currency={currency} /></dd>
         {totals.discount ? (
           <>
-            <dt className="text-muted">Discount {q.discount_percent}% on labour and services</dt><dd className="text-right">− {aed(totals.discount)}</dd>
-            <dt className="text-muted">Before VAT</dt><dd className="text-right">{aed(totals.net)}</dd>
+            <dt className="text-muted">Discount {q.discount_percent}% on labour and services</dt><dd className="text-right">− <Money amount={totals.discount} currency={currency} /></dd>
+            <dt className="text-muted">Before VAT</dt><dd className="text-right"><Money amount={totals.net} currency={currency} /></dd>
           </>
         ) : null}
-        <dt className="text-muted">VAT {q.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
-        <dt className="text-base font-extrabold">Total</dt><dd className="text-right text-base font-extrabold">{aed(totals.total)}</dd>
-        {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold">{aed(totals.deposit)}</dd></> : null}
+        <dt className="text-muted">VAT {q.vat_percent}%</dt><dd className="text-right"><Money amount={totals.vat} currency={currency} /></dd>
+        <dt className="text-base font-extrabold">Total</dt><dd className="text-right text-base font-extrabold"><Money amount={totals.total} currency={currency} /></dd>
+        {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold"><Money amount={totals.deposit} currency={currency} /></dd></> : null}
       </dl>
     </section>
   );
@@ -203,7 +206,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           hasUrgent={hasUrgent && hasRecommended}
         />
       ) : null}
-      <p className="text-xs text-muted">{settings.company_name}. Prices in AED. VAT at {q.vat_percent}% shown separately.</p>
+      <p className="text-xs text-muted">{settings.company_name}. Prices in UAE dirhams. VAT at {q.vat_percent}% shown separately.</p>
     </>,
     title,
   );

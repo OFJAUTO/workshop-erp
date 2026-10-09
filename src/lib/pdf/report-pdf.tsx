@@ -6,15 +6,17 @@ import type { InspectionBundle, InspectionMediaRow } from "@/lib/inspection-data
 import { vehicleTitle, type JobCard } from "@/lib/job-data";
 import { ROAD_TEST_ITEMS, type RoadTestRow } from "@/lib/road-test";
 import type { Settings } from "@/lib/settings";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { fetchPhoto, loadLogo } from "./images";
-import { AMBER, GREEN, GREY, InfoBoxes, PdfDocument, Photos, RED, Tag, TitleBlock, companyOf, styles } from "./template";
+import { qrPng } from "./qr";
+import { AMBER, GREEN, GREY, InfoBoxes, PdfDocument, Photos, RED, Tag, TitleRow, companyOf, styles } from "./template";
 
 const COLOR: Record<ItemStatus, string> = { good: GREEN, average: AMBER, bad: RED, na: GREY };
 const PHOTOS_PER_ITEM = 3;
 
-/** The customer's inspection report as a PDF: findings with photos, BAD and AVERAGE first. Parts and costs are never shown. */
-export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, roadTest: RoadTestRow | null, settings: Settings): Promise<Buffer> {
+/** The customer's inspection report on the document template: findings with photos, BAD and AVERAGE first. Parts and costs are never shown. */
+export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, roadTest: RoadTestRow | null, settings: Settings, token?: string | null): Promise<Buffer> {
   const insp = bundle.inspection;
   // N/A items do not apply to this car and are left out, as on the online report.
   const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY && i.status !== "na");
@@ -38,31 +40,30 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   const photoBuffers = (rows: InspectionMediaRow[]) => photosFor(rows).map((x) => buffers.get(x.storage_path)).filter((b): b is Buffer => !!b);
 
   const company = companyOf(settings);
-  const logo = await loadLogo();
+  const [logo, qr] = await Promise.all([loadLogo(), token ? qrPng(`${PRODUCTION_SITE_URL}/report/${token}`) : Promise.resolve(null)]);
   const tyres = [...TYRE_POSITIONS, { key: "spare", label: "Spare" }].filter((p) => m[`tyre_${p.key}_tread`] || m[`tyre_${p.key}_action`]);
   const measures = MEASUREMENTS.filter((x) => !x.key.startsWith("tyre_") && m[x.key] != null && String(m[x.key]) !== "");
   const prescans = insp.show_prescan_to_customer ? bundle.media.filter((x) => x.is_prescan) : [];
 
   const doc = (
-    <PdfDocument title={`Inspection report ${card.job.job_number}`} company={company} logo={logo} footerLines={["This report describes the condition found at inspection. A quotation for any work follows separately."]}>
-      <TitleBlock
+    <PdfDocument title={`Inspection report ${card.job.job_number}`} company={company} logo={logo} qr={qr} preparedBy={bundle.approver?.display_name ?? bundle.technician?.display_name ?? null} footerLines={["This report describes the condition found at inspection. A quotation for any work follows separately."]}>
+      <TitleRow
         title="INSPECTION REPORT"
-        number={card.job.job_number}
         meta={[
+          { label: "Job card", value: card.job.job_number },
           { label: "Inspected", value: formatDateTime(insp.submitted_at) },
           { label: "Approved", value: formatDateTime(insp.approved_at) },
           { label: "Technician", value: bundle.technician?.display_name ?? "" },
-          card.gateIn?.mileage ? { label: "Mileage", value: `${Number(card.gateIn.mileage).toLocaleString("en-GB")} ${card.gateIn.mileage_unit === "mi" ? "mi" : "km"}` } : null,
         ]}
       />
       <InfoBoxes
         boxes={[
-          { title: "Customer", strong: card.customer?.company_name ?? card.customer?.full_name ?? "Customer", lines: [card.customer?.company_name ? card.customer.full_name : null] },
-          { title: "Vehicle", strong: vehicleTitle(card.vehicle), lines: [formatPlate(card.vehicle), card.vehicle.vin ? `VIN ${card.vehicle.vin}` : null, card.vehicle.colour] },
+          { title: "Customer", strong: card.customer?.company_name ?? card.customer?.full_name ?? "Customer", rows: [["Name", card.customer?.company_name ? card.customer.full_name : null], ["Mobile", card.customer?.phone ?? null]] },
+          { title: "Vehicle", strong: vehicleTitle(card.vehicle), rows: [["Plate", formatPlate(card.vehicle)], ["VIN", card.vehicle.vin], ["Colour", card.vehicle.colour]] },
         ]}
       />
 
-      <View style={styles.section}>
+      <View>
         <Text style={styles.sectionTitle}>Your requests</Text>
         {card.requests.length === 0 ? <Text style={styles.small}>No requests were noted at gate-in.</Text> : null}
         {card.requests.map((r, i) => {
@@ -91,7 +92,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
         })}
       </View>
 
-      <View style={styles.section}>
+      <View>
         <Text style={styles.sectionTitle}>Items needing attention   ·   {flagged.length}</Text>
         {flagged.length === 0 ? <Text style={styles.small}>Nothing was marked average or bad.</Text> : null}
         {flagged.map((i) => (
@@ -107,7 +108,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
         ))}
       </View>
 
-      <View style={styles.section}>
+      <View>
         <Text style={styles.sectionTitle}>Full checklist</Text>
         {sections.map(([key, title]) => (
           <View key={key} style={{ marginTop: 4 }}>
@@ -125,7 +126,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
       </View>
 
       {tyres.length || measures.length ? (
-        <View style={styles.section}>
+        <View>
           <Text style={styles.sectionTitle}>Tyres and brakes</Text>
           {tyres.map((p) => (
             <View key={p.key} style={styles.checkRow}>
@@ -151,7 +152,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
       ) : null}
 
       {roadTest && roadTest.status !== "not_started" && roadTest.decision !== "not_needed" ? (
-        <View style={styles.section}>
+        <View>
           <Text style={styles.sectionTitle}>Road test</Text>
           {roadTest.status === "not_possible" ? (
             <Text>Road test not possible: {roadTest.not_possible_reason}</Text>
@@ -172,13 +173,13 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
 
       {insp.manager_note ? (
         <View style={styles.note} wrap={false}>
-          <Text style={styles.sectionTitle}>Workshop manager&apos;s note</Text>
+          <Text style={styles.smallTitle}>Workshop manager&apos;s note</Text>
           <Text>{insp.manager_note}</Text>
         </View>
       ) : null}
       {insp.technician_notes ? (
         <View style={styles.note} wrap={false}>
-          <Text style={styles.sectionTitle}>Technician&apos;s notes</Text>
+          <Text style={styles.smallTitle}>Technician&apos;s notes</Text>
           <Text>{insp.technician_notes}</Text>
         </View>
       ) : null}

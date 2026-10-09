@@ -22,6 +22,8 @@ export type NextStepInput = {
   gateInComplete: boolean;
   /** The quotation's plain-word state, when the job is at or past the quote. */
   quote?: QuoteState | null;
+  /** Later stages: parts, work, QC, wash, invoice, delivery. */
+  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null } | null;
 };
 
 export type NextStep = {
@@ -91,12 +93,30 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
     if (j.quote?.key === "expired") return { done: { label: "Quotation sent", by: j.advisorName }, next: "The quotation expired. Re-send or revise it.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Open the quotation", href: `/jobs/${jobId}#quotation` }, since: j.stage_entered_at, line: `Quotation expired, waiting on ${advisor}` };
     return { done: { label: j.quote?.key === "opened" ? "Quotation opened by the customer" : "Quotation sent", by: j.advisorName }, next: "The customer approves the quotation.", waitingOn: "the customer", actorRole: "customer", action: null, since: j.stage_entered_at, line: j.quote?.key === "opened" ? "Quotation opened, waiting on the customer" : "Waiting on the customer to approve the quotation" };
   }
-  if (j.status === "approved" || j.status === "waiting_parts") return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts are ordered and received.", waitingOn: "parts", actorRole: null, action: null, since: j.stage_entered_at, line: `${j.status === "approved" ? "Approved" : "Waiting for parts"}, waiting on parts` };
-  if (j.status === "in_work") return { done: { label: "Parts ready", by: null }, next: `${tech} does the work.`, waitingOn: tech, actorRole: "technician", action: null, since: j.stage_entered_at, line: `In work, waiting on ${tech}` };
-  if (j.status === "pending_qc") return { done: { label: "Work finished", by: tech }, next: "QC checks the car.", waitingOn: "the QC inspector", actorRole: "qc_inspector", action: null, since: j.stage_entered_at, line: "Pending QC, waiting on the QC inspector" };
-  if (j.status === "pending_wash") return { done: { label: "QC passed", by: null }, next: "Car wash.", waitingOn: "the wash", actorRole: null, action: null, since: j.stage_entered_at, line: "Pending car wash" };
-  if (j.status === "ready") return { done: { label: "Car ready", by: null }, next: "The customer collects; invoice and payment.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Gate out", href: `/jobs/${jobId}/gate-out` }, since: j.stage_entered_at, line: `Ready, waiting on ${advisor}` };
-  if (j.status === "pending_payment") return { done: { label: "Job done", by: null }, next: "Payment, then gate out.", waitingOn: "accounts", actorRole: "accounts", action: { label: "Gate out", href: `/jobs/${jobId}/gate-out` }, since: j.stage_entered_at, line: "Pending payment, waiting on accounts" };
+  const x = j.extra ?? {};
+  if (j.status === "approved" || j.status === "waiting_parts") {
+    const since = j.stage_entered_at;
+    if (x.partsState === "received") return { done: { label: "Parts arrived", by: null }, next: "Parts print the labels and issue the parts to the technician with his PIN.", waitingOn: "Parts", actorRole: "parts", action: { label: "Issue the parts", href: `/parts/issue/${jobId}` }, since, line: "Parts arrived, waiting on Parts to issue them" };
+    if (x.partsState === "ordered") return { done: { label: "Parts ordered", by: null }, next: x.partsLate ? `${x.partsLate} part${x.partsLate === 1 ? " is" : "s are"} late. Parts chase the supplier.` : "Waiting for the supplier to deliver.", waitingOn: "the supplier", actorRole: "parts", action: { label: "Purchase orders", href: "/parts/orders" }, since, line: x.partsLate ? `Waiting for parts, ${x.partsLate} late` : "Waiting for parts from the supplier" };
+    if (x.partsState === "ordering") return { done: { label: "Purchase order raised", by: null }, next: "The owner or the head accountant approves the purchase order.", waitingOn: "the owner", actorRole: "owner", action: { label: "Purchase orders", href: "/parts/orders" }, since, line: "Purchase order waiting for approval" };
+    return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts raise the purchase order for the approved parts.", waitingOn: "Parts", actorRole: "parts", action: { label: "Parts desk", href: "/parts" }, since, line: "Approved, waiting on Parts to order" };
+  }
+  if (j.status === "in_work") {
+    if (!j.assigned_to && !(x.workDone ?? 0)) return { done: { label: "Parts issued, work order ready", by: null }, next: `${j.managerLabel} assigns the work to a technician.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Work order", href: `/jobs/${jobId}/work` }, since: j.stage_entered_at, line: `Work order ready, waiting on ${j.managerLabel}` };
+    const allDone = (x.workTotal ?? 0) > 0 && x.workDone === x.workTotal;
+    if (allDone) return { done: { label: "Every line done", by: tech }, next: `${j.managerLabel} confirms the work complete; the car goes to QC.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Confirm work complete", href: `/jobs/${jobId}/work` }, since: j.stage_entered_at, line: `Work done, waiting on ${j.managerLabel} to confirm` };
+    return { done: { label: x.qcRound ? `Back from QC, round ${x.qcRound}` : "Work assigned", by: null }, next: `${tech} does the work: ${x.workDone ?? 0} of ${x.workTotal ?? 0} lines done.`, waitingOn: tech, actorRole: "technician", action: { label: "Open on the tablet", href: `/my-jobs/${jobId}` }, since: j.stage_entered_at, line: `In work, ${x.workDone ?? 0} of ${x.workTotal ?? 0} done, waiting on ${tech}` };
+  }
+  if (j.status === "pending_qc") return { done: { label: "Work confirmed complete", by: null }, next: `The QC inspector checks the car${(x.qcRound ?? 1) > 1 ? ` (recheck, round ${x.qcRound})` : ""}.`, waitingOn: "the QC inspector", actorRole: "qc_inspector", action: { label: "Start QC", href: `/qc/${jobId}` }, since: j.stage_entered_at, line: "Pending QC, waiting on the QC inspector" };
+  if (j.status === "pending_wash") return { done: { label: "QC passed", by: null }, next: "Car wash, then the car is Ready.", waitingOn: "the wash", actorRole: "workshop_manager", action: { label: "Car wash list", href: "/wash" }, since: j.stage_entered_at, line: "Pending car wash" };
+  if (j.status === "ready") {
+    if (!x.invoiced && !x.readyToInvoice) return { done: { label: "Car ready", by: null }, next: "Mark it ready to invoice so accounts issue the invoice.", waitingOn: advisor, actorRole: "service_advisor", action: null, since: j.stage_entered_at, line: `Ready, waiting on ${advisor} to mark it ready to invoice` };
+    if (!x.invoiced) return { done: { label: "Ready to invoice", by: j.advisorName }, next: "Accounts issue the invoice.", waitingOn: "accounts", actorRole: "accounts", action: { label: "Issue the invoice", href: `/jobs/${jobId}/invoice` }, since: j.stage_entered_at, line: "Ready, waiting on accounts to invoice" };
+    if (!x.readySent) return { done: { label: "Invoice issued", by: null }, next: "Send the customer the \"your car is ready\" message with the invoice link.", waitingOn: advisor, actorRole: "service_advisor", action: null, since: j.stage_entered_at, line: `Ready, waiting on ${advisor} to tell the customer` };
+    return { done: { label: "Customer told the car is ready", by: j.advisorName }, next: "The customer collects, or the car is delivered. Gate out.", waitingOn: "the customer", actorRole: "service_advisor", action: { label: "Gate out", href: `/jobs/${jobId}/gate-out` }, since: j.stage_entered_at, line: "Ready for collection" };
+  }
+  if (j.status === "pending_payment") return { done: { label: "Invoice issued", by: null }, next: `Payment of AED ${(x.balanceDue ?? 0).toLocaleString("en-GB")} is due, then gate out.`, waitingOn: "the customer", actorRole: "accounts", action: { label: "Gate out", href: `/jobs/${jobId}/gate-out` }, since: j.stage_entered_at, line: "Pending payment" };
+  if (j.status === "in_delivery") return { done: { label: "Left the workshop for delivery", by: null }, next: `Mark it delivered at ${x.deliveryAddress ?? "the customer's address"}.`, waitingOn: advisor, actorRole: "service_advisor", action: { label: "Mark delivered", href: `/jobs/${jobId}/gate-out` }, since: j.stage_entered_at, line: "Out for delivery" };
   return { done: null, next: "", waitingOn: "", actorRole: null, action: null, since: j.stage_entered_at, line: "" };
 }
 

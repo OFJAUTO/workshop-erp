@@ -15,6 +15,12 @@ import { mediaChecklist } from "@/lib/media";
 import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
 import { PARTS_BUCKET, PART_SELECT, loadQuoteSummary, signPaths, toPart } from "@/lib/quote-data";
+import { jobBalance } from "@/lib/invoice-data";
+import { jobPartsState } from "@/lib/parts-data";
+import { latestQc, loadWash, loadWork } from "@/lib/work-data";
+import { markReadyToInvoice } from "../../invoices/actions";
+import { followUpDone } from "../gate-out-actions";
+import { ReadySendControl } from "./ReadySendControl";
 import { aed, quoteState } from "@/lib/quotes";
 import { ROAD_TEST_DECISIONS, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { PartsConfirm, type ConfirmItem } from "@/components/PartsConfirm";
@@ -64,6 +70,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const latestQuote = quoteSummary.quotation;
   const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
   const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
+  const laterStage = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
+  const [partsState, work, qc, wash, bal] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null)]);
 
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "" });
   const wt = workingTimeOf(settings);
@@ -99,6 +107,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name);
   const approvalTemplate = fillCar(settings.whatsapp_approval_template);
   const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", customerName);
+  const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", customerName);
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
   const insp = inspection?.inspection ?? null;
@@ -126,6 +135,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
     gateInComplete: check.complete,
     quote: qState,
+    extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null },
   });
   const canQuote = (role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)))) && job.is_open && !staff.viewingAs;
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
@@ -291,7 +301,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className={`flex flex-col gap-2 ${toneCls[approvalState.tone]} ${job.stage === "gate_in" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
@@ -358,17 +368,49 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               ].filter(Boolean).join(" · ")}
             </span>
           ) : null}
-          {can(role, "priceParts") || seesPrices ? (
-            <div className="mt-auto">
-              <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton>
-            </div>
-          ) : null}
+          <div className="mt-auto flex flex-wrap gap-2">
+            {can(role, "priceParts") || seesPrices ? <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton> : null}
+            {can(role, "managePurchaseOrders") && partsState.received.length && partsState.needed.some((p) => p.issue_status !== "confirmed") ? <LinkButton href={`/parts/issue/${id}`} size="md">Issue parts</LinkButton> : null}
+            {can(role, "viewPurchaseOrders") && partsState.received.length ? <LinkButton href={`/parts/labels/${id}`} tone="secondary" size="md">Labels</LinkButton> : null}
+          </div>
+          {partsState.late.length ? <span className="text-xs font-bold text-red">{partsState.late.length} part{partsState.late.length === 1 ? "" : "s"} late</span> : null}
+          {partsState.needed.length ? <span className="text-xs text-muted">Issued {partsState.confirmed.length} of {partsState.needed.length}</span> : null}
         </Card>
-        <Card className="flex flex-col gap-2 bg-canvas opacity-70">
+        <Card className={`flex flex-col gap-2 ${work ? "" : "bg-canvas opacity-70"} ${job.stage === "work" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Work</span>
+          <span className="text-sm font-semibold">{work ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} lines done` : "Not started"}</span>
+          {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min clocked of {work.hoursQuoted.toFixed(1)} h quoted{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
+          {can(role, "viewWorkOrders") ? <div className="mt-auto"><LinkButton href={`/jobs/${id}/work`} tone={job.status === "in_work" && managesThisJob ? "primary" : "secondary"} size="md">Work order</LinkButton></div> : null}
+        </Card>
+        <Card className={`flex flex-col gap-2 ${qc ? "" : "bg-canvas opacity-70"} ${job.stage === "qc" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">QC</span>
+          <span className="text-sm font-semibold">{qc ? (qc.status === "open" ? `Round ${qc.round} in progress` : qc.status === "passed" ? `Passed, round ${qc.round}` : `Failed, round ${qc.round}`) : "Not started"}</span>
+          {job.rework_count ? <span className="text-xs text-red font-bold">Rework {job.rework_count}×</span> : null}
+          {qc && (can(role, "doQc") || can(role, "viewWorkOrders")) ? <div className="mt-auto"><LinkButton href={`/qc/${id}`} tone={job.status === "pending_qc" && can(role, "doQc") ? "primary" : "secondary"} size="md">{job.status === "pending_qc" && can(role, "doQc") ? "Start QC" : "QC"}</LinkButton></div> : null}
+        </Card>
+        <Card className={`flex flex-col gap-2 ${wash ? "" : "bg-canvas opacity-70"} ${job.stage === "wash" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Wash</span>
+          <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? "On the car wash list" : "Not started"}</span>
+          {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><LinkButton href="/wash" size="md">Car wash list</LinkButton></div> : null}
+        </Card>
+        <Card className={`flex flex-col gap-2 ${bal?.invoice ? "border-green" : job.status === "ready" || job.status === "pending_payment" ? "border-ink" : "bg-canvas opacity-70"} ${job.stage === "ready" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Invoice</span>
-          <span className="text-sm font-semibold text-muted">{job.inspection_fee_due ? "Inspection fee due at gate-out" : "Not started"}</span>
+          <span className="text-sm font-semibold">{bal?.invoice ? `${bal.invoice.number} · ${bal.state === "paid" ? "paid in full" : bal.state === "part_paid" ? `part paid, AED ${bal.balance.toFixed(0)} due` : bal.state === "cheque_pending" ? "cheque pending" : `AED ${bal.balance.toFixed(0)} due`}` : job.ready_to_invoice_at ? "Ready to invoice, with accounts" : job.inspection_fee_due ? "Inspection fee to invoice" : "Not started"}</span>
+          {job.ready_sent_at ? <span className="text-xs text-muted">Customer told {formatDayTime(job.ready_sent_at)}</span> : null}
+          <div className="mt-auto flex flex-wrap gap-2">
+            {!bal?.invoice && !job.ready_to_invoice_at && ["ready", "pending_wash", "pending_qc"].includes(job.status) && can(role, "markReadyToInvoice") && !staff.viewingAs ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="md">Ready to invoice</Button></form> : null}
+            {can(role, "issueInvoices") && !bal?.invoice && laterStage && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} tone={job.ready_to_invoice_at ? "primary" : "secondary"} size="md">Issue invoice</LinkButton> : null}
+            {bal?.invoice && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open invoice</LinkButton> : null}
+          </div>
+          {bal?.invoice && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? <ReadySendControl jobId={id} token={bal.invoice.token} siteUrl={site} messageTemplate={readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={job.ready_sent_at} /> : null}
         </Card>
       </div>
+      {!job.is_open && job.followup_due_at && !job.followup_done_at && can(role, "sendApproval") ? (
+        <Card className="flex flex-wrap items-center gap-3 border-ink">
+          <span className="text-sm font-semibold">Follow-up due {formatPromised(job.followup_due_at)}: call or message the customer and ask how the car is.</span>
+          <form action={followUpDone.bind(null, id)} className="ml-auto"><Button type="submit" size="md">Follow-up done</Button></form>
+        </Card>
+      ) : null}
 
       {managesThisJob && pendingParts.length ? (
         <PartsConfirm

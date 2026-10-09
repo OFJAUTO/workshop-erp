@@ -41,7 +41,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
   const editorSettings = {
-    labourRate: labourRateFor(settings, job?.department ?? null),
+    labourRate: labourRateFor(settings, job?.department ?? null, vehicle?.make?.name ?? null),
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,

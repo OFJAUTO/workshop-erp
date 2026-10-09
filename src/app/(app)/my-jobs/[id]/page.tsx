@@ -22,7 +22,10 @@ import { PARTS_BUCKET, signPaths } from "@/lib/quote-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { confirmPart } from "../../parts/actions";
 import { noteInspectionEdit, startInspection, submitInspection } from "../../jobs/inspection-actions";
+import { reportAdditionalWork, setLineDone, startWork, stopWork } from "../../jobs/work-actions";
+import { PAUSE_REASONS, additionalWorkLabel, latestQc, loadWork } from "@/lib/work-data";
 import { InspectionForm } from "./InspectionForm";
+import { WorkPanel, type PanelLine } from "./WorkPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +66,14 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const diagramUrls = await signPaths(PARTS_BUCKET, (partRows ?? []).map((p) => p.diagram_path).filter((x): x is string => !!x));
   const confirmItems: ConfirmItem[] = (partRows ?? []).map((p) => ({ id: p.id, part_number: p.part_number, description: p.description, quantity: Number(p.quantity), diagram_url: p.diagram_path ? (diagramUrls[p.diagram_path] ?? null) : null, request_label: p.part_request_id ? (reqOf.get(p.part_request_id)?.label ?? null) : null, requested_text: p.part_request_id ? (reqOf.get(p.part_request_id)?.requested_text ?? null) : null, confirm_status: p.confirm_status as ConfirmItem["confirm_status"], confirmed_quantity: p.confirmed_quantity === null ? null : Number(p.confirmed_quantity), reject_note: p.reject_note }));
   const statusText = insp?.status === "submitted" ? "Submitted, waiting for manager" : waitingRoadTest ? "Waiting for road test" : STATUS_LABELS[job.status];
+  // The work order, once the car is in Work (or back from a failed QC).
+  const work = job.status === "in_work" || job.status === "pending_qc" ? await loadWork(id) : null;
+  const qc = work ? await latestQc(id) : null;
+  const qcFailed = qc && qc.status === "failed" && job.status === "in_work" ? { round: qc.round, items: qc.items.filter((i) => i.result === "fail").map((i) => ({ label: i.label, remark: i.remark })) } : null;
+  const panelLines: PanelLine[] = work ? work.lines.map((l) => ({ id: l.id, title: l.title, details: l.details, hours_quoted: l.hours_quoted, status: l.status, notes: l.notes, mine: l.assigned_to === staff.id || (!l.assigned_to && mine), assignedName: l.assigned_to ? (work.names.get(l.assigned_to) ?? null) : null, photos: work.files.filter((f) => f.kind === "work_photo" && f.ref_id === l.id).map((f) => ({ id: f.id, path: f.storage_path, url: work.fileUrls[f.storage_path] ?? null })) })) : [];
+  const runningSession = work?.sessions.find((s) => s.technician_id === staff.id && !s.ended_at) ?? null;
+  const myMinutes = work?.minutesByTechnician.get(staff.id) ?? 0;
+  const reminders = [gateIn?.dash_cam ? "Disconnect the dash cam before you start." : "", gateIn?.old_parts_return ? "Keep the old parts: the customer asked for them." : ""].filter(Boolean);
 
   const formProps = insp && bundle
     ? {
@@ -124,6 +135,24 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         )}
       </section>
 
+      {work && job.status === "in_work" ? (
+        <WorkPanel
+          jobId={id}
+          lines={panelLines}
+          findings={work.additional.map((a) => ({ id: a.id, remark: a.remark, parts_needed: a.parts_needed, status: a.status, decision_note: a.decision_note, label: additionalWorkLabel(a).text, tone: additionalWorkLabel(a).tone }))}
+          running={runningSession ? { since: runningSession.started_at } : null}
+          myMinutes={myMinutes}
+          reminders={reminders}
+          pauseReasons={PAUSE_REASONS}
+          canWork={mine && role === "technician" && !staff.viewingAs}
+          qcFailed={qcFailed}
+          startAction={startWork.bind(null, id)}
+          stopAction={stopWork.bind(null, id)}
+          doneAction={setLineDone}
+          reportAction={reportAdditionalWork.bind(null, id)}
+        />
+      ) : null}
+      {job.status === "pending_qc" ? <Notice tone="info">Work complete. The car is with QC; you will be told if anything comes back.</Notice> : null}
       {confirmItems.length ? <PartsConfirm items={confirmItems} action={confirmPart} /> : null}
 
       {roadTest && job.department !== "bodyshop" ? (

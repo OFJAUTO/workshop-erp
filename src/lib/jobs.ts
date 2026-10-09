@@ -31,6 +31,7 @@ export const STATUSES = [
   "pending_wash",
   "ready",
   "pending_payment",
+  "in_delivery",
   "closed",
 ] as const;
 export type JobStatus = (typeof STATUSES)[number];
@@ -49,6 +50,7 @@ export const STATUS_LABELS: Record<JobStatus, string> = {
   pending_wash: "Pending car wash",
   ready: "Job done, ready to collect",
   pending_payment: "Job done, pending payment",
+  in_delivery: "Out for delivery",
   closed: "Gated out",
 };
 
@@ -67,6 +69,7 @@ export const STATUS_STAGE: Record<JobStatus, Stage> = {
   pending_wash: "wash",
   ready: "ready",
   pending_payment: "ready",
+  in_delivery: "ready",
   closed: "ready",
 };
 
@@ -77,9 +80,12 @@ export const PENDING_GROUPS: { key: string; label: string; statuses: JobStatus[]
   { key: "quote", label: "Quote", statuses: ["pending_quote"] },
   { key: "approval", label: "Customer approval", statuses: ["pending_approval", "pending_customer_approval"] },
   { key: "parts", label: "Parts", statuses: ["approved", "waiting_parts"] },
+  { key: "work", label: "In work", statuses: ["in_work"] },
   { key: "qc", label: "QC", statuses: ["pending_qc"] },
   { key: "wash", label: "Car wash", statuses: ["pending_wash"] },
+  { key: "ready", label: "Ready", statuses: ["ready"] },
   { key: "payment", label: "Payment", statuses: ["pending_payment"] },
+  { key: "delivery", label: "Delivery", statuses: ["in_delivery"] },
 ];
 
 /** Manual moves the workshop manager can make until later phases automate them. */

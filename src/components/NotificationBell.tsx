@@ -9,7 +9,7 @@ type Item = { id: number; staff_id?: string; type: string; title: string; body: 
 const VOLUME_KEY = "erp_notif_volume";
 const POLL_MS = 30000;
 /** Anything that needs the owner's personal approval gets the louder, longer sound. */
-const OWNER_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested"]);
+const OWNER_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested", "po_approval", "credit_note_approval", "release_approval", "quote_owner_approval"]);
 type Volume = "off" | "low" | "normal";
 
 function timeAgo(iso: string) {

@@ -89,7 +89,7 @@ export async function startQuotation(jobId: string) {
   const settings = await getSettings();
   const { data: vehicle } = await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", job!.vehicle_id).maybeSingle();
   const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;
-  const rate = labourRateFor(settings, job!.department);
+  const rate = labourRateFor(settings, job!.department, makeName);
   const minMarkup = minMarkupFor(settings, makeName);
   const { data: created, error } = await admin
     .from("quotations")

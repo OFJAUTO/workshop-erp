@@ -89,6 +89,25 @@ export const PERMISSIONS = {
   confirmParts: ["owner", "technician", "workshop_manager"],
   viewEstimates: ["owner", "service_advisor"],
   manageServices: ["owner"],
+  // Parts ordering, work, QC, wash, invoices, payments (built 9 October 2026)
+  managePurchaseOrders: ["owner", "parts"],
+  viewPurchaseOrders: ["owner", "parts", "accounts", "service_advisor"],
+  approvePurchaseOrders: ["owner", "accounts"],
+  manageStock: ["owner", "parts"],
+  viewWorkOrders: ["owner", "workshop_manager", "service_advisor", "accounts"],
+  manageWork: ["owner", "workshop_manager"],
+  doWork: ["owner", "technician"],
+  clockShift: ["owner", "technician", "workshop_manager", "qc_inspector", "parts"],
+  viewAttendance: ["owner", "workshop_manager", "accounts"],
+  doQc: ["owner", "qc_inspector"],
+  washCars: ["owner", "workshop_manager", "qc_inspector", "service_advisor"],
+  markReadyToInvoice: ["owner", "service_advisor"],
+  viewInvoices: ["owner", "accounts", "service_advisor"],
+  issueInvoices: ["owner", "accounts"],
+  recordPayments: ["owner", "accounts"],
+  approveCreditNotes: ["owner"],
+  viewProfitList: ["owner", "accounts"],
+  exportAccounts: ["owner", "accounts"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

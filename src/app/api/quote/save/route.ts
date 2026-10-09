@@ -7,7 +7,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-type LinePatch = { line_type?: string; title?: string; details?: string | null; group_label?: string | null; quantity?: number | string; unit_cost?: number | string | null; markup_percent?: number | string | null; unit_price?: number | string | null; hours?: number | string | null; discount_percent?: number | string; discount_reason?: string | null; visible_to_customer?: boolean; urgency?: string | null };
+type LinePatch = { line_type?: string; title?: string; details?: string | null; group_label?: string | null; quantity?: number | string; unit_cost?: number | string | null; markup_percent?: number | string | null; unit_price?: number | string | null; hours?: number | string | null; labour_rate?: number | string | null; discount_percent?: number | string; discount_reason?: string | null; visible_to_customer?: boolean; urgency?: string | null };
 type Body = {
   quotationId?: string;
   addLine?: LinePatch & { service_id?: string | null; dummyPart?: boolean };
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
   const minMarkup = minMarkupFor(settings, (vehicle?.make as unknown as { name: string } | null)?.name ?? null);
   const { data: job } = q.job_id ? await admin.from("jobs").select("department, job_number").eq("id", q.job_id).maybeSingle() : { data: null };
-  const labourRate = labourRateFor(settings, job?.department ?? null);
+  const labourRate = labourRateFor(settings, job?.department ?? null, (vehicle?.make as unknown as { name: string } | null)?.name ?? null);
   const stamp = { updated_by: staff.id };
 
   const cleanPatch = (p: LinePatch, current: Partial<QuoteLine> | null): Record<string, unknown> | string => {
@@ -81,6 +81,13 @@ export async function POST(request: NextRequest) {
     }
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
+    if (p.labour_rate !== undefined) {
+      // The advisor can raise the hourly rate, never set it below the standard rate for this car. Only the owner can go lower.
+      const rate = n(p.labour_rate);
+      if (rate === null || rate < 0) return "Enter the hourly rate.";
+      if (!isOwner && rate + 0.005 < labourRate) return `The rate cannot be below the standard rate of AED ${labourRate} per hour for this car. Only the owner can go lower.`;
+      out.labour_rate = rate;
+    }
     if (p.markup_percent !== undefined) out.markup_percent = n(p.markup_percent);
     if (p.discount_percent !== undefined) {
       const d = Math.min(100, Math.max(0, n(p.discount_percent) ?? 0));
@@ -184,6 +191,9 @@ export async function POST(request: NextRequest) {
     const merged = { ...cur, ...patch } as QuoteLine;
     const floorError = checkFloor(merged);
     if (floorError) return NextResponse.json({ error: floorError }, { status: 400 });
+    if ("labour_rate" in patch && Number(patch.labour_rate) !== Number(cur.labour_rate ?? 0)) {
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "labour_rate", note: `${staff.display_name} changed the hourly rate on ${cur.title} from AED ${Number(cur.labour_rate ?? 0)} to AED ${Number(patch.labour_rate)} (standard AED ${labourRate})`, created_by: staff.id });
+    }
     if ("discount_percent" in patch && (cur.line_type === "part" || (cur.line_type === "other" && cur.unit_cost !== null)) && Number(patch.discount_percent) > 0) {
       await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "part_discount", note: `${staff.display_name} ${isOwner ? "gave" : "asked for"} a ${patch.discount_percent}% discount on ${cur.title}: ${merged.discount_reason ?? ""}`, created_by: staff.id });
     }

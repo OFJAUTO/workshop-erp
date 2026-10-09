@@ -177,5 +177,26 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // 8. Follow-up after gate-out: remind the advisor once on the due day.
+  {
+    const today = dubaiDate();
+    const { data: due } = await admin.from("jobs").select("id, job_number, gated_in_by, gated_out_by").eq("is_open", false).lte("followup_due_at", today).is("followup_done_at", null).is("followup_notified_at", null).limit(100);
+    for (const j of due ?? []) {
+      await notifyStaff([j.gated_in_by, j.gated_out_by].filter((x): x is string => !!x), { type: "gate_out_followup", title: `Follow-up call due · ${j.job_number}`, body: "Ask the customer how the car is. Mark it done on the job card.", jobId: j.id as string, href: `/jobs/${j.id}` });
+      await admin.from("jobs").update({ followup_notified_at: new Date().toISOString() }).eq("id", j.id);
+      report.followUps = (report.followUps ?? 0) + 1;
+    }
+  }
+  // 9. Parts past their expected date: tell Parts on the first late day.
+  {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const { data: late } = await admin.from("part_items").select("id, description, job_id, job:jobs(job_number)").eq("is_active", true).in("order_status", ["ordered", "partly_received"]).eq("expected_date", yesterday).limit(100);
+    for (const p of late ?? []) {
+      const job = p.job as unknown as { job_number: string } | null;
+      await notifyRoles(["parts"], { type: "parts_late", title: `Part late · ${job?.job_number ?? ""}`, body: `${p.description} was expected ${yesterday}. Chase the supplier.`, jobId: p.job_id as string, href: "/parts/orders" });
+      report.partsLate = (report.partsLate ?? 0) + 1;
+    }
+  }
+
   return NextResponse.json({ ok: true, ...report });
 }

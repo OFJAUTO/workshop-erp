@@ -89,7 +89,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         usage={services.usage}
         department={null}
         settings={{
-          labourRate: labourRateFor(settings, null),
+          labourRate: labourRateFor(settings, null, vehicle?.make?.name ?? null),
           minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,

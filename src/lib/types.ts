@@ -195,6 +195,18 @@ export type JobRow = {
   assignment_overdue_notified_at: string | null;
   estimate_id: string | null;
   inspection_fee_due: boolean;
+  parts_state: "none" | "ordering" | "ordered" | "received" | "issued";
+  work_started_at: string | null;
+  work_completed_at: string | null;
+  qc_round: number;
+  rework_count: number;
+  mileage_out: number | null;
+  ready_to_invoice_at: string | null;
+  ready_to_invoice_by: string | null;
+  ready_token: string | null;
+  ready_sent_at: string | null;
+  followup_due_at: string | null;
+  followup_done_at: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -290,7 +290,7 @@ export function QuoteEditor({
                 {l.line_type === "labour" ? (
                   <>
                     <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Hours (0.1 steps)</span><Input value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const v = e.target.value.replace(",", "."); if (v !== "") patch(l.id, { hours: Math.max(0.1, Math.round(Number(v) * 10) / 10) }, true); }} inputMode="decimal" disabled={disabled} /></label>
-                    <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Rate (AED/h)</span><Input value={num(l.labour_rate)} readOnly disabled /></label>
+                    <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Rate (AED/h) · standard {settings.labourRate}</span><Input value={num(l.labour_rate)} onChange={(e) => patch(l.id, { labour_rate: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} className={(l.labour_rate ?? 0) + 0.005 < settings.labourRate ? "border-red-bar" : ""} /></label>
                   </>
                 ) : null}
                 {l.line_type === "part" ? (
@@ -391,6 +391,12 @@ export function QuoteEditor({
               </div>
             ) : null}
             <p className="text-xs text-muted">Parts listed by the Parts desk appear here on their own, with their cost, once the technician confirms them. Unusual work can be typed as a free line.</p>
+            {lines.some((l) => l.line_type === "labour") ? (
+              <div className="flex flex-wrap items-end gap-2 border-t border-line pt-3">
+                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Hourly rate for every labour line (standard AED {settings.labourRate}{isOwner ? "" : ", higher only"})</span><Input id="rate-all" defaultValue={String(settings.labourRate)} inputMode="decimal" className="w-32" disabled={disabled} /></label>
+                <Button type="button" tone="secondary" size="md" disabled={disabled} onClick={() => { const v = Number((document.getElementById("rate-all") as HTMLInputElement | null)?.value); if (!Number.isFinite(v) || v <= 0) return; for (const l of lines) if (l.line_type === "labour") patch(l.id, { labour_rate: v }, true); }}>Apply to all labour lines</Button>
+              </div>
+            ) : null}
           </Card>
         ) : null}
       </div>

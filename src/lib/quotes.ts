@@ -124,7 +124,7 @@ export type PartItem = {
   confirmed_by: string | null;
   confirmed_at: string | null;
   reject_note: string | null;
-  order_status: "none" | "to_order" | "ordered" | "received";
+  order_status: "none" | "to_order" | "ordered" | "partly_received" | "received";
   added_by_role: string | null;
   is_active: boolean;
   created_at: string;

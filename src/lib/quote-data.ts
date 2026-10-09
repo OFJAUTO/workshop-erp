@@ -39,8 +39,8 @@ export type QuoteBundle = {
   requests: PartRequest[];
   events: { id: number; event_type: string; note: string | null; created_at: string; by_name: string | null }[];
   versions: { id: string; version: number; status: string; created_at: string }[];
-  customer: { id: string; full_name: string; company_name: string | null; phone: string } | null;
-  vehicle: { id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
+  customer: { id: string; full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null;
+  vehicle: { id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
   job: { id: string; job_number: string; status: string; department: string | null; assigned_to: string | null; gated_in_by: string; is_open: boolean; inspection_fee_due: boolean } | null;
   inspection: InspectionBundle | null;
   creatorName: string | null;
@@ -75,8 +75,8 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     quotation.job_id ? admin.from("part_requests").select(REQUEST_SELECT).eq("job_id", quotation.job_id).eq("is_active", true).order("created_at") : Promise.resolve({ data: [] }),
     admin.from("quotation_events").select("id, event_type, note, created_at, created_by").eq("quotation_id", id).order("created_at", { ascending: false }),
     admin.from("quotations").select("id, version, status, created_at").eq("number", quotation.number).eq("kind", quotation.kind).order("version"),
-    admin.from("customers").select("id, full_name, company_name, phone").eq("id", quotation.customer_id).maybeSingle(),
-    quotation.vehicle_id ? admin.from("vehicles").select("id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
+    admin.from("customers").select("id, full_name, company_name, phone, email, trn").eq("id", quotation.customer_id).maybeSingle(),
+    quotation.vehicle_id ? admin.from("vehicles").select("id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? loadInspection(quotation.job_id) : Promise.resolve(null),
     quotation.created_by ? admin.from("staff").select("display_name").eq("id", quotation.created_by).maybeSingle() : Promise.resolve({ data: null }),
@@ -144,7 +144,9 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
 }
 
 /** The labour rate for a job's department, and the minimum parts markup for a make. */
-export function labourRateFor(settings: Settings, department: string | null | undefined) {
+export function labourRateFor(settings: Settings, department: string | null | undefined, make?: string | null) {
+  const byMake = (settings.labour_rate_by_make ?? {}) as Record<string, number>;
+  if (make && byMake[make]) return Number(byMake[make]) || 0;
   const byDept = (settings.labour_rate_by_department ?? {}) as Record<string, number>;
   const key = department === "bodyshop" ? "bodyshop" : department === "mechanical" ? "mechanical" : "";
   return Number(byDept[key] ?? settings.labour_rate_aed) || 0;

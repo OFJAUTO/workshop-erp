@@ -1,7 +1,8 @@
 import "server-only";
 import type { ReactNode } from "react";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
-import { Document, Font, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Document, Font, Image, Page, Path, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
+import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 
@@ -11,91 +12,186 @@ Font.registerHyphenationCallback((word) => [word]);
 export const INK = "#111111";
 export const GREY = "#6a6a6a";
 export const LINE = "#d9d9d9";
-export const CHIP = "#f2f2f2";
+export const PALE = "#f3f3f3";
 export const RED = "#b3261e";
 export const AMBER = "#8a5a00";
 export const GREEN = "#1b6b2f";
 
 /**
- * One template for every PDF the workshop sends: the logo on the left, the company details on the
- * right, a big title with the number, two boxes, a table, totals, and a footer on every page.
- * White, black and grey only; A4 with proper margins.
+ * One template for every document the workshop sends: logo left, legal name and address beside the
+ * TRN on the right, a thick rule, the title with its numbers in one row, pale grey boxes, tables with
+ * VAT columns, totals and a status box, amount in words with payments and bank details, and a footer
+ * on every page. White and black with thin rules; printer friendly. No lineHeight anywhere above the
+ * footer: react-pdf drops a fixed footer whose page-number Text inherits one.
  */
 export const styles = StyleSheet.create({
-  // No lineHeight anywhere above the footer: react-pdf drops a fixed footer whose page-number Text inherits one.
-  page: { paddingTop: 34, paddingBottom: 82, paddingHorizontal: 42, fontFamily: "Helvetica", fontSize: 9.5, color: INK },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: 1.2, borderBottomColor: INK, paddingBottom: 10, marginBottom: 16 },
-  logo: { width: 120, height: 56, objectFit: "contain", objectPosition: "left" },
-  company: { alignItems: "flex-end", fontSize: 8.5, color: GREY, lineHeight: 1.4 },
-  companyName: { fontSize: 11, fontFamily: "Helvetica-Bold", color: INK },
-  titleRow: { flexDirection: "row", alignItems: "flex-end", gap: 10, marginBottom: 6 },
-  title: { fontSize: 22, lineHeight: 1.15, fontFamily: "Helvetica-Bold", letterSpacing: 1.5 },
-  number: { fontSize: 12, lineHeight: 1.15, fontFamily: "Helvetica-Bold", color: GREY, paddingBottom: 4 },
-  meta: { flexDirection: "row", flexWrap: "wrap", gap: 14, fontSize: 9, color: GREY },
-  metaLabel: { fontFamily: "Helvetica-Bold", color: INK },
-  boxes: { flexDirection: "row", gap: 12, marginTop: 16 },
-  box: { flex: 1, borderWidth: 0.8, borderColor: LINE, borderRadius: 4, padding: 9 },
-  boxTitle: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: GREY, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 },
-  boxLine: { fontSize: 9.5 },
-  boxStrong: { fontSize: 10.5, fontFamily: "Helvetica-Bold" },
-  section: { marginTop: 16 },
-  sectionTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: GREY, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 },
-  groupTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", color: GREY, letterSpacing: 1.2, textTransform: "uppercase", marginTop: 10, marginBottom: 2 },
-  th: { flexDirection: "row", backgroundColor: CHIP, paddingVertical: 5, paddingHorizontal: 4, fontFamily: "Helvetica-Bold", fontSize: 8, color: GREY },
-  row: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: LINE, paddingVertical: 5, paddingHorizontal: 4 },
-  cDesc: { flex: 1, paddingRight: 8 },
-  cQty: { width: 58, textAlign: "right" },
-  cUnit: { width: 76, textAlign: "right" },
-  cAmt: { width: 80, textAlign: "right", fontFamily: "Helvetica-Bold" },
-  cTag: { width: 74, textAlign: "right", fontSize: 7.5, fontFamily: "Helvetica-Bold" },
+  page: { paddingTop: 30, paddingBottom: 112, paddingHorizontal: 36, fontFamily: "Helvetica", fontSize: 9, color: INK },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: 2.2, borderBottomColor: INK, paddingBottom: 10, marginBottom: 14 },
+  logo: { width: 118, height: 54, objectFit: "contain", objectPosition: "left" },
+  headerRight: { flexDirection: "row", alignItems: "stretch" },
+  headerCol: { paddingHorizontal: 12, justifyContent: "center" },
+  headerDivider: { borderLeftWidth: 0.8, borderLeftColor: INK },
+  legalName: { fontSize: 10, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  addressLine: { fontSize: 8, color: INK },
+  trnLabel: { fontSize: 7.5, color: GREY, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 3 },
+  trn: { fontSize: 14, fontFamily: "Helvetica-Bold", letterSpacing: 0.5 },
+  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 },
+  title: { fontSize: 24, fontFamily: "Helvetica-Bold", letterSpacing: 2 },
+  metaRow: { flexDirection: "row", gap: 16 },
+  metaLabel: { fontSize: 7, color: GREY, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 2 },
+  metaValue: { fontSize: 9.5, fontFamily: "Helvetica-Bold" },
+  boxes: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  box: { flex: 1, backgroundColor: PALE, borderRadius: 3, padding: 9 },
+  boxTitle: { fontSize: 7, fontFamily: "Helvetica-Bold", color: GREY, letterSpacing: 1, textTransform: "uppercase", marginBottom: 5 },
+  boxStrong: { fontSize: 10.5, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  boxRow: { flexDirection: "row", marginTop: 1.5 },
+  boxLabel: { width: 52, color: GREY, fontSize: 8 },
+  boxValue: { flex: 1, fontSize: 8.5 },
+  sectionTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", letterSpacing: 1.2, textTransform: "uppercase", marginTop: 8, marginBottom: 4 },
+  th: { flexDirection: "row", borderBottomWidth: 0.8, borderBottomColor: INK, paddingVertical: 4, fontFamily: "Helvetica-Bold", fontSize: 7.5, color: GREY, textTransform: "uppercase", letterSpacing: 0.4 },
+  tr: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: LINE, paddingVertical: 4.5 },
+  subtotal: { flexDirection: "row", backgroundColor: PALE, paddingVertical: 4.5, fontFamily: "Helvetica-Bold" },
+  cNo: { width: 18 },
+  cDesc: { flex: 1, paddingRight: 6 },
+  cQty: { width: 44, textAlign: "right" },
+  cRate: { width: 60, textAlign: "right" },
+  cAmt: { width: 64, textAlign: "right" },
+  cVat: { width: 52, textAlign: "right" },
+  cTot: { width: 66, textAlign: "right" },
   lineTitle: { fontFamily: "Helvetica-Bold" },
-  lineDetails: { fontSize: 8.5, color: GREY, marginTop: 1 },
-  totals: { marginTop: 14, alignSelf: "flex-end", width: 280 },
+  lineDetails: { fontSize: 7.5, color: GREY, marginTop: 1 },
+  partNumber: { fontSize: 7.5, color: GREY, marginTop: 1 },
+  discountLine: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, borderBottomWidth: 0.5, borderBottomColor: LINE, fontFamily: "Helvetica-Bold" },
+  bottom: { flexDirection: "row", gap: 18, marginTop: 14 },
+  leftCol: { flex: 1 },
+  rightCol: { width: 230 },
   tRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2.5 },
   tLabel: { color: GREY },
-  tTotal: { flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1.2, borderTopColor: INK, marginTop: 4, paddingTop: 6, fontSize: 13, fontFamily: "Helvetica-Bold" },
-  note: { marginTop: 14, padding: 9, borderWidth: 0.8, borderColor: LINE, borderRadius: 4, fontSize: 9 },
-  footer: { position: "absolute", left: 42, right: 42, bottom: 26, borderTopWidth: 0.5, borderTopColor: LINE, paddingTop: 6, fontSize: 7.5, color: GREY },
-  footerRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
+  tBold: { fontFamily: "Helvetica-Bold", color: INK },
+  tTotal: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1.2, borderTopColor: INK, marginTop: 3, paddingTop: 6, paddingBottom: 4, fontSize: 12.5, fontFamily: "Helvetica-Bold" },
+  statusBox: { borderWidth: 1.2, borderColor: INK, borderRadius: 3, padding: 9, marginTop: 8 },
+  statusTitle: { fontSize: 8, fontFamily: "Helvetica-Bold", letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 3 },
+  statusNote: { fontSize: 7.5, color: GREY, marginTop: 2 },
+  words: { fontSize: 8.5, fontFamily: "Helvetica-Oblique", marginBottom: 8 },
+  smallTitle: { fontSize: 7, fontFamily: "Helvetica-Bold", color: GREY, letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 },
+  payRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2, borderBottomWidth: 0.4, borderBottomColor: LINE, fontSize: 8 },
+  bank: { marginTop: 16 },
+  bankRow: { flexDirection: "row", fontSize: 8, marginTop: 1.5 },
+  bankLabel: { width: 70, color: GREY },
+  note: { marginTop: 12, padding: 8, borderWidth: 0.6, borderColor: LINE, borderRadius: 3, fontSize: 8.5 },
+  footer: { position: "absolute", left: 36, right: 36, bottom: 24 },
+  footerMain: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", borderTopWidth: 0.5, borderTopColor: LINE, paddingTop: 7, paddingBottom: 7 },
+  footerText: { fontSize: 7.5, color: GREY },
+  footerStrong: { fontSize: 8, color: INK },
+  qr: { width: 44, height: 44 },
+  contact: { borderTopWidth: 2.2, borderTopColor: INK, paddingTop: 6, flexDirection: "row", justifyContent: "center", gap: 18, fontSize: 8 },
   photoRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 },
-  photo: { width: 118, height: 88, objectFit: "cover", borderRadius: 3, backgroundColor: CHIP },
+  photo: { width: 118, height: 88, objectFit: "cover", borderRadius: 3, backgroundColor: PALE },
   tag: { fontSize: 7.5, fontFamily: "Helvetica-Bold", letterSpacing: 0.8 },
-  item: { borderWidth: 0.8, borderColor: LINE, borderRadius: 4, padding: 8, marginTop: 6 },
+  item: { borderWidth: 0.6, borderColor: LINE, borderRadius: 3, padding: 8, marginTop: 6 },
   itemHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 },
-  small: { fontSize: 8.5, color: GREY },
+  small: { fontSize: 8, color: GREY },
   checkRow: { flexDirection: "row", gap: 6, paddingVertical: 2, borderBottomWidth: 0.4, borderBottomColor: LINE },
+  groupTitle: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: GREY, letterSpacing: 1, textTransform: "uppercase", marginTop: 8, marginBottom: 2 },
 });
 
-export type Company = { name: string; address: string; phone: string; email: string; trn: string };
+export type Company = {
+  tradingName: string;
+  legalName: string;
+  legalNameAr: string;
+  address: string[];
+  phone: string;
+  email: string;
+  website: string;
+  trn: string;
+  bank: { name: string; accountName: string; accountNumber: string; iban: string; swift: string };
+};
 
-/** The company details from Settings, for the header of every PDF. */
+/** The company details from Settings, for the header, footer and bank block of every document. */
 export function companyOf(s: Settings): Company {
-  return { name: String(s.company_name || "OFJ Automotive"), address: String(s.company_address ?? ""), phone: String(s.company_phone ?? ""), email: String(s.company_email ?? ""), trn: String(s.company_trn ?? "") };
+  return {
+    tradingName: String(s.company_name || "OFJ Automotive"),
+    legalName: String(s.company_legal_name || s.company_name || ""),
+    legalNameAr: String(s.company_legal_name_ar ?? ""),
+    address: [s.company_address_1, s.company_address_2, s.company_address_3].map((x) => String(x ?? "").trim()).filter(Boolean),
+    phone: String(s.company_phone ?? ""),
+    email: String(s.company_email ?? ""),
+    website: String(s.company_website ?? ""),
+    trn: String(s.company_trn ?? ""),
+    bank: { name: String(s.bank_name ?? ""), accountName: String(s.bank_account_name ?? ""), accountNumber: String(s.bank_account_number ?? ""), iban: String(s.bank_iban ?? ""), swift: String(s.bank_swift ?? "") },
+  };
 }
 
 export const SITE_HOST = PRODUCTION_SITE_URL.replace(/^https?:\/\//, "");
+export const currencyOf = (s: Settings): Currency => (String(s.document_currency) === "aed" ? "aed" : "symbol");
 
-export function PdfDocument({ title, company, logo, footerLines, children }: { title: string; company: Company; logo: Buffer | null; footerLines: string[]; children: ReactNode }) {
+/** The dirham symbol drawn at the size of the text beside it. */
+export function DirhamMark({ size = 9, color = INK }: { size?: number; color?: string }) {
+  const h = size * 0.82;
   return (
-    <Document title={title} author={company.name} creator={company.name} producer={company.name}>
+    <Svg viewBox={DIRHAM_VIEWBOX} width={h * DIRHAM_RATIO} height={h} style={{ marginRight: size * 0.18 }}>
+      <Path d={DIRHAM_PATH} fill={color} />
+    </Svg>
+  );
+}
+
+/** An amount with the symbol before it (or "AED" when the setting says so), right-aligned inside its cell. */
+export function Amount({ value, currency, size = 9, bold = false, color = INK, align = "flex-end", style }: { value: number | null | undefined; currency: Currency; size?: number; bold?: boolean; color?: string; align?: "flex-start" | "flex-end"; style?: TextProps["style"] }) {
+  const text = moneyDigits(value);
+  const textStyle = { fontSize: size, fontFamily: bold ? "Helvetica-Bold" : "Helvetica", color };
+  const extra = style ? (Array.isArray(style) ? style : [style]) : [];
+  if (currency === "aed") return <Text style={[textStyle, ...extra]}>AED {text}</Text>;
+  return (
+    <View style={[{ flexDirection: "row", alignItems: "center", justifyContent: align }, ...extra]}>
+      <DirhamMark size={size} color={color} />
+      <Text style={textStyle}>{text}</Text>
+    </View>
+  );
+}
+
+export function PdfDocument({ title, company, logo, qr, preparedBy, footerLines = [], children }: { title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; preparedBy?: string | null; footerLines?: string[]; children: ReactNode }) {
+  return (
+    <Document title={title} author={company.tradingName} creator={company.tradingName} producer={company.tradingName}>
       <Page size="A4" style={styles.page}>
         <View style={styles.header} fixed>
-          {logo ? <Image src={{ data: logo, format: "jpg" }} style={styles.logo} /> : <Text style={styles.companyName}>{company.name}</Text>}
-          <View style={styles.company}>
-            <Text style={styles.companyName}>{company.name}</Text>
-            {company.address ? <Text>{company.address}</Text> : null}
-            {company.phone || company.email ? <Text>{[company.phone, company.email].filter(Boolean).join("   ·   ")}</Text> : null}
-            {company.trn ? <Text>TRN {company.trn}</Text> : null}
+          {logo ? <Image src={{ data: logo, format: "jpg" }} style={styles.logo} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
+          <View style={styles.headerRight}>
+            <View style={[styles.headerCol, { alignItems: "flex-end" }]}>
+              <Text style={styles.legalName}>{company.legalName}</Text>
+              {company.address.map((l, i) => (
+                <Text key={i} style={styles.addressLine}>{l}</Text>
+              ))}
+            </View>
+            {company.trn ? (
+              <View style={[styles.headerCol, styles.headerDivider, { alignItems: "flex-start", paddingRight: 0 }]}>
+                <Text style={styles.trnLabel}>Tax registration no.</Text>
+                <Text style={styles.trn}>{company.trn}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
         {/* The footer sits before the content: react-pdf drops fixed elements placed after a block that wraps over pages. */}
         <View style={styles.footer} fixed>
-          {footerLines.filter(Boolean).map((l, i) => (
-            <Text key={i}>{l}</Text>
-          ))}
-          <View style={styles.footerRow}>
-            <Text>Terms and conditions apply   ·   {SITE_HOST}/terms</Text>
-            <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+          <View style={styles.footerMain}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              {preparedBy ? (
+                <Text style={styles.footerStrong}>
+                  Prepared by <Text style={{ fontFamily: "Helvetica-Bold" }}>{preparedBy}</Text>
+                </Text>
+              ) : null}
+              <Text style={styles.footerText}>This is a computer generated document which requires no stamp and signature.</Text>
+              {footerLines.filter(Boolean).map((l, i) => (
+                <Text key={i} style={styles.footerText}>{l}</Text>
+              ))}
+              <Text style={styles.footerText}>Terms and conditions: {SITE_HOST}/terms</Text>
+            </View>
+            {qr ? <Image src={{ data: qr, format: "png" }} style={styles.qr} /> : null}
+            <Text style={[styles.footerText, { width: 60, textAlign: "right", marginLeft: 10 }]} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+          </View>
+          <View style={styles.contact}>
+            {company.phone ? <Text>Tel {company.phone}</Text> : null}
+            {company.website ? <Text>Web {company.website}</Text> : null}
+            {company.email ? <Text>Email {company.email}</Text> : null}
           </View>
         </View>
         {children}
@@ -104,38 +200,51 @@ export function PdfDocument({ title, company, logo, footerLines, children }: { t
   );
 }
 
-export function TitleBlock({ title, number, meta }: { title: string; number: string; meta: ({ label: string; value: string } | null)[] }) {
+export type Meta = { label: string; value: string } | null;
+
+/** The big title with the document's numbers in one row beside it. */
+export function TitleRow({ title, meta }: { title: string; meta: Meta[] }) {
+  // A long title ("INSPECTION REPORT") with four meta columns must not run into them: it shrinks a little and may wrap.
+  const long = title.length > 12;
   return (
-    <View>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.number}>{number}</Text>
-      </View>
-      <View style={styles.meta}>
+    <View style={styles.titleRow}>
+      <Text style={[styles.title, { flexShrink: 1, maxWidth: long ? 250 : 320, fontSize: long ? 19 : 24, letterSpacing: long ? 1.2 : 2 }]}>{title}</Text>
+      <View style={[styles.metaRow, { flexShrink: 0 }]}>
         {meta
           .filter((m): m is { label: string; value: string } => !!m && !!m.value)
           .map((m) => (
-            <Text key={m.label}>
-              <Text style={styles.metaLabel}>{m.label}: </Text>
-              {m.value}
-            </Text>
+            <View key={m.label}>
+              <Text style={styles.metaLabel}>{m.label}</Text>
+              <Text style={styles.metaValue}>{m.value}</Text>
+            </View>
           ))}
       </View>
     </View>
   );
 }
 
-export function InfoBoxes({ boxes }: { boxes: { title: string; strong: string; lines: (string | null | undefined)[] }[] }) {
+export type Box = { title: string; strong?: string | null; rows?: [string, string | null | undefined][]; lines?: (string | null | undefined)[] };
+
+/** Pale grey boxes: customer, vehicle, supplier. */
+export function InfoBoxes({ boxes }: { boxes: Box[] }) {
   return (
     <View style={styles.boxes}>
       {boxes.map((b) => (
         <View key={b.title} style={styles.box}>
           <Text style={styles.boxTitle}>{b.title}</Text>
-          <Text style={styles.boxStrong}>{b.strong}</Text>
-          {b.lines
+          {b.strong ? <Text style={styles.boxStrong}>{b.strong}</Text> : null}
+          {(b.lines ?? [])
             .filter((l): l is string => !!l)
             .map((l, i) => (
-              <Text key={i} style={styles.boxLine}>{l}</Text>
+              <Text key={i} style={styles.boxValue}>{l}</Text>
+            ))}
+          {(b.rows ?? [])
+            .filter((r) => !!r[1])
+            .map(([label, value]) => (
+              <View key={label} style={styles.boxRow}>
+                <Text style={styles.boxLabel}>{label}</Text>
+                <Text style={styles.boxValue}>{value}</Text>
+              </View>
             ))}
         </View>
       ))}
@@ -143,58 +252,144 @@ export function InfoBoxes({ boxes }: { boxes: { title: string; strong: string; l
   );
 }
 
-export type PdfLine = { title: string; details?: string | null; qty: string; unit: string; amount: string; tag?: string | null };
+export type DocLine = { description: string; details?: string | null; partNumber?: string | null; qty: string; rate: number; amount: number; vat: number; total: number; complimentary?: boolean; tag?: string | null };
 
-export function LinesTable({ groups, currency = "AED" }: { groups: { label: string; lines: PdfLine[] }[]; currency?: string }) {
+/** SERVICES or SPARE PARTS: #, Description, Qty, Rate, Amount, VAT 5%, Total, with a pale subtotal row. */
+export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLabel, startAt = 1 }: { title: string; lines: DocLine[]; currency: Currency; vatPercent?: number; subtotalLabel: string; startAt?: number }) {
+  const sum = (k: "amount" | "vat" | "total") => lines.reduce((a, l) => a + l[k], 0);
   return (
-    <View style={styles.section}>
+    <View>
+      <Text style={styles.sectionTitle}>{title}</Text>
       <View style={styles.th}>
+        <Text style={styles.cNo}>#</Text>
         <Text style={styles.cDesc}>Description</Text>
-        <Text style={styles.cQty}>Qty / hours</Text>
-        <Text style={styles.cUnit}>Unit price ({currency})</Text>
-        <Text style={styles.cAmt}>Amount ({currency})</Text>
-        <Text style={styles.cTag}>{""}</Text>
+        <Text style={styles.cQty}>Qty</Text>
+        <Text style={styles.cRate}>Rate</Text>
+        <Text style={styles.cAmt}>Amount</Text>
+        <Text style={styles.cVat}>VAT {vatPercent}%</Text>
+        <Text style={styles.cTot}>Total</Text>
       </View>
-      {groups.map((g) => (
-        <View key={g.label}>
-          <Text style={styles.groupTitle}>{g.label}</Text>
-          {g.lines.map((l, i) => (
-            <View key={i} style={styles.row} wrap={false}>
-              <View style={styles.cDesc}>
-                <Text style={styles.lineTitle}>{l.title}</Text>
-                {l.details ? <Text style={styles.lineDetails}>{l.details}</Text> : null}
-              </View>
-              <Text style={styles.cQty}>{l.qty}</Text>
-              <Text style={styles.cUnit}>{l.unit}</Text>
-              <Text style={styles.cAmt}>{l.amount}</Text>
-              <Text style={[styles.cTag, { color: l.tag === "Urgent" ? RED : GREY }]}>{l.tag ?? ""}</Text>
-            </View>
-          ))}
+      {lines.length === 0 ? (
+        <View style={styles.tr}>
+          <Text style={[styles.cDesc, { color: GREY }]}>None</Text>
+        </View>
+      ) : null}
+      {lines.map((l, i) => (
+        <View key={i} style={styles.tr} wrap={false}>
+          <Text style={styles.cNo}>{startAt + i}</Text>
+          <View style={styles.cDesc}>
+            <Text style={styles.lineTitle}>{l.description}</Text>
+            {l.tag ? <Text style={[styles.tag, { color: GREY, marginTop: 1 }]}>{l.tag.toUpperCase()}</Text> : null}
+            {l.partNumber ? <Text style={styles.partNumber}>{l.partNumber}</Text> : null}
+            {l.details ? <Text style={styles.lineDetails}>{l.details}</Text> : null}
+          </View>
+          <Text style={styles.cQty}>{l.qty}</Text>
+          {l.complimentary ? (
+            <>
+              <Text style={styles.cRate}>{""}</Text>
+              <Text style={[styles.cAmt, { fontFamily: "Helvetica-Oblique" }]}>Complimentary</Text>
+              <Text style={styles.cVat}>{""}</Text>
+              <Text style={styles.cTot}>{""}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.cRate}>{moneyDigits(l.rate)}</Text>
+              <Text style={styles.cAmt}>{moneyDigits(l.amount)}</Text>
+              <Text style={styles.cVat}>{moneyDigits(l.vat)}</Text>
+              <Text style={styles.cTot}>{moneyDigits(l.total)}</Text>
+            </>
+          )}
         </View>
       ))}
+      <View style={styles.subtotal} wrap={false}>
+        <Text style={styles.cNo}>{""}</Text>
+        <Text style={styles.cDesc}>{subtotalLabel}</Text>
+        <Text style={styles.cQty}>{""}</Text>
+        <Text style={styles.cRate}>{""}</Text>
+        <Text style={styles.cAmt}>{moneyDigits(sum("amount"))}</Text>
+        <Text style={styles.cVat}>{moneyDigits(sum("vat"))}</Text>
+        <Amount value={sum("total")} currency={currency} bold style={styles.cTot} />
+      </View>
     </View>
   );
 }
 
-export function TotalsBlock({ rows, total, after = [] }: { rows: { label: string; value: string }[]; total: { label: string; value: string }; after?: { label: string; value: string }[] }) {
+/** "Discount on labour and services", in bold under the services table. Never spread across lines. */
+export function DiscountLine({ amount, currency, label = "Discount on labour and services" }: { amount: number; currency: Currency; label?: string }) {
+  if (!amount) return null;
   return (
-    <View style={styles.totals} wrap={false}>
-      {rows.map((r) => (
-        <View key={r.label} style={styles.tRow}>
-          <Text style={styles.tLabel}>{r.label}</Text>
-          <Text>{r.value}</Text>
-        </View>
-      ))}
+    <View style={styles.discountLine} wrap={false}>
+      <Text>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <Text style={{ fontFamily: "Helvetica-Bold" }}>- </Text>
+        <Amount value={amount} currency={currency} bold />
+      </View>
+    </View>
+  );
+}
+
+export type TotalRow = { label: string; value: number; bold?: boolean; negative?: boolean };
+export type StatusBox = { title: string; value?: number | null; note?: string | null };
+
+/** The totals on the right: gross, discount, taxable, VAT, total in bold, paid, then the outlined status box. */
+export function TotalsBlock({ rows, total, after = [], status, currency }: { rows: TotalRow[]; total: { label: string; value: number }; after?: TotalRow[]; status?: StatusBox | null; currency: Currency }) {
+  const row = (r: TotalRow) => (
+    <View key={r.label} style={styles.tRow}>
+      <Text style={r.bold ? styles.tBold : styles.tLabel}>{r.label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        {r.negative ? <Text style={r.bold ? styles.tBold : {}}>- </Text> : null}
+        <Amount value={r.value} currency={currency} bold={!!r.bold} />
+      </View>
+    </View>
+  );
+  return (
+    <View style={styles.rightCol} wrap={false}>
+      {rows.map(row)}
       <View style={styles.tTotal}>
         <Text>{total.label}</Text>
-        <Text>{total.value}</Text>
+        <Amount value={total.value} currency={currency} bold size={12.5} />
       </View>
-      {after.map((r) => (
-        <View key={r.label} style={styles.tRow}>
-          <Text style={styles.tLabel}>{r.label}</Text>
-          <Text style={{ fontFamily: "Helvetica-Bold" }}>{r.value}</Text>
+      {after.map(row)}
+      {status ? (
+        <View style={styles.statusBox}>
+          <Text style={styles.statusTitle}>{status.title}</Text>
+          {status.value !== null && status.value !== undefined ? <Amount value={status.value} currency={currency} bold size={15} align="flex-start" /> : null}
+          {status.note ? <Text style={styles.statusNote}>{status.note}</Text> : null}
         </View>
-      ))}
+      ) : null}
+    </View>
+  );
+}
+
+export type PaymentLine = { date: string; method: string; amount: number; note?: string | null };
+
+/** Left of the totals: the amount in words, the payments received, and the bank transfer details with clear space above. */
+export function WordsAndPayments({ words, payments, bank, currency, showBank = true }: { words: string; payments: PaymentLine[]; bank: Company["bank"]; currency: Currency; showBank?: boolean }) {
+  return (
+    <View style={styles.leftCol}>
+      <Text style={styles.smallTitle}>Amount in words</Text>
+      <Text style={styles.words}>{words}</Text>
+      {payments.length ? (
+        <View>
+          <Text style={styles.smallTitle}>Payments received</Text>
+          {payments.map((p, i) => (
+            <View key={i} style={styles.payRow}>
+              <Text>{p.date}  ·  {p.method}{p.note ? `  ·  ${p.note}` : ""}</Text>
+              <Amount value={p.amount} currency={currency} size={8} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {showBank && (bank.iban || bank.accountNumber) ? (
+        <View style={styles.bank}>
+          <Text style={styles.smallTitle}>Bank transfer</Text>
+          {bank.name ? <View style={styles.bankRow}><Text style={styles.bankLabel}>Bank</Text><Text>{bank.name}</Text></View> : null}
+          {bank.accountName ? <View style={styles.bankRow}><Text style={styles.bankLabel}>Account name</Text><Text>{bank.accountName}</Text></View> : null}
+          {bank.accountNumber ? <View style={styles.bankRow}><Text style={styles.bankLabel}>Account no.</Text><Text>{bank.accountNumber}</Text></View> : null}
+          {bank.iban ? <View style={styles.bankRow}><Text style={styles.bankLabel}>IBAN</Text><Text>{bank.iban}</Text></View> : null}
+          {bank.swift ? <View style={styles.bankRow}><Text style={styles.bankLabel}>SWIFT</Text><Text>{bank.swift}</Text></View> : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -212,4 +407,10 @@ export function Photos({ photos }: { photos: Buffer[] }) {
 
 export function Tag({ text, color }: { text: string; color: string }) {
   return <Text style={[styles.tag, { color }]}>{text}</Text>;
+}
+
+/** The line's quantity text: "1.5 h" for labour, otherwise the number. */
+export function qtyText(quantity: number, hours?: number | null) {
+  if (hours !== null && hours !== undefined) return `${(Math.round(hours * 10) / 10).toFixed(1)} h`;
+  return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(2);
 }
