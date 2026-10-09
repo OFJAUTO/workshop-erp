@@ -207,6 +207,39 @@ export type JobRow = {
   ready_sent_at: string | null;
   followup_due_at: string | null;
   followup_done_at: string | null;
+  /** Planning inside the Parts step: Parts, then the workshop manager, then the advisor. */
+  plan_parts_done_at: string | null;
+  plan_parts_by: string | null;
+  plan_parts_ready_date: string | null;
+  plan_start_date: string | null;
+  plan_released_at: string | null;
+  plan_released_by: string | null;
+  plan_release_note: string | null;
+  plan_date_confirmed_at: string | null;
+  plan_date_confirmed_by: string | null;
+  plan_reminded_at: string | null;
+  /** Every technician pressed "Job finished"; the workshop manager confirms or sends it back. */
+  work_done_at: string | null;
+  work_sendbacks: number;
+  wash_sent_at: string | null;
+  wash_sent_by: string | null;
+  /** A car back with the same problem: the original job, the cause, and whether it is free of charge. */
+  comeback_of: string | null;
+  comeback_cause: "workmanship" | "faulty_part" | "unrelated" | "customer_caused" | null;
+  comeback_cause_by: string | null;
+  comeback_cause_at: string | null;
+  comeback_confirmed_by: string | null;
+  comeback_confirmed_at: string | null;
+  comeback_free: boolean;
+  comeback_claim_status: "none" | "to_claim" | "claimed" | "paid";
+  comeback_claim_amount: number | null;
+  comeback_claim_po: string | null;
+  comeback_claim_supplier: string | null;
+  summary: Record<string, unknown> | null;
+  summary_verdict: "good" | "acceptable" | "talk" | null;
+  summary_at: string | null;
+  summary_comment: string | null;
+  summary_comment_by: string | null;
   created_at: string;
   updated_at: string;
 };

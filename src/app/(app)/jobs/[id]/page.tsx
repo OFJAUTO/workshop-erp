@@ -33,8 +33,15 @@ import { formatPlate } from "@/lib/types";
 import { assignJob, moveJob, setJobPriority, setPromisedDate } from "../actions";
 import { decideRoadTest, remindManager, setAssignmentNote } from "../assignment-actions";
 import { decideMove, requestMove } from "../move-actions";
+import { remindManagerToConfirm } from "../work-actions";
+import { loadPlanning } from "@/lib/planning";
+import { sendToWash, skipWash, washDone } from "../../wash/actions";
+import { WashForms } from "../../wash/WashForms";
 import { MediaGallery } from "./MediaGallery";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
+import { PlanningCard } from "./PlanningCard";
+import { JobSummaryCard } from "./JobSummaryCard";
+import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +77,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
   const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
   const laterStage = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
-  const [partsState, work, qc, wash, bal] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null)]);
+  const [partsState, work, qc, wash, bal, plan, { data: comebackRows }] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null), laterStage ? loadPlanning(job, settings) : Promise.resolve(null), admin.from("jobs").select("id, job_number, comeback_cause, comeback_free, gated_in_at").or(`comeback_of.eq.${id},id.eq.${job.comeback_of ?? id}`).neq("id", id)]);
+  const comebackOriginal = job.comeback_of ? ((comebackRows ?? []).find((r) => r.id === job.comeback_of) ?? null) : null;
+  const comebacksOfThis = (comebackRows ?? []).filter((r) => r.id !== job.comeback_of);
 
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "", hasCarPicture: !!vehicle.photo_path });
   const wt = workingTimeOf(settings);
@@ -137,7 +146,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
     gateInComplete: check.complete,
     quote: qState,
-    extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null },
+    extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
   });
   const canQuote = (role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)))) && job.is_open && !staff.viewingAs;
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
@@ -184,6 +193,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
             {job.inspection_fee_due ? <Badge tone="red">Inspection fee due · AED {Number(settings.inspection_fee_aed).toLocaleString("en-GB")}</Badge> : null}
+            {job.comeback_of ? <Badge tone={job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "outline" : "red"}>{job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "Return visit" : "Comeback"}{comebackOriginal ? ` of ${comebackOriginal.job_number}` : ""}{job.comeback_free ? " · free of charge" : ""}</Badge> : null}
+            {comebacksOfThis.length ? <Badge tone="red">Came back: {comebacksOfThis.map((c) => c.job_number).join(", ")}</Badge> : null}
             <TimingBadge timing={timing} />
             {!job.is_open ? <Badge tone="neutral">Closed</Badge> : null}
           </span>
@@ -274,6 +285,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               {step.action.label}
             </LinkButton>
           ) : null}
+          {job.status === "in_work" && job.work_done_at && job.is_open && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? (
+            <form action={remindManagerToConfirm.bind(null, id)}><Button type="submit" tone="secondary" size="md" className="w-full">Remind {managerLabel}</Button></form>
+          ) : null}
           {job.promised_at ? (
             <div className="flex flex-col gap-2 border-t border-ink/20 pt-3">
               <p className="text-sm">
@@ -309,6 +323,14 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           ) : null}
         </section>
       </div>
+
+      {plan && (plan.active || ["approved", "waiting_parts"].includes(job.status)) ? (
+        <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} technicians={(technicians ?? []).length ? (technicians ?? []) : await loadTechnicians()} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} />
+      ) : null}
+      {job.comeback_of || comebacksOfThis.length ? (
+        <ComebackCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} original={comebackOriginal} comebacks={comebacksOfThis} inspectionApproved={inspection?.inspection.status === "approved"} />
+      ) : null}
+      {job.summary ? <JobSummaryCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} /> : null}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className={`flex flex-col gap-2 ${toneCls[approvalState.tone]} ${job.stage === "gate_in" ? "ring-2 ring-ink" : ""}`}>
@@ -392,20 +414,21 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <span className="text-xs text-muted">Opens when the approved report lists parts</span>
               </span>
             ) : null}
-            {can(role, "managePurchaseOrders") && partsState.received.length && partsState.needed.some((p) => p.issue_status !== "confirmed") ? <LinkButton href={`/parts/issue/${id}`} size="md">Issue parts</LinkButton> : null}
+            {can(role, "managePurchaseOrders") && partsState.received.length && partsState.needed.some((p) => p.issue_status !== "confirmed") ? <LinkButton href={`/parts/handover/${id}`} size="md">Hand over</LinkButton> : null}
             {can(role, "viewPurchaseOrders") && partsState.received.length ? <LinkButton href={`/parts/labels/${id}`} tone="secondary" size="md">Labels</LinkButton> : null}
+            {(can(role, "viewPurchaseOrders") || can(role, "manageWork")) && partsState.needed.length ? <LinkButton href={`/parts/trail/${id}`} tone="ghost" size="md">Parts trail</LinkButton> : null}
           </div>
           {partsState.late.length ? <span className="text-xs font-bold text-red">{partsState.late.length} part{partsState.late.length === 1 ? "" : "s"} late</span> : null}
-          {partsState.needed.length ? <span className="text-xs text-muted">Issued {partsState.confirmed.length} of {partsState.needed.length}</span> : null}
+          {partsState.needed.length ? <span className="text-xs text-muted">Handed over {partsState.confirmed.length} of {partsState.needed.length}</span> : null}
         </Card>
         <Card className={`flex flex-col gap-2 ${work ? "" : "bg-canvas opacity-70"} ${job.stage === "work" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Work</span>
-          <span className="text-sm font-semibold">{work ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} lines done` : "Not started"}</span>
-          {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min clocked of {work.hoursQuoted.toFixed(1)} h quoted{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
+          <span className="text-sm font-semibold">{job.status === "in_work" && job.work_done_at ? `Job finished, waiting on ${managerLabel} to confirm` : work && job.plan_released_at ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} jobs done` : work ? "Planned, not released" : "Not started"}</span>
+          {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min used of {work.hoursQuoted.toFixed(1)} h charged{plan?.technicians.length ? ` · ${plan.technicians.filter((t) => !t.left_at).map((t) => t.display_name).join(", ")}` : ""}{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
           {can(role, "viewWorkOrders") && (work || role === "owner") ? <div className="mt-auto"><LinkButton href={`/jobs/${id}/work`} tone={job.status === "in_work" && managesThisJob ? "primary" : "secondary"} size="md">Work order</LinkButton></div> : can(role, "viewWorkOrders") ? (
             <div className="mt-auto flex flex-col gap-1">
               <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Work order</span>
-              <span className="text-xs text-muted">Opens when the quotation is approved and the parts are issued</span>
+              <span className="text-xs text-muted">Opens when the workshop manager releases the car from planning</span>
             </div>
           ) : null}
         </Card>
@@ -413,12 +436,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">QC</span>
           <span className="text-sm font-semibold">{qc ? (qc.status === "open" ? `Round ${qc.round} in progress` : qc.status === "passed" ? `Passed, round ${qc.round}` : `Failed, round ${qc.round}`) : "Not started"}</span>
           {job.rework_count ? <span className="text-xs text-red font-bold">Rework {job.rework_count}×</span> : null}
-          {qc && (can(role, "doQc") || can(role, "viewWorkOrders")) ? <div className="mt-auto"><LinkButton href={`/qc/${id}`} tone={job.status === "pending_qc" && can(role, "doQc") ? "primary" : "secondary"} size="md">{job.status === "pending_qc" && can(role, "doQc") ? "Start QC" : "QC"}</LinkButton></div> : null}
+          {(qc || job.status === "pending_qc") && (can(role, "doQc") || can(role, "viewWorkOrders")) ? <div className="mt-auto"><LinkButton href={`/qc/${id}`} tone={job.status === "pending_qc" && can(role, "doQc") ? "primary" : "secondary"} size="md">{job.status === "pending_qc" && can(role, "doQc") ? "Start QC" : "QC"}</LinkButton></div> : null}
         </Card>
         <Card className={`flex flex-col gap-2 ${wash ? "" : "bg-canvas opacity-70"} ${job.stage === "wash" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Wash</span>
-          <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? "On the car wash list" : "Not started"}</span>
-          {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><LinkButton href="/wash" size="md">Car wash list</LinkButton></div> : null}
+          <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? (job.wash_sent_at ? `At the wash since ${formatDayTime(job.wash_sent_at)}` : "Ready for wash") : "Not started"}</span>
+          {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><WashForms jobId={id} atWash={!!job.wash_sent_at} canAct={(role === "owner" || role === "service_advisor") && !staff.viewingAs} from="job" sendAction={sendToWash.bind(null, id)} doneAction={washDone.bind(null, id)} skipAction={skipWash.bind(null, id)} /></div> : null}
         </Card>
         {role !== "parts" ? (
         <Card className={`flex flex-col gap-2 ${bal?.invoice ? "border-green" : job.status === "ready" || job.status === "pending_payment" ? "border-ink" : "bg-canvas opacity-70"} ${job.stage === "ready" ? "ring-2 ring-ink" : ""}`}>
@@ -651,10 +674,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                       </option>
                     ))}
                   </Select>
+                  <Textarea name="reason" rows={1} required placeholder="Reason (stays on the job card)" />
                   <Button type="submit" tone="secondary">
                     Move
                   </Button>
-                  <p className="text-xs text-muted">Owner only. Every move is logged.</p>
+                  <p className="text-xs text-muted">Owner only. The step opens properly: to QC opens the round, to Work builds the work order.</p>
                 </form>
               </Card>
             ) : null}
@@ -676,6 +700,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       </div>
     </>
   );
+}
+
+async function loadTechnicians() {
+  const { data } = await createAdminClient().from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name");
+  return (data ?? []) as { id: string; display_name: string; department_id: string | null }[];
 }
 
 async function loadApproverContacts(customerId: string) {

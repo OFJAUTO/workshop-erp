@@ -31,6 +31,7 @@ export function GateInForm({
   mileageUnit = "km",
   mileageContext = { modelYear: null, lastKm: null, lastVisitAt: null },
   estimates = [],
+  comebacks = [],
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -48,6 +49,8 @@ export function GateInForm({
   mileageContext?: { modelYear: number | null; lastKm: number | null; lastVisitAt: string | null };
   /** Accepted estimates for this car that no job has used yet. */
   estimates?: { id: string; label: string; hint: string }[];
+  /** Jobs of this car gated out within the comeback window. */
+  comebacks?: { id: string; label: string; hint: string }[];
 }) {
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
@@ -173,6 +176,11 @@ export function GateInForm({
                 {vip ? (
                   <Field label="VIP handling note" hint="Shown to everyone who opens this customer's cars.">
                     <Textarea name="vip_note" defaultValue={v.vip_note} rows={2} />
+                  </Field>
+                ) : null}
+                {comebacks.length ? (
+                  <Field label="Is this a comeback for a previous job?" hint="A car back within the window for the same problem. The manager picks the cause after the inspection; only the owner can make it free.">
+                    <ChoiceButtons name="comeback_of" columns={2} defaultValue={v.comeback_of ?? ""} options={[{ value: "", label: "No, a new visit" }, ...comebacks.map((c) => ({ value: c.id, label: c.label, hint: c.hint }))]} />
                   </Field>
                 ) : null}
                 <Field label="Priority">

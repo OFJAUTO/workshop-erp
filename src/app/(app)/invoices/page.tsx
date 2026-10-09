@@ -3,6 +3,8 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { verifyPaymentAction } from "./actions";
+import { Button } from "@/components/ui";
 import { INVOICE_SELECT, PAYMENT_SELECT, PAYMENT_STATE_LABELS, invoiceBalance, toInvoice, toPayment, type InvoiceRow } from "@/lib/invoice-data";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -35,6 +37,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     return true;
   });
   const unpaidTotal = invoices.reduce((a, i) => a + (stateOf(i.inv)?.balance ?? 0), 0);
+  // Payments recorded by advisors that accounts have not ticked yet; after three days the owner sees them in red.
+  const toVerify = payments.filter((p) => p.status === "recorded" && !p.verified_at).sort((a, b) => (a.received_at < b.received_at ? -1 : 1));
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const oldLimit = Date.now() - 3 * 86400000;
+  const invoiceOf = new Map(invoices.map((i) => [i.inv.id, i]));
   const tone = (state: string | undefined) => (state === "paid" ? "green" : state === "part_paid" ? "amber" : state === "cheque_pending" ? "amber" : state === "unpaid" ? "red" : "neutral");
 
   return (
@@ -47,6 +54,26 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+
+      {can(role, "verifyPayments") && toVerify.length ? (
+        <section className="flex flex-col gap-3">
+          <SectionLabel right={`${toVerify.length}`}>Payments to verify</SectionLabel>
+          {toVerify.map((p) => {
+            const inv = p.invoice_id ? invoiceOf.get(p.invoice_id) : null;
+            const old = Date.parse(p.received_at) < oldLimit;
+            return (
+              <Card key={p.id} className={`flex flex-wrap items-center gap-3 ${old ? "border-red-bar" : ""}`}>
+                <span className="font-extrabold">{p.number}</span>
+                <span className="font-semibold">{inv?.inv.number ?? "deposit"}{inv?.job?.vehicle ? ` · ${formatPlate(inv.job.vehicle)}` : ""}</span>
+                <span className="text-sm text-muted">{formatDateTime(p.received_at)} · {p.method}</span>
+                <span className="font-semibold">AED {p.amount_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
+                {old ? <Badge tone="red">Not verified for more than 3 days</Badge> : null}
+                {!staff.viewingAs ? <form action={verifyPaymentAction.bind(null, p.id)} className="ml-auto"><input type="hidden" name="return_to" value="/invoices" /><Button type="submit" size="md" tone="secondary">Verified: the money is in</Button></form> : null}
+              </Card>
+            );
+          })}
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${toInvoiceList.length}`}>To invoice</SectionLabel>

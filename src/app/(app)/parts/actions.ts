@@ -7,7 +7,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
-import { PARTS_BUCKET, PART_SELECT, minMarkupFor, refreshQuoteTotals, toPart } from "@/lib/quote-data";
+import { PARTS_BUCKET, PART_SELECT, minMarkupFor, refreshQuoteTotals, toPart, parentLineFor } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -48,18 +48,25 @@ export async function syncLineForPart(jobId: string, partId: string, by: string)
     if (line) await admin.from("quotation_lines").update({ is_active: false, updated_by: by }).eq("id", line.id);
   } else if (line) {
     await admin.from("quotation_lines").update(shared).eq("id", line.id);
+    const { data: cur } = await admin.from("quotation_lines").select("parent_line_id").eq("id", line.id).maybeSingle();
+    if (cur && !cur.parent_line_id) {
+      const { data: req0 } = p.part_request_id ? await admin.from("part_requests").select("source_type, source_key").eq("id", p.part_request_id).maybeSingle() : { data: null };
+      const parent = await parentLineFor(quotationId, req0 ? { source_type: req0.source_type, source_key: req0.source_key } : null);
+      if (parent) await admin.from("quotation_lines").update({ parent_line_id: parent, updated_by: by }).eq("id", line.id);
+    }
   } else {
     const settings = await getSettings();
     const { data: v } = await admin.from("jobs").select("vehicle:vehicles(make:vehicle_makes(name))").eq("id", jobId).maybeSingle();
     const make = ((v?.vehicle as unknown as { make: { name: string } | null } | null)?.make?.name) ?? null;
     const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", quotationId).order("position", { ascending: false }).limit(1).maybeSingle();
-    const { data: req } = p.part_request_id ? await admin.from("part_requests").select("label").eq("id", p.part_request_id).maybeSingle() : { data: null };
+    const { data: req } = p.part_request_id ? await admin.from("part_requests").select("label, source_type, source_key").eq("id", p.part_request_id).maybeSingle() : { data: null };
+    const parent = await parentLineFor(quotationId, req ? { source_type: req.source_type, source_key: req.source_key } : null);
     let chosen = true;
     if (p.option_group) {
       const { data: siblings } = await admin.from("quotation_lines").select("id").eq("quotation_id", quotationId).eq("option_group", p.option_group).eq("is_active", true).eq("chosen", true).limit(1);
       chosen = !(siblings ?? []).length;
     }
-    await admin.from("quotation_lines").insert({ quotation_id: quotationId, position: (Number(last?.position) || 0) + 1, line_type: "part", ...shared, chosen, group_label: req?.label ?? "Parts", source_type: "manual", markup_percent: minMarkupFor(settings, make), part_item_id: p.id, created_by: by });
+    await admin.from("quotation_lines").insert({ quotation_id: quotationId, position: (Number(last?.position) || 0) + 1, line_type: "part", ...shared, chosen, parent_line_id: parent, group_label: req?.label ?? "Parts", source_type: "manual", markup_percent: minMarkupFor(settings, make), part_item_id: p.id, created_by: by });
   }
   await refreshQuoteTotals(quotationId, await getSettings(), by, { reopen: true });
 }

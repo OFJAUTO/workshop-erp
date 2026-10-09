@@ -32,6 +32,9 @@ export default async function SettingsPage() {
   let limits: Record<string, number> = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
   let prescanGate = false;
   let inboundToken = "";
+  let labourJobsText = "";
+  let candidates: Record<string, number> = {};
+  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false };
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
@@ -45,6 +48,10 @@ export default async function SettingsPage() {
     else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
     else if (row.key === "inspection_limits") limits = { ...limits, ...((row.value as Record<string, number>) ?? {}) };
     else if (row.key === "prescan_gate_enabled") prescanGate = row.value === true;
+    else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button") flags[row.key] = row.value === true;
+    else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
+    else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
+    else if (row.key === "recovery_providers" || row.key === "labour_hours_memory") continue;
     else if (row.key === "inbound_scan_token") inboundToken = typeof row.value === "string" ? row.value : "";
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");
   }
@@ -93,6 +100,9 @@ export default async function SettingsPage() {
             listTexts={listTexts}
             limits={limits}
             prescanGate={prescanGate}
+            labourJobsText={labourJobsText}
+            candidates={candidates}
+            flags={flags}
           />
         </div>
         <div className="flex flex-col gap-6">

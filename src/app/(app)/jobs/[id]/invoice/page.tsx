@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
+import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, toInvoice, toPayment, type LabourMode } from "@/lib/invoice-data";
@@ -11,6 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
+import { InvoiceOptions } from "./InvoiceOptions";
 import { issueInvoice, recordPayment } from "@/app/(app)/invoices/actions";
 
 export const dynamic = "force-dynamic";
@@ -62,20 +63,10 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         <div className="xl:col-span-2 flex flex-col gap-4">
           <Card className="flex flex-col gap-3">
             <SectionLabel>Options</SectionLabel>
-            <form method="get" className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2">
-                <label className={`min-h-11 inline-flex items-center gap-2 rounded-control border px-3 text-sm font-bold cursor-pointer ${labourMode === "itemised" ? "border-ink bg-ink text-white" : "border-line-strong"}`}><input type="radio" name="labour" value="itemised" defaultChecked={labourMode === "itemised"} className="sr-only" />Labour itemised per job</label>
-                <label className={`min-h-11 inline-flex items-center gap-2 rounded-control border px-3 text-sm font-bold cursor-pointer ${labourMode === "combined" ? "border-ink bg-ink text-white" : "border-line-strong"}`}><input type="radio" name="labour" value="combined" defaultChecked={labourMode === "combined"} className="sr-only" />One &quot;Labour charges&quot; line</label>
-                <label className={`min-h-11 inline-flex items-center gap-2 rounded-control border px-3 text-sm font-bold cursor-pointer ${consumables ? "border-ink bg-ink text-white" : "border-line-strong"}`}><input type="checkbox" name="consumables" value="1" defaultChecked={!!consumables} className="sr-only" />Add Consumables (AED {Number(settings.consumables_default_aed) || 0})</label>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Agreed total with VAT (optional)</span><Input name="agreed" defaultValue={sp.agreed ?? ""} inputMode="decimal" placeholder="A round final total" /></label>
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Or discount % on labour and services</span><Input name="discount" defaultValue={sp.discount ?? ""} inputMode="decimal" placeholder={`quoted: ${draft.totals.discountPercent}%`} /></label>
-                <div className="flex items-end"><Button type="submit" tone="secondary" size="md">Recalculate</Button></div>
-              </div>
-              {draft.totals.agreedTotalProblem ? <p className="text-sm font-semibold text-red">{draft.totals.agreedTotalProblem}</p> : null}
-              {draft.totals.agreedTotalApplied ? <p className="text-sm font-semibold text-green">Agreed total applied: discount {draft.totals.discountPercent}% on labour and services (limit {settings.discount_limit_percent}%).</p> : null}
-            </form>
+            <InvoiceOptions labourMode={labourMode} consumables={!!consumables} consumablesDefault={Number(settings.consumables_default_aed) || 0} agreed={sp.agreed ?? ""} discount={sp.discount ?? ""} quotedDiscount={draft.totals.discountPercent} />
+            {draft.totals.agreedTotalProblem ? <p className="text-sm font-semibold text-red">{draft.totals.agreedTotalProblem}</p> : null}
+            {draft.totals.agreedTotalApplied ? <p className="text-sm font-semibold text-green">Agreed total applied: discount {draft.totals.discountPercent}% on labour and services (limit {settings.discount_limit_percent}%).</p> : null}
+            {draft.totals.warrantyCredit ? <p className="text-sm font-semibold">Warranty repair: the work and parts show at their normal value, then &quot;Warranty repair, no charge&quot; brings the total to zero.</p> : null}
           </Card>
 
           <Card className="flex flex-col gap-2">
@@ -99,6 +90,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
             <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm border-t border-line pt-2">
               <dt className="text-muted">Gross amount</dt><dd className="text-right">AED {m(draft.totals.gross)}</dd>
               {draft.totals.discount ? <><dt className="font-bold">Discount on labour and services ({draft.totals.discountPercent}%)</dt><dd className="text-right font-bold">− AED {m(draft.totals.discount)}</dd></> : null}
+              {draft.totals.warrantyCredit ? <><dt className="font-bold">Warranty repair, no charge</dt><dd className="text-right font-bold">− AED {m(draft.totals.warrantyCredit)}</dd></> : null}
               <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(draft.totals.taxable)}</dd>
               <dt className="text-muted">VAT {draft.vatPercent}%</dt><dd className="text-right">AED {m(draft.totals.vat)}</dd>
               <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(draft.totals.total)}</dd>

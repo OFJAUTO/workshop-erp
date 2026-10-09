@@ -4,7 +4,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { feeNotice } from "@/lib/jobs";
 import { amountInWords, round2 } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { URGENCY_LABELS, hasCostFloor, isHidden, isUnchosen, lineTotal, lineUnitPrice, partTypeText, quoteTotals } from "@/lib/quotes";
+import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partTypeText, quoteTotals } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -38,11 +38,12 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       vat,
       total: round2(amount + vat),
       complimentary: amount === 0,
-      tag: l.urgency && !isEstimate ? URGENCY_LABELS[l.urgency] : null,
+      tag: l.urgency === "urgent" && !isEstimate ? "Urgent" : null,
     };
   };
-  const services = lines.filter((l) => l.line_type !== "part" && !(l.line_type === "other" && hasCostFloor(l))).map(toDoc);
-  const parts = lines.filter((l) => l.line_type === "part" || (l.line_type === "other" && hasCostFloor(l))).map(toDoc);
+  const services = lines.filter((l) => blockOf(l) === "labour").map(toDoc);
+  const parts = lines.filter((l) => blockOf(l) === "parts").map(toDoc);
+  const others = lines.filter((l) => blockOf(l) === "other").map(toDoc);
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), q.token ? qrPng(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : Promise.resolve(null)]);
@@ -54,7 +55,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const doc = (
     <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} preparedBy={creatorName} footerLines={footer}>
       <TitleRow
-        title={isEstimate ? "ESTIMATE" : "QUOTATION"}
+        title={isEstimate ? "ESTIMATE" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
         meta={[
           { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },
           { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
@@ -69,9 +70,10 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           { title: "Vehicle", strong: carName || "Vehicle", rows: [["Variant", vehicle?.variant ?? null], ["Plate", vehicle ? formatPlate(vehicle) : null], ["VIN", vehicle?.vin ?? null]] },
         ]}
       />
-      <LinesTable title="Services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Services subtotal" />
+      <LinesTable title="Labour and services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Labour and services subtotal" />
       <DiscountLine amount={totals.discount} currency={currency} />
-      <LinesTable title="Spare parts" lines={parts} currency={currency} vatPercent={vatPct} subtotalLabel="Spare parts subtotal" startAt={services.length + 1} />
+      {parts.length ? <LinesTable title="Parts" lines={parts} currency={currency} vatPercent={vatPct} subtotalLabel="Parts subtotal" startAt={services.length + 1} /> : null}
+      {others.length ? <LinesTable title="Other charges" lines={others} currency={currency} vatPercent={vatPct} subtotalLabel="Other charges subtotal" startAt={services.length + parts.length + 1} /> : null}
       <View style={styles.bottom}>
         <WordsAndPayments words={amountInWords(totals.total)} payments={[]} bank={company.bank} currency={currency} showBank={!isEstimate} />
         <TotalsBlock
@@ -79,6 +81,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           rows={[
             { label: "Gross amount", value: totals.subtotal },
             ...(totals.discount ? [{ label: "Discount", value: totals.discount, bold: true, negative: true }] : []),
+            ...(totals.rounding ? [{ label: "Rounding", value: Math.abs(totals.rounding), negative: totals.rounding < 0 }] : []),
             { label: "Taxable amount", value: totals.net },
             { label: `VAT ${vatPct}%`, value: totals.vat },
           ]}

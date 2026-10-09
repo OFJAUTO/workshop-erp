@@ -39,6 +39,8 @@ export default async function ProfitPage() {
               <span className="font-semibold">{r.plate ?? ""} · {r.jobNumber ?? ""}</span>
               {r.provisional ? <Badge tone="amber">Provisional: {r.provisionalWhy.join(", ")}</Badge> : <Badge tone="green">Final</Badge>}
               {r.balance > 0 ? <Badge tone="red">AED {r.balance.toFixed(0)} unpaid</Badge> : null}
+              {r.comeback?.ours ? <Badge tone="red">Comeback, our fault{r.comeback.claimPaid ? ` · AED ${r.comeback.claimPaid.toFixed(0)} claimed back` : ""}</Badge> : r.comeback ? <Badge tone="outline">Return visit</Badge> : null}
+              {r.profitAfterComeback !== null ? <Badge tone="amber">Profit after comeback {aed(r.profitAfterComeback)}</Badge> : null}
               <span className="ml-auto flex gap-4 text-xs text-muted">
                 <span>rev {r.revenue.toFixed(0)}</span>
                 <span>parts {r.partsCost.toFixed(0)}</span>

@@ -13,41 +13,61 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/work-data";
-import { assignWorkLines, confirmWorkComplete, decideAdditionalWork } from "../../work-actions";
+import { activeTechnicians } from "@/lib/work-flow";
+import { putTechnicianOnCar } from "../../planning-actions";
+import { confirmWorkComplete, decideAdditionalWork, decidePause, sendWorkBack } from "../../work-actions";
+import { BudgetTimer } from "@/app/(app)/my-jobs/[id]/WorkPanel";
 
 export const dynamic = "force-dynamic";
 
-const fmt = (min: number) => `${Math.floor(min / 60)} h ${min % 60} min`;
+const fmt = (min: number) => `${Math.floor(min / 60)} h ${String(Math.round(min % 60)).padStart(2, "0")} min`;
+type PauseRow = { id: string; technician_id: string; reason: string; started_at: string; ended_at: string | null; minutes: number | string | null; accepted: boolean; rejected_by: string | null; note: string | null };
 
-/** The workshop manager's work order: the approved lines with hours and no prices, who does what, the clock against the quote, additional work, and "work complete". */
+/**
+ * The workshop manager's work order: who is on the car and their hours, the time budget, the approved
+ * lines (no prices), the parts, additional work found, the pause log, and "Confirmed, send to QC" or
+ * "Not done, send back" once the technician presses Job finished.
+ */
 export default async function WorkOrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requirePermission("viewWorkOrders");
   const role = staff.role_id as RoleId;
   const { id } = await params;
   const { message, error } = await searchParams;
   const supabase = await createClient();
-  const [card, work, parts, settings, qc] = await Promise.all([loadJobCard(supabase, id), loadWork(id), jobPartsState(id), getSettings(), latestQc(id)]);
+  const admin = createAdminClient();
+  const [card, work, parts, settings, qc, techs, { data: pauseRows }, { data: techRows }] = await Promise.all([
+    loadJobCard(supabase, id),
+    loadWork(id),
+    jobPartsState(id),
+    getSettings(),
+    latestQc(id),
+    activeTechnicians(id),
+    admin.from("work_pauses").select("id, technician_id, reason, started_at, ended_at, minutes, accepted, rejected_by, note").eq("job_id", id).eq("is_active", true).order("started_at", { ascending: false }),
+    admin.from("staff").select("id, display_name, department_id").eq("role_id", "technician").eq("is_active", true).order("display_name"),
+  ]);
   if (!card) notFound();
-  const qcFailed = qc && qc.status === "failed" ? qc : null;
   const { job, vehicle, gateIn } = card;
+  const qcFailed = qc && qc.status === "failed" && job.status === "in_work" ? qc : null;
   const manages = role === "owner" || (role === "workshop_manager" && jobConcernsSide(job.department, sideOfDepartment(staff.department_id)));
   const canEdit = manages && can(role, "manageWork") && !staff.viewingAs && job.is_open;
-  const { data: techs } = await createAdminClient().from("staff").select("id, display_name, department_id").eq("role_id", "technician").eq("is_active", true).order("display_name");
-  const technicians = (techs ?? []).filter((t) => !sideOfDepartment(t.department_id) || jobConcernsSide(job.department, sideOfDepartment(t.department_id)));
+  const technicians = (techRows ?? []).filter((t) => !sideOfDepartment(t.department_id) || jobConcernsSide(job.department, sideOfDepartment(t.department_id)));
+  const nameOf = new Map((techRows ?? []).map((t) => [t.id, t.display_name]));
   const seesCost = role === "owner" || role === "accounts";
   const rate = Number(settings.technician_cost_rate_aed) || 0;
   const pending = work.additional.filter((a) => a.status === "pending");
-  const undone = work.lines.filter((l) => l.status !== "done");
   const running = work.sessions.filter((s) => !s.ended_at);
-  const blockers = [
-    ...(undone.length ? [`${undone.length} line${undone.length === 1 ? "" : "s"} not done`] : []),
-    ...(parts.needed.some((p) => p.issue_status !== "confirmed") ? ["issued parts not confirmed by the technician"] : []),
-    ...(pending.length ? ["additional work waiting for a decision"] : []),
-  ];
+  const minutesUsed = work.sessions.filter((s) => s.ended_at).reduce((a, s) => a + sessionMinutes(s), 0);
+  const pauses = (pauseRows ?? []) as PauseRow[];
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const nowMs = Date.now();
+  const pauseMinutes = (p: PauseRow) => (p.minutes !== null ? Number(p.minutes) : p.ended_at ? 0 : Math.round((nowMs - Date.parse(p.started_at)) / 60000));
+  const unhanded = parts.needed.filter((p) => p.issue_status !== "confirmed");
+  const blockers = [...(unhanded.length ? [`${unhanded.length} part${unhanded.length === 1 ? "" : "s"} not handed to the technician`] : []), ...(pending.length ? ["additional work waiting for your decision"] : [])];
+  const inPlanning = ["approved", "waiting_parts"].includes(job.status);
 
   return (
     <>
-      <LiveRefresh tables={["work_lines", "work_sessions", "additional_work", "jobs"]} jobId={id} pollMs={60000} />
+      <LiveRefresh tables={["work_lines", "work_sessions", "additional_work", "jobs", "job_technicians", "work_pauses"]} jobId={id} pollMs={60000} />
       <PageHeader
         title={`Work order · ${formatPlate(vehicle)}`}
         subtitle={`${vehicleTitle(vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}`}
@@ -57,7 +77,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
       {error ? <Notice tone="error">{error}</Notice> : null}
       {gateIn?.dash_cam ? <Notice tone="error">Dash cam fitted: disconnect before work, reconnect before release.</Notice> : null}
       {gateIn?.old_parts_return ? <Notice tone="info">The customer asked for the old parts. Keep them.</Notice> : null}
-      {qcFailed && job.status === "in_work" ? (
+      {qcFailed ? (
         <Card className="border-red-bar flex flex-col gap-2">
           <SectionLabel right={`round ${qcFailed.round} · rework ${job.rework_count}`}>QC failed: back in Work</SectionLabel>
           <ul className="flex flex-col gap-1 text-sm">
@@ -65,58 +85,53 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
               <li key={i.key}><span className="font-bold">{i.label}</span>{i.remark ? <span className="text-muted"> · {i.remark}</span> : null}</li>
             ))}
           </ul>
-          <p className="text-xs text-muted">When the technician has fixed these, confirm work complete again: QC rechecks only the failed items.</p>
+          <p className="text-xs text-muted">The technician fixes these and presses Job finished again; you confirm; QC rechecks only the failed items.</p>
         </Card>
       ) : null}
-      {job.status !== "in_work" && job.status !== "pending_qc" ? <Notice tone="info">The work order opens when the quotation is approved and the parts are issued (or none are needed). Now: {STATUS_LABELS[job.status]}{parts.needed.length ? ` · parts issued ${parts.confirmed.length} of ${parts.needed.length}` : ""}.</Notice> : null}
+      {inPlanning ? (
+        <Card className="flex flex-col gap-3 border-ink">
+          <SectionLabel>Not released yet</SectionLabel>
+          <p className="text-sm">The car is in planning. The work order opens for the technicians when you release it from the Planning card on the job card: pick the start day and tick the technicians.</p>
+          <div><LinkButton href={`/jobs/${id}#planning`} size="md">Go to planning</LinkButton></div>
+        </Card>
+      ) : null}
+      {!inPlanning && job.status !== "in_work" && job.status !== "pending_qc" ? <Notice tone="info">Now: {STATUS_LABELS[job.status]}. {job.status === "pending_wash" ? "QC is passed; the advisor sends the car to the wash." : ""}</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
-          <Card className="flex flex-col gap-3">
-            <SectionLabel right={`${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} done · ${work.hoursQuoted.toFixed(1)} h quoted`}>Approved work</SectionLabel>
-            {work.lines.length === 0 ? <p className="text-sm text-muted">No work lines yet.</p> : null}
-            <form action={assignWorkLines.bind(null, id)} className="flex flex-col gap-2">
-              <ul className="divide-y divide-line">
-                {work.lines.map((l) => (
-                  <li key={l.id} className="py-2 flex flex-wrap items-center gap-3">
-                    <Badge tone={l.status === "done" ? "green" : l.status === "in_progress" ? "amber" : "neutral"}>{l.status === "done" ? "Done" : l.status === "in_progress" ? "In progress" : "To do"}</Badge>
-                    <span className="flex-1 min-w-56">
-                      <span className="font-semibold">{l.title}</span>
-                      {l.details ? <span className="block text-xs text-muted">{l.details}</span> : null}
-                      {l.notes ? <span className="block text-xs">Technician: {l.notes}</span> : null}
-                      {l.source === "additional" ? <span className="block text-xs text-muted">Additional work</span> : null}
-                    </span>
-                    <span className="text-xs text-muted w-16 text-right">{l.hours_quoted !== null ? `${l.hours_quoted.toFixed(1)} h` : ""}</span>
-                    {canEdit ? (
-                      <Select name={`assign__${l.id}`} defaultValue={l.assigned_to ?? ""} className="w-44">
-                        <option value="">Not assigned</option>
-                        {technicians.map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}
-                      </Select>
-                    ) : (
-                      <span className="text-sm font-semibold w-44">{l.assigned_to ? (work.names.get(l.assigned_to) ?? "") : "Not assigned"}</span>
-                    )}
-                    {l.done_at ? <span className="text-xs text-muted">done {formatDateTime(l.done_at)}{l.done_by ? ` by ${work.names.get(l.done_by) ?? ""}` : ""}</span> : null}
-                  </li>
-                ))}
-              </ul>
-              {canEdit && work.lines.length ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select name="assign_all" defaultValue="" className="w-56">
-                    <option value="">Assign all lines to…</option>
-                    {technicians.map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}
-                  </Select>
-                  <Button type="submit" size="md">Save assignments</Button>
-                </div>
-              ) : null}
-            </form>
-            {work.files.length ? (
-              <div className="flex flex-wrap gap-2">
-                {work.files.filter((f) => f.kind === "work_photo").map((f) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <a key={f.id} href={work.fileUrls[f.storage_path] ?? "#"} target="_blank" rel="noreferrer"><img src={work.fileUrls[f.storage_path] ?? ""} alt="Work photo" className="h-20 w-20 rounded-control object-cover bg-chip" /></a>
-                ))}
+          {job.status === "in_work" && canEdit ? (
+            <Card className={`flex flex-col gap-3 ${job.work_done_at ? "border-green" : "border-line"}`}>
+              <SectionLabel>{job.work_done_at ? `Job finished ${formatDateTime(job.work_done_at)}: confirm it` : "Work complete"}</SectionLabel>
+              {job.work_done_at ? <p className="text-sm">The technician{techs.length > 1 ? "s say" : " says"} all work on this car is done. Check the car, then confirm, or send it back with a note the technician sees on top.</p> : <p className="text-sm text-muted">The technician presses Job finished on the tablet; you confirm here. You can also confirm now if you checked the car yourself.</p>}
+              {blockers.length ? <p className="text-sm text-red font-semibold">Not possible yet: {blockers.join("; ")}.</p> : null}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <form action={confirmWorkComplete.bind(null, id)} className="sm:flex-1"><Button type="submit" size="lg" className="w-full" disabled={blockers.length > 0}>Confirmed, send to QC</Button></form>
+                <form action={sendWorkBack.bind(null, id)} className="sm:flex-1 flex flex-col gap-2">
+                  <Textarea name="note" rows={2} required placeholder="What is not done (the technician sees this on top)" />
+                  <Button type="submit" tone="secondary" size="lg" className="w-full">Not done, send back</Button>
+                </form>
               </div>
-            ) : null}
+              {job.work_sendbacks ? <p className="text-xs text-muted">Sent back {job.work_sendbacks} time{job.work_sendbacks === 1 ? "" : "s"} on this car.</p> : null}
+            </Card>
+          ) : null}
+
+          <Card className="flex flex-col gap-3">
+            <SectionLabel right={`${work.hoursQuoted.toFixed(1)} h charged`}>Approved work</SectionLabel>
+            {work.lines.length === 0 ? <p className="text-sm text-muted">No work lines yet.</p> : null}
+            <ol className="divide-y divide-line">
+              {work.lines.map((l, i) => (
+                <li key={l.id} className="py-2 flex gap-3 items-start">
+                  <span className="w-6 shrink-0 text-muted font-semibold">{i + 1}.</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="font-semibold">{l.title}</span>
+                    {l.details ? <span className="block text-xs text-muted">{l.details}</span> : null}
+                    {l.source === "additional" ? <span className="block text-xs text-muted">Additional work</span> : null}
+                  </span>
+                  <span className="text-xs text-muted whitespace-nowrap">{l.hours_quoted !== null ? `${l.hours_quoted.toFixed(1)} h` : ""}</span>
+                  <Badge tone={l.status === "done" ? "green" : l.status === "in_progress" ? "amber" : "neutral"}>{l.status === "done" ? "Done" : l.status === "in_progress" ? "In progress" : "To do"}</Badge>
+                </li>
+              ))}
+            </ol>
           </Card>
 
           <Card className={`flex flex-col gap-3 ${pending.length ? "border-ink" : ""}`}>
@@ -137,40 +152,72 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
                   ))}
                 </div>
                 {a.decision_note ? <p className="text-xs text-muted">Decision: {a.decision_note}</p> : null}
-                {a.quotation_id ? <LinkButton href={`/jobs/${id}/quote/${a.quotation_id}`} tone="secondary" size="md">Open the additional quotation</LinkButton> : null}
+                {a.quotation_id && can(role, "viewQuotes") ? <LinkButton href={`/jobs/${id}/quote/${a.quotation_id}`} tone="secondary" size="md">Open the additional quotation</LinkButton> : null}
                 {a.status === "pending" && canEdit ? (
                   <form action={decideAdditionalWork.bind(null, a.id)} className="flex flex-col gap-2">
-                    <Textarea name="note" rows={2} placeholder="Note for the advisor or the technician (optional)" />
+                    <Textarea name="note" rows={1} placeholder="Note for the advisor or the technician (optional)" />
                     <div className="flex gap-2">
-                      <Button type="submit" name="decision" value="approve" size="md">Approve: send to the advisor to quote</Button>
-                      <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Refuse</Button>
+                      <Button type="submit" name="decision" value="approve" size="md">Send to the advisor to quote</Button>
+                      <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Dismiss</Button>
                     </div>
                   </form>
                 ) : null}
               </div>
             ))}
           </Card>
+
+          <Card className="flex flex-col gap-2">
+            <SectionLabel right={pauses.length ? `${pauses.length} · ${fmt(pauses.reduce((a, p) => a + pauseMinutes(p), 0))}` : undefined}>Pauses on this car</SectionLabel>
+            {pauses.length === 0 ? <p className="text-sm text-muted">No pauses.</p> : null}
+            <ul className="divide-y divide-line text-sm">
+              {pauses.map((p) => (
+                <li key={p.id} className={`py-2 flex flex-wrap items-center gap-3 ${p.accepted === false ? "text-red" : ""}`}>
+                  <span className="font-semibold w-32">{nameOf.get(p.technician_id) ?? work.names.get(p.technician_id) ?? "Technician"}</span>
+                  <span>{p.reason}</span>
+                  <span className="text-muted">{formatDateTime(p.started_at)} · {p.ended_at ? fmt(pauseMinutes(p)) : "still paused"}</span>
+                  {p.accepted === false ? <Badge tone="red">Not accepted</Badge> : null}
+                  {canEdit ? (
+                    <form action={decidePause.bind(null, p.id)} className="ml-auto">
+                      <input type="hidden" name="return_to" value={`/jobs/${id}/work`} />
+                      {p.accepted === false ? <Button type="submit" name="accepted" value="yes" tone="ghost" size="md">Accept after all</Button> : <Button type="submit" name="accepted" value="no" tone="ghost" size="md">Not accepted</Button>}
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {canEdit ? <p className="text-xs text-muted">Every technician&apos;s pauses by day: <a href="/pauses" className="underline underline-offset-4 font-semibold">Pause log</a>.</p> : null}
+          </Card>
         </div>
 
         <div className="flex flex-col gap-4">
           <Card className="flex flex-col gap-2">
-            <SectionLabel>Clock against the quote</SectionLabel>
-            <p className="text-2xl font-extrabold">{fmt(work.minutesTotal)} <span className="text-sm font-semibold text-muted">of {work.hoursQuoted.toFixed(1)} h quoted</span></p>
-            {running.length ? <Badge tone="amber">Running: {running.map((s) => work.names.get(s.technician_id)).join(", ")}</Badge> : null}
+            <SectionLabel>Time budget</SectionLabel>
+            <BudgetTimer hoursCharged={work.hoursQuoted} minutesUsed={minutesUsed} running={running.map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: false }))} locked={!!job.work_done_at} />
             <ul className="text-sm divide-y divide-line">
               {Array.from(work.minutesByTechnician.entries()).map(([tid, min]) => (
                 <li key={tid} className="py-1.5 flex justify-between"><span>{work.names.get(tid) ?? "Technician"}</span><span className="font-semibold">{fmt(min)}{seesCost ? ` · AED ${((min / 60) * rate).toFixed(0)}` : ""}</span></li>
               ))}
             </ul>
-            {work.sessions.length ? (
-              <details className="text-xs text-muted">
-                <summary className="cursor-pointer font-semibold">Sessions</summary>
-                <ul className="mt-1 flex flex-col gap-0.5">
-                  {work.sessions.map((s) => (
-                    <li key={s.id}>{formatDateTime(s.started_at)} · {work.names.get(s.technician_id)} · {sessionMinutes(s)} min{s.end_reason === "pause" ? ` · paused: ${s.pause_reason}` : s.ended_at ? "" : " · running"}</li>
-                  ))}
-                </ul>
-              </details>
+          </Card>
+          <Card className="flex flex-col gap-2">
+            <SectionLabel right={`${techs.length}`}>On the car</SectionLabel>
+            {techs.length === 0 ? <p className="text-sm text-muted">Nobody yet.</p> : null}
+            <ul className="text-sm divide-y divide-line">
+              {techs.map((t) => (
+                <li key={t.id} className="py-1.5 flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">{nameOf.get(t.staff_id) ?? work.names.get(t.staff_id) ?? "Technician"}</span>
+                  {running.some((s) => s.technician_id === t.staff_id) ? <Badge tone="green">Working</Badge> : t.done_at ? <Badge tone="ink">Done</Badge> : <Badge tone="neutral">Paused</Badge>}
+                </li>
+              ))}
+            </ul>
+            {canEdit && job.is_open && (job.status === "in_work" || job.status === "pending_qc") ? (
+              <form action={putTechnicianOnCar.bind(null, id)} className="flex items-center gap-2 border-t border-line pt-2">
+                <Select name="technician" defaultValue="" required className="flex-1">
+                  <option value="" disabled>Put a technician on the car…</option>
+                  {technicians.filter((t) => !techs.some((x) => x.staff_id === t.id)).map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}
+                </Select>
+                <Button type="submit" tone="secondary" size="md">Add</Button>
+              </form>
             ) : null}
           </Card>
           <Card className="flex flex-col gap-2">
@@ -178,20 +225,12 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
             {parts.needed.length === 0 ? <p className="text-sm text-muted">No parts needed.</p> : (
               <ul className="text-sm divide-y divide-line">
                 {parts.needed.map((p) => (
-                  <li key={p.id} className="py-1.5 flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><Badge tone={p.issue_status === "confirmed" ? "green" : "amber"}>{p.issue_status === "confirmed" ? "Issued, confirmed" : "Not issued"}</Badge></li>
+                  <li key={p.id} className="py-1.5 flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><Badge tone={p.issue_status === "confirmed" ? "green" : p.order_status === "received" ? "amber" : "neutral"}>{p.issue_status === "confirmed" ? "Handed over" : p.order_status === "received" ? "Here, not handed over" : p.expected_date ?? p.delivery_date ? `Coming ${p.expected_date ?? p.delivery_date}` : "Not here yet"}</Badge></li>
                 ))}
               </ul>
             )}
+            {unhanded.length && can(role, "managePurchaseOrders") ? <LinkButton href={`/parts/handover/${id}`} tone="secondary" size="md">Hand over the parts</LinkButton> : null}
           </Card>
-          {job.status === "in_work" && canEdit ? (
-            <Card className={`flex flex-col gap-2 ${blockers.length ? "" : "border-ink"}`}>
-              <SectionLabel>Work complete</SectionLabel>
-              {blockers.length ? <p className="text-sm text-red font-semibold">Not possible yet: {blockers.join("; ")}.</p> : <p className="text-sm text-muted">Every line is done and every part confirmed. The car goes to QC.</p>}
-              <form action={confirmWorkComplete.bind(null, id)}>
-                <Button type="submit" size="lg" className="w-full" disabled={blockers.length > 0}>Confirm work complete, send to QC</Button>
-              </form>
-            </Card>
-          ) : null}
         </div>
       </div>
     </>

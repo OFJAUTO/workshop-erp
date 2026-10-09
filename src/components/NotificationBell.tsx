@@ -3,18 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { TONES, engine, isTone, playTone, type ToneId } from "@/lib/tones";
 
 type Item = { id: number; staff_id?: string; type: string; title: string; body: string | null; job_id: string | null; href: string | null; read_at: string | null; created_at: string };
 
 const VOLUME_KEY = "erp_notif_volume";
+const TONE_KEY = "erp_notif_tone";
 const POLL_MS = 30000;
-/** While something is unread and the panel is closed, a soft reminder note every so often. */
-const REMIND_MS = 45000;
-/** Anything that needs the owner's personal approval gets the louder, longer sound. */
-const OWNER_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested", "po_approval", "credit_note_approval", "release_approval", "quote_owner_approval"]);
+/** Anything that needs the owner's personal approval, and a technician's "additional work found" for the manager, gets the second sound. */
+const LOUD_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested", "po_approval", "credit_note_approval", "release_approval", "quote_owner_approval", "additional_work", "overpayment_approval", "comeback"]);
 type Volume = "off" | "low" | "normal" | "loud";
 const VOLUMES: Volume[] = ["loud", "normal", "low", "off"];
-const GAIN: Record<Volume, number> = { off: 0, low: 0.18, normal: 0.45, loud: 0.85 };
+const GAIN: Record<Volume, number> = { off: 0, low: 0.25, normal: 0.55, loud: 0.9 };
 
 function timeAgo(iso: string) {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -22,53 +22,6 @@ function timeAgo(iso: string) {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   return `${Math.round(s / 86400)} d ago`;
-}
-
-let audio: AudioContext | null = null;
-/** One sound engine for the page. Browsers keep it muted until the person has clicked somewhere once. */
-function engine(): AudioContext | null {
-  try {
-    if (!audio) {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      audio = new Ctx();
-    }
-    return audio;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The sounds, made on the spot (no sound files). "normal": a clear two-note chime, ding-dong, played
- * twice. "owner": four rising notes, louder, for things only the owner can approve. "remind": one
- * soft note while something is still unread.
- */
-function play(kind: "normal" | "owner" | "remind", volume: Volume): "ok" | "blocked" | "none" {
-  if (volume === "off") return "none";
-  const ctx = engine();
-  if (!ctx) return "none";
-  if (ctx.state === "suspended") {
-    ctx.resume().catch(() => {});
-    if (ctx.state === "suspended") return "blocked";
-  }
-  const level = GAIN[volume] * (kind === "remind" ? 0.4 : 1);
-  const seq = kind === "owner" ? [523, 659, 784, 1047, 784, 1047] : kind === "remind" ? [1175] : [1175, 880, 1175, 880];
-  const len = kind === "owner" ? 0.2 : kind === "remind" ? 0.25 : 0.3;
-  const gap = kind === "normal" ? [0, 1, 2.6, 3.6] : null;
-  seq.forEach((freq, i) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = kind === "owner" ? "square" : "triangle";
-    osc.frequency.value = freq;
-    const t = ctx.currentTime + (gap ? gap[i] * len : i * len);
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(level, t + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + len * 1.1);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + len * 1.2);
-  });
-  return "ok";
 }
 
 function readVolume(): Volume {
@@ -79,14 +32,23 @@ function readVolume(): Volume {
     return "normal";
   }
 }
+function readTone(): ToneId | null {
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(TONE_KEY) : null;
+    return isTone(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * Bell with unread count at the top right of the page, a panel below it, live arrival with a loud
- * chime, a wiggle that keeps going while something is unread, a soft reminder note every so often,
- * the count on the browser tab, a corner pop-up, per-person volume with a test button, and a bar
- * that asks for one click when the browser has not allowed sound yet.
+ * Bell with unread count at the top right of the page, a panel below it, live arrival with the
+ * workshop's soft tone (the owner's approvals get the second tone), a wiggle while something is
+ * unread, a gentle reminder note every couple of minutes, the count on the browser tab, a corner
+ * pop-up, per-person volume and tone, and a bar that asks for one click when the browser has not
+ * allowed sound yet.
  */
-export function NotificationBell({ staffId }: { staffId: string }) {
+export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord", remindMinutes = 2 }: { staffId: string; tone?: string; ownerTone?: string; remindMinutes?: number }) {
   const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
   const [unread, setUnread] = useState(0);
@@ -95,6 +57,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
   const [shake, setShake] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [volume, setVolume] = useState<Volume>(readVolume);
+  const [myTone, setMyTone] = useState<ToneId | null>(readTone);
   const box = useRef<HTMLDivElement>(null);
   const known = useRef<Set<number>>(new Set());
   const baseTitle = useRef<string>("");
@@ -102,6 +65,8 @@ export function NotificationBell({ staffId }: { staffId: string }) {
   useEffect(() => {
     openRef.current = open;
   }, [open]);
+  const normalTone: ToneId = myTone ?? (isTone(tone) ? tone : "marimba");
+  const loudTone: ToneId = isTone(ownerTone) ? ownerTone : "chord";
 
   // The count on the browser tab.
   useEffect(() => {
@@ -109,11 +74,14 @@ export function NotificationBell({ staffId }: { staffId: string }) {
     document.title = unread > 0 ? `(${unread}) ${baseTitle.current}` : baseTitle.current;
   }, [unread]);
 
-  const sound = useCallback((kind: "normal" | "owner" | "remind") => {
-    const r = play(kind, readVolume());
-    if (r === "blocked") setBlocked(true);
-    else if (r === "ok") setBlocked(false);
-  }, []);
+  const sound = useCallback(
+    (kind: "normal" | "loud" | "remind") => {
+      const r = playTone(kind === "loud" ? loudTone : normalTone, GAIN[readVolume()], { remind: kind === "remind" });
+      if (r === "blocked") setBlocked(true);
+      else if (r === "ok") setBlocked(false);
+    },
+    [normalTone, loudTone],
+  );
 
   const announce = useCallback(
     (n: Item) => {
@@ -121,7 +89,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
       setTimeout(() => setToast((t) => (t?.id === n.id ? null : t)), 10000);
       setShake(true);
       setTimeout(() => setShake(false), 1600);
-      sound(OWNER_TYPES.has(n.type) ? "owner" : "normal");
+      sound(LOUD_TYPES.has(n.type) ? "loud" : "normal");
     },
     [sound],
   );
@@ -194,7 +162,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
     };
   }, [staffId, load, announce]);
 
-  // Something unread and the panel closed: a soft note now and then, so nobody misses a hand-over.
+  // Something unread and the panel closed: one gentle note every couple of minutes, so nobody misses a hand-over.
   useEffect(() => {
     if (unread <= 0) return;
     const t = setInterval(() => {
@@ -202,9 +170,9 @@ export function NotificationBell({ staffId }: { staffId: string }) {
       sound("remind");
       setShake(true);
       setTimeout(() => setShake(false), 1600);
-    }, REMIND_MS);
+    }, Math.max(1, remindMinutes) * 60000);
     return () => clearInterval(t);
-  }, [unread, sound]);
+  }, [unread, sound, remindMinutes]);
 
   async function openItem(n: Item) {
     setOpen(false);
@@ -228,7 +196,15 @@ export function NotificationBell({ staffId }: { staffId: string }) {
     try {
       localStorage.setItem(VOLUME_KEY, v);
     } catch {}
-    if (v !== "off") sound("normal");
+    if (v !== "off") setTimeout(() => sound("normal"), 0);
+  }
+  function chooseTone(t: ToneId | null) {
+    setMyTone(t);
+    try {
+      if (t) localStorage.setItem(TONE_KEY, t);
+      else localStorage.removeItem(TONE_KEY);
+    } catch {}
+    playTone(t ?? (isTone(tone) ? tone : "marimba"), GAIN[readVolume()]);
   }
 
   return (
@@ -258,7 +234,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
           type="button"
           onClick={() => {
             const ctx = engine();
-            if (ctx) ctx.resume().then(() => { setBlocked(false); play("normal", readVolume()); }).catch(() => {});
+            if (ctx) ctx.resume().then(() => { setBlocked(false); sound("normal"); }).catch(() => {});
           }}
           className="fixed top-0 inset-x-0 z-50 bg-ink text-white text-sm font-bold py-2 text-center"
         >
@@ -276,14 +252,22 @@ export function NotificationBell({ staffId }: { staffId: string }) {
               </button>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-line text-xs">
-            <span className="font-semibold text-muted">Sound</span>
-            {VOLUMES.map((v) => (
-              <button key={v} type="button" onClick={() => chooseVolume(v)} aria-pressed={volume === v} className={`min-h-8 rounded-control border px-2.5 font-bold ${volume === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                {v === "off" ? "Off" : v[0].toUpperCase() + v.slice(1)}
-              </button>
-            ))}
-            <button type="button" onClick={() => sound("normal")} className="min-h-8 rounded-control border border-line-strong bg-white px-2.5 font-bold">Test sound</button>
+          <div className="flex flex-col gap-1.5 px-4 py-2 border-b border-line text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-muted w-12">Sound</span>
+              {VOLUMES.map((v) => (
+                <button key={v} type="button" onClick={() => chooseVolume(v)} aria-pressed={volume === v} className={`min-h-8 rounded-control border px-2.5 font-bold ${volume === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                  {v === "off" ? "Off" : v[0].toUpperCase() + v.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-muted w-12">Tone</span>
+              <button type="button" onClick={() => chooseTone(null)} aria-pressed={myTone === null} className={`min-h-8 rounded-control border px-2.5 font-bold ${myTone === null ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Workshop default</button>
+              {TONES.map((t) => (
+                <button key={t.id} type="button" onClick={() => chooseTone(t.id)} aria-pressed={myTone === t.id} className={`min-h-8 rounded-control border px-2.5 font-bold ${myTone === t.id ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{t.label}</button>
+              ))}
+            </div>
           </div>
           <ul className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain divide-y divide-line">
             {items.length === 0 ? <li className="px-4 py-6 text-sm text-muted text-center">Nothing yet.</li> : null}
@@ -291,7 +275,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
               <li key={n.id}>
                 <button type="button" onClick={() => openItem(n)} className={`w-full px-4 py-3 text-left hover:bg-canvas ${n.read_at ? "" : "bg-chip/60"}`}>
                   <span className="flex items-start gap-2">
-                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : OWNER_TYPES.has(n.type) ? "bg-ink" : "bg-red-bar"}`} />
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : LOUD_TYPES.has(n.type) ? "bg-ink" : "bg-red-bar"}`} />
                     <span className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-semibold leading-snug">{n.title}</span>
                       {n.body ? <span className="text-xs text-muted">{n.body}</span> : null}

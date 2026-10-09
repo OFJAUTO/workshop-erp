@@ -1,5 +1,6 @@
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { issueStock, saveStockItem } from "../order-actions";
@@ -14,6 +15,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   await requirePermission("manageStock");
   const { message, error } = await searchParams;
   const admin = createAdminClient();
+  const settings = await getSettings();
   const [{ data: items }, { data: jobs }, { data: techs }] = await Promise.all([
     admin.from("stock_items").select("id, name, unit, quantity, minimum_level, unit_cost").eq("is_active", true).order("name"),
     admin.from("jobs").select("id, job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).in("status", ["in_work", "waiting_parts", "approved", "pending_qc"]).order("job_number"),
@@ -76,7 +78,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician</span>
               <Select name="technician" required><option value="">Choose…</option>{(techs ?? []).map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}</Select>
             </label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician&apos;s PIN</span><Input name="pin" type="password" inputMode="numeric" maxLength={4} required className="w-28 text-center tracking-[0.4em]" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician&apos;s PIN <span className="font-medium">(needed above AED {Number(settings.pin_needed_above_aed) || 0})</span></span><Input name="pin" type="password" inputMode="numeric" maxLength={4} className="w-28 text-center tracking-[0.4em]" /></label>
             <Button type="submit" size="md">Issue</Button>
           </form>
         </Card>

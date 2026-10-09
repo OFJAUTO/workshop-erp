@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
 
   const { data: priv } = await admin
     .from("staff_private")
-    .select("pin_hash, pin_failed_attempts, pin_locked_until")
+    .select("pin_hash, pin_failed_attempts, pin_locked_until, pin_must_change")
     .eq("staff_id", staffId)
     .maybeSingle();
 
@@ -127,5 +127,6 @@ export async function POST(request: NextRequest) {
     .update({ last_seen_at: new Date().toISOString(), last_staff_id: staffId })
     .eq("id", device.id);
 
-  return NextResponse.json({ ok: true });
+  // A temporary PIN from the owner: the person chooses their own before anything else.
+  return NextResponse.json({ ok: true, mustChange: priv.pin_must_change === true });
 }

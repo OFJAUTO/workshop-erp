@@ -1,22 +1,48 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { LINE_TYPES, aed, floorPrice, floorProblem, isHidden, lineTotal, parseHours, round2, type LineType, type QuoteLine } from "@/lib/quotes";
+import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, round2, type LineType, type QuoteLine } from "@/lib/quotes";
 import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine } from "@/lib/quote-data";
 import { notifyRoles } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-type LinePatch = { line_type?: string; title?: string; details?: string | null; group_label?: string | null; quantity?: number | string; unit_cost?: number | string | null; markup_percent?: number | string | null; unit_price?: number | string | null; hours?: number | string | null; labour_rate?: number | string | null; discount_percent?: number | string; discount_reason?: string | null; visible_to_customer?: boolean; urgency?: string | null; chosen?: boolean; recovery_trips?: number | string | null; recovery_provider?: string | null };
+type LinePatch = {
+  line_type?: string;
+  title?: string;
+  details?: string | null;
+  group_label?: string | null;
+  quantity?: number | string;
+  unit_cost?: number | string | null;
+  markup_percent?: number | string | null;
+  unit_price?: number | string | null;
+  hours?: number | string | null;
+  labour_rate?: number | string | null;
+  discount_percent?: number | string;
+  discount_reason?: string | null;
+  visible_to_customer?: boolean;
+  urgency?: string | null;
+  chosen?: boolean;
+  recovery_trips?: number | string | null;
+  recovery_provider?: string | null;
+  recovery_provider_kind?: string | null;
+  parent_line_id?: string | null;
+  markup_confirmed?: boolean;
+  dangerous?: boolean;
+  source_type?: string | null;
+  source_key?: string | null;
+};
 type Body = {
   quotationId?: string;
-  addLine?: LinePatch & { service_id?: string | null; dummyPart?: boolean };
+  addLine?: LinePatch & { service_id?: string | null };
   patchLine?: { id: string } & LinePatch;
   removeLine?: { id: string };
   reorder?: { ids: string[] };
-  header?: { discount_percent?: number | string; promised_at?: string | null; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean };
+  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean };
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
-  requestPart?: { description: string; quantity?: number | string };
+  requestPart?: { description: string; quantity?: number | string; source_type?: string | null; source_key?: string | null };
+  /** A finding the advisor is not quoting, with the reason; a null reason takes the mark off again. */
+  notQuoted?: { key: string; reason: string | null };
 };
 
 const n = (v: unknown): number | null => {
@@ -24,14 +50,15 @@ const n = (v: unknown): number | null => {
   const x = Number(String(v).replace(",", ".").replace(/[^\d.-]/g, ""));
   return Number.isFinite(x) ? x : null;
 };
+const TRIP_TEXT: Record<string, string> = { "1": "Recovery, one way to the workshop", "1b": "Recovery, one way to the customer", "2": "Recovery, two ways" };
 
 /**
  * Saves one change to a quotation as the advisor types. Every change is kept at once; nothing typed
- * is lost. The rules live here too: advisors cannot discount parts or type part costs, a listed part
- * keeps the name, quantity and cost that Parts gave it (the advisor only sets the markup, never below
- * the minimum), a part's net price never drops below cost plus the minimum markup, hours are one
- * decimal place from 0.1, the automatic bank charge line cannot be touched, and any change after
- * "Quotation complete" reopens the quotation.
+ * is lost. The rules live here too: parts come only from the Parts desk (an estimate may type them),
+ * a listed part keeps the name, quantity and cost Parts gave it and the advisor sets only the markup,
+ * never below the floor and, above the confirmation level, only after confirming the selling price;
+ * a labour line is Urgent or nothing; the bank charge line cannot be touched; a dangerous warning
+ * is the owner's to switch off; any change after "Quotation complete" reopens the quotation.
  */
 export async function POST(request: NextRequest) {
   let body: Body;
@@ -47,7 +74,7 @@ export async function POST(request: NextRequest) {
   const isOwner = role === "owner";
   if (!can(role, "editQuotes")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const admin = createAdminClient();
-  const { data: q } = await admin.from("quotations").select("id, kind, job_id, number, status, created_by, vehicle_id").eq("id", String(body.quotationId ?? "")).maybeSingle();
+  const { data: q } = await admin.from("quotations").select("id, kind, job_id, number, status, created_by, vehicle_id, not_quoted").eq("id", String(body.quotationId ?? "")).maybeSingle();
   if (!q) return NextResponse.json({ error: "Quotation not found." }, { status: 404 });
   if (!isOwner && q.created_by !== staff.id) {
     const { data: job } = q.job_id ? await admin.from("jobs").select("gated_in_by").eq("id", q.job_id).maybeSingle() : { data: null };
@@ -57,32 +84,35 @@ export async function POST(request: NextRequest) {
   if (q.status !== "draft" && q.status !== "pending_owner") return NextResponse.json({ error: "This version has been sent. Revise it to make changes." }, { status: 423 });
   const settings = await getSettings();
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
-  const minMarkup = minMarkupFor(settings, (vehicle?.make as unknown as { name: string } | null)?.name ?? null);
+  const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;
+  const minMarkup = minMarkupFor(settings, makeName);
+  const confirmAt = Number(settings.markup_confirm_percent) || 100;
   const { data: job } = q.job_id ? await admin.from("jobs").select("department, job_number").eq("id", q.job_id).maybeSingle() : { data: null };
-  const labourRate = labourRateFor(settings, job?.department ?? null, (vehicle?.make as unknown as { name: string } | null)?.name ?? null);
+  const labourRate = labourRateFor(settings, job?.department ?? null, makeName);
   const stamp = { updated_by: staff.id };
   const refreshed = () => refreshQuoteTotals(q.id, settings, staff.id, { reopen: true });
 
-  const cleanPatch = (p: LinePatch, current: Partial<QuoteLine> | null): Record<string, unknown> | string => {
+  const cleanPatch = (p: LinePatch, current: Partial<QuoteLine> | null): Record<string, unknown> | string | { confirm: string } => {
     const out: Record<string, unknown> = {};
     if (current?.fee_kind) return "The bank charge line is automatic; it cannot be changed.";
     const type = (p.line_type ?? current?.line_type) as LineType | undefined;
     if (p.line_type !== undefined) {
       if (!LINE_TYPES.some((t) => t.value === p.line_type)) return "Bad line type.";
       if (current?.part_item_id) return "A listed part keeps its type.";
+      if (p.line_type === "fee") return "The bank charge is automatic; there is no Fee line to add.";
       out.line_type = p.line_type;
     }
     if (p.title !== undefined) {
       if (current?.part_item_id && !isOwner) return "A listed part keeps the name Parts gave it. Ask Parts to change it.";
-      const t = String(p.title).trim().slice(0, 200);
-      if (!t) return "The line needs a name.";
-      out.title = t;
+      out.title = String(p.title).trim().slice(0, 200);
     }
     if (p.details !== undefined) out.details = p.details ? String(p.details).trim().slice(0, 1000) : null;
     if (p.group_label !== undefined) out.group_label = p.group_label ? String(p.group_label).trim().slice(0, 200) : null;
+    if (p.source_type !== undefined) out.source_type = p.source_type && ["request", "item", "tyre", "manual"].includes(p.source_type) ? p.source_type : null;
+    if (p.source_key !== undefined) out.source_key = p.source_key ? String(p.source_key).slice(0, 120) : null;
     if (p.quantity !== undefined) out.quantity = Math.max(0.01, n(p.quantity) ?? 1);
     if (p.unit_cost !== undefined) {
-      if (type === "part" && !isOwner && !current?.advisor_added) return "Only Parts (or the owner) can enter a part's cost. Add the part through the Parts desk.";
+      if (type === "part" && q.kind === "quotation") return "The cost of a part comes from Parts.";
       out.unit_cost = n(p.unit_cost);
     }
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
@@ -96,17 +126,22 @@ export async function POST(request: NextRequest) {
     }
     if (p.markup_percent !== undefined) {
       const m = n(p.markup_percent);
-      // The markup on a part starts at the minimum and only goes up; the owner may go lower (the floor still applies to the net price).
-      if (type === "part" && !isOwner && m !== null && m < minMarkup) return `The markup on a part cannot be below ${minMarkup}%.`;
+      if (type === "part") {
+        // The markup starts at the floor and never goes below it; there is no upper limit, but a very high one is confirmed with the result spelled out.
+        if (m === null || m < minMarkup) return `The markup on a part cannot be below ${minMarkup}%.`;
+        if (m >= confirmAt && !p.markup_confirmed) {
+          const qty = current?.quantity || 1;
+          const sell = round2((current?.unit_cost ?? 0) * (1 + m / 100) * qty);
+          return { confirm: `Markup ${m}%. This part will sell for ${aed(sell)}. Correct?` };
+        }
+        out.markup_confirmed = m >= confirmAt;
+      }
       out.markup_percent = m;
     }
     if (p.discount_percent !== undefined) {
       const d = Math.min(100, Math.max(0, n(p.discount_percent) ?? 0));
-      const costed = (type === "part" || type === "other") && (p.unit_cost !== undefined ? out.unit_cost !== null : current?.unit_cost !== null && current?.unit_cost !== undefined);
-      if (costed && d > 0) {
-        if (!isOwner) return "Advisors cannot discount a part. Ask the owner.";
-        if (!(p.discount_reason ?? current?.discount_reason)) return "Write the reason for the part discount; it is logged.";
-      }
+      if (!isOwner) return "Only the owner gives discounts on a line.";
+      if (type === "part" && d > 0 && !(p.discount_reason ?? current?.discount_reason)) return "Write the reason for the part discount; it is logged.";
       out.discount_percent = d;
     }
     if (p.discount_reason !== undefined) out.discount_reason = p.discount_reason ? String(p.discount_reason).trim().slice(0, 300) : null;
@@ -115,16 +150,33 @@ export async function POST(request: NextRequest) {
       out.visible_to_customer = !!p.visible_to_customer;
     }
     if (p.urgency !== undefined) {
-      if (p.urgency !== null && p.urgency !== "urgent" && p.urgency !== "recommended") return "Mark the line Urgent or Recommended.";
+      if (p.urgency !== null && p.urgency !== "urgent") return "A line is Urgent or nothing.";
       if (current?.dangerous && p.urgency !== "urgent") return "A dangerous finding is always Urgent.";
       out.urgency = p.urgency;
+    }
+    if (p.dangerous !== undefined) {
+      if (!isOwner) return "Only the owner can switch the safety warning off.";
+      out.dangerous = !!p.dangerous;
+      if (p.dangerous) out.urgency = "urgent";
     }
     if (p.chosen !== undefined) {
       if (!current?.option_group) return "This part has no other option to choose between.";
       out.chosen = !!p.chosen;
     }
-    if (p.recovery_trips !== undefined) out.recovery_trips = n(p.recovery_trips);
+    if (p.parent_line_id !== undefined) out.parent_line_id = p.parent_line_id ? String(p.parent_line_id) : null;
+    if (p.recovery_trips !== undefined) {
+      const t = n(p.recovery_trips);
+      out.recovery_trips = t;
+      if (t !== null && t > 0) out.quantity = t;
+    }
     if (p.recovery_provider !== undefined) out.recovery_provider = p.recovery_provider ? String(p.recovery_provider).trim().slice(0, 120) : null;
+    if (p.recovery_provider_kind !== undefined) {
+      const k = String(p.recovery_provider_kind ?? "ours");
+      if (!["ours", "external", "customer"].includes(k)) return "Choose the recovery provider.";
+      out.recovery_provider_kind = k;
+      if (k === "customer") Object.assign(out, { unit_cost: 0, unit_price: 0, visible_to_customer: false, recovery_provider: null });
+      if (k === "ours") out.recovery_provider = null;
+    }
     return out;
   };
 
@@ -135,14 +187,39 @@ export async function POST(request: NextRequest) {
     if (merged.unit_cost !== null && merged.unit_cost !== undefined && (merged.line_type === "part" || merged.line_type === "other") && !isHidden(merged) && lineTotal(merged) + 0.005 < round2(merged.unit_cost * (merged.quantity || 1))) return "Blocked: that would sell the part below its cost.";
     return null;
   };
+  const rememberProvider = async (name: string | null | undefined) => {
+    const clean = (name ?? "").trim();
+    if (!clean) return;
+    const list = Array.isArray(settings.recovery_providers) ? (settings.recovery_providers as string[]) : [];
+    if (list.some((x) => x.toLowerCase() === clean.toLowerCase())) return;
+    await admin.from("settings").update({ value: [clean, ...list].slice(0, 50) }).eq("key", "recovery_providers");
+  };
+
+  if (body.notQuoted) {
+    const key = String(body.notQuoted.key ?? "").slice(0, 160);
+    if (!key) return NextResponse.json({ error: "Bad request." }, { status: 400 });
+    const map = { ...((q.not_quoted ?? {}) as Record<string, string>) };
+    const reason = body.notQuoted.reason === null ? null : String(body.notQuoted.reason).trim().slice(0, 300);
+    if (reason === null) delete map[key];
+    else {
+      if (reason.length < 2) return NextResponse.json({ error: "Say why this finding is not quoted." }, { status: 400 });
+      map[key] = reason;
+    }
+    const { error } = await admin.from("quotations").update({ not_quoted: map, ...stamp }).eq("id", q.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await refreshed();
+    return NextResponse.json({ ok: true });
+  }
 
   if (body.requestPart) {
     if (!q.job_id) return NextResponse.json({ error: "An estimate has no job for Parts to price. Type the part as a line instead." }, { status: 400 });
     const description = String(body.requestPart.description ?? "").trim().slice(0, 200);
     if (!description) return NextResponse.json({ error: "Describe the part." }, { status: 400 });
     const qty = Math.max(0.01, n(body.requestPart.quantity) ?? 1);
-    const key = `${q.id}:${Date.now()}`;
-    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: "manual", source_key: key, label: description, requested_text: `Quantity ${qty} · added by ${staff.display_name} on ${q.number}`, quantity: qty, created_by: staff.id, ...stamp });
+    // A part asked from under a finding keeps that finding, so it lands under the right labour line once priced.
+    const srcType = body.requestPart.source_type && ["request", "item", "tyre"].includes(body.requestPart.source_type) ? body.requestPart.source_type : "manual";
+    const srcKey = srcType === "manual" ? `${q.id}:${Date.now()}` : `${String(body.requestPart.source_key ?? "")}#q${Date.now()}`;
+    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, created_by: staff.id, ...stamp });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await notifyRoles(["parts"], { type: "parts_request", title: `Part to price · ${job?.job_number ?? ""}`, body: `${description} × ${qty}, asked by ${staff.display_name} on ${q.number}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     await refreshed();
@@ -152,42 +229,37 @@ export async function POST(request: NextRequest) {
   if (body.addLine) {
     const a = body.addLine;
     let type = ((a.line_type as LineType | undefined) ?? "labour") as LineType;
-    if (type === "fee" && !isOwner) return NextResponse.json({ error: "Only the owner adds a fee line." }, { status: 403 });
-    const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", created_by: staff.id, ...stamp, title: String(a.title ?? "New line").trim().slice(0, 200) || "New line", group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
+    if (type === "fee") return NextResponse.json({ error: "The bank charge is automatic; there is no Fee line to add." }, { status: 400 });
+    if (type === "part" && q.kind === "quotation") return NextResponse.json({ error: "Parts come through the Parts desk. Use \"Ask Parts for a part\"." }, { status: 400 });
+    const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", created_by: staff.id, ...stamp, title: String(a.title ?? "").trim().slice(0, 200), group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
     // Parts a service asks for; they go to the Parts desk once the line is safely in.
     let linked: { rows: Record<string, unknown>[]; name: string } | null = null;
     if (a.service_id) {
       const { data: svc } = await admin.from("services").select(SERVICE_SELECT).eq("id", String(a.service_id)).maybeSingle();
       if (!svc) return NextResponse.json({ error: "Service not found." }, { status: 404 });
       type = svc.price_aed !== null ? "package" : "labour";
-      Object.assign(row, { line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: "package", unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
+      Object.assign(row, { line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
       if (q.job_id && Array.isArray(svc.parts_requests) && svc.parts_requests.length) {
         linked = { name: svc.name, rows: (svc.parts_requests as string[]).map((label, i) => ({ job_id: q.job_id, source_type: "manual", source_key: `${svc.id}:${Date.now()}:${i}`, label, requested_text: `For ${svc.name}, added by ${staff.display_name} on ${q.number}`, created_by: staff.id, ...stamp })) };
       }
     } else if (type === "part") {
-      if (!isOwner && q.kind === "quotation") {
-        // The one "small part" an advisor may add himself, with cost and selling price.
-        if (!a.dummyPart) return NextResponse.json({ error: "Parts go through the Parts desk. Use \"Parts price it\" or the one small part allowed per quotation." }, { status: 400 });
-        const { data: existing } = await admin.from("quotation_lines").select("id").eq("quotation_id", q.id).eq("is_active", true).eq("advisor_added", true);
-        if ((existing ?? []).length >= 1) return NextResponse.json({ error: "One small part per quotation. A second must go through the Parts desk." }, { status: 400 });
-        const cost = n(a.unit_cost);
-        const price = n(a.unit_price);
-        if (cost === null || cost < 1) return NextResponse.json({ error: "The cost must be at least AED 1." }, { status: 400 });
-        const qty = Math.max(0.01, n(a.quantity) ?? 1);
-        const floor = floorPrice({ unit_cost: cost, quantity: qty }, minMarkup);
-        if (price === null || price * qty + 0.005 < floor) return NextResponse.json({ error: `The selling price must be at least cost plus the minimum markup of ${minMarkup}%: ${aed(floor / qty)} each.` }, { status: 400 });
-        const markup = round2(((price - cost) / cost) * 100);
-        Object.assign(row, { quantity: qty, unit_cost: cost, markup_percent: markup, advisor_added: true });
-      } else {
-        Object.assign(row, { unit_cost: isOwner ? n(a.unit_cost) : null, markup_percent: n(a.markup_percent) ?? minMarkup, quantity: Math.max(0.01, n(a.quantity) ?? 1) });
-      }
+      // Estimates only: the car is not here, so the advisor types the part with cost and markup.
+      Object.assign(row, { unit_cost: n(a.unit_cost), markup_percent: Math.max(minMarkup, n(a.markup_percent) ?? minMarkup), quantity: Math.max(0.01, n(a.quantity) ?? 1), title: row.title || "Part" });
     } else {
       const patch = cleanPatch(a, null);
       if (typeof patch === "string") return NextResponse.json({ error: patch }, { status: 400 });
+      if ("confirm" in patch) return NextResponse.json({ error: patch.confirm, confirm: true }, { status: 409 });
       Object.assign(row, patch);
       if (type === "labour" && row.labour_rate === undefined) row.labour_rate = labourRate;
       if ((type === "other" || type === "recovery") && row.markup_percent === undefined) row.markup_percent = minMarkup;
-      if (type === "recovery" && row.recovery_trips === undefined) row.recovery_trips = row.quantity ?? 1;
+      if (type === "recovery") {
+        if (row.recovery_trips === undefined) row.recovery_trips = 1;
+        if (row.quantity === undefined) row.quantity = 1;
+        if (row.recovery_provider_kind === undefined) row.recovery_provider_kind = "ours";
+        if (!row.title) row.title = TRIP_TEXT["1"];
+        if (!row.details) row.details = "One way to the workshop";
+      }
+      if (type === "other" && !row.title) row.title = "";
     }
     const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", q.id).eq("is_active", true).neq("line_type", "fee").order("position", { ascending: false }).limit(1).maybeSingle();
     row.position = (Number(last?.position) || 0) + 1;
@@ -197,7 +269,7 @@ export async function POST(request: NextRequest) {
       await admin.from("part_requests").insert(linked.rows);
       await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job?.job_number ?? ""}`, body: `${linked.rows.map((r) => r.label).join(", ")} for ${linked.name}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     }
-    if (row.advisor_added) await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "advisor_part", note: `${staff.display_name} added a part himself: ${row.title} at ${aed(Number(row.unit_cost))} cost`, created_by: staff.id });
+    if (type === "recovery" && row.recovery_provider_kind === "external") await rememberProvider(row.recovery_provider as string | null);
     await refreshed();
     return NextResponse.json({ ok: true, id: created.id });
   }
@@ -207,30 +279,40 @@ export async function POST(request: NextRequest) {
     const cur = toLine(curRaw as Record<string, unknown>);
     const patch = cleanPatch(body.patchLine, cur);
     if (typeof patch === "string") return NextResponse.json({ error: patch }, { status: 400 });
+    if ("confirm" in patch) return NextResponse.json({ error: patch.confirm, confirm: true }, { status: 409 });
     if (cur.part_item_id && "unit_cost" in patch) delete patch.unit_cost; // The cost of a listed part comes from Parts.
     if (cur.part_item_id && "quantity" in patch) delete patch.quantity; // And its quantity from the technician.
     const merged = { ...cur, ...patch } as QuoteLine;
     const floorError = checkFloor(merged);
     if (floorError) return NextResponse.json({ error: floorError }, { status: 400 });
     if ("labour_rate" in patch && Number(patch.labour_rate) !== Number(cur.labour_rate ?? 0)) {
-      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "labour_rate", note: `${staff.display_name} changed the hourly rate on ${cur.title} from AED ${Number(cur.labour_rate ?? 0)} to AED ${Number(patch.labour_rate)} (standard AED ${labourRate})`, created_by: staff.id });
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "labour_rate", note: `${staff.display_name} changed the hourly rate on ${cur.title || "a labour line"} from AED ${Number(cur.labour_rate ?? 0)} to AED ${Number(patch.labour_rate)} (standard AED ${labourRate})`, created_by: staff.id });
     }
-    if ("discount_percent" in patch && (cur.line_type === "part" || (cur.line_type === "other" && cur.unit_cost !== null)) && Number(patch.discount_percent) > 0 && Number(patch.discount_percent) !== Number(cur.discount_percent ?? 0)) {
-      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "part_discount", note: `${staff.display_name} gave a ${patch.discount_percent}% discount on ${cur.title}: ${merged.discount_reason ?? ""}`, created_by: staff.id });
+    if ("discount_percent" in patch && Number(patch.discount_percent) > 0 && Number(patch.discount_percent) !== Number(cur.discount_percent ?? 0)) {
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "part_discount", note: `${staff.display_name} gave a ${patch.discount_percent}% discount on ${cur.title}${merged.discount_reason ? `: ${merged.discount_reason}` : ""}`, created_by: staff.id });
+    }
+    if (patch.markup_confirmed === true && (cur.markup_percent ?? 0) < confirmAt) {
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "high_markup", note: `${staff.display_name} confirmed a markup of ${patch.markup_percent}% on ${cur.title}`, created_by: staff.id });
+    }
+    if ("dangerous" in patch && !patch.dangerous && cur.dangerous) {
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "danger_off", note: `${staff.display_name} switched the safety warning off on ${cur.title}`, created_by: staff.id });
     }
     const { error } = await admin.from("quotation_lines").update({ ...patch, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     // One option used per group: choosing this one puts the others aside.
     if (patch.chosen === true && cur.option_group) await admin.from("quotation_lines").update({ chosen: false, ...stamp }).eq("quotation_id", q.id).eq("option_group", cur.option_group).neq("id", cur.id);
+    if (cur.line_type === "recovery" && (merged.recovery_provider_kind ?? "ours") === "external") await rememberProvider(merged.recovery_provider);
     await refreshed();
     return NextResponse.json({ ok: true });
   }
   if (body.removeLine) {
-    const { data: cur } = await admin.from("quotation_lines").select("id, fee_kind").eq("id", body.removeLine.id).eq("quotation_id", q.id).maybeSingle();
+    const { data: cur } = await admin.from("quotation_lines").select("id, fee_kind, line_type").eq("id", body.removeLine.id).eq("quotation_id", q.id).maybeSingle();
     if (!cur) return NextResponse.json({ error: "Line not found." }, { status: 404 });
     if (cur.fee_kind) return NextResponse.json({ error: "The bank charge line is automatic; it cannot be removed." }, { status: 400 });
     const { error } = await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // Removing a job removes its parts with it.
+    if (cur.line_type === "labour" || cur.line_type === "package") await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
     await refreshed();
     return NextResponse.json({ ok: true });
   }
@@ -242,8 +324,10 @@ export async function POST(request: NextRequest) {
   if (body.header) {
     const h = body.header;
     const patch: Record<string, unknown> = { ...stamp };
-    if (h.discount_percent !== undefined) patch.discount_percent = Math.min(100, Math.max(0, n(h.discount_percent) ?? 0));
-    if (h.promised_at !== undefined) patch.promised_at = h.promised_at && /^\d{4}-\d{2}-\d{2}$/.test(h.promised_at) ? h.promised_at : null;
+    if (h.discount_percent !== undefined) {
+      if (!isOwner) return NextResponse.json({ error: "Only the owner gives a discount." }, { status: 403 });
+      patch.discount_percent = Math.min(100, Math.max(0, n(h.discount_percent) ?? 0));
+    }
     if (h.customer_note !== undefined) patch.customer_note = h.customer_note ? String(h.customer_note).trim().slice(0, 2000) : null;
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;

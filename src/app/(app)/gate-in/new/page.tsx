@@ -54,6 +54,11 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   ]);
   const { data: attachedJobs } = (estimates ?? []).length ? await admin.from("jobs").select("estimate_id").in("estimate_id", (estimates ?? []).map((e) => e.id)) : { data: [] };
   const used = new Set((attachedJobs ?? []).map((j) => j.estimate_id));
+  // A car back within the comeback window: ask whether it is a comeback for one of its recent jobs.
+  const windowDays = Number(settings.comeback_window_days) || 90;
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const nowMs = Date.now();
+  const recentJobs = visits.filter((h) => !h.is_open && h.gated_out_at && nowMs - Date.parse(h.gated_out_at) < windowDays * 86400000).map((h) => ({ id: h.id, label: `${h.job_number} · ${formatDate(h.gated_out_at)}`, hint: (h.gate_in?.customer_requests ?? "").slice(0, 80) }));
   const openEstimates = (estimates ?? []).filter((e) => !used.has(e.id)).map((e) => ({ id: e.id, label: `${e.number} · AED ${Number(e.total_aed).toLocaleString("en-GB")}`, hint: `Accepted by ${e.approver_name ?? "the customer"} ${formatDate(e.responded_at)}` }));
 
   // Started from the calendar: the appointment's reason becomes the first request line.
@@ -83,6 +88,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             mileageUnit={v.mileage_unit ?? "km"}
             mileageContext={{ modelYear: v.model_year, lastKm: v.last_mileage, lastVisitAt: visits[0]?.gated_in_at ?? null }}
             estimates={openEstimates}
+            comebacks={recentJobs}
             initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "", department: appointment?.department ?? "" }}
           />
         </div>

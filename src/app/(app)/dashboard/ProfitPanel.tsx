@@ -14,6 +14,7 @@ export function ProfitPanel({
   live,
   provisional = 0,
   count = 0,
+  comebacksAed = 0,
 }: {
   targetAed: number;
   yellowPercent: number;
@@ -23,6 +24,7 @@ export function ProfitPanel({
   live: boolean;
   provisional?: number;
   count?: number;
+  comebacksAed?: number;
 }) {
   const fmt = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
   if (!live) {
@@ -51,6 +53,7 @@ export function ProfitPanel({
         <span>Target {fmt(targetAed)} per working day</span>
         <span>Carried from earlier this month {carryAed >= 0 ? "+" : "−"}{fmt(Math.abs(carryAed))}</span>
       </div>
+      {comebacksAed ? <div className="flex flex-col text-sm"><span className="font-extrabold text-red">Comebacks −{fmt(comebacksAed)}</span><span className="text-xs">lost today on cars back for our fault</span></div> : null}
     </Card>
   );
 }

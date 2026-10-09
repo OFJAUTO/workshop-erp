@@ -91,6 +91,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         settings={{
           labourRate: labourRateFor(settings, null, vehicle?.make?.name ?? null),
           minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
+          markupWarn: Number(settings.markup_warn_percent) || 50,
+          markupConfirm: Number(settings.markup_confirm_percent) || 100,
+          inspectionFee: Number(settings.inspection_fee_aed) || 0,
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
           technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
@@ -111,6 +114,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         labourActions={(settings.labour_actions ?? []) as string[]}
         labourPositions={(settings.labour_positions ?? []) as string[]}
         completedAt={q.completed_at}
+        labourJobs={(settings.labour_jobs ?? {}) as Record<string, string[]>}
+        recoveryProviders={(settings.recovery_providers ?? []) as string[]}
       />
       {!staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
         <Card className="flex flex-col gap-2 max-w-xl">

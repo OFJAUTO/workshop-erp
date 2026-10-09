@@ -4,6 +4,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, type InvoiceBundle, type InvoiceLineRow, type PaymentRow } from "@/lib/invoice-data";
 import { amountInWords, round2 } from "@/lib/money";
 import type { PoBundle } from "@/lib/parts-data";
+import { partTypeText } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -93,6 +94,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
           rows={[
             { label: "Gross amount", value: invoice.subtotal_aed },
             ...(invoice.discount_aed ? [{ label: "Discount", value: invoice.discount_aed, bold: true, negative: true }] : []),
+            ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed, bold: true, negative: true }] : []),
             { label: "Taxable amount", value: invoice.taxable_aed },
             { label: `VAT ${vatPercent}%`, value: invoice.vat_aed },
           ]}
@@ -161,7 +163,8 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
   const docLines: DocLine[] = lines.map((l) => {
     const amount = round2(l.quantity * l.unit_cost);
     const vat = round2(amount * (vatPercent / 100));
-    return { description: l.description, partNumber: l.part_number, details: l.expected_date ? `Expected ${formatDate(l.expected_date)}` : null, qty: qtyText(l.quantity), rate: l.unit_cost, amount, vat, total: round2(amount + vat) };
+    const part = bundle.parts.find((p) => p.id === l.part_item_id);
+    return { description: l.description, partNumber: l.part_number, details: [part ? partTypeText(part) : null, l.expected_date ? `Expected ${formatDate(l.expected_date)}` : null].filter(Boolean).join(" · ") || null, qty: qtyText(l.quantity), rate: l.unit_cost, amount, vat, total: round2(amount + vat) };
   });
   const gross = round2(docLines.reduce((a, l) => a + l.amount, 0));
   const vat = round2(gross * (vatPercent / 100));

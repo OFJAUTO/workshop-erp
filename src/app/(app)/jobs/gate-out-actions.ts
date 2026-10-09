@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { formValues, type FormState } from "@/lib/form-state";
 import { jobBalance } from "@/lib/invoice-data";
-import { dubaiDate } from "@/lib/jobs";
+import { STATUS_LABELS, type JobStatus, dubaiDate } from "@/lib/jobs";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -52,7 +52,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   // Gate-out comes after QC, the wash and the invoice. Only the owner may go through earlier, and it is written down.
   if (!["ready", "pending_payment"].includes(job.status)) {
     if (role !== "owner") return { error: "This car is not ready to leave yet: QC, the wash and the invoice come first.", values };
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, note: `Gate-out by ${staff.display_name} while the car was still at "${job.status.replace(/_/g, " ")}" (owner override)`, created_by: staff.id });
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, note: `Gated out by ${staff.display_name}, ${new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())}, while the car was still at ${STATUS_LABELS[job.status as JobStatus]}. Reason: owner override, before QC, the wash and the invoice`, created_by: staff.id });
   }
   const { data: gi } = await admin.from("gate_ins").select("keys_count, keys_keychain, dash_cam, old_parts_return").eq("job_id", jobId).maybeSingle();
   if (!gi) return { error: "No gate-in record found.", values };

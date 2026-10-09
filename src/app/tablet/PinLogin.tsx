@@ -14,31 +14,41 @@ export type TabletPerson = {
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
 
+/**
+ * Name grid, then the PIN pad. A temporary PIN from the owner asks for a new one straight away:
+ * the person types it twice and nobody else ever sees it.
+ */
 export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[]; autoSelect?: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState<TabletPerson | null>(autoSelect && people.length === 1 ? people[0] : null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<"login" | "new" | "again">("login");
+  const [firstNew, setFirstNew] = useState("");
 
   function reset() {
     setSelected(autoSelect && people.length === 1 ? people[0] : null);
     setPin("");
     setError(null);
     setBusy(false);
+    setStage("login");
+    setFirstNew("");
   }
 
   async function submit(fullPin: string, person: TabletPerson) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/pin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffId: person.id, pin: fullPin }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const res = await fetch("/api/auth/pin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ staffId: person.id, pin: fullPin }) });
+      const data = (await res.json()) as { ok?: boolean; error?: string; mustChange?: boolean };
       if (res.ok && data.ok) {
+        if (data.mustChange) {
+          setStage("new");
+          setPin("");
+          setBusy(false);
+          return;
+        }
         router.replace("/home");
         router.refresh();
         return;
@@ -53,6 +63,29 @@ export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[
     }
   }
 
+  async function saveNew(fullPin: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/pin/change", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: firstNew, again: fullPin }) });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (res.ok && data.ok) {
+        router.replace("/home");
+        router.refresh();
+        return;
+      }
+      setError(data.error ?? "Could not save the PIN.");
+      setStage("new");
+      setFirstNew("");
+      setPin("");
+      setBusy(false);
+    } catch {
+      setError("No connection. Try again.");
+      setPin("");
+      setBusy(false);
+    }
+  }
+
   function press(key: string) {
     if (busy || !selected) return;
     if (key === "⌫") {
@@ -62,16 +95,18 @@ export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[
     if (!key) return;
     const next = (pin + key).slice(0, 4);
     setPin(next);
-    if (next.length === 4) void submit(next, selected);
+    if (next.length !== 4) return;
+    if (stage === "login") void submit(next, selected);
+    else if (stage === "new") {
+      setFirstNew(next);
+      setPin("");
+      setStage("again");
+    } else void saveNew(next);
   }
 
   if (!selected) {
     if (people.length === 0) {
-      return (
-        <p className="text-center text-muted">
-          No tablet users yet. The owner adds staff with PIN login from the Team page.
-        </p>
-      );
+      return <p className="text-center text-muted">No tablet users yet. The owner adds staff with PIN login from the Team page.</p>;
     }
     return (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -96,50 +131,41 @@ export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[
     );
   }
 
+  const prompt = stage === "login" ? "Enter your 4-digit PIN" : stage === "new" ? "This was a temporary PIN. Choose your own 4 digits" : "Type the new PIN again";
+
   return (
     <div className="mx-auto w-full max-w-xs flex flex-col items-center gap-6">
       <div className="flex flex-col items-center gap-3">
         <Avatar name={selected.full_name} photoUrl={selected.photoUrl} size={72} />
         <span className="text-lg font-bold">{selected.display_name}</span>
-        <span className="text-sm text-muted">Enter your 4-digit PIN</span>
+        <span className={`text-sm text-center ${stage === "login" ? "text-muted" : "font-semibold"}`}>{prompt}</span>
       </div>
 
       <div className="flex gap-3" aria-label="PIN entered">
         {[0, 1, 2, 3].map((i) => (
-          <span
-            key={i}
-            className={`h-4 w-4 rounded-full border-2 border-ink ${i < pin.length ? "bg-ink" : "bg-transparent"}`}
-          />
+          <span key={i} className={`h-4 w-4 rounded-full border-2 border-ink ${i < pin.length ? "bg-ink" : "bg-transparent"}`} />
         ))}
       </div>
 
       {error ? (
-        <p role="alert" className="text-center text-sm font-semibold text-red">
-          {error}
-        </p>
+        <p role="alert" className="text-center text-sm font-semibold text-red">{error}</p>
       ) : (
-        <p className="h-5 text-sm text-muted">{busy ? "Checking…" : " "}</p>
+        <p className="h-5 text-sm text-muted">{busy ? "Checking…" : " "}</p>
       )}
 
       <div className="grid grid-cols-3 gap-3 w-full">
         {KEYS.map((k, i) => (
-          <button
-            key={i}
-            type="button"
-            disabled={busy || !k}
-            onClick={() => press(k)}
-            className={`h-16 rounded-card text-2xl font-bold ${
-              k ? "bg-white border border-line hover:border-ink active:bg-chip cursor-pointer" : "invisible"
-            } disabled:opacity-50`}
-          >
+          <button key={i} type="button" disabled={busy || !k} onClick={() => press(k)} className={`h-16 rounded-card text-2xl font-bold ${k ? "bg-white border border-line hover:border-ink active:bg-chip cursor-pointer" : "invisible"} disabled:opacity-50`}>
             {k}
           </button>
         ))}
       </div>
 
-      <Button tone="ghost" onClick={reset} className="w-full">
-        Not you? Go back
-      </Button>
+      {stage === "login" ? (
+        <Button tone="ghost" onClick={reset} className="w-full">Not you? Go back</Button>
+      ) : (
+        <p className="text-xs text-muted text-center">Nobody else sees your PIN. You use it on every handheld and to sign for parts.</p>
+      )}
     </div>
   );
 }

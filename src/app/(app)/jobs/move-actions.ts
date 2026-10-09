@@ -7,7 +7,12 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, type JobStatus } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { applyStageSideEffects } from "@/lib/work-flow";
+
+/** "22:48" in Dubai time, for the plain-words override line. */
+const dubaiTime = (iso: string) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
 
 /** A workshop manager or advisor asks the owner to move a job past a gate. */
 export async function requestMove(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -45,8 +50,9 @@ export async function decideMove(jobId: string, requestId: string, _state: FormS
   const now = new Date().toISOString();
   await admin.from("move_requests").update({ status: decision, decided_by: staff.id, decided_at: now, decision_reason: reason, to_status: decision === "approved" ? toStatus : null, updated_by: staff.id }).eq("id", req.id);
   if (decision === "approved") {
-    await admin.from("jobs").update({ status: toStatus, stage: STATUS_STAGE[toStatus] }).eq("id", jobId);
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, to_status: toStatus, note: `OVERRIDE by ${staff.display_name}: moved to "${STATUS_LABELS[toStatus]}" · ${reason} · requested by ${req.requested_by ? "staff" : "unknown"}: ${req.reason}`, created_by: staff.id });
+    await admin.from("jobs").update({ status: toStatus, stage: STATUS_STAGE[toStatus], stage_entered_at: now }).eq("id", jobId);
+    await applyStageSideEffects(jobId, toStatus, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, to_status: toStatus, note: `Moved to ${STATUS_LABELS[toStatus]} by ${staff.display_name}, ${dubaiTime(now)}. Reason: ${reason} (asked for: ${req.reason})`, created_by: staff.id });
   } else {
     await admin.from("job_events").insert({ job_id: jobId, event_type: "move_refused", note: `Special move refused by ${staff.display_name}: ${reason}`, created_by: staff.id });
   }

@@ -33,6 +33,10 @@ export type InvoiceRow = {
   notes: string | null;
   customer_snapshot: Record<string, string | null> | null;
   vehicle_snapshot: Record<string, string | null> | null;
+  /** A payment link the advisor pasted: the customer's page shows Pay now. */
+  payment_link_url: string | null;
+  /** A comeback repaired free of charge: the work at its normal value, then this credit brings the total to zero. */
+  warranty_credit_aed: number;
   created_at: string;
 };
 
@@ -74,16 +78,24 @@ export type PaymentRow = {
   cleared_at: string | null;
   bank_charge_aed: number;
   is_deposit: boolean;
-  status: "recorded" | "reversed";
+  status: "recorded" | "reversed" | "voided" | "pending_owner";
   reversed_at: string | null;
   reversed_reason: string | null;
   notes: string | null;
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  verified_at: string | null;
+  verified_by: string | null;
+  approval_requested_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
   created_at: string;
 };
 
-export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, created_at";
+export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, created_at";
 export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id";
-export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, status, reversed_at, reversed_reason, notes, created_at";
+export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at";
 
 export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque" };
 
@@ -95,7 +107,7 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
   }
   return out;
 }
-export const toInvoice = (r: Record<string, unknown>) => num(r as unknown as InvoiceRow, ["subtotal_aed", "discount_aed", "taxable_aed", "vat_aed", "total_aed", "agreed_total_aed"]);
+export const toInvoice = (r: Record<string, unknown>) => num(r as unknown as InvoiceRow, ["subtotal_aed", "discount_aed", "taxable_aed", "vat_aed", "total_aed", "agreed_total_aed", "warranty_credit_aed"]);
 export const toInvoiceLine = (r: Record<string, unknown>) => {
   const l = num(r as unknown as InvoiceLineRow, ["position", "quantity", "unit_price", "amount_aed", "vat_aed", "total_aed", "cost_aed"]);
   // Hours ride in the details as "1.5 h" when the line is labour; the builder sets the quantity to the hours.
@@ -159,7 +171,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
 }
 
 export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean };
-export type DraftTotals = { gross: number; services: number; parts: number; fees: number; discount: number; discountPercent: number; taxable: number; vat: number; total: number; discountLimitAed: number; agreedTotalApplied: boolean; agreedTotalProblem: string | null };
+export type DraftTotals = { gross: number; services: number; parts: number; fees: number; discount: number; discountPercent: number; taxable: number; vat: number; total: number; discountLimitAed: number; agreedTotalApplied: boolean; agreedTotalProblem: string | null; /** A free comeback: the whole bill, taken off after the lines so the customer sees the value of the repair. */ warrantyCredit: number };
 export type InvoiceDraft = { lines: DraftLine[]; totals: DraftTotals; quotationNumbers: string[]; vatPercent: number };
 
 /**
@@ -171,7 +183,7 @@ export type InvoiceDraft = { lines: DraftLine[]; totals: DraftTotals; quotationN
 export async function buildInvoiceDraft(jobId: string, settings: Settings, opts: { labourMode: LabourMode; consumables?: number | null; agreedTotal?: number | null; discountPercent?: number | null }): Promise<InvoiceDraft> {
   const admin = createAdminClient();
   const [{ data: job }, quotes] = await Promise.all([
-    admin.from("jobs").select("id, inspection_fee_due").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("id, inspection_fee_due, comeback_free").eq("id", jobId).maybeSingle(),
     approvedQuotations(jobId),
   ]);
   const qs = quotes;
@@ -232,13 +244,16 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings, opts:
     }
   }
   discount = Math.min(discount, discountBase);
-  const taxable = round2(gross - discount);
+  // A free comeback (warranty repair): no discount, the whole bill comes off after the lines, the total is zero.
+  const warrantyCredit = job?.comeback_free ? gross : 0;
+  if (warrantyCredit) { discount = 0; agreedTotalApplied = false; agreedTotalProblem = null; }
+  const taxable = round2(gross - discount - warrantyCredit);
   // With an agreed total the customer pays exactly that figure: the VAT takes the rounding, never the total.
   const total = agreedTotalApplied ? round2(opts.agreedTotal!) : round2(taxable + round2(taxable * (vatPercent / 100)));
   const vat = round2(total - taxable);
   return {
     lines: out,
-    totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, taxable, vat, total, discountLimitAed, agreedTotalApplied, agreedTotalProblem },
+    totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, taxable, vat, total, discountLimitAed, agreedTotalApplied, agreedTotalProblem, warrantyCredit },
     quotationNumbers: Array.from(new Set(qs.map((q) => q.number))),
     vatPercent,
   };

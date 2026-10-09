@@ -1,32 +1,61 @@
 "use client";
 
-import { useState } from "react";
-import { ElapsedTimer } from "@/components/ElapsedTimer";
+import { useEffect, useState } from "react";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea } from "@/components/ui";
 
-export type PanelLine = { id: string; title: string; details: string | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done"; notes: string | null; mine: boolean; assignedName: string | null; photos: JobFile[] };
+export type PanelLine = { id: string; title: string; details: string | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
+export type PanelPart = { id: string; description: string; quantity: number; state: "handed" | "here" | "coming"; when: string | null };
 export type PanelFinding = { id: string; remark: string; parts_needed: string | null; status: "pending" | "approved" | "rejected"; decision_note: string | null; label: string; tone: "neutral" | "amber" | "green" | "red" | "ink" };
+export type QcFailed = { round: number; items: { label: string; remark: string | null }[] };
+export type RunningSession = { since: string; name: string; mine: boolean };
+
+const fmtHm = (min: number) => {
+  const m = Math.max(0, Math.round(Math.abs(min)));
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+};
 
 /**
- * The technician's work order on the tablet: Start / Stop / Pause with a reason, each line marked
- * done with notes and photos, reminders at the start, and "additional work found".
+ * The one big countdown on the technician's tablet: the hours charged to the customer minus every
+ * technician's clocked time on this car. Green, amber under a fifth left, red once over.
  */
-export type QcFailed = { round: number; items: { label: string; remark: string | null }[] };
-
-export function WorkPanel({ jobId, lines, findings, running, myMinutes, reminders, pauseReasons, canWork, qcFailed = null, startAction, stopAction, doneAction, reportAction }: { jobId: string; lines: PanelLine[]; findings: PanelFinding[]; running: { since: string } | null; myMinutes: number; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; qcFailed?: QcFailed | null; startAction: () => void; stopAction: (formData: FormData) => void; doneAction: (lineId: string, formData: FormData) => void; reportAction: (formData: FormData) => void }) {
-  const [pausing, setPausing] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
-  const [photos, setPhotos] = useState<Record<string, JobFile[]>>(Object.fromEntries(lines.map((l) => [l.id, l.photos])));
-  const [findingFiles, setFindingFiles] = useState<JobFile[]>([]);
-  const mine = lines.filter((l) => l.mine);
-  const done = mine.filter((l) => l.status === "done").length;
-
+export function BudgetTimer({ hoursCharged, minutesUsed, running, locked }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; locked: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running.length) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running.length]);
+  const live = running.reduce((a, r) => a + Math.max(0, (now - Date.parse(r.since)) / 60000), 0);
+  const used = minutesUsed + live;
+  const budget = hoursCharged * 60;
+  const left = budget - used;
+  const tone = budget <= 0 ? "text-ink" : left < 0 ? "text-red" : left < budget * 0.2 ? "text-amber" : "text-green";
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col items-center gap-1 py-2 text-center">
+      <span className="text-xs font-bold uppercase tracking-[0.1em] text-muted">{locked ? "Clock stopped" : left < 0 ? "Over the time" : "Time left"}</span>
+      <span className={`text-5xl sm:text-6xl font-extrabold tabular-nums leading-none ${tone}`}>{budget > 0 ? (left < 0 ? `+${fmtHm(left)}` : fmtHm(left)) : fmtHm(used)}</span>
+      <span className="text-sm font-semibold text-muted">{budget > 0 ? `of ${hoursCharged} h charged · used ${fmtHm(used)}` : "no hours quoted on this car"}</span>
+      {running.length ? <span className="text-xs font-semibold text-green">Working now: {running.map((r) => r.name).join(", ")}</span> : null}
+    </div>
+  );
+}
+
+/** Timer, Working and Pause, Leave this job. Sits at the top of the technician's screen. */
+export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, reminders, pauseReasons, canWork, workDone, waitingOnManager, sendBack, qcFailed = null, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
+  const [pausing, setPausing] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  return (
+    <div className="flex flex-col gap-3">
+      {sendBack ? (
+        <Card className="border-red-bar flex flex-col gap-1">
+          <SectionLabel>Not done, sent back by the manager</SectionLabel>
+          <p className="text-[15px] font-semibold">{sendBack}</p>
+        </Card>
+      ) : null}
       {qcFailed ? (
         <Card className="border-red-bar flex flex-col gap-2">
-          <SectionLabel right={`round ${qcFailed.round}`}>QC failed: fix these, then the manager sends the car back to QC</SectionLabel>
+          <SectionLabel right={`round ${qcFailed.round}`}>QC failed: fix these, then press Job finished again</SectionLabel>
           <ul className="flex flex-col gap-1">
             {qcFailed.items.map((i) => (
               <li key={i.label} className="text-[15px]"><span className="font-bold">{i.label}</span>{i.remark ? <span className="text-muted"> · {i.remark}</span> : null}</li>
@@ -34,70 +63,88 @@ export function WorkPanel({ jobId, lines, findings, running, myMinutes, reminder
           </ul>
         </Card>
       ) : null}
-      <Card className={`flex flex-col gap-3 ${running ? "border-green" : "border-ink"}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <SectionLabel>{running ? "Clock running" : "Clock"}</SectionLabel>
-          <span className="text-3xl font-extrabold">{running ? <ElapsedTimer since={running.since} /> : `${Math.floor(myMinutes / 60)}:${String(myMinutes % 60).padStart(2, "0")}`}</span>
-        </div>
-        {reminders.length && !running ? (
+      <Card className={`flex flex-col gap-3 ${mineRunning ? "border-green" : workDone ? "border-line" : "border-ink"}`}>
+        <BudgetTimer hoursCharged={hoursCharged} minutesUsed={minutesUsed} running={running} locked={workDone} />
+        {reminders.length && !mineRunning && !workDone ? (
           <ul className="flex flex-col gap-1">
             {reminders.map((r) => <li key={r}><Notice tone="error">{r}</Notice></li>)}
           </ul>
         ) : null}
-        {canWork ? (
-          running ? (
-            <form action={stopAction} className="flex flex-wrap items-end gap-2">
-              <input type="hidden" name="mode" value={pausing ? "pause" : "stop"} />
-              {pausing ? (
-                <div className="flex flex-col gap-2 flex-1">
-                  <span className="text-xs font-semibold text-muted">Why do you pause? Tap one.</span>
-                  <div className="flex flex-wrap gap-2">
-                    {pauseReasons.map((r) => <Button key={r} type="submit" name="pause_reason" value={r} tone="secondary" size="lg">{r}</Button>)}
-                    <Button type="button" tone="ghost" size="lg" onClick={() => setPausing(false)}>Back</Button>
-                  </div>
+        {workDone ? (
+          <Notice tone="info">Job finished. Waiting on {waitingOnManager} to confirm the work. The clock is locked.</Notice>
+        ) : canWork ? (
+          <div className="flex flex-col gap-2">
+            {pausing ? (
+              <form action={pauseAction} className="flex flex-col gap-2">
+                <span className="text-sm font-semibold">Why do you pause? Tap one.</span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {pauseReasons.map((r) => <Button key={r} type="submit" name="pause_reason" value={r} tone="secondary" size="lg">{r}</Button>)}
                 </div>
-              ) : (
-                <>
-                  <Button type="submit" size="lg" tone="secondary">Stop</Button>
-                  <Button type="button" size="lg" tone="secondary" onClick={() => setPausing(true)}>Pause with a reason</Button>
-                </>
-              )}
-            </form>
-          ) : (
-            <form action={startAction}>
-              <Button type="submit" size="lg" className="w-full">Start work on this car</Button>
-            </form>
-          )
+                <Button type="button" tone="ghost" size="md" onClick={() => setPausing(false)}>Back</Button>
+              </form>
+            ) : leaving ? (
+              <form action={leaveAction} className="flex flex-col gap-2">
+                <span className="text-sm font-semibold">Why do you leave this job?</span>
+                <Textarea name="reason" rows={2} required placeholder="For example: moved to another car by the manager" />
+                <div className="flex gap-2">
+                  <Button type="submit" tone="danger" size="lg">Leave this job</Button>
+                  <Button type="button" tone="ghost" size="lg" onClick={() => setLeaving(false)}>Back</Button>
+                </div>
+              </form>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <form action={startAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg" disabled={mineRunning} tone={mineRunning ? "secondary" : "primary"}>{mineRunning ? "Working…" : "Working"}</Button></form>
+                <Button type="button" size="lg" tone="secondary" className="min-h-16 text-lg" disabled={!mineRunning} onClick={() => setPausing(true)}>Pause</Button>
+              </div>
+            )}
+            {!pausing && !leaving ? <button type="button" onClick={() => setLeaving(true)} className="self-end text-xs font-semibold text-muted underline underline-offset-4">Leave this job</button> : null}
+          </div>
         ) : null}
       </Card>
+    </div>
+  );
+}
 
-      <Card className="flex flex-col gap-3">
-        <SectionLabel right={`${done} of ${mine.length} done`}>Your work</SectionLabel>
-        {mine.length === 0 ? <p className="text-sm text-muted">No lines assigned to you yet. {lines.length ? `${lines.length} line${lines.length === 1 ? "" : "s"} on this car are with ${Array.from(new Set(lines.map((l) => l.assignedName).filter(Boolean))).join(", ") || "nobody yet"}.` : ""}</p> : null}
-        {mine.map((l) => (
-          <div key={l.id} className={`rounded-control border p-3 flex flex-col gap-2 ${l.status === "done" ? "border-green bg-green-soft/30" : "border-line"}`}>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={l.status === "done" ? "green" : l.status === "in_progress" ? "amber" : "neutral"}>{l.status === "done" ? "Done" : l.status === "in_progress" ? "In progress" : "To do"}</Badge>
-              <span className="text-lg font-bold">{l.title}</span>
-              {l.hours_quoted !== null ? <span className="text-xs text-muted">{l.hours_quoted.toFixed(1)} h quoted</span> : null}
-            </div>
-            {l.details ? <p className="text-sm text-muted">{l.details}</p> : null}
-            <form action={doneAction.bind(null, l.id)} className="flex flex-col gap-2">
-              <Textarea name="notes" rows={2} defaultValue={l.notes ?? ""} placeholder="Notes on this line (optional)" disabled={!canWork} />
-              <div className="flex flex-wrap gap-2">
-                {l.status !== "done" ? <Button type="submit" name="done" value="yes" size="lg" disabled={!canWork}>Mark done</Button> : <Button type="submit" name="done" value="no" tone="secondary" size="md" disabled={!canWork}>Reopen</Button>}
-                {l.status === "done" ? <Button type="submit" name="done" value="yes" tone="ghost" size="md" disabled={!canWork}>Save notes</Button> : null}
-              </div>
-            </form>
-            <JobFileUpload jobId={jobId} kind="work_photo" refId={l.id} files={photos[l.id] ?? []} disabled={!canWork} compact onAdded={(f) => setPhotos((p) => ({ ...p, [l.id]: [...(p[l.id] ?? []), f] }))} />
-          </div>
-        ))}
+/** The read-only job list with the parts, "Additional work found", and "Job finished". */
+export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, severalTechnicians, myPartDone, finishAction, reportAction }: { jobId: string; lines: PanelLine[]; parts: PanelPart[]; findings: PanelFinding[]; canWork: boolean; workDone: boolean; severalTechnicians: boolean; myPartDone: boolean; finishAction: () => void; reportAction: (formData: FormData) => void }) {
+  const [reportOpen, setReportOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [findingFiles, setFindingFiles] = useState<JobFile[]>([]);
+  return (
+    <div className="flex flex-col gap-4">
+      <Card className="flex flex-col gap-2">
+        <SectionLabel right={`${lines.length} job${lines.length === 1 ? "" : "s"}`}>Jobs on this car</SectionLabel>
+        {lines.length === 0 ? <p className="text-sm text-muted">No work lines yet.</p> : null}
+        <ol className="divide-y divide-line">
+          {lines.map((l, i) => (
+            <li key={l.id} className="py-2 flex gap-3">
+              <span className="w-6 shrink-0 text-muted font-semibold">{i + 1}.</span>
+              <span className="flex-1 min-w-0">
+                <span className="text-[16px] font-bold leading-snug">{l.title}</span>
+                {l.details ? <span className="block text-sm text-muted">{l.details}</span> : null}
+              </span>
+              {l.hours_quoted !== null ? <span className="text-sm font-semibold text-muted whitespace-nowrap">{l.hours_quoted.toFixed(1)} h</span> : null}
+            </li>
+          ))}
+        </ol>
+        {parts.length ? (
+          <ul className="border-t border-line pt-2 flex flex-col gap-1">
+            {parts.map((p) => (
+              <li key={p.id} className="flex items-center gap-2 text-sm">
+                <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${p.state === "handed" ? "bg-green text-white" : p.state === "here" ? "bg-ink text-white" : "bg-chip text-muted"}`}>{p.state === "handed" ? "✓" : p.state === "here" ? "•" : "…"}</span>
+                <span className="font-semibold">{p.description}</span>
+                <span className="text-muted">× {p.quantity}</span>
+                <span className="ml-auto text-xs font-semibold text-muted">{p.state === "handed" ? "Handed to you" : p.state === "here" ? "Here, with Parts" : p.when ? `Coming ${p.when}` : "Coming"}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </Card>
 
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionLabel right={findings.length ? `${findings.length}` : undefined}>Additional work found</SectionLabel>
-          {canWork && !reportOpen ? <Button type="button" tone="secondary" size="md" onClick={() => setReportOpen(true)}>Flag additional work</Button> : null}
+          {canWork && !reportOpen && !workDone ? <Button type="button" tone="secondary" size="md" onClick={() => setReportOpen(true)}>Additional work found</Button> : null}
         </div>
         {findings.map((f) => (
           <p key={f.id} className="text-sm flex flex-wrap items-center gap-2">
@@ -110,12 +157,14 @@ export function WorkPanel({ jobId, lines, findings, running, myMinutes, reminder
           <form action={reportAction} className="flex flex-col gap-2 rounded-control border border-ink p-3">
             <label className="flex flex-col gap-1"><span className="text-sm font-semibold">What did you find?</span><Textarea name="remark" rows={2} required placeholder="For example: rear brake discs below minimum thickness" /></label>
             <label className="flex flex-col gap-1"><span className="text-sm font-semibold">Parts needed <span className="font-medium text-muted">(optional)</span></span><Textarea name="parts_needed" rows={1} placeholder="For example: rear brake discs and pads" /></label>
-            <label className="flex flex-col gap-1"><span className="text-sm font-semibold">Related line <span className="font-medium text-muted">(optional)</span></span>
-              <Select name="work_line_id" defaultValue=""><option value="">None</option>{lines.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</Select>
-            </label>
+            {lines.length ? (
+              <label className="flex flex-col gap-1"><span className="text-sm font-semibold">Related job <span className="font-medium text-muted">(optional)</span></span>
+                <Select name="work_line_id" defaultValue=""><option value="">None</option>{lines.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</Select>
+              </label>
+            ) : null}
             <JobFileUpload jobId={jobId} kind="additional_work" files={findingFiles} label="Add photos" onAdded={(f) => setFindingFiles((p) => [...p, f])} />
             {findingFiles.map((f) => <input key={f.id} type="hidden" name="file" value={f.id} />)}
-            <p className="text-xs text-muted">The workshop manager approves it, the advisor quotes it. It cannot start until the customer approves. Carry on with the original work.</p>
+            <p className="text-xs text-muted">The workshop manager gets it at once and sends it to the advisor to quote, or dismisses it. Carry on with the original work.</p>
             <div className="flex gap-2">
               <Button type="submit" size="lg">Send to the manager</Button>
               <Button type="button" tone="ghost" size="lg" onClick={() => setReportOpen(false)}>Cancel</Button>
@@ -123,6 +172,24 @@ export function WorkPanel({ jobId, lines, findings, running, myMinutes, reminder
           </form>
         ) : null}
       </Card>
+
+      {canWork && !workDone ? (
+        <Card className="flex flex-col gap-2 border-ink">
+          {myPartDone && severalTechnicians ? (
+            <Notice tone="info">Your part is done. Waiting for the other technicians on this car.</Notice>
+          ) : confirming ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-lg font-bold">{severalTechnicians ? "Is your part of the work on this car done?" : "All work on this car is done?"}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <form action={finishAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg">Yes</Button></form>
+                <Button type="button" tone="secondary" size="lg" className="min-h-16 text-lg" onClick={() => setConfirming(false)}>Not yet</Button>
+              </div>
+            </div>
+          ) : (
+            <Button type="button" size="lg" className="min-h-16 text-lg" onClick={() => setConfirming(true)}>{severalTechnicians ? "My part is done" : "Job finished"}</Button>
+          )}
+        </Card>
+      ) : null}
     </div>
   );
 }

@@ -29,7 +29,7 @@ export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
 
 export type QuoteKind = "quotation" | "estimate";
 export type Urgency = "urgent" | "recommended";
-export const URGENCY_LABELS: Record<Urgency, string> = { urgent: "Urgent", recommended: "Recommended" };
+export const URGENCY_LABELS: Record<Urgency, string> = { urgent: "Urgent", recommended: "" };
 
 export type QuoteLine = {
   id: string;
@@ -70,6 +70,11 @@ export type QuoteLine = {
   recovery_provider: string | null;
   /** A dangerous finding: forced Urgent, with a safety warning for the customer. */
   dangerous: boolean;
+  /** A part belongs to the labour line of the finding it came from. */
+  parent_line_id: string | null;
+  recovery_provider_kind: "ours" | "external" | "customer" | null;
+  /** A markup at or above the confirmation level was confirmed by the advisor, with the selling price spelled out. */
+  markup_confirmed: boolean;
 };
 
 export type QuoteRow = {
@@ -118,6 +123,12 @@ export type QuoteRow = {
   parts_escalated_at: string | null;
   danger_acknowledged_at: string | null;
   danger_acknowledged_by: string | null;
+  /** Findings the advisor is not quoting, by finding key, with the reason. */
+  not_quoted: Record<string, string>;
+  /** The whole-dirham total chosen when sending; the pre-VAT amount takes the difference. */
+  rounded_total_aed: number | null;
+  estimated_days: number | null;
+  declined_note: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -259,6 +270,8 @@ export type QuoteTotals = {
   subtotal: number;
   discountBase: number;
   discount: number;
+  /** The adjustment to the pre-VAT amount when the total was rounded to whole dirhams. */
+  rounding: number;
   net: number;
   vat: number;
   total: number;
@@ -268,76 +281,121 @@ export type QuoteTotals = {
   labourSell: number;
   labourHours: number;
   labourCost: number;
+  /** Recovery, Other and fee lines the customer pays for. */
+  otherSell: number;
+  /** What those lines, hidden or shown, cost us. */
+  otherCost: number;
   hiddenCost: number;
   bankCharge: number;
   profit: number;
   deposit: number;
 };
 
+/** Which block of the quotation a line sits in: labour and services, parts, or other charges. */
+export function blockOf(l: Pick<QuoteLine, "line_type">): "labour" | "parts" | "other" {
+  if (l.line_type === "part") return "parts";
+  if (l.line_type === "labour" || l.line_type === "package") return "labour";
+  return "other";
+}
+
 /**
  * Totals for the lines that count. The customer's figures leave hidden lines out; profit takes in
- * every cost, including hidden lines and the bank charge when the customer pays by card or link.
+ * every cost, including hidden lines and the bank charge. A rounded total (chosen when sending)
+ * adjusts the pre-VAT amount so the VAT line and the total agree.
  */
 export function quoteTotals(
   lines: QuoteLine[],
-  q: { discount_percent: number; vat_percent: number; payment_by_card?: boolean },
+  q: { discount_percent: number; vat_percent: number; payment_by_card?: boolean; rounded_total_aed?: number | null },
   opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number } = {},
 ): QuoteTotals {
   const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
   const discountBase = round2(counted.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
   const discount = round2(discountBase * ((q.discount_percent ?? 0) / 100));
-  const net = round2(subtotal - discount);
-  const vat = round2(net * ((q.vat_percent ?? 5) / 100));
-  const total = round2(net + vat);
-  const parts = counted.filter((l) => l.line_type === "part" || (l.line_type === "other" && hasCostFloor(l) && !isHidden(l)));
+  const pct = (q.vat_percent ?? 5) / 100;
+  let net = round2(subtotal - discount);
+  let vat = round2(net * pct);
+  let total = round2(net + vat);
+  let rounding = 0;
+  if (q.rounded_total_aed && q.rounded_total_aed > 0 && net > 0) {
+    total = round2(q.rounded_total_aed);
+    net = round2(total / (1 + pct));
+    vat = round2(total - net);
+    rounding = round2(net - (subtotal - discount));
+  }
+  const parts = counted.filter((l) => blockOf(l) === "parts");
   const partsCost = round2(parts.reduce((a, l) => a + lineCost(l), 0));
   const partsSell = round2(parts.reduce((a, l) => a + lineTotal(l), 0));
-  const labour = counted.filter((l) => l.line_type === "labour");
-  const labourHours = round1(labour.reduce((a, l) => a + (l.hours ?? 0), 0));
+  const labour = counted.filter((l) => blockOf(l) === "labour");
+  const labourHours = round1(labour.filter((l) => l.line_type === "labour").reduce((a, l) => a + (l.hours ?? 0), 0));
   const labourSell = round2(labour.reduce((a, l) => a + lineTotal(l), 0));
   const labourCost = round2(labourHours * (opts.technicianCostRate ?? 0));
+  const other = counted.filter((l) => blockOf(l) === "other" && !l.fee_kind);
+  const otherSell = round2(other.filter((l) => !isHidden(l)).reduce((a, l) => a + lineTotal(l), 0));
+  const otherCost = round2(other.reduce((a, l) => a + lineCost(l), 0));
   const feeLine = counted.find((l) => l.fee_kind === "bank_charge");
-  const hiddenCost = round2(counted.filter((l) => isHidden(l) && !l.fee_kind).reduce((a, l) => a + lineCost(l), 0) + counted.filter((l) => l.line_type === "recovery" && !isHidden(l)).reduce((a, l) => a + lineCost(l), 0));
   // The bank charge: the automatic hidden Fee line when there is one, else the old estimate from the card tick.
   const bankCharge = feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? round2(total * ((opts.bankChargePercent ?? 0) / 100)) : 0;
-  const profit = round2(net - partsCost - labourCost - hiddenCost - bankCharge);
+  const profit = round2(net - partsCost - labourCost - otherCost - bankCharge);
   const threshold = opts.depositThreshold ?? 0;
   const deposit = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
-  return { subtotal, discountBase, discount, net, vat, total, partsCost, partsSell, partsMargin: round2(partsSell - partsCost), labourSell, labourHours, labourCost, hiddenCost, bankCharge, profit, deposit };
+  return { subtotal, discountBase, discount, rounding, net, vat, total, partsCost, partsSell, partsMargin: round2(partsSell - partsCost), labourSell, labourHours, labourCost, otherSell, otherCost, hiddenCost: otherCost, bankCharge, profit, deposit };
 }
 
 export type SendBlocker = { key: string; label: string };
 
-/** What stops a quotation from being sent. Empty means it can go. */
-export function sendBlockers(q: Pick<QuoteRow, "kind" | "promised_at" | "status">, lines: QuoteLine[], parts: PartItem[], settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null }): SendBlocker[] {
+/** What stops a quotation from being completed and sent. Empty means it can go. */
+export function sendBlockers(
+  q: Pick<QuoteRow, "kind" | "status">,
+  lines: QuoteLine[],
+  parts: PartItem[],
+  settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null; unquotedFindings?: number; confirmPercent?: number },
+): SendBlocker[] {
   const out: SendBlocker[] = [];
   const active = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.fee_kind);
   if (active.length === 0) out.push({ key: "lines", label: "Add at least one line" });
   if (settings.openRequests) out.push({ key: "parts", label: `${settings.openRequests} part request${settings.openRequests === 1 ? "" : "s"} still with Parts` });
   if (q.kind === "quotation" && settings.workshopEstimate && settings.workshopEstimate.hours !== null && !settings.workshopEstimate.agreed) out.push({ key: "estimate", label: "The workshop manager has not agreed the technician's estimated hours" });
+  if (q.kind === "quotation" && settings.unquotedFindings) out.push({ key: "findings", label: `${settings.unquotedFindings} finding${settings.unquotedFindings === 1 ? "" : "s"} not quoted: add the labour or mark "Not quoting this"` });
   for (const l of active) {
-    const short = l.title.length > 30 ? l.title.slice(0, 28) + "…" : l.title;
+    const short = (l.title || "Line without a description").length > 30 ? (l.title || "Line without a description").slice(0, 28) + "…" : l.title || "Line without a description";
     if (l.line_type === "part") {
       const p = l.part_item_id ? parts.find((x) => x.id === l.part_item_id) ?? null : null;
       if (p) {
         if (p.confirm_status === "rejected") out.push({ key: `line-${l.id}`, label: `${short}: rejected, remove the line` });
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       } else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
+      if (q.kind === "quotation" && !l.parent_line_id) out.push({ key: `line-${l.id}`, label: `${short}: not linked to a job` });
+      if (settings.confirmPercent && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
     }
+    if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });
     if (l.line_type === "labour" && !(l.hours && l.hours > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the hours` });
     if ((l.line_type === "package" || l.line_type === "fee") && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
-    if (l.line_type === "other" && !(l.details ?? "").trim()) out.push({ key: `line-${l.id}`, label: `${short}: describe the work` });
+    if (l.line_type === "other" && !(l.title ?? "").trim()) out.push({ key: `line-${l.id}`, label: "An Other charge has no description" });
     if (l.line_type === "other" && !hasCostFloor(l) && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
-    if (l.line_type === "recovery" && (l.unit_cost === null || l.unit_cost === undefined)) out.push({ key: `line-${l.id}`, label: `${short}: enter the cost to us` });
-    if (l.line_type === "recovery" && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price to the customer, or hide the line` });
+    if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && (l.unit_cost === null || l.unit_cost === undefined)) out.push({ key: `line-${l.id}`, label: `${short}: enter the cost per trip` });
+    if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price per trip, or hide the line` });
     const floor = floorProblem(l, settings.minMarkup);
     if (floor) out.push({ key: `line-${l.id}`, label: `${short}: ${floor}` });
-    // Parts take Urgent or Recommended from the work line they belong to when the quotation is completed.
-    if (q.kind === "quotation" && !l.urgency && !isHidden(l) && l.line_type !== "part") out.push({ key: `line-${l.id}`, label: `${short}: mark Urgent or Recommended` });
   }
-  if (q.kind === "quotation" && !q.promised_at) out.push({ key: "promised", label: "Set the promised date" });
   return out;
+}
+
+/** Whole-dirham totals to offer when sending: the nearest ten below (the default) and above. */
+export function roundingChoices(total: number): { down: number; up: number } {
+  const down = Math.floor(total / 10) * 10;
+  const up = Math.ceil(total / 10) * 10;
+  return { down: down > 0 ? down : Math.round(total), up: up === down ? down + 10 : up };
+}
+
+/** How long the work takes once approved: the latest part delivery, then the labour in working days. */
+export function estimatedDaysAfterApproval(lines: QuoteLine[], parts: PartItem[], today: string, wt: WorkingTime): number {
+  const hours = lines.filter((l) => l.is_active && !isUnchosen(l) && l.line_type === "labour").reduce((a, l) => a + (l.hours ?? 0), 0);
+  const dayHours = wt.closeHour > wt.openHour ? wt.closeHour - wt.openHour : 8;
+  const labourDays = Math.max(1, Math.ceil(hours / dayHours));
+  const latest = latestDelivery(lines, parts);
+  const deliveryDays = latest && latest > today ? Math.max(0, Math.round((Date.parse(latest) - Date.parse(today)) / 86400000)) : 0;
+  return deliveryDays + labourDays;
 }
 
 /** Why the owner must approve before sending: a discount above the advisor's limit, a part discount, or a total above the optional threshold. */

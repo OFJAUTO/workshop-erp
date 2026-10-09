@@ -15,11 +15,14 @@ export function Shell({
   footer,
   viewingAs = null,
   actingAs = null,
+  sounds,
   children,
 }: {
   nav?: NavItem[];
   user?: { id: string; name: string; role: string; photoUrl: string | null };
   footer?: ReactNode;
+  /** The workshop's notification sounds from Settings. */
+  sounds?: { tone: string; ownerTone: string; remindMinutes: number };
   /** The owner is looking at the system as this person (view only). */
   viewingAs?: { realId: string; realName: string } | null;
   /** The owner is doing this person's work from their screen; every change is logged on the owner's behalf. */
@@ -70,7 +73,7 @@ export function Shell({
         {/* Bell at the top right of the page area, level with the page title; below the bar when viewing or acting as someone. */}
         {user ? (
           <div className={`absolute ${viewingAs || actingAs ? "top-[4.5rem]" : "top-5"} right-4 sm:right-6 lg:right-8 z-30`}>
-            <NotificationBell staffId={user.id} />
+            <NotificationBell staffId={user.id} tone={sounds?.tone} ownerTone={sounds?.ownerTone} remindMinutes={sounds?.remindMinutes} />
           </div>
         ) : null}
         {viewingAs ? (

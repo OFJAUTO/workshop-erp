@@ -22,6 +22,10 @@ export type JobProfit = {
   provisionalWhy: string[];
   collected: number;
   balance: number;
+  /** This invoice is for a car that came back for our workmanship or a part we supplied: a loss, not a sale. */
+  comeback: { of: string | null; ours: boolean; claimPaid: number } | null;
+  /** For the original job: the losses on its comebacks, taken off. Null when it never came back. */
+  profitAfterComeback: number | null;
 };
 
 /**
@@ -29,9 +33,9 @@ export type JobProfit = {
  * Recovery lines, minus stock items used, minus clocked technician time at the cost rate, minus bank
  * charges. Counted on the invoice date. Provisional while a supplier invoice is still to follow.
  */
-export async function jobProfits(settings: Settings, filter: { from?: string; to?: string; jobIds?: string[]; limit?: number } = {}): Promise<JobProfit[]> {
+export async function jobProfits(settings: Settings, filter: { from?: string; to?: string; jobIds?: string[]; limit?: number; noComebacks?: boolean } = {}): Promise<JobProfit[]> {
   const admin = createAdminClient();
-  let q = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number, vehicle:vehicles(plate_number, plate_code, plate_emirate, has_plate, vin))").eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").order("issued_at", { ascending: false });
+  let q = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number, comeback_of, comeback_cause, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(plate_number, plate_code, plate_emirate, has_plate, vin))").eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").order("issued_at", { ascending: false });
   if (filter.from) q = q.gte("issued_at", filter.from);
   if (filter.to) q = q.lt("issued_at", filter.to);
   if (filter.jobIds) q = q.in("job_id", filter.jobIds);
@@ -39,7 +43,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   const { data } = await q;
   const rows = (data ?? []) as unknown as Record<string, unknown>[];
   if (!rows.length) return [];
-  const invoices = rows.map((r) => ({ invoice: toInvoice(r), job: r.job as { job_number: string; vehicle: { plate_number: string | null; plate_code: string | null; plate_emirate: string | null; has_plate: boolean; vin: string | null } | null } | null }));
+  const invoices = rows.map((r) => ({ invoice: toInvoice(r), job: r.job as { job_number: string; comeback_of: string | null; comeback_cause: string | null; comeback_claim_status: string | null; comeback_claim_amount: number | string | null; vehicle: { plate_number: string | null; plate_code: string | null; plate_emirate: string | null; has_plate: boolean; vin: string | null } | null } | null }));
   const ids = invoices.map((i) => i.invoice.id);
   const jobIds = Array.from(new Set(invoices.map((i) => i.invoice.job_id).filter((x): x is string => !!x)));
   const rate = Number(settings.technician_cost_rate_aed) || 0;
@@ -53,6 +57,9 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     // Hidden lines of the approved quotations: hidden Recovery or Other costs, and the automatic bank charge line.
     jobIds.length ? admin.from("quotation_lines").select("line_type, quantity, unit_cost, visible_to_customer, fee_kind, option_group, chosen, quotation:quotations!inner(job_id, status)").eq("is_active", true).in("quotation.job_id", jobIds).eq("quotation.status", "approved") : Promise.resolve({ data: [] }),
   ]);
+  // The comebacks of these jobs (our fault), to take their losses off the original job.
+  const { data: cbJobs } = jobIds.length && !filter.noComebacks ? await admin.from("jobs").select("id, comeback_of").in("comeback_of", jobIds).in("comeback_cause", ["workmanship", "faulty_part"]) : { data: [] as { id: string; comeback_of: string }[] };
+  const cbProfits = (cbJobs ?? []).length ? await jobProfits(settings, { jobIds: (cbJobs ?? []).map((c) => c.id), noComebacks: true }) : [];
   const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string }[]).filter((l) => l.invoice_id === id);
   return invoices.map(({ invoice, job }) => {
     const ls = byInvoice(invoice.id);
@@ -80,6 +87,11 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     if (pending.length) why.push("cheque pending clearance");
     if (!recorded.length && feeEstimate > 0) why.push("bank charge estimated until payment");
     const bal = invoiceBalance(invoice, pays);
+    const profit = round2(revenue - partsCost - otherCost - stockCost - labourCost - bankCharges);
+    const ours = job?.comeback_of ? job.comeback_cause === "workmanship" || job.comeback_cause === "faulty_part" : false;
+    const claimPaid = job?.comeback_claim_status === "paid" ? Number(job.comeback_claim_amount) || 0 : 0;
+    const myComebacks = (cbJobs ?? []).filter((c) => c.comeback_of === invoice.job_id).map((c) => cbProfits.find((p) => p.invoice.job_id === c.id)).filter((p): p is JobProfit => !!p);
+    const comebackLoss = round2(myComebacks.reduce((a, p) => a + Math.max(0, -(p.profit + (p.comeback?.claimPaid ?? 0))), 0));
     return {
       invoice,
       jobNumber: job?.job_number ?? null,
@@ -91,11 +103,13 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       labourMinutes: minutes,
       labourCost,
       bankCharges,
-      profit: round2(revenue - partsCost - otherCost - stockCost - labourCost - bankCharges),
+      profit,
       provisional: why.length > 0,
       provisionalWhy: why,
       collected: bal.paid,
       balance: bal.balance,
+      comeback: job?.comeback_of ? { of: job.comeback_of, ours, claimPaid } : null,
+      profitAfterComeback: myComebacks.length ? round2(profit - comebackLoss) : null,
     };
   });
 }
@@ -105,7 +119,7 @@ function plateText(v: { plate_number: string | null; plate_code: string | null; 
   return [v.plate_emirate, v.plate_code, v.plate_number].filter(Boolean).join(" ");
 }
 
-export type DailyProfit = { date: string; target: number; yellowPercent: number; invoicedProfit: number; invoicedTotal: number; collected: number; carry: number; effective: number; percent: number; tone: "green" | "amber" | "red"; count: number; provisional: number };
+export type DailyProfit = { date: string; target: number; yellowPercent: number; invoicedProfit: number; invoicedTotal: number; collected: number; carry: number; effective: number; percent: number; tone: "green" | "amber" | "red"; count: number; provisional: number; /** The losses on comebacks invoiced today (our fault), shown as a red line. */ comebacks: number };
 
 /** Dubai midnight of a date as an ISO instant. */
 function dayStart(date: string) {
@@ -144,7 +158,8 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
   const effective = round2(invoicedProfit + carry);
   const percent = target > 0 ? Math.round((effective / target) * 100) : 0;
   const tone: DailyProfit["tone"] = target <= 0 ? "green" : percent >= 100 ? "green" : percent >= yellowPercent ? "amber" : "red";
-  return { date, target, yellowPercent, invoicedProfit, invoicedTotal: round2(today.reduce((a, p) => a + p.invoice.total_aed, 0)), collected, carry, effective, percent, tone, count: today.length, provisional: today.filter((p) => p.provisional).length };
+  const comebacks = round2(today.filter((p) => p.comeback?.ours).reduce((a, p) => a + Math.max(0, -(p.profit + (p.comeback?.claimPaid ?? 0))), 0));
+  return { date, target, yellowPercent, invoicedProfit, invoicedTotal: round2(today.reduce((a, p) => a + p.invoice.total_aed, 0)), collected, carry, effective, percent, tone, count: today.length, provisional: today.filter((p) => p.provisional).length, comebacks };
 }
 
 export type { PaymentRow };

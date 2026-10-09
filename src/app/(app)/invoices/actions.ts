@@ -2,12 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/lib/auth";
+import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
-import { INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, loadInvoice, nextDocumentNumber, toInvoice, toPayment, type InvoiceKind, type LabourMode } from "@/lib/invoice-data";
+import { PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, loadInvoice, nextDocumentNumber, toPayment, type InvoiceKind, type LabourMode } from "@/lib/invoice-data";
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPayment, type Actor } from "@/lib/payments";
+import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -29,6 +31,7 @@ async function advisorsOf(jobId: string) {
   const [{ data: job }, { data: appr }] = await Promise.all([admin.from("jobs").select("gated_in_by").eq("id", jobId).maybeSingle(), admin.from("approval_requests").select("sent_by").eq("job_id", jobId)]);
   return Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
 }
+const actorOf = (s: { id: string; display_name: string; role_id: string; is_head_accountant?: boolean }): Actor => ({ id: s.id, display_name: s.display_name, role_id: s.role_id, is_head_accountant: s.is_head_accountant });
 
 /** The advisor marks the car ready to invoice; accounts are told. */
 export async function markReadyToInvoice(jobId: string) {
@@ -92,7 +95,8 @@ export async function issueInvoice(jobId: string, formData: FormData) {
       vat_aed: draft.totals.vat,
       total_aed: draft.totals.total,
       agreed_total_aed: draft.totals.agreedTotalApplied ? opts.agreedTotal : null,
-      discount_note: draft.totals.discount ? `${draft.totals.discountPercent}% on labour and services${draft.totals.agreedTotalApplied ? " (agreed total)" : ""}` : null,
+      warranty_credit_aed: draft.totals.warrantyCredit,
+      discount_note: draft.totals.warrantyCredit ? "Warranty repair, no charge" : draft.totals.discount ? `${draft.totals.discountPercent}% on labour and services${draft.totals.agreedTotalApplied ? " (agreed total)" : ""}` : null,
       prepared_by: job.gated_in_by,
       issued_by: staff.id,
       notes: blankToNull(formData.get("notes")),
@@ -115,9 +119,8 @@ export async function issueInvoice(jobId: string, formData: FormData) {
     if (["ready", "pending_wash", "pending_qc"].includes(job.status) || job.status === "pending_payment") {
       await admin.from("jobs").update({ status: bal.balance > 0 ? "pending_payment" : "ready", stage: "ready", ready_token: token }).eq("id", jobId);
     }
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", from_status: job.status, to_status: bal.balance > 0 ? "pending_payment" : "ready", note: `${number} issued by ${staff.display_name}: AED ${draft.totals.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} with VAT${bal.paid ? `, AED ${bal.paid.toLocaleString("en-GB")} already received` : ""}`, created_by: staff.id });
-    const advisors = await advisorsOf(jobId);
-    await notifyStaff(advisors, { type: "invoice_issued", title: `Invoice issued · ${job.job_number}`, body: `${number}, AED ${draft.totals.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Send the customer the "car is ready" message from the job card.`, jobId, href: `/jobs/${jobId}` });
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", from_status: job.status, to_status: bal.balance > 0 ? "pending_payment" : "ready", note: `${number} issued by ${staff.display_name}: AED ${draft.totals.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} with VAT${draft.totals.warrantyCredit ? " (warranty repair, no charge)" : ""}${bal.paid ? `, AED ${bal.paid.toLocaleString("en-GB")} already received` : ""}`, created_by: staff.id });
+    await notifyStaff(await advisorsOf(jobId), { type: "invoice_issued", title: `Invoice issued · ${job.job_number}`, body: `${number}, AED ${draft.totals.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Send the tax invoice to the customer on WhatsApp from the job card.`, jobId, href: `/jobs/${jobId}` });
   } else {
     await admin.from("job_events").insert({ job_id: jobId, event_type: "proforma_issued", note: `${number} issued by ${staff.display_name}`, created_by: staff.id });
   }
@@ -125,67 +128,79 @@ export async function issueInvoice(jobId: string, formData: FormData) {
   redirect(`/invoices/${inv.id}?message=${encodeURIComponent(`${number} issued.`)}`);
 }
 
-/** A payment: cash, card, link or cheque, against an invoice or as a deposit on the job. Card and link carry the bank charge from Settings. */
+/**
+ * A payment: cash, card, link or cheque, against an invoice or as a deposit on the job. One tap, one
+ * receipt: the same tap twice records nothing twice; more than the balance waits for the owner.
+ */
 export async function recordPayment(formData: FormData) {
   const staff = await requirePermission("recordPayments");
-  const admin = createAdminClient();
   const settings = await getSettings();
   const invoiceId = blankToNull(formData.get("invoice_id"));
   const jobIdIn = blankToNull(formData.get("job_id"));
-  const method = String(formData.get("method") ?? "");
-  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
-  const reference = blankToNull(formData.get("reference"));
-  // Back to the page the payment came from, keeping its options (the invoice build page carries labour, consumables and the agreed total in its address).
   const returnTo = blankToNull(formData.get("return_to"));
   const base = invoiceId ? `/invoices/${invoiceId}` : jobIdIn ? `/jobs/${jobIdIn}/invoice` : "/invoices";
   const back = returnTo && returnTo.startsWith(base) && !returnTo.includes("message=") && !returnTo.includes("error=") ? returnTo : base;
   const sep = back.includes("?") ? "&" : "?";
-  if (!["cash", "card", "link", "cheque"].includes(method)) redirect(`${back}${sep}error=${encodeURIComponent("Choose the payment method.")}`);
-  if (!Number.isFinite(amount) || amount <= 0) redirect(`${back}?error=${encodeURIComponent("Enter the amount received.")}`);
-  let jobId = jobIdIn;
-  let customerId: string | null = null;
-  let invoice = null as Awaited<ReturnType<typeof loadInvoice>>;
-  if (invoiceId) {
-    invoice = await loadInvoice(invoiceId);
-    if (!invoice || invoice.invoice.status !== "issued") redirect(`${back}?error=${encodeURIComponent("Invoice not found.")}`);
-    jobId = invoice.invoice.job_id;
-    customerId = invoice.invoice.customer_id;
-  } else if (jobId) {
-    const { data: job } = await admin.from("jobs").select("customer_id").eq("id", jobId).maybeSingle();
-    customerId = job?.customer_id ?? null;
-  }
-  if (!customerId) redirect(`${back}?error=${encodeURIComponent("Choose the invoice or the job.")}`);
-  const cheque = method === "cheque" ? { cheque_number: blankToNull(formData.get("cheque_number")), cheque_bank: blankToNull(formData.get("cheque_bank")), cheque_date: blankToNull(formData.get("cheque_date")), cheque_status: "pending" as const } : {};
-  if (method === "cheque" && (!cheque.cheque_number || !cheque.cheque_bank || !cheque.cheque_date)) redirect(`${back}?error=${encodeURIComponent("A cheque needs its number, bank and date.")}`);
-  const pct = method === "card" ? Number(settings.bank_charge_card_percent) || 0 : method === "link" ? Number(settings.bank_charge_link_percent) || 0 : 0;
-  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: invoiceId, customer_id: customerId, method, amount_aed: round2(amount), reference, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !invoiceId, received_by: staff.id, notes: blankToNull(formData.get("notes")), created_by: staff.id, updated_by: staff.id }).select("id, number").single();
-  if (error || !created) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not record the payment.")}`);
-  if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: AED ${round2(amount).toLocaleString("en-GB", { minimumFractionDigits: 2 })} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${invoiceId ? "" : " as a deposit"} received by ${staff.display_name}`, created_by: staff.id });
-  if (invoice && jobId) await settleJob(jobId, invoice.invoice.id, staff.id);
-  if (jobId) {
-    const advisors = await advisorsOf(jobId);
-    await notifyStaff(advisors, { type: "payment_received", title: `Payment received · ${created.number}`, body: `AED ${round2(amount).toLocaleString("en-GB", { minimumFractionDigits: 2 })} by ${method}${invoiceId ? "" : " (deposit)"}`, jobId, href: invoiceId ? `/invoices/${invoiceId}` : `/jobs/${jobId}` });
-  }
+  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
+  const r = await recordPaymentCore(actorOf(staff), {
+    invoiceId,
+    jobId: jobIdIn,
+    method: String(formData.get("method") ?? ""),
+    amount,
+    reference: blankToNull(formData.get("reference")),
+    cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
+    notes: blankToNull(formData.get("notes")),
+    clientKey: blankToNull(formData.get("client_key")),
+  }, settings);
+  const jobId = jobIdIn ?? (invoiceId ? (await loadInvoice(invoiceId))?.invoice.job_id ?? null : null);
   refresh(jobId, invoiceId ?? undefined);
-  redirect(`${back}?message=${encodeURIComponent(`${created.number} recorded.${method === "cheque" ? " The cheque counts as unpaid until it clears." : ""}`)}`);
+  redirect(`${back}${sep}${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Recorded.")}`);
 }
 
-/** After a payment or a cheque change: the job is Ready when the invoice is settled, pending payment otherwise. */
-async function settleJob(jobId: string, invoiceId: string, by: string) {
+/** A wrong receipt is never deleted: the owner or the head accountant voids it with a reason. */
+export async function voidPaymentAction(paymentId: string, formData: FormData) {
+  const staff = await requireStaff();
+  const r = await voidPayment(paymentId, actorOf(staff), String(formData.get("reason") ?? ""));
+  const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
+  refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
+  const back = p?.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
+  redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Voided.")}`);
+}
+
+/** Accounts tick a payment once the money is confirmed. */
+export async function verifyPaymentAction(paymentId: string, formData: FormData) {
+  const staff = await requirePermission("verifyPayments");
+  const r = await verifyPayment(paymentId, actorOf(staff));
+  const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
+  refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
+  const to = blankToNull(formData.get("return_to")) ?? (p?.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices");
+  redirect(`${to}${to.includes("?") ? "&" : "?"}${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Verified.")}`);
+}
+
+/** The owner approves or refuses a payment above the balance. */
+export async function decideOverpaymentAction(paymentId: string, formData: FormData) {
+  const staff = await requirePermission("moveJobs");
+  const approve = String(formData.get("decision") ?? "") === "approve";
+  const r = await decideOverpayment(paymentId, actorOf(staff), approve, blankToNull(formData.get("note")));
+  const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
+  refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
+  const back = p?.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
+  redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
+}
+
+/** The owner or accounts paste the bank's payment link; the customer's invoice page shows "Pay now". */
+export async function setPaymentLink(invoiceId: string, formData: FormData) {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  if (!can(role, "issueInvoices")) redirect(`/invoices/${invoiceId}`);
+  const url = blankToNull(formData.get("payment_link_url"));
+  if (url && !/^https:\/\/\S+$/.test(url)) redirect(`/invoices/${invoiceId}?error=${encodeURIComponent("Paste the full https:// link.")}`);
   const admin = createAdminClient();
-  const [{ data: inv }, { data: pays }, { data: job }] = await Promise.all([
-    admin.from("invoices").select(INVOICE_SELECT).eq("id", invoiceId).maybeSingle(),
-    admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoiceId).eq("is_active", true),
-    admin.from("jobs").select("status, is_open").eq("id", jobId).maybeSingle(),
-  ]);
-  if (!inv || !job || !job.is_open) return;
-  const bal = invoiceBalance(toInvoice(inv as Record<string, unknown>), ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
-  if (job.status === "pending_payment" && bal.balance <= 0) {
-    await admin.from("jobs").update({ status: "ready" }).eq("id", jobId);
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_payment", to_status: "ready", note: "Invoice paid in full", created_by: by });
-  } else if (job.status === "ready" && bal.balance > 0) {
-    await admin.from("jobs").update({ status: "pending_payment" }).eq("id", jobId);
-  }
+  await admin.from("invoices").update({ payment_link_url: url, updated_by: staff.id }).eq("id", invoiceId);
+  const { data: inv } = await admin.from("invoices").select("job_id, number").eq("id", invoiceId).maybeSingle();
+  if (inv?.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "payment_link", note: url ? `Payment link added to ${inv.number} by ${staff.display_name}` : `Payment link removed from ${inv.number} by ${staff.display_name}`, created_by: staff.id });
+  refresh(inv?.job_id ?? null, invoiceId);
+  redirect(`/invoices/${invoiceId}?message=${encodeURIComponent(url ? "Payment link saved. The customer sees Pay now on the invoice page." : "Payment link removed.")}`);
 }
 
 /** A cheque clears, or bounces (which reverses the payment). */
@@ -251,12 +266,13 @@ export async function issueCreditNote(invoiceId: string, formData: FormData) {
   redirect(`/invoices/${cn.id}?message=${encodeURIComponent(`${number} issued.`)}`);
 }
 
-/** Records that the "car is ready" message went to the customer. */
+/** Records that the "car is ready" message with the invoice went to the customer. */
 export async function markReadySent(jobId: string, method: string): Promise<{ error?: string; ok?: boolean }> {
   const staff = await requirePermission("sendApproval");
   const admin = createAdminClient();
   await admin.from("jobs").update({ ready_sent_at: new Date().toISOString() }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: `"Your car is ready" sent by ${staff.display_name} (${method})`, created_by: staff.id });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: `Tax invoice and "your car is ready" sent by ${staff.display_name} (${method})`, created_by: staff.id });
   refresh(jobId);
   return { ok: true };
 }
+

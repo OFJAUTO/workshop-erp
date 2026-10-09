@@ -4,9 +4,9 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Text
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor } from "@/lib/quote-data";
+import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, loadQuoteFindings } from "@/lib/quote-data";
 import { checklistItems, type ChecklistSection } from "@/lib/inspection";
-import { QUOTE_STATUS_LABELS, aed, isHidden } from "@/lib/quotes";
+import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -34,7 +34,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
   const canSend = !staff.viewingAs;
   const services = await loadServices(staff.id);
-  const [checks, partsWait] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id)]);
+  const [checks, partsWait, findings] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id), loadQuoteFindings(id)]);
+  const candidateMap = (settings.labour_job_candidates ?? {}) as Record<string, number>;
+  const candidates = Object.entries(candidateMap).filter(([, n]) => Number(n) >= 2).map(([t]) => t);
+  const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
   const countedParts = bundle.parts.filter((p) => p.confirm_status !== "rejected");
   const wait: PartsWait = {
     openRequests: checks.openRequests,
@@ -64,6 +67,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const editorSettings = {
     labourRate: labourRateFor(settings, job?.department ?? null, vehicle?.make?.name ?? null),
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
+    markupWarn: Number(settings.markup_warn_percent) || 50,
+    markupConfirm: Number(settings.markup_confirm_percent) || 100,
+    inspectionFee: Number(settings.inspection_fee_aed) || 0,
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
     technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
@@ -148,7 +154,6 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={!!q.estimate_id}
-        requests={bundle.requests}
         labourActions={(settings.labour_actions ?? []) as string[]}
         labourPositions={(settings.labour_positions ?? []) as string[]}
         components={components}
@@ -156,6 +161,12 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         wait={wait}
         workshopEstimate={checks.workshopEstimate}
         completedAt={q.completed_at}
+        findings={findings}
+        labourJobs={(settings.labour_jobs ?? {}) as Record<string, string[]>}
+        candidates={candidates}
+        recoveryProviders={(settings.recovery_providers ?? []) as string[]}
+        estimatedDays={estimatedDays}
+        isRevision={q.version > 1}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

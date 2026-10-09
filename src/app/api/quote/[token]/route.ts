@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { applyCustomerResponse, requestUrgentOnly } from "@/lib/quote-respond";
+import { applyCustomerResponse } from "@/lib/quote-respond";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-/** The customer's answer from the quotation page: approve everything, ask for urgent work only, or decline. */
+/** The customer's answer from the quotation page: Approved or Declined (with an optional reason). */
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const form = await request.formData();
@@ -21,13 +21,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   if (q.valid_until && Date.parse(q.valid_until) < Date.now()) return back("This quotation has expired. Please ask the workshop for a new one.");
   if (name.length < 2) return back("Please type your full name.");
   if (action === "approve" && !agree) return back("Please tick the box to agree to the terms and conditions.");
-
   if (action === "decline") {
     // Declining a quotation with a dangerous finding needs the safety acknowledgement.
     const { data: danger } = await admin.from("quotation_lines").select("id").eq("quotation_id", q.id).eq("is_active", true).eq("dangerous", true).limit(1);
     if ((danger ?? []).length && !dangerAck) return back("Please tick the box to confirm you have read the safety warning.");
   }
-  const res = action === "urgent" ? await requestUrgentOnly(q.id, { name, note }) : await applyCustomerResponse(q.id, { approve: action === "approve", name, via: "customer", dangerAck });
+  const res = await applyCustomerResponse(q.id, { approve: action === "approve", name, via: "customer", dangerAck, note });
   if (res.error) return back(res.error);
   return back();
 }

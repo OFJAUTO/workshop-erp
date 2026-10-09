@@ -11,6 +11,7 @@ import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabel
 import { verifyPin } from "@/lib/pin";
 import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensureWorkLines } from "@/lib/work-data";
 
@@ -262,9 +263,8 @@ export async function issueParts(jobId: string, formData: FormData) {
   const job = await jobBrief(jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_issued", note: `${issued} part${issued === 1 ? "" : "s"} issued by ${staff.display_name} and confirmed by ${tech.display_name} with his PIN`, created_by: staff.id });
   await notifyStaff([tech.id], { type: "parts_issued", title: `Parts issued to you · ${job?.job_number ?? ""}`, body: `${issued} part${issued === 1 ? "" : "s"} confirmed with your PIN.`, jobId, href: `/my-jobs/${jobId}` });
-  const moved = await moveToWorkIfReady(jobId, staff.id, staff.display_name);
   refresh(jobId);
-  redirect(`${back}?message=${encodeURIComponent(`${issued} part${issued === 1 ? "" : "s"} issued to ${tech.display_name}.${moved ? " Every part is issued: the car moved to Work and the workshop manager has the work order." : ""}`)}`);
+  redirect(`/parts/handover/${jobId}?message=${encodeURIComponent(`${issued} part${issued === 1 ? "" : "s"} handed to ${tech.display_name}.`)}`);
 }
 
 /** A job moves to Work when its quotation is approved and its parts are issued, or it needs none. */
@@ -332,7 +332,10 @@ export async function issueStock(formData: FormData) {
   const [{ data: item }, { data: tech }, { data: priv }] = await Promise.all([admin.from("stock_items").select("id, name, quantity, unit_cost").eq("id", itemId).maybeSingle(), admin.from("staff").select("id, display_name, role_id").eq("id", technicianId).maybeSingle(), admin.from("staff_private").select("pin_hash").eq("staff_id", technicianId).maybeSingle()]);
   if (!item) redirect(`${back}?error=${encodeURIComponent("Item not found.")}`);
   if (!tech || tech.role_id !== "technician") redirect(`${back}?error=${encodeURIComponent("Choose the technician.")}`);
-  if (!verifyPin(pin, priv?.pin_hash)) redirect(`${back}?error=${encodeURIComponent("The technician's PIN is wrong.")}`);
+  // Small consumables need no PIN; above the threshold from Settings the technician confirms with his PIN.
+  const threshold = Number((await getSettings()).pin_needed_above_aed) || 0;
+  const value = qty * (Number(item.unit_cost) || 0);
+  if (value > threshold && !verifyPin(pin, priv?.pin_hash)) redirect(`${back}?error=${encodeURIComponent(`Above AED ${threshold}: the technician's PIN is needed, and it was wrong or missing.`)}`);
   const now = new Date().toISOString();
   await admin.from("stock_issues").insert({ stock_item_id: itemId, job_id: jobId, quantity: qty, unit_cost: Number(item.unit_cost) || 0, issued_by: staff.id, confirmed_by: tech.id, confirmed_at: now, created_by: staff.id, updated_by: staff.id });
   await admin.from("stock_items").update({ quantity: Math.max(0, Number(item.quantity) - qty), updated_by: staff.id }).eq("id", itemId);

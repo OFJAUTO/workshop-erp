@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
-import { loadInspection, INSPECTION_BUCKET, type InspectionBundle } from "./inspection-data";
-import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows } from "./inspection";
+import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
+import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
 import type { Settings } from "./settings";
 import { newToken } from "./media";
@@ -9,8 +9,8 @@ import { newToken } from "./media";
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, created_at, created_by, updated_at";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, description, parts_requests, position, is_active";
 export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason";
@@ -25,7 +25,7 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
   return out;
 }
 const LINE_NUM: (keyof QuoteLine)[] = ["position", "quantity", "unit_cost", "markup_percent", "unit_price", "hours", "labour_rate", "discount_percent", "line_total", "recovery_trips"];
-const QUOTE_NUM: (keyof QuoteRow)[] = ["version", "discount_percent", "vat_percent", "subtotal_aed", "discount_aed", "vat_aed", "total_aed", "approved_total_aed", "deposit_aed", "validity_days"];
+const QUOTE_NUM: (keyof QuoteRow)[] = ["version", "discount_percent", "vat_percent", "subtotal_aed", "discount_aed", "vat_aed", "total_aed", "approved_total_aed", "deposit_aed", "validity_days", "rounded_total_aed", "estimated_days"];
 const PART_NUM: (keyof PartItem)[] = ["quantity", "cost_aed", "confirmed_quantity"];
 
 export const toLine = (r: Record<string, unknown>) => num(r as unknown as QuoteLine, LINE_NUM);
@@ -41,7 +41,7 @@ export type QuoteBundle = {
   versions: { id: string; version: number; status: string; created_at: string }[];
   customer: { id: string; full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null;
   vehicle: { id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
-  job: { id: string; job_number: string; status: string; department: string | null; assigned_to: string | null; gated_in_by: string; is_open: boolean; inspection_fee_due: boolean } | null;
+  job: { id: string; job_number: string; status: string; department: string | null; assigned_to: string | null; gated_in_by: string; is_open: boolean; inspection_fee_due: boolean; comeback_free?: boolean } | null;
   inspection: InspectionBundle | null;
   creatorName: string | null;
 };
@@ -77,7 +77,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     admin.from("quotations").select("id, version, status, created_at").eq("number", quotation.number).eq("kind", quotation.kind).order("version"),
     admin.from("customers").select("id, full_name, company_name, phone, email, trn").eq("id", quotation.customer_id).maybeSingle(),
     quotation.vehicle_id ? admin.from("vehicles").select("id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
-    quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
+    quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due, comeback_free").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? loadInspection(quotation.job_id) : Promise.resolve(null),
     quotation.created_by ? admin.from("staff").select("display_name").eq("id", quotation.created_by).maybeSingle() : Promise.resolve({ data: null }),
   ]);
@@ -225,19 +225,19 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
   const { data: reqs } = await admin.from("job_requests").select("id, text, position").eq("job_id", jobId).eq("is_active", true).order("position");
   const out: Omit<QuoteLine, "id" | "quotation_id" | "is_active">[] = [];
   let position = 0;
-  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null, part_type: null, brand: null, option_group: null, chosen: true, fee_kind: null, recovery_trips: null, recovery_provider: null, dangerous: false };
+  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null, part_type: null, brand: null, option_group: null, chosen: true, fee_kind: null, recovery_trips: null, recovery_provider: null, dangerous: false, parent_line_id: null, recovery_provider_kind: null, markup_confirmed: false };
   for (const r of reqs ?? []) {
     const f = bundle.findings.find((x) => x.job_request_id === r.id);
     if (!f || !(f.status === "bad" || f.status === "average")) continue;
     // The labour line is the work on the complaint; what the technician listed as parts goes to Parts as a price request, never into the title.
-    out.push({ ...base, position: position++, line_type: "labour", title: `Attend to: ${r.text}`, details: [f.found?.trim(), f.needs?.trim() ? `Needs: ${f.needs.trim()}` : ""].filter(Boolean).join(" · ") || null, group_label: `Request: ${r.text}`, source_type: "request", source_key: r.id });
+    out.push({ ...base, position: position++, line_type: "labour", title: "", details: null, group_label: `Request: ${r.text}`, source_type: "request", source_key: r.id });
   }
   for (const i of bundle.items) {
     if (!(i.status === "bad" || i.status === "average")) continue;
     // The title follows what the technician tapped: skim or replace a disc, repair a leak; a dangerous finding is Urgent from the start.
     const disc = DISC_ACTIONS.find((a) => a.value === i.disc_action);
     const leak = LEAK_REPAIRS.find((r) => r.value === i.leak_repair);
-    const title = disc && i.disc_action === "skim" ? `Skim ${i.item_label.toLowerCase()}` : disc && i.disc_action === "replace" ? `Replace ${i.item_label.toLowerCase()}` : leak ? `${i.leak_repair === "replace" ? "Replace" : "Repair leak,"} ${i.item_label.toLowerCase()}${i.leak_repair === "replace" ? "" : ` (${leak.label.toLowerCase()})`}` : i.item_label;
+    const title = disc && i.disc_action === "skim" ? `Skim ${i.item_label.toLowerCase()}` : disc && i.disc_action === "replace" ? `Replace ${i.item_label.toLowerCase()}` : leak ? `${i.leak_repair === "replace" ? "Replace" : "Repair leak,"} ${i.item_label.toLowerCase()}${i.leak_repair === "replace" ? "" : ` (${leak.label.toLowerCase()})`}` : "";
     const extra = [i.leak_severity ? `${LEAK_SEVERITIES.find((s) => s.value === i.leak_severity)?.label ?? ""} leak` : "", i.fluid_qty !== null && i.fluid_qty !== undefined ? `${i.fluid_qty} ${i.fluid_unit === "g" ? "g" : "L"}${i.fluid_grade ? ` ${i.fluid_grade}` : ""}${i.fluid_spec ? ` (${i.fluid_spec})` : ""}` : i.fluid_grade ? i.fluid_grade : ""].filter(Boolean).join(" · ");
     out.push({ ...base, position: position++, line_type: "labour", title, details: [i.remarks ?? "", extra].filter(Boolean).join(" · ") || null, group_label: `${i.section_title}`, source_type: "item", source_key: i.item_key, dangerous: !!i.dangerous, urgency: i.dangerous ? "urgent" : null });
   }
@@ -255,13 +255,15 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
 export async function refreshQuoteTotals(quotationId: string, settings: Settings, by: string, opts: { reopen?: boolean } = {}) {
   const admin = createAdminClient();
   const [{ data: q }, { data: lines }] = await Promise.all([
-    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at").eq("id", quotationId).maybeSingle(),
+    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at, rounded_total_aed").eq("id", quotationId).maybeSingle(),
     admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", quotationId).eq("is_active", true),
   ]);
   if (!q) return;
   let ls = ((lines ?? []) as Record<string, unknown>[]).map(toLine);
   const stamp = by || null;
-  const qArgs = { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 };
+  // A change after the total was rounded and the quotation completed reopens it: the rounding is chosen again at Send.
+  const reopening = !!opts.reopen && !!q.completed_at;
+  const qArgs = { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, rounded_total_aed: reopening || q.rounded_total_aed === null ? null : Number(q.rounded_total_aed) };
   // The automatic bank charge: one hidden Fee line at the set percentage of the total including VAT.
   // Never shown to the customer, counted as a cost against profit, corrected by the real charge at payment.
   if (q.status === "draft" || q.status === "pending_owner") {
@@ -292,7 +294,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, updated_by: stamp };
   if (responded) patch.approved_total_aed = quoteTotals(ls, qArgs, { onlyApproved: true }).total;
   // A change after "Quotation complete" reopens it: the advisor checks it again before sending.
-  if (opts.reopen && q.completed_at) Object.assign(patch, { completed_at: null, completed_by: null });
+  if (reopening) Object.assign(patch, { completed_at: null, completed_by: null, rounded_total_aed: null });
   const { error } = await admin.from("quotations").update(patch).eq("id", quotationId);
   if (error) console.error("refreshQuoteTotals", error.message);
 }
@@ -344,4 +346,62 @@ export async function loadPartsWait(jobId: string): Promise<{ count: number; min
   const stamps = [...(reqs ?? []), ...(parts ?? [])].map((r) => Date.parse((r as { created_at: string }).created_at)).filter((t) => Number.isFinite(t));
   const minutes = stamps.length ? Math.max(0, Math.floor((Date.now() - Math.min(...stamps)) / 60000)) : 0;
   return { count: stamps.length, minutes, names: (people ?? []).map((p) => p.display_name as string) };
+}
+
+/* ---------------------------------------------------------------------------
+   The findings a quotation answers (overnight round 3). Each BAD or AVERAGE
+   finding of the approved inspection is a heading in the labour block, with the
+   labour lines for it underneath; a part belongs to the labour line of the
+   finding its request came from.
+   --------------------------------------------------------------------------- */
+
+export type QuoteFinding = {
+  /** "request:<id>", "item:<key>" or "tyre:<pos>": the same key the lines carry in source_type and source_key. */
+  key: string;
+  source_type: "request" | "item" | "tyre";
+  source_key: string;
+  status: "bad" | "average";
+  /** The heading: "Oil leaks · Engine top side", "Request: A/C not cooling", "Rear left tyre". */
+  label: string;
+  section: string | null;
+  remark: string | null;
+  parts: string | null;
+  photos: string[];
+  dangerous: boolean;
+};
+
+/** The findings of the approved report, in the order they appear on it: customer requests first. */
+export async function loadQuoteFindings(jobId: string): Promise<QuoteFinding[]> {
+  const bundle = await loadInspection(jobId);
+  if (!bundle) return [];
+  const admin = createAdminClient();
+  const { data: reqs } = await admin.from("job_requests").select("id, text, position").eq("job_id", jobId).eq("is_active", true).order("position");
+  const out: QuoteFinding[] = [];
+  const photosFor = (filter: (m: InspectionMediaRow) => boolean) => bundle.media.filter((m) => m.kind === "photo" && filter(m)).map((m) => bundle.mediaUrls[m.storage_path]).filter((u): u is string => !!u);
+  for (const r of reqs ?? []) {
+    const f = bundle.findings.find((x) => x.job_request_id === r.id);
+    if (!f || !(f.status === "bad" || f.status === "average")) continue;
+    out.push({ key: `request:${r.id}`, source_type: "request", source_key: r.id, status: f.status, label: `Request: ${r.text}`, section: null, remark: [f.found, f.needs ? `Needs: ${f.needs}` : ""].filter(Boolean).join(" · ") || null, parts: f.needs ?? null, photos: photosFor((m) => m.job_request_id === r.id), dangerous: false });
+  }
+  for (const i of bundle.items) {
+    if (!(i.status === "bad" || i.status === "average")) continue;
+    const rows = cleanPartsRows(i.parts_rows);
+    out.push({ key: `item:${i.item_key}`, source_type: "item", source_key: i.item_key, status: i.status, label: `${i.section_title} · ${i.item_label}`, section: i.section_title, remark: i.remarks ?? null, parts: rows.length ? partsRowsText(rows).replace(/\n/g, "; ") : (i.parts_needed ?? null), photos: photosFor((m) => m.item_key === i.item_key), dangerous: !!i.dangerous });
+  }
+  const m = bundle.inspection.measurements ?? {};
+  for (const p of [...TYRE_POSITIONS, { key: "spare", label: "Spare" }]) {
+    const action = String(m[`tyre_${p.key}_action`] ?? "");
+    if (action !== "replace_now" && action !== "replace_soon") continue;
+    out.push({ key: `tyre:${p.key}`, source_type: "tyre", source_key: p.key, status: action === "replace_now" ? "bad" : "average", label: `${p.label} tyre`, section: "Tyres", remark: [m[`tyre_${p.key}_tread`] ? `${m[`tyre_${p.key}_tread`]} mm tread` : "", action === "replace_now" ? "Replace now" : "Replace soon"].filter(Boolean).join(" · "), parts: `${p.label} tyre`, photos: [], dangerous: String(m[`tyre_${p.key}_danger`] ?? "") === "1" });
+  }
+  return out;
+}
+
+/** The labour line of this quotation that answers a part request's finding, so the part can sit under it. */
+export async function parentLineFor(quotationId: string, request: { source_type: string; source_key: string } | null): Promise<string | null> {
+  if (!request) return null;
+  const base = request.source_key.split("#")[0];
+  const { data } = await createAdminClient().from("quotation_lines").select("id, source_type, source_key, position").eq("quotation_id", quotationId).eq("is_active", true).in("line_type", ["labour", "package"]).order("position");
+  const hit = (data ?? []).find((l) => l.source_type === request.source_type && l.source_key === base);
+  return hit?.id ?? null;
 }

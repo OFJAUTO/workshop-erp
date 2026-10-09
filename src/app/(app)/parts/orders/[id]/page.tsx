@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { PO_STATUS_LABELS, loadPurchaseOrder } from "@/lib/parts-data";
+import { partTypeText } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -37,6 +38,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;
   const today = todayIso();
+  const typeOf = (partId: string) => { const p = bundle.parts.find((x) => x.id === partId); return p ? partTypeText(p) : null; };
   const formLines = lines.map((l) => ({ id: l.id, description: l.description, part_number: l.part_number, quantity: l.quantity, received_qty: l.received_qty, unit_cost: l.unit_cost, flag: l.flag }));
   const v = job?.vehicle;
 
@@ -77,6 +79,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 return (
                   <li key={l.id} className="py-2 flex flex-wrap items-center gap-2">
                     <span className="font-semibold">{l.description}</span>
+                    {typeOf(l.part_item_id) ? <Badge tone="outline">{typeOf(l.part_item_id)}</Badge> : null}
                     {l.part_number ? <span className="text-muted">{l.part_number}</span> : null}
                     <span className="text-muted">× {l.quantity} at AED {l.unit_cost.toFixed(2)}</span>
                     {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}

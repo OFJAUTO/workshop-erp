@@ -210,6 +210,7 @@ export async function resetPin(id: string, _state: FormState, formData: FormData
       pin_hash: hashPin(pin),
       pin_failed_attempts: 0,
       pin_locked_until: null,
+      pin_must_change: true,
       pin_updated_at: new Date().toISOString(),
       updated_by: owner.id,
     })
@@ -217,7 +218,7 @@ export async function resetPin(id: string, _state: FormState, formData: FormData
   if (error) return { error: error.message };
 
   revalidatePath(`/team/${id}`);
-  return { success: "New PIN saved." };
+  return { success: "Temporary PIN saved. The person chooses their own PIN the first time they log in with it." };
 }
 
 /** Makes a 24-hour setup link the person opens to choose a password. Opening it changes nothing; it is used up when the password is saved. */

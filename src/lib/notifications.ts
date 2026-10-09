@@ -78,6 +78,18 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "scan_received", label: "An Autel scan report arrived for your car", locked: true },
   { type: "scan_unmatched", label: "An Autel scan report could not be matched to a car", locked: true },
   { type: "scan_approval", label: "A technician asks to skip the pre-scan", locked: true },
+  { type: "planning", label: "Planning: your turn (Parts, workshop manager, advisor)", locked: true },
+  { type: "work_done", label: "A technician pressed Job finished; confirm or send back", locked: true },
+  { type: "work_sendback", label: "The manager sent the work back to you", locked: true },
+  { type: "pause", label: "A technician paused waiting for parts or the manager", locked: true },
+  { type: "left_job", label: "A technician left a job", locked: true },
+  { type: "handover", label: "Parts handed over or returned", locked: true },
+  { type: "job_summary", label: "Job summary after QC (owner and manager)", locked: true },
+  { type: "comeback", label: "A comeback job needs a cause or the owner's decision", locked: true },
+  { type: "payment_void", label: "A receipt was voided or an overpayment approved (owner)", locked: true },
+  { type: "payment_verify", label: "A payment recorded by an advisor to verify (accounts)", locked: true },
+  { type: "overpayment_approval", label: "A payment above the balance needs the owner's approval", locked: true },
+  { type: "wash", label: "Car ready for the wash, or wash done", locked: true },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };

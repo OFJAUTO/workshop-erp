@@ -45,7 +45,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/parts/orders", label: "Purchase orders", show: can(role, "viewPurchaseOrders") && role !== "service_advisor" },
     { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
-    { href: "/wash", label: "Car wash", show: can(role, "washCars") && role !== "service_advisor" },
+    { href: "/wash", label: "Car wash", show: can(role, "washCars") },
+    { href: "/pauses", label: "Pause log", show: can(role, "manageWork") },
+    { href: "/scoreboard", label: "Scoreboard", show: can(role, "manageWork") },
+    { href: "/comebacks", label: "Comebacks", show: can(role, "manageWork") },
     { href: "/invoices", label: "Invoices", show: can(role, "viewInvoices") },
     { href: "/profit", label: "Profit", show: can(role, "viewProfitList") },
     { href: "/attendance", label: "Attendance", show: can(role, "viewAttendance") },
@@ -66,6 +69,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Shell
         nav={nav}
         user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
+        sounds={{ tone: String(settings.notification_tone || "marimba"), ownerTone: String(settings.notification_tone_owner || "chord"), remindMinutes: Number(settings.notification_remind_minutes) || 2 }}
         viewingAs={staff.viewingAs}
         actingAs={staff.actingAs}
         footer={

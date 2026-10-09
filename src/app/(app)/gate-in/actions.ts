@@ -164,9 +164,13 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   // An accepted estimate for this car becomes the quotation once the inspection is approved.
   const estimateId = blankToNull(formData.get("estimate_id"));
   const { data: estimate } = estimateId ? await supabase.from("quotations").select("id, number, status, vehicle_id").eq("id", estimateId).eq("kind", "estimate").maybeSingle() : { data: null };
+  // A comeback: the car is back for a previous job of its own. High priority, linked both ways.
+  const comebackId = blankToNull(formData.get("comeback_of"));
+  const { data: comebackJob } = comebackId ? await supabase.from("jobs").select("id, job_number, vehicle_id").eq("id", comebackId).eq("vehicle_id", vehicleId).maybeSingle() : { data: null };
+  if (comebackId && !comebackJob) return { error: "That previous job does not belong to this car.", values };
   const { data: job, error: jobError } = await supabase
     .from("jobs")
-    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: d.priority, department: d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null })
+    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null })
     .select("id, job_number")
     .single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
@@ -220,6 +224,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
 
   if (estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId) {
     await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Accepted estimate ${estimate.number} attached at gate-in`, created_by: staff.id });
+  }
+  if (comebackJob) {
+    await supabase.from("job_events").insert({ job_id: job.id, event_type: "comeback", note: `Comeback of ${comebackJob.job_number}, marked at gate-in by ${staff.display_name}. High priority.`, created_by: staff.id });
+    await supabase.from("job_events").insert({ job_id: comebackJob.id, event_type: "comeback", note: `The car came back on ${job.job_number} (gate-in by ${staff.display_name})`, created_by: staff.id });
+    await notifyRoles(["owner"], { type: "comeback", title: `Comeback · ${job.job_number}`, body: `The car is back for ${comebackJob.job_number}. The manager picks the cause after the inspection; you confirm it.`, jobId: job.id, href: `/jobs/${job.id}#comeback` });
   }
   await supabase.from("job_events").insert({
     job_id: job.id,

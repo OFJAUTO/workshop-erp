@@ -6,7 +6,8 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { MANUAL_STATUS_OPTIONS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
+import { MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
+import { applyStageSideEffects } from "@/lib/work-flow";
 import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { toMiles } from "@/lib/mileage";
@@ -123,20 +124,30 @@ export async function assignJob(jobId: string, formData: FormData) {
 }
 
 /** Manual stage move for the owner and workshop manager until later phases automate it. */
+/**
+ * The owner moves a job to any step, with a reason. The step opens properly: to QC opens the round,
+ * to Work builds the work order, so nothing is a dead end afterwards. Written on the job card in plain words.
+ */
 export async function moveJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("moveJobs");
   const toStatus = String(formData.get("status") ?? "") as JobStatus;
+  const reason = blankToNull(formData.get("reason"));
   if (!MANUAL_STATUS_OPTIONS.includes(toStatus)) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Choose a step."));
-  const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, status, is_open").eq("id", jobId).maybeSingle();
+  if (!reason || reason.length < 3) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Write the reason for the move; it stays on the job card."));
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, status, is_open").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
   if (job.status === "gate_in_pending") redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Finish the gate-in media first."));
-
-  const { error } = await supabase.from("jobs").update({ status: toStatus, stage: STATUS_STAGE[toStatus] }).eq("id", jobId);
+  if (job.status === toStatus) redirect(`/jobs/${jobId}?message=` + encodeURIComponent("The job is already at that step."));
+  const now = new Date().toISOString();
+  const { error } = await admin.from("jobs").update({ status: toStatus, stage: STATUS_STAGE[toStatus], stage_entered_at: now }).eq("id", jobId);
   if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
-  await logEvent(supabase, jobId, staff.id, { event_type: "status_change", from_status: job.status, to_status: toStatus });
+  await applyStageSideEffects(jobId, toStatus, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(now));
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, to_status: toStatus, from_stage: STATUS_STAGE[job.status as JobStatus], to_stage: STATUS_STAGE[toStatus], note: `Moved to ${STATUS_LABELS[toStatus]} by ${staff.display_name}, ${time}. Reason: ${reason}`, created_by: staff.id });
   refresh(jobId);
-  redirect(`/jobs/${jobId}`);
+  revalidatePath("/overrides");
+  redirect(`/jobs/${jobId}?message=` + encodeURIComponent(`Moved to ${STATUS_LABELS[toStatus]}.`));
 }
 
 export async function setJobPriority(jobId: string, formData: FormData) {

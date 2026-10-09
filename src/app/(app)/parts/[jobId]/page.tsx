@@ -11,6 +11,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { addOption, askManager, closePartRequest, coverRequest, removePart, savePartRows, updatePart } from "../actions";
 import { AskManagerForm, CloseRequestForm, OnePartForm, PartRowsForm } from "../PartsForms";
+import { allInStock, partsPlanned, setPartPlan } from "../../jobs/planning-actions";
+import { PlanPartRow, type PlanPart } from "./PlanParts";
 
 export const dynamic = "force-dynamic";
 
@@ -24,9 +26,9 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const admin = createAdminClient();
   const settings = await getSettings();
   const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, status, is_open, customer_id, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("id, job_number, status, is_open, customer_id, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT).eq("job_id", jobId).eq("is_active", true).order("created_at"),
-    admin.from("part_items").select(PART_SELECT).eq("job_id", jobId).eq("is_active", true).order("created_at"),
+    admin.from("part_items").select(PART_SELECT + ", po_id, expected_date, received_qty, issue_status, return_status").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     admin.from("suppliers").select("name").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name").eq("is_active", true),
   ]);
@@ -35,8 +37,16 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   type V = { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   const v = job.vehicle as unknown as V;
   const requests = (reqRows ?? []) as PartRequest[];
-  const parts = ((partRows ?? []) as Record<string, unknown>[]).map(toPart);
+  const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPart);
+  const rawById = new Map(((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => [String(r.id), r]));
   const nameOf = new Map((names ?? []).map((n) => [n.id, n.display_name]));
+  // Planning inside the Parts step: the approved parts, in stock or to order with the date.
+  const inPlanning = ["approved", "waiting_parts"].includes(job.status) && job.is_open;
+  const planParts: PlanPart[] = parts.filter((p) => p.order_status !== "none" && String(rawById.get(p.id)?.return_status ?? "none") !== "returned").map((p) => {
+    const raw = rawById.get(p.id) ?? {};
+    return { id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, availability: p.availability, delivery_date: p.delivery_date, order_status: p.order_status, expected_date: (raw.expected_date as string | null) ?? null, received: p.order_status === "received" || Number(raw.received_qty ?? 0) > 0, days: toValues(p).days };
+  });
+  const unplanned = planParts.filter((p) => !p.received && p.order_status !== "ordered" && p.order_status !== "partly_received" && (!p.availability || (p.availability === "to_order" && !p.delivery_date)));
   const urls = await signPaths(PARTS_BUCKET, parts.map((p) => p.diagram_path).filter((x): x is string => !!x));
   const suppliers = Array.from(new Set([...(supplierRows ?? []).map((s) => s.name as string), ...parts.map((p) => p.supplier).filter((x): x is string => !!x)])).sort();
   const canPrice = can(role, "priceParts") && !staff.viewingAs && job.is_open;
@@ -102,6 +112,25 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!job.is_open ? <Notice tone="info">This job is closed.</Notice> : null}
+      {inPlanning ? (
+        <Card id="planning" className={`flex flex-col gap-3 ${job.plan_parts_done_at ? "border-green" : "border-ink"}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <SectionLabel right={planParts.length ? `${planParts.length - unplanned.length} of ${planParts.length} decided` : undefined}>Planning: the approved parts</SectionLabel>
+            {job.plan_parts_done_at ? <Badge tone="green">Parts planned{job.plan_parts_ready_date ? ` · all here by ${job.plan_parts_ready_date}` : ""}</Badge> : <Badge tone="amber">Your turn</Badge>}
+          </div>
+          {planParts.length === 0 ? <p className="text-sm">No parts on this job. Press Parts planned so the workshop manager can plan the work.</p> : <p className="text-xs text-muted">For each part: In stock, or To order with the days until it arrives. Then press Parts planned; the workshop manager is next.</p>}
+          {canPrice ? (
+            <>
+              <div className="divide-y divide-line">{planParts.map((p) => <PlanPartRow key={p.id} part={p} action={setPartPlan.bind(null, p.id)} />)}</div>
+              <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                {unplanned.length ? <form action={allInStock.bind(null, jobId)}><input type="hidden" name="from" value="parts" /><Button type="submit" tone="secondary" size="md">All in stock</Button></form> : null}
+                <form action={partsPlanned.bind(null, jobId)}><input type="hidden" name="from" value="parts" /><Button type="submit" size="md" disabled={unplanned.length > 0}>{job.plan_parts_done_at ? "Parts planned again (date changed)" : "Parts planned"}</Button></form>
+                {unplanned.length ? <span className="text-xs text-muted">{unplanned.length} part{unplanned.length === 1 ? "" : "s"} still to decide.</span> : null}
+              </div>
+            </>
+          ) : null}
+        </Card>
+      ) : null}
       <p className="text-xs text-muted">Each row is the whole answer: part number, description, quantity, type, cost, supplier and availability. Saved parts go straight onto the quotation; nobody has to confirm them.</p>
 
       {requests.length === 0 && loose.length === 0 ? <Notice tone="info">No parts requests on this job yet. They come from the approved inspection report.</Notice> : null}

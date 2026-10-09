@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Logo } from "@/components/Logo";
-import { Money } from "@/components/Money";
-import { Badge, Notice } from "@/components/ui";
+import { CustomerDocument, DocLines, DocSection, DocTotals, type DocRow } from "@/components/CustomerDocument";
+import { Notice } from "@/components/ui";
+import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, loadInvoice } from "@/lib/invoice-data";
-import type { Currency } from "@/lib/money";
+import { aed } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -16,95 +16,97 @@ export async function generateMetadata(): Promise<Metadata> {
   return customerPageMetadata("OFJ Automotive, Your Invoice", "Your invoice and balance, with the PDF to download");
 }
 
-/** The customer's invoice page from the "car is ready" link: the lines, what is paid, the balance, the PDF. */
+/** The customer's invoice from the "car is ready" link: the document, the balance, Pay now when a payment link was added, the bank details, and the receipts once paid. */
 export default async function CustomerInvoicePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const settings = await getSettings();
-  const currency: Currency = String(settings.document_currency) === "aed" ? "aed" : "symbol";
-  const shell = (children: React.ReactNode) => (
-    <div className="min-h-screen bg-canvas">
-      <header className="bg-sidebar text-white px-4 py-3 flex items-center gap-3">
-        <Logo onDark className="h-9" alt={settings.company_name} />
-        <span className="hidden sm:inline text-sm font-bold">Your Invoice</span>
-      </header>
-      <div className="sm:hidden bg-white border-b border-line px-4 py-2.5">
-        <span className="block text-base font-extrabold">Your Invoice</span>
-      </div>
-      <main className="mx-auto max-w-2xl px-4 py-5 flex flex-col gap-4">{children}</main>
-    </div>
-  );
+  const company = companyFromSettings(settings);
+  const plain = (children: React.ReactNode) => <div className="min-h-screen bg-canvas"><main className="mx-auto max-w-2xl px-4 py-8">{children}</main></div>;
   const { data: row } = await createAdminClient().from("invoices").select("id").eq("token", token).eq("is_active", true).maybeSingle();
-  if (!row) return shell(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
+  if (!row) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const bundle = await loadInvoice(row.id);
-  if (!bundle) return shell(<Notice tone="error">This invoice is no longer available.</Notice>);
+  if (!bundle) return plain(<Notice tone="error">This invoice is no longer available.</Notice>);
   const { invoice, lines, payments, customer, vehicle, job } = bundle;
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
-  const name = invoice.customer_snapshot?.full_name ?? customer?.full_name ?? "Customer";
   const car = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
-  const kindLabel = invoice.kind === "proforma" ? "proforma invoice" : invoice.kind === "credit_note" ? "credit note" : "invoice";
+  const title = invoice.kind === "proforma" ? "Proforma invoice" : invoice.kind === "credit_note" ? "Credit note" : "Tax invoice";
+  const money = (n: number) => aed(n).replace("AED ", "");
+  let n = 0;
+  const rowOf = (l: (typeof lines)[number]): DocRow => {
+    n++;
+    return { n, description: l.description, details: [l.part_number, l.hours === null ? l.details : null].filter(Boolean).join(" · ") || null, qty: l.hours !== null ? `${l.hours.toFixed(1)} h` : String(l.quantity), rate: money(l.unit_price), amount: l.amount_aed === 0 ? "Complimentary" : money(l.amount_aed) };
+  };
+  const services = lines.filter((l) => l.section === "services").map(rowOf);
+  const parts = lines.filter((l) => l.section === "parts").map(rowOf);
+  const fees = lines.filter((l) => l.section === "fees").map(rowOf);
+  const paid = invoice.kind === "tax_invoice" && bal.state === "paid";
+  const due = invoice.kind === "tax_invoice" && !paid;
 
-  return shell(
-    <>
-      <h1 className="text-2xl font-extrabold">Your {invoice.kind === "proforma" ? "Proforma Invoice" : invoice.kind === "credit_note" ? "Credit Note" : "Invoice"}</h1>
-      <p className="text-[15px] leading-relaxed">
-        Dear {name}, {invoice.kind === "tax_invoice" ? "your car is ready. Here is your" : "here is your"} {kindLabel} {invoice.number} for your {car}{vehicle ? ` (${formatPlate(vehicle)})` : ""}{job ? `, job ${job.job_number}` : ""}, dated {formatDate(invoice.issued_at)}.
-      </p>
-      {invoice.kind === "tax_invoice" ? (
-        <div className="rounded-card border-2 border-ink bg-white p-4 flex flex-col gap-1">
-          <span className="text-xs font-extrabold uppercase tracking-[0.08em]">{bal.state === "paid" ? "Paid in full" : bal.state === "cheque_pending" ? "Cheque pending clearance" : bal.state === "part_paid" ? "Balance due" : "Amount due"}</span>
-          {bal.state === "paid" ? <span className="text-sm">Final payment received {bal.paidAt ? formatDate(bal.paidAt) : ""}. Thank you.</span> : <span className="text-3xl font-extrabold"><Money amount={bal.balance} currency={currency} /></span>}
+  return (
+    <CustomerDocument
+      company={company}
+      title={title}
+      meta={[
+        { label: "Invoice no.", value: invoice.number },
+        { label: "Date", value: formatDate(invoice.issued_at) },
+        ...(job ? [{ label: "Job card", value: job.job_number }] : []),
+        ...(bundle.preparedByName ? [{ label: "Advisor", value: bundle.preparedByName }] : []),
+      ]}
+      boxes={[
+        { title: "Customer", strong: invoice.customer_snapshot?.company_name ?? customer?.company_name ?? invoice.customer_snapshot?.full_name ?? customer?.full_name ?? "Customer", rows: [["Name", invoice.customer_snapshot?.company_name ? invoice.customer_snapshot?.full_name : null], ["Mobile", invoice.customer_snapshot?.phone ?? customer?.phone ?? null], ["TRN", invoice.customer_snapshot?.trn ?? customer?.trn ?? null]] },
+        { title: "Vehicle", strong: invoice.vehicle_snapshot?.title ?? car ?? "Vehicle", rows: [["Variant", invoice.vehicle_snapshot?.variant ?? vehicle?.variant ?? null], ["Plate", invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null)], ["VIN", invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null]] },
+      ]}
+      pdfHref={`/api/pdf/invoice/${token}`}
+      bar={due && invoice.payment_link_url ? <a href={invoice.payment_link_url} target="_blank" rel="noreferrer" className="flex min-h-14 w-full items-center justify-center rounded-control bg-ink text-base font-extrabold text-white">Pay now · {aed(bal.balance)}</a> : null}
+      footer={<>{company.legalName} · TRN {company.trn}. Prices in dirhams; VAT at 5% shown separately.</>}
+    >
+      {paid ? (
+        <div className="rounded-card border-2 border-ink p-4 text-center">
+          <div className="text-xl font-extrabold">Paid, thank you</div>
+          <div className="text-sm">Final payment received {bal.paidAt ? formatDate(bal.paidAt) : ""}.</div>
+        </div>
+      ) : due ? (
+        <div className="rounded-card border-2 border-ink p-4 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-extrabold uppercase tracking-[0.14em]">{bal.state === "cheque_pending" ? "Cheque pending clearance" : bal.state === "part_paid" ? "Balance due" : "Amount due"}</span>
+          <span className="text-2xl font-extrabold">{aed(bal.balance)}</span>
         </div>
       ) : null}
-      <a href={`/api/pdf/invoice/${token}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white">Download the {kindLabel} as a PDF</a>
-
-      {(["services", "fees", "parts"] as const).map((section) => {
-        const ls = lines.filter((l) => l.section === section);
-        if (!ls.length) return null;
-        return (
-          <section key={section} className="bg-white border border-line rounded-card p-4 flex flex-col gap-2">
-            <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">{section === "parts" ? "Spare parts" : section === "fees" ? "Fees" : "Services"}</h2>
-            <ul className="divide-y divide-line text-sm">
-              {ls.map((l) => (
-                <li key={l.id} className="py-2 flex flex-wrap items-center justify-between gap-2">
-                  <span><span className="font-semibold">{l.description}</span>{l.part_number ? <span className="block text-xs text-muted">{l.part_number}</span> : null}<span className="block text-xs text-muted">{l.hours !== null ? `${l.hours.toFixed(1)} h × ` : `${l.quantity} × `}<Money amount={l.unit_price} currency={currency} /></span></span>
-                  <span className="font-bold">{l.amount_aed === 0 ? "Complimentary" : <Money amount={l.amount_aed} currency={currency} />}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        );
-      })}
-      <section className="bg-white border border-line rounded-card p-4 text-sm">
-        <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
-          <dt className="text-muted">Gross amount</dt><dd className="text-right"><Money amount={invoice.subtotal_aed} currency={currency} /></dd>
-          {invoice.discount_aed ? <><dt className="font-bold">Discount on labour and services</dt><dd className="text-right font-bold">− <Money amount={invoice.discount_aed} currency={currency} /></dd></> : null}
-          <dt className="text-muted">Taxable amount</dt><dd className="text-right"><Money amount={invoice.taxable_aed} currency={currency} /></dd>
-          <dt className="text-muted">VAT 5%</dt><dd className="text-right"><Money amount={invoice.vat_aed} currency={currency} /></dd>
-          <dt className="text-base font-extrabold">Total</dt><dd className="text-right text-base font-extrabold"><Money amount={invoice.total_aed} currency={currency} /></dd>
-          {bal.paid ? <><dt className="text-muted">Paid</dt><dd className="text-right"><Money amount={bal.paid} currency={currency} /></dd></> : null}
-        </dl>
-      </section>
+      {services.length ? <DocSection title="Services"><DocLines rows={services} /></DocSection> : null}
+      {parts.length ? <DocSection title="Spare parts"><DocLines rows={parts} /></DocSection> : null}
+      {fees.length ? <DocSection title="Fees"><DocLines rows={fees} /></DocSection> : null}
+      <DocTotals
+        rows={[
+          { label: "Gross amount", value: money(invoice.subtotal_aed) },
+          ...(invoice.discount_aed ? [{ label: "Discount", value: `− ${money(invoice.discount_aed)}`, bold: true }] : []),
+          ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: `− ${money(invoice.warranty_credit_aed)}`, bold: true }] : []),
+          { label: "Taxable amount", value: money(invoice.taxable_aed) },
+          { label: "VAT 5%", value: money(invoice.vat_aed) },
+        ]}
+        total={{ label: "Total", value: aed(invoice.total_aed) }}
+        after={invoice.kind === "tax_invoice" ? [{ label: "Paid", value: money(bal.paid) }, { label: paid ? "Balance" : "Balance due", value: money(bal.balance), bold: true }] : []}
+      />
       {live.length ? (
-        <section className="bg-white border border-line rounded-card p-4 flex flex-col gap-2 text-sm">
-          <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Payments received</h2>
-          <ul className="divide-y divide-line">
+        <DocSection title="Payments received">
+          <div className="text-sm divide-y divide-line">
             {live.map((p) => (
-              <li key={p.id} className="py-1.5 flex items-center justify-between gap-2"><span>{formatDate(p.received_at)} · {METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status === "pending" ? <Badge tone="amber">pending clearance</Badge> : null}</span><Money amount={p.amount_aed} currency={currency} /></li>
+              <div key={p.id} className="flex items-center justify-between gap-2 py-1.5"><span>{p.number} · {formatDate(p.received_at)} · {METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status === "pending" ? " (pending clearance)" : ""}</span><span className="font-bold">{aed(p.amount_aed)} · <a href={`/api/pdf/receipt/${p.id}`} className="underline underline-offset-4">Receipt</a></span></div>
             ))}
-          </ul>
-        </section>
+          </div>
+        </DocSection>
       ) : null}
-      {invoice.kind === "tax_invoice" && bal.state !== "paid" ? (
-        <section className="bg-white border border-line rounded-card p-4 text-sm flex flex-col gap-1">
-          <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Bank transfer</h2>
-          <p>{settings.bank_name}</p>
-          <p>Account name {settings.bank_account_name}</p>
-          <p>Account number {settings.bank_account_number}</p>
-          <p>IBAN {settings.bank_iban} · SWIFT {settings.bank_swift}</p>
-        </section>
+      {due ? (
+        <DocSection title="Bank transfer">
+          <div className="text-sm grid grid-cols-[6rem_1fr] gap-y-0.5">
+            <span className="text-muted">Bank</span><span>{company.bank.name}</span>
+            <span className="text-muted">Account</span><span>{company.bank.accountName}</span>
+            <span className="text-muted">Number</span><span>{company.bank.accountNumber}</span>
+            <span className="text-muted">IBAN</span><span>{company.bank.iban}</span>
+            <span className="text-muted">SWIFT</span><span>{company.bank.swift}</span>
+          </div>
+        </DocSection>
       ) : null}
-      <p className="text-xs text-muted">{settings.company_legal_name} · TRN {settings.company_trn}. Prices in dirhams; VAT at 5% shown separately.</p>
-    </>,
+      {invoice.notes ? <div className="rounded-control border border-line p-3 text-sm whitespace-pre-wrap">{invoice.notes}</div> : null}
+    </CustomerDocument>
   );
 }

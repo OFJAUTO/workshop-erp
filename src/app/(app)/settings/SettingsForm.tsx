@@ -3,6 +3,7 @@
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { Card, Field, Input, SectionLabel, Select, Textarea } from "@/components/ui";
 import { STAGE_LABELS, STAGES } from "@/lib/jobs";
+import { TonePicker } from "./TonePicker";
 
 const DAYS: { id: string; label: string }[] = [
   { id: "mon", label: "Mon" },
@@ -30,6 +31,9 @@ export function SettingsForm({
   listTexts = {},
   limits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 },
   prescanGate = false,
+  labourJobsText = "",
+  candidates = {},
+  flags = {},
 }: {
   action: FormAction;
   initialValues: Record<string, string>;
@@ -46,6 +50,9 @@ export function SettingsForm({
   listTexts?: Record<string, string>;
   limits?: Record<string, number>;
   prescanGate?: boolean;
+  labourJobsText?: string;
+  candidates?: Record<string, number>;
+  flags?: Record<string, boolean>;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
@@ -236,8 +243,14 @@ export function SettingsForm({
               <Field label="Advisor discount limit (%)" hint="Used from Phase 4.">
                 <Input name="discount_limit_percent" defaultValue={v.discount_limit_percent} inputMode="numeric" required />
               </Field>
-              <Field label="Minimum parts markup (%)" hint="A quote cannot go out below this.">
+              <Field label="Minimum parts markup (%)" hint="A quote cannot go out below this. No upper limit.">
                 <Input name="parts_min_markup_percent" defaultValue={v.parts_min_markup_percent} inputMode="numeric" required />
+              </Field>
+              <Field label="Markup warning from (%)" hint="From here the markup shows amber on the quotation.">
+                <Input name="markup_warn_percent" defaultValue={v.markup_warn_percent} inputMode="numeric" required />
+              </Field>
+              <Field label="Markup confirmation from (%)" hint="From here the advisor must confirm the selling price, spelled out, and the line is flagged.">
+                <Input name="markup_confirm_percent" defaultValue={v.markup_confirm_percent} inputMode="numeric" required />
               </Field>
             </div>
             <details className="rounded-control border border-line p-4">
@@ -440,6 +453,54 @@ export function SettingsForm({
           </Card>
 
 
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Notification sounds</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Sound for new notifications" hint="Soft and warm; each person can pick their own from the bell.">
+                <TonePicker name="notification_tone" initial={v.notification_tone || "marimba"} />
+              </Field>
+              <Field label="Sound for the owner's approvals" hint="Things only the owner can approve, and a technician's additional work for the manager.">
+                <TonePicker name="notification_tone_owner" initial={v.notification_tone_owner || "chord"} />
+              </Field>
+            </div>
+            <Field label="Gentle reminder every (minutes)" hint="While something is unread and the bell is closed.">
+              <Input name="notification_remind_minutes" defaultValue={v.notification_remind_minutes} inputMode="numeric" required className="max-w-40" />
+            </Field>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Ready-made jobs</SectionLabel>
+            <Field label="Jobs list" hint="A line ending with a colon starts a category (Engine:, Brakes:); the lines under it are the jobs the advisor picks from. Two letters find them.">
+              <Textarea name="labour_jobs" defaultValue={v.labour_jobs ?? labourJobsText} rows={14} className="font-mono text-xs" />
+            </Field>
+            {Object.keys(candidates).length ? (
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-semibold">Built by advisors more than once, not on the list yet</span>
+                {Object.entries(candidates).sort((a, b) => b[1] - a[1]).map(([title, n]) => (
+                  <div key={title} className="flex flex-wrap items-center gap-3 text-sm">
+                    <label className="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name={`candidate__${title}`} className="h-5 w-5 accent-ink" /><span className="font-semibold">{title}</span><span className="text-muted">used {n}×</span></label>
+                    <label className="inline-flex items-center gap-1 text-xs text-muted cursor-pointer"><input type="checkbox" name={`drop_candidate__${title}`} className="h-4 w-4 accent-ink" />forget it</label>
+                  </div>
+                ))}
+                <span className="text-xs text-muted">Tick to add to the list (under General), then save.</span>
+              </div>
+            ) : null}
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Workshop floor</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="PIN needed for consumables above (AED)" hint="Below this, consumables are issued without the technician's PIN.">
+                <Input name="pin_needed_above_aed" defaultValue={v.pin_needed_above_aed} inputMode="numeric" required />
+              </Field>
+              <Field label="Comeback window (days)" hint="A car back within this many days of its gate-out is asked whether it is a comeback.">
+                <Input name="comeback_window_days" defaultValue={v.comeback_window_days} inputMode="numeric" required />
+              </Field>
+            </div>
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_show_times" defaultChecked={!!flags.wash_board_show_times} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board shows the needed-by date</span><span className="text-xs text-muted">The promised date on each tile of the wash board.</span></span></label>
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_done_button" defaultChecked={!!flags.wash_board_done_button} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board has a Done button</span><span className="text-xs text-muted">Not built yet: for now the advisor marks the wash done. The switch is kept for later.</span></span></label>
+          </Card>
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>QC, car ready and follow-up</SectionLabel>

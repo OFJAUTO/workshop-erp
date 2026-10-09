@@ -5,6 +5,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { cleanChecklist } from "@/lib/inspection";
 import { STAGES } from "@/lib/jobs";
+import { isTone } from "@/lib/tones";
 import { createClient } from "@/lib/supabase/server";
 
 const NUMBER_KEYS = [
@@ -46,6 +47,11 @@ const NUMBER_KEYS = [
   "followup_days",
   "parts_remind_minutes",
   "parts_escalate_minutes",
+  "notification_remind_minutes",
+  "markup_warn_percent",
+  "markup_confirm_percent",
+  "pin_needed_above_aed",
+  "comeback_window_days",
 ] as const;
 /** Settings that keep decimals (percentages like 1.9). */
 const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_fee_percent"] as const;
@@ -137,6 +143,11 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   followup_days: [1, 90, "Follow-up after gate-out"],
   parts_remind_minutes: [1, 1440, "Remind Parts after"],
   parts_escalate_minutes: [1, 1440, "Escalate to the owner after"],
+  notification_remind_minutes: [1, 60, "Reminder sound every"],
+  markup_warn_percent: [5, 10000, "Markup warning from"],
+  markup_confirm_percent: [5, 100000, "Markup confirmation from"],
+  pin_needed_above_aed: [0, 1000000, "PIN needed for consumables above"],
+  comeback_window_days: [1, 365, "Comeback window"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -246,6 +257,42 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     updates.push({ key, value: list });
   }
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
+  updates.push({ key: "wash_board_show_times", value: formData.get("wash_board_show_times") === "on" });
+  updates.push({ key: "wash_board_done_button", value: formData.get("wash_board_done_button") === "on" });
+  for (const key of ["notification_tone", "notification_tone_owner"] as const) {
+    const t = String(formData.get(key) ?? "");
+    if (!isTone(t)) return { error: "Choose the notification sounds.", values };
+    updates.push({ key, value: t });
+  }
+  if (Number(formData.get("markup_confirm_percent")) < Number(formData.get("markup_warn_percent"))) return { error: "The markup confirmation figure must be at or above the warning figure.", values };
+  // The ready-made jobs list: "Category:" lines start a group, the lines under it are the jobs.
+  const jobs: Record<string, string[]> = {};
+  let group = "General";
+  for (const raw of String(formData.get("labour_jobs") ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.endsWith(":")) {
+      group = line.slice(0, -1).trim() || "General";
+      if (!jobs[group]) jobs[group] = [];
+      continue;
+    }
+    if (!jobs[group]) jobs[group] = [];
+    if (!jobs[group].some((j) => j.toLowerCase() === line.toLowerCase())) jobs[group].push(line.slice(0, 120));
+  }
+  // Jobs built twice that the owner ticks join the permanent list; the rest stay as suggestions.
+  const { data: candRow } = await supabase.from("settings").select("value").eq("key", "labour_job_candidates").maybeSingle();
+  const candidates = { ...((candRow?.value as Record<string, number> | null) ?? {}) };
+  for (const [key, raw] of formData.entries()) {
+    if (!key.startsWith("candidate__") || raw !== "on") continue;
+    const title = key.slice("candidate__".length);
+    if (!jobs["General"]) jobs["General"] = [];
+    if (!Object.values(jobs).some((list) => list.some((j) => j.toLowerCase() === title.toLowerCase()))) jobs["General"].push(title.slice(0, 120));
+    delete candidates[title];
+  }
+  for (const [key] of formData.entries()) if (key.startsWith("drop_candidate__")) delete candidates[key.slice("drop_candidate__".length)];
+  if (!Object.keys(jobs).length) return { error: "Keep at least one job on the ready-made jobs list.", values };
+  updates.push({ key: "labour_jobs", value: jobs });
+  updates.push({ key: "labour_job_candidates", value: candidates });
   const limits: Record<string, number> = {};
   for (const k of LIMIT_KEYS) {
     const raw = String(formData.get(`limit__${k}`) ?? "").trim().replace(",", ".");

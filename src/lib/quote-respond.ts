@@ -30,7 +30,7 @@ const CORE = "id, kind, number, version, job_id, customer_id, vehicle_id, status
  * kept with the answer is the one the link was sent to. Used by the customer page and when the
  * advisor confirms an unchanged estimate.
  */
-export async function applyCustomerResponse(quotationId: string, answer: { approve: boolean; name: string; by?: string | null; via: "customer" | "estimate"; dangerAck?: boolean }): Promise<{ error?: string; status?: string }> {
+export async function applyCustomerResponse(quotationId: string, answer: { approve: boolean; name: string; by?: string | null; via: "customer" | "estimate" | "warranty"; dangerAck?: boolean; note?: string | null }): Promise<{ error?: string; status?: string }> {
   const admin = createAdminClient();
   const settings = await getSettings();
   const { data: qRaw } = await admin.from("quotations").select(CORE).eq("id", quotationId).maybeSingle();
@@ -44,13 +44,13 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   const status: QuoteRow["status"] = answer.approve ? "approved" : "declined";
 
   for (const l of lines) await admin.from("quotation_lines").update({ customer_approved: answer.approve }).eq("id", l.id);
-  await admin.from("quotations").update({ status, responded_at: now, approver_name: answer.name, approver_phone: q.sent_to_phone, opened_at: now, updated_by: answer.by ?? null, ...(!answer.approve && answer.dangerAck ? { danger_acknowledged_at: now, danger_acknowledged_by: answer.name } : {}) }).eq("id", quotationId);
+  await admin.from("quotations").update({ status, responded_at: now, approver_name: answer.name, approver_phone: q.sent_to_phone, opened_at: now, declined_note: answer.approve ? null : (answer.note ?? null), updated_by: answer.by ?? null, ...(!answer.approve && answer.dangerAck ? { danger_acknowledged_at: now, danger_acknowledged_by: answer.name } : {}) }).eq("id", quotationId);
   // One approved version per number: the older versions are replaced, so nothing is counted twice on the work order or the invoice.
   if (answer.approve) await admin.from("quotations").update({ status: "superseded", updated_by: answer.by ?? null }).eq("number", q.number).eq("kind", q.kind).lt("version", q.version).eq("is_active", true).neq("status", "superseded");
   await refreshQuoteTotals(quotationId, settings, answer.by ?? "");
   const { data: fresh } = await admin.from("quotations").select("approved_total_aed, total_aed").eq("id", quotationId).maybeSingle();
   const totalText = aed(Number(fresh?.approved_total_aed ?? fresh?.total_aed ?? 0));
-  const who = answer.via === "estimate" ? "the advisor (unchanged estimate)" : `${answer.name} (customer link)`;
+  const who = answer.via === "estimate" ? "the advisor (unchanged estimate)" : answer.via === "warranty" ? "the owner (warranty repair, free of charge)" : `${answer.name} (customer link)`;
   await logQuoteEvent(quotationId, q.job_id, answer.by ?? null, answer.approve ? "quote_approved" : "quote_declined", `${q.number} v${q.version}: ${answer.approve ? `approved, ${totalText} with VAT` : `declined${answer.dangerAck ? " (safety warning acknowledged)" : ""}`} by ${who}`);
 
   // Declined work stays against the car for its next visit.
@@ -73,10 +73,12 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   if (!job) return { status };
 
   if (!answer.approve) {
-    await admin.from("jobs").update({ status: "ready", stage: "ready", inspection_fee_due: true }).eq("id", job.id);
-    await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: "ready", note: `Quotation ${q.number} declined by ${answer.name}. Inspection fee of AED ${Number(settings.inspection_fee_aed).toLocaleString("en-GB")} due at gate-out.`, created_by: answer.by ?? null });
-    await notifyStaff(advisors, { type: "quote_declined", title: `Quotation declined · ${job.job_number}`, body: `${answer.name} declined ${q.number}. The car goes to gate-out with the inspection fee due.`, jobId: job.id, href: `/jobs/${job.id}` });
-    await notifyRoles(["owner"], { type: "quote_declined", title: `Quotation declined · ${job.job_number}`, body: `${answer.name} declined ${q.number}.`, jobId: job.id, href: `/jobs/${job.id}` });
+    // Nothing moves in the workshop: the advisor makes a revised quotation, or the car leaves with the inspection fee due.
+    await admin.from("jobs").update({ inspection_fee_due: true }).eq("id", job.id);
+    await admin.from("job_events").insert({ job_id: job.id, event_type: "quote_declined", note: `Quotation ${q.number} declined by ${answer.name}${answer.note ? `: "${answer.note}"` : ""}. Inspection fee of AED ${Number(settings.inspection_fee_aed).toLocaleString("en-GB")} due unless work is approved later.`, created_by: answer.by ?? null });
+    const why = answer.note ? ` Reason: "${answer.note}".` : "";
+    await notifyStaff(advisors, { type: "quote_declined", title: `Quotation declined · ${job.job_number}`, body: `${answer.name} declined ${q.number}.${why} Make a revised quotation, or gate the car out with the inspection fee.`, jobId: job.id, href: `/jobs/${job.id}/quote/${quotationId}` });
+    await notifyRoles(["owner"], { type: "quote_declined", title: `Quotation declined · ${job.job_number}`, body: `${answer.name} declined ${q.number}.${why}`, jobId: job.id, href: `/jobs/${job.id}` });
     return { status };
   }
 
@@ -102,18 +104,22 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   }
   // An additional quotation (the car is already in work, QC or wash): the job never moves backwards.
   // The new lines join the work order, the promised date can only move later, and the parts follow the normal ordering path.
+  // An additional quotation (the car is already in work, QC or wash) joins the work order; a first approval goes to Planning inside the Parts step.
   const extra = ["in_work", "pending_qc", "pending_wash"].includes(job.status);
-  const { data: jobDates } = await admin.from("jobs").select("promised_at").eq("id", job.id).maybeSingle();
-  const laterPromise = q.promised_at && (!jobDates?.promised_at || q.promised_at > jobDates.promised_at) ? { promised_at: q.promised_at } : {};
-  const toStatus = extra ? "in_work" : needsOrder ? "waiting_parts" : "in_work";
-  await admin.from("jobs").update({ status: toStatus, stage: toStatus === "in_work" ? "work" : "parts", ...(extra ? laterPromise : q.promised_at ? { promised_at: q.promised_at } : {}) }).eq("id", job.id);
-  const madeLines = toStatus === "in_work" ? await ensureWorkLines(job.id, answer.by ?? null) : 0;
-  await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: toStatus, note: `Quotation ${q.number} approved by ${answer.name}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${totalText} with VAT${extra ? ` (additional work, ${madeLines} new line${madeLines === 1 ? "" : "s"} on the work order)` : ""}`, created_by: answer.by ?? null });
-  const body = `${answer.name} approved ${q.number} (${totalText}). ${extra ? "Additional work: the new lines are on the work order." : needsOrder ? "Parts to order." : "Work can start."}`;
+  const toStatus = extra ? "in_work" : "waiting_parts";
+  await admin.from("jobs").update({ status: toStatus, stage: extra ? "work" : "parts", stage_entered_at: now, inspection_fee_due: false, ...(extra ? {} : { plan_parts_done_at: null, plan_released_at: null, plan_date_confirmed_at: null, plan_start_date: null }) }).eq("id", job.id);
+  const madeLines = extra ? await ensureWorkLines(job.id, answer.by ?? null) : 0;
+  // No parts on the approved work: the Parts circle is done at once and the workshop manager plans the work.
+  const noParts = !extra && !lines.some((l) => l.line_type === "part") && !parts.some((p) => p.order_status !== "none");
+  if (noParts) await admin.from("jobs").update({ plan_parts_done_at: now, plan_parts_by: null, plan_parts_ready_date: now.slice(0, 10) }).eq("id", job.id);
+  await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: toStatus, note: `Quotation ${q.number} approved by ${answer.name}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${totalText} with VAT${extra ? ` (additional work, ${madeLines} new line${madeLines === 1 ? "" : "s"} on the work order)` : " · planning starts with Parts"}`, created_by: answer.by ?? null });
+  const body = `${answer.name} approved ${q.number} (${totalText}). ${extra ? "Additional work: the new lines are on the work order." : "Planning: Parts first, then the workshop manager, then the advisor."}`;
   await notifyStaff(advisors, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   await notifyManagers(job.department ?? null, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
-  if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `${answer.name} approved the quotation. See the To order list.`, jobId: job.id, href: "/parts" });
-  if (job.assigned_to && toStatus === "in_work") await notifyStaff([job.assigned_to], { type: "quote_approved", title: extra ? `Additional work approved · ${job.job_number}` : `Work approved · ${job.job_number}`, body: extra ? "The customer approved the additional work. The new lines are on your work order." : "The customer approved the quotation. Work can start.", jobId: job.id, href: `/my-jobs/${job.id}` });
+  if (!extra && noParts) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${answer.name} approved ${q.number}; no parts needed. Pick the start day and the technicians, then Release to workshop.`, jobId: job.id, href: `/jobs/${job.id}#planning` });
+  else if (!extra) await notifyRoles(["parts"], { type: "planning", title: `Plan the parts · ${job.job_number}`, body: `${answer.name} approved ${q.number}. For each part: in stock, or to order with the date. Then press "Parts planned".`, jobId: job.id, href: `/parts/${job.id}` });
+  else if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `${answer.name} approved additional work. See the To order list.`, jobId: job.id, href: "/parts" });
+  if (job.assigned_to && extra) await notifyStaff([job.assigned_to], { type: "quote_approved", title: `Additional work approved · ${job.job_number}`, body: "The customer approved the additional work. The new lines are on your work order.", jobId: job.id, href: `/my-jobs/${job.id}` });
   return { status };
 }
 

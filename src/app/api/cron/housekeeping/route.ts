@@ -6,6 +6,7 @@ import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { workingHoursBetween } from "@/lib/working-time";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { autoPauseEndOfShift } from "@/lib/work-flow";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -195,6 +196,45 @@ export async function GET(request: NextRequest) {
       const job = p.job as unknown as { job_number: string } | null;
       await notifyRoles(["parts"], { type: "parts_late", title: `Part late · ${job?.job_number ?? ""}`, body: `${p.description} was expected ${yesterday}. Chase the supplier.`, jobId: p.job_id as string, href: "/parts/orders" });
       report.partsLate = (report.partsLate ?? 0) + 1;
+    }
+  }
+
+  // 10. The job clocks pause themselves at the end of the shift.
+  report.clocksPaused = await autoPauseEndOfShift(settings);
+
+  // 11. Planning that waits too long on one person: a reminder every working day.
+  {
+    const { data: stuck } = await admin.from("jobs").select("id, job_number, status, department, gated_in_by, plan_parts_done_at, plan_released_at, plan_date_confirmed_at, stage_entered_at, plan_reminded_at").eq("is_open", true).in("status", ["approved", "waiting_parts"]).limit(100);
+    const dayAgo = Date.now() - 86400000;
+    for (const j of stuck ?? []) {
+      if (j.plan_reminded_at && Date.parse(j.plan_reminded_at) > dayAgo) continue;
+      const since = Date.parse(j.plan_released_at ?? j.plan_parts_done_at ?? j.stage_entered_at);
+      if (since > dayAgo) continue;
+      const n = { type: "planning", title: `Planning waits on you · ${j.job_number}`, body: "The car has waited a day in planning.", jobId: j.id as string, href: `/jobs/${j.id}#planning` };
+      if (!j.plan_parts_done_at) await notifyRoles(["parts"], { ...n, href: `/parts/${j.id}` });
+      else if (!j.plan_released_at) await notifyManagers(j.department ?? null, n);
+      else if (!j.plan_date_confirmed_at) await notifyStaff([j.gated_in_by].filter((x): x is string => !!x), n);
+      else continue;
+      await admin.from("jobs").update({ plan_reminded_at: new Date().toISOString() }).eq("id", j.id);
+      report.planningReminders = (report.planningReminders ?? 0) + 1;
+    }
+  }
+
+  // 12. A part arriving later than Parts promised: the Parts circle turns amber, the manager and the advisor are told.
+  {
+    const { data: late } = await admin.from("part_items").select("id, description, job_id, expected_date, delivery_date, job:jobs(job_number, department, gated_in_by, plan_parts_ready_date, plan_parts_done_at, status)").eq("is_active", true).in("order_status", ["to_order", "ordered", "partly_received"]).limit(200);
+    for (const p of late ?? []) {
+      const job = p.job as unknown as { job_number: string; department: string | null; gated_in_by: string | null; plan_parts_ready_date: string | null; plan_parts_done_at: string | null; status: string } | null;
+      const when = p.expected_date ?? p.delivery_date;
+      if (!job || !job.plan_parts_done_at || !job.plan_parts_ready_date || !when || when <= job.plan_parts_ready_date) continue;
+      const { data: already } = await admin.from("job_events").select("id").eq("job_id", p.job_id).eq("event_type", "parts_delayed").ilike("note", `%${p.description}%${when}%`).limit(1);
+      if ((already ?? []).length) continue;
+      await admin.from("job_events").insert({ job_id: p.job_id, event_type: "parts_delayed", note: `${p.description} now expected ${when}, after the planned date ${job.plan_parts_ready_date}`, created_by: null });
+      const n = { type: "planning", title: `Part delayed · ${job.job_number}`, body: `${p.description} now comes ${when}, after the planned ${job.plan_parts_ready_date}. ${job.status === "in_work" ? "The car is already in Work." : "Parts re-plan the date."}`, jobId: p.job_id as string, href: `/jobs/${p.job_id}#planning` };
+      await notifyManagers(job.department ?? null, n);
+      await notifyStaff([job.gated_in_by].filter((x): x is string => !!x), n);
+      await notifyRoles(["parts"], { ...n, href: `/parts/${p.job_id}` });
+      report.partsDelayed = (report.partsDelayed ?? 0) + 1;
     }
   }
 

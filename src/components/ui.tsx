@@ -145,9 +145,18 @@ const controlClass =
 const WORDY_TYPES = new Set([undefined, "text", "search", "url"]);
 
 /** Text boxes get English spell check by default (a standing rule); numbers, emails, dates and codes do not. */
-export function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+export function Input({ className = "", onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   const wordy = WORDY_TYPES.has(props.type) && props.inputMode !== "numeric" && props.inputMode !== "decimal" && props.inputMode !== "tel";
-  return <input spellCheck={wordy ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
+  // Money and number boxes take digits only (and one dot for decimals): letters typed by mistake disappear as you type.
+  const clean = props.inputMode === "numeric" ? (v: string) => v.replace(/[^\d]/g, "") : props.inputMode === "decimal" ? (v: string) => { const t = v.replace(/,/g, ".").replace(/[^\d.]/g, ""); const i = t.indexOf("."); return i === -1 ? t : t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, ""); } : null;
+  const handle = clean
+    ? (e: React.ChangeEvent<HTMLInputElement>) => {
+        const c = clean(e.target.value);
+        if (c !== e.target.value) e.target.value = c;
+        onChange?.(e);
+      }
+    : onChange;
+  return <input spellCheck={wordy ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} onChange={handle} {...props} />;
 }
 
 export function Textarea({ className = "", ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
