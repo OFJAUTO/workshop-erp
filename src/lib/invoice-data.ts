@@ -1,6 +1,6 @@
 import "server-only";
 import { round2 } from "./money";
-import { LINE_SELECT, PART_SELECT, toLine, toPart } from "./quote-data";
+import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
 import { hasCostFloor, isHidden, lineCost, lineTotal, lineUnitPrice, takesTotalDiscount, type QuoteLine } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
@@ -170,11 +170,11 @@ export type InvoiceDraft = { lines: DraftLine[]; totals: DraftTotals; quotationN
  */
 export async function buildInvoiceDraft(jobId: string, settings: Settings, opts: { labourMode: LabourMode; consumables?: number | null; agreedTotal?: number | null; discountPercent?: number | null }): Promise<InvoiceDraft> {
   const admin = createAdminClient();
-  const [{ data: job }, { data: quotes }] = await Promise.all([
+  const [{ data: job }, quotes] = await Promise.all([
     admin.from("jobs").select("id, inspection_fee_due").eq("id", jobId).maybeSingle(),
-    admin.from("quotations").select("id, number, version, discount_percent, vat_percent, status").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).eq("status", "approved").order("created_at"),
+    approvedQuotations(jobId),
   ]);
-  const qs = (quotes ?? []) as { id: string; number: string; version: number; discount_percent: number | string; vat_percent: number | string; status: string }[];
+  const qs = quotes;
   const vatPercent = qs.length ? Number(qs[0].vat_percent) || 5 : 5;
   const [{ data: lineRows }, { data: partRows }] = await Promise.all([
     qs.length ? admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qs.map((q) => q.id)).eq("is_active", true).order("position") : Promise.resolve({ data: [] }),
@@ -280,9 +280,9 @@ export async function nextDocumentNumber(kind: InvoiceKind, settings: Settings):
 /** What the customer still owes on a job: the tax invoice balance, or "no invoice yet" when work was approved or a fee is due. */
 export async function jobBalance(jobId: string) {
   const admin = createAdminClient();
-  const [{ data: inv }, { data: quotes }, { data: job }] = await Promise.all([
+  const [{ data: inv }, quotes, { data: job }] = await Promise.all([
     admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).order("issued_at", { ascending: false }).limit(1).maybeSingle(),
-    admin.from("quotations").select("id").eq("job_id", jobId).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).limit(1),
+    approvedQuotations(jobId),
     admin.from("jobs").select("inspection_fee_due").eq("id", jobId).maybeSingle(),
   ]);
   const needsInvoice = (quotes ?? []).length > 0 || !!job?.inspection_fee_due;

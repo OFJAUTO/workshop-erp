@@ -44,13 +44,18 @@ export async function assignWorkLines(jobId: string, formData: FormData) {
   const { data: techs } = await admin.from("staff").select("id, display_name").eq("role_id", "technician").eq("is_active", true);
   const techOf = new Map((techs ?? []).map((t) => [t.id, t.display_name]));
   const changed = new Map<string, string[]>();
+  let chosen = 0;
   for (const l of lines) {
     const who = all || String(formData.get(`assign__${l.id}`) ?? "");
-    if (!who || !techOf.has(who) || who === l.assigned_to) continue;
+    if (!who || !techOf.has(who)) continue;
+    chosen++;
+    if (who === l.assigned_to) continue;
     await admin.from("work_lines").update({ assigned_to: who, updated_by: staff.id }).eq("id", l.id);
     changed.set(who, [...(changed.get(who) ?? []), l.title]);
   }
-  if (!changed.size) redirect(`${back}?error=${encodeURIComponent("Choose a technician for at least one line.")}`);
+  if (!chosen) redirect(`${back}?error=${encodeURIComponent("Choose a technician for at least one line.")}`);
+  // Nothing new: the lines already belong to the people shown. That is not an error.
+  if (!changed.size) redirect(`${back}?message=${encodeURIComponent("Nothing changed: the lines are already assigned as shown.")}`);
   const first = Array.from(changed.keys())[0];
   if (!job.assigned_to || all) await admin.from("jobs").update({ assigned_to: first, assigned_at: new Date().toISOString() }).eq("id", jobId);
   for (const [who, titles] of changed) {

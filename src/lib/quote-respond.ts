@@ -44,6 +44,8 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
 
   for (const l of lines) await admin.from("quotation_lines").update({ customer_approved: answer.approve }).eq("id", l.id);
   await admin.from("quotations").update({ status, responded_at: now, approver_name: answer.name, approver_phone: q.sent_to_phone, opened_at: now, updated_by: answer.by ?? null }).eq("id", quotationId);
+  // One approved version per number: the older versions are replaced, so nothing is counted twice on the work order or the invoice.
+  if (answer.approve) await admin.from("quotations").update({ status: "superseded", updated_by: answer.by ?? null }).eq("number", q.number).eq("kind", q.kind).lt("version", q.version).eq("is_active", true).neq("status", "superseded");
   await refreshQuoteTotals(quotationId, settings, answer.by ?? "");
   const { data: fresh } = await admin.from("quotations").select("approved_total_aed, total_aed").eq("id", quotationId).maybeSingle();
   const totalText = aed(Number(fresh?.approved_total_aed ?? fresh?.total_aed ?? 0));

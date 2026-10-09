@@ -54,13 +54,20 @@ export function Shell({
             </a>
           </div>
         ) : null}
-        {/* Bell at the top right of the page area, level with the page title. */}
+        {/* Bell at the top right of the page area, level with the page title; below the yellow bar when viewing as someone. */}
         {user ? (
-          <div className="absolute top-5 right-4 sm:right-6 lg:right-8 z-30">
+          <div className={`absolute ${viewingAs ? "top-[4.5rem]" : "top-5"} right-4 sm:right-6 lg:right-8 z-30`}>
             <NotificationBell staffId={user.id} />
           </div>
         ) : null}
-        <div className="flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
+        {viewingAs ? (
+          // View only: every button, box and switch on the page is switched off, so nothing can be changed by accident.
+          <fieldset disabled className="view-only flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8 min-w-0 border-0 m-0">
+            {children}
+          </fieldset>
+        ) : (
+          <div className="flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">{children}</div>
+        )}
       </main>
     </div>
   );

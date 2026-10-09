@@ -101,6 +101,21 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
 }
 
 /** The job's current quotation (the newest version of the newest number) and the parts state, for cards and the Next step. */
+/**
+ * The approved quotations of a job that count for work, parts and the invoice: one per quotation
+ * number, the newest approved version. An older approved version that was revised is not counted twice.
+ */
+export async function approvedQuotations(jobId: string): Promise<{ id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number }[]> {
+  const { data } = await createAdminClient().from("quotations").select("id, number, version, discount_percent, vat_percent, deposit_aed, created_at").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).eq("status", "approved").order("created_at");
+  const best = new Map<string, { id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number }>();
+  for (const q of (data ?? []) as { id: string; number: string; version: number | string; discount_percent: number | string; vat_percent: number | string; deposit_aed: number | string | null }[]) {
+    const row = { id: q.id, number: q.number, version: Number(q.version) || 1, discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, deposit_aed: Number(q.deposit_aed) || 0 };
+    const have = best.get(q.number);
+    if (!have || have.version < row.version) best.set(q.number, row);
+  }
+  return Array.from(best.values());
+}
+
 export async function loadQuoteSummary(jobId: string): Promise<QuoteSummary> {
   const admin = createAdminClient();
   const [{ data: q }, { data: parts }, { data: requests }] = await Promise.all([
@@ -202,7 +217,8 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
   for (const r of reqs ?? []) {
     const f = bundle.findings.find((x) => x.job_request_id === r.id);
     if (!f || !(f.status === "bad" || f.status === "average")) continue;
-    out.push({ ...base, position: position++, line_type: "labour", title: f.needs?.trim() || `Attend to: ${r.text}`, details: f.found ?? null, group_label: `Request: ${r.text}`, source_type: "request", source_key: r.id });
+    // The labour line is the work on the complaint; what the technician listed as parts goes to Parts as a price request, never into the title.
+    out.push({ ...base, position: position++, line_type: "labour", title: `Attend to: ${r.text}`, details: [f.found?.trim(), f.needs?.trim() ? `Needs: ${f.needs.trim()}` : ""].filter(Boolean).join(" · ") || null, group_label: `Request: ${r.text}`, source_type: "request", source_key: r.id });
   }
   for (const i of bundle.items) {
     if (!(i.status === "bad" || i.status === "average")) continue;

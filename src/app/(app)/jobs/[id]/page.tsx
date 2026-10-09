@@ -90,7 +90,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canRequestMove = !can(role, "moveJobs") && can(role, "requestMove") && job.is_open;
   const canEditGateIn = can(role, "editGateIn") && job.is_open;
   const canSend = can(role, "sendApproval") && job.is_open;
-  const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending";
+  // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
+  const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
+  const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending" && (gateOutReached || role === "owner");
+  const gateOutReason = !gateOutReached && job.is_open ? "After QC, the wash and the invoice" : null;
   const canPlan = can(role, "setPriority") && job.is_open;
   const canSendReport = can(role, "sendReport") && job.is_open && inspection?.inspection.status === "approved";
   const canNote = can(role, "noteToManager") && job.is_open;
@@ -195,9 +198,17 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               </LinkButton>
             ) : null}
             {canGateOut ? (
-              <LinkButton href={`/jobs/${id}/gate-out`} tone="secondary" size="lg">
-                Gate out
-              </LinkButton>
+              <span className="flex flex-col items-end gap-1">
+                <LinkButton href={`/jobs/${id}/gate-out`} tone="secondary" size="lg">
+                  Gate out
+                </LinkButton>
+                {gateOutReason ? <span className="text-xs font-semibold text-amber-bar">Owner override: {gateOutReason.toLowerCase()} (logged)</span> : null}
+              </span>
+            ) : can(role, "gateOut") && job.is_open && gateOutReason ? (
+              <span className="flex flex-col items-end gap-1">
+                <span className="inline-flex min-h-14 items-center rounded-control border border-line bg-chip px-6 text-base font-bold text-muted" aria-disabled="true">Gate out</span>
+                <span className="text-xs text-muted">{gateOutReason}</span>
+              </span>
             ) : null}
           </>
         }
@@ -335,9 +346,15 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           ) : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (inspection?.inspection.status === "approved" || role === "owner") ? (
-              <form action={startQuotation.bind(null, id)}>
+              <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
                 <Button type="submit" size="md">Start quotation</Button>
+                {inspection?.inspection.status !== "approved" ? <span className="text-xs font-semibold text-amber-bar">Owner override: the inspection report is not approved yet (logged)</span> : null}
               </form>
+            ) : !latestQuote && canQuote ? (
+              <span className="flex flex-col gap-1">
+                <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Start quotation</span>
+                <span className="text-xs text-muted">{inspection ? "After the workshop manager approves the inspection report" : "After the inspection"}</span>
+              </span>
             ) : null}
             {latestQuote ? (
               <LinkButton href={`/jobs/${id}/quote/${latestQuote.id}`} tone={quoteOpenStatuses.includes(latestQuote.status) && canQuote ? "primary" : "secondary"} size="md">
@@ -369,7 +386,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </span>
           ) : null}
           <div className="mt-auto flex flex-wrap gap-2">
-            {can(role, "priceParts") || seesPrices ? <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton> : null}
+            {(can(role, "priceParts") || seesPrices) && (partItems.length || quoteSummary.openRequests || role === "owner") ? <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton> : can(role, "priceParts") || seesPrices ? (
+              <span className="flex flex-col gap-1">
+                <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Parts desk</span>
+                <span className="text-xs text-muted">Opens when the approved report lists parts</span>
+              </span>
+            ) : null}
             {can(role, "managePurchaseOrders") && partsState.received.length && partsState.needed.some((p) => p.issue_status !== "confirmed") ? <LinkButton href={`/parts/issue/${id}`} size="md">Issue parts</LinkButton> : null}
             {can(role, "viewPurchaseOrders") && partsState.received.length ? <LinkButton href={`/parts/labels/${id}`} tone="secondary" size="md">Labels</LinkButton> : null}
           </div>
@@ -380,7 +402,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Work</span>
           <span className="text-sm font-semibold">{work ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} lines done` : "Not started"}</span>
           {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min clocked of {work.hoursQuoted.toFixed(1)} h quoted{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
-          {can(role, "viewWorkOrders") ? <div className="mt-auto"><LinkButton href={`/jobs/${id}/work`} tone={job.status === "in_work" && managesThisJob ? "primary" : "secondary"} size="md">Work order</LinkButton></div> : null}
+          {can(role, "viewWorkOrders") && (work || role === "owner") ? <div className="mt-auto"><LinkButton href={`/jobs/${id}/work`} tone={job.status === "in_work" && managesThisJob ? "primary" : "secondary"} size="md">Work order</LinkButton></div> : can(role, "viewWorkOrders") ? (
+            <div className="mt-auto flex flex-col gap-1">
+              <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Work order</span>
+              <span className="text-xs text-muted">Opens when the quotation is approved and the parts are issued</span>
+            </div>
+          ) : null}
         </Card>
         <Card className={`flex flex-col gap-2 ${qc ? "" : "bg-canvas opacity-70"} ${job.stage === "qc" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">QC</span>

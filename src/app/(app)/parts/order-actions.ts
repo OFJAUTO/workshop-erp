@@ -1,5 +1,6 @@
 "use server";
 
+import { approvedQuotations } from "@/lib/quote-data";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
@@ -77,7 +78,7 @@ export async function createPurchaseOrder(jobId: string, formData: FormData) {
 async function depositState(jobId: string) {
   const admin = createAdminClient();
   const [{ data: q }, { data: pays }] = await Promise.all([
-    admin.from("quotations").select("deposit_aed").eq("job_id", jobId).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    approvedQuotations(jobId).then((qs) => ({ data: qs.length ? { deposit_aed: qs.reduce((a, q) => a + q.deposit_aed, 0) } : null })),
     admin.from("payments").select(PAYMENT_SELECT).eq("job_id", jobId).eq("is_active", true),
   ]);
   const required = Number(q?.deposit_aed) || 0;

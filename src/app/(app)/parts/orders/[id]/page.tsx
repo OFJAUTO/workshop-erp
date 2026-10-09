@@ -1,3 +1,4 @@
+import { approvedQuotations } from "@/lib/quote-data";
 import { notFound } from "next/navigation";
 import { Badge, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -26,7 +27,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const { po, lines, job, names, parts } = bundle;
   const admin = createAdminClient();
   const [{ data: q }, { data: pays }] = await Promise.all([
-    admin.from("quotations").select("deposit_aed, number").eq("job_id", po.job_id).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    approvedQuotations(po.job_id).then((qs) => ({ data: qs.length ? { deposit_aed: qs.reduce((a, q) => a + q.deposit_aed, 0), number: qs.map((q) => q.number).join(", ") } : null })),
     admin.from("payments").select(PAYMENT_SELECT).eq("job_id", po.job_id).eq("is_active", true),
   ]);
   const depositRequired = Number(q?.deposit_aed) || 0;

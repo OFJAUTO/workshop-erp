@@ -83,6 +83,10 @@ export async function startQuotation(jobId: string) {
   if (!staff) err("Only the job's advisor or the owner can start the quotation.");
   const bundle = await loadInspection(jobId);
   if (staff!.role_id !== "owner" && (!bundle || bundle.inspection.status !== "approved")) err("The quotation opens once the workshop manager has approved the inspection report.");
+  if (staff!.role_id === "owner" && (!bundle || bundle.inspection.status !== "approved")) {
+    // The owner may go ahead of the gate; it is written down.
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Quotation started by ${staff!.display_name} before the inspection report was approved (owner override)`, created_by: staff!.id });
+  }
   const { data: existing } = await admin.from("quotations").select("id, status").eq("job_id", jobId).eq("is_active", true).in("status", ["draft", "pending_owner", "sent", "opened", "urgent_requested"]).limit(1).maybeSingle();
   if (existing) redirect(`/jobs/${jobId}/quote/${existing.id}`);
 

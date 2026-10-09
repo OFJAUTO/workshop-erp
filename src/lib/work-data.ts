@@ -1,5 +1,5 @@
 import "server-only";
-import { LINE_SELECT, toLine } from "./quote-data";
+import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
 import { hasCostFloor, isHidden } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
@@ -123,19 +123,34 @@ export async function signJobFiles(paths: string[], seconds = 3600): Promise<Rec
  */
 export async function ensureWorkLines(jobId: string, by: string | null): Promise<number> {
   const admin = createAdminClient();
-  const { data: quotes } = await admin.from("quotations").select("id").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).eq("status", "approved");
-  const qids = (quotes ?? []).map((q) => q.id);
+  const quotes = await approvedQuotations(jobId);
+  const qids = quotes.map((q) => q.id);
   if (!qids.length) return 0;
   const [{ data: lines }, { data: existing }] = await Promise.all([
     admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qids).eq("is_active", true).order("position"),
-    admin.from("work_lines").select("id, quotation_line_id, position").eq("job_id", jobId),
+    admin.from("work_lines").select("id, quotation_line_id, position, title, hours_quoted, status, is_active").eq("job_id", jobId),
   ]);
-  const have = new Set((existing ?? []).map((e) => e.quotation_line_id).filter(Boolean));
-  let position = (existing ?? []).reduce((m, e) => Math.max(m, Number(e.position) || 0), 0);
-  const rows = ((lines ?? []) as Record<string, unknown>[])
-    .map(toLine)
-    .filter((l) => !isHidden(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))) && !have.has(l.id))
-    .map((l) => ({ job_id: jobId, quotation_line_id: l.id, source: "quotation", position: ++position, title: l.title, details: l.details, hours_quoted: l.line_type === "labour" ? l.hours : null, created_by: by, updated_by: by }));
+  const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))));
+  const wantedIds = new Set(wanted.map((l) => l.id));
+  const all = (existing ?? []) as { id: string; quotation_line_id: string | null; position: number; title: string; hours_quoted: number | string | null; status: string; is_active: boolean }[];
+  const have = new Set(all.filter((e) => e.is_active).map((e) => e.quotation_line_id).filter(Boolean));
+  let position = all.reduce((m, e) => Math.max(m, Number(e.position) || 0), 0);
+  // A revised quotation copies its lines under new ids: a work line with the same title moves to the new line instead of being made twice.
+  const spare = all.filter((e) => e.is_active && e.quotation_line_id && !wantedIds.has(e.quotation_line_id));
+  const rows: Record<string, unknown>[] = [];
+  for (const l of wanted) {
+    if (have.has(l.id)) continue;
+    const twin = spare.find((e) => e.title === l.title);
+    if (twin) {
+      spare.splice(spare.indexOf(twin), 1);
+      await admin.from("work_lines").update({ quotation_line_id: l.id, hours_quoted: l.line_type === "labour" ? l.hours : null, details: l.details, updated_by: by }).eq("id", twin.id);
+      continue;
+    }
+    rows.push({ job_id: jobId, quotation_line_id: l.id, source: "quotation", position: ++position, title: l.title, details: l.details, hours_quoted: l.line_type === "labour" ? l.hours : null, created_by: by, updated_by: by });
+  }
+  // Lines of a replaced version that nobody started are retired; started or finished ones stay as history.
+  const stale = spare.filter((e) => e.status === "todo").map((e) => e.id);
+  if (stale.length) await admin.from("work_lines").update({ is_active: false, updated_by: by }).in("id", stale);
   if (!rows.length) return 0;
   await admin.from("work_lines").insert(rows);
   // Two calls at the same moment could both insert: keep the first line per quotation line, retire the rest.

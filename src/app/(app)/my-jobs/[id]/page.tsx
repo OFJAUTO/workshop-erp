@@ -39,7 +39,21 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const { error, message } = await searchParams;
   const supabase = await createClient();
   const [card, bundle, settings, { data: rt }] = await Promise.all([loadJobCard(supabase, id), loadInspection(id), getSettings(), supabase.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle()]);
-  if (!card) notFound();
+  if (!card) {
+    // The car exists but is not this technician's: say so in plain words instead of a "page not found".
+    const { data: other } = await createAdminClient().from("jobs").select("job_number, assigned_to, assignee:staff!jobs_assigned_to_fkey(display_name)").eq("id", id).maybeSingle();
+    if (!other) notFound();
+    const who = (other as unknown as { assignee: { display_name: string } | null }).assignee?.display_name ?? null;
+    return (
+      <>
+        <PageHeader title={other.job_number} subtitle="This car is not on your list." />
+        <Card className="flex flex-col gap-3 max-w-xl">
+          <p className="text-sm">{who ? `It is assigned to ${who}. ` : "It is not assigned to anyone yet. "}Ask the workshop manager if it should be yours.</p>
+          <div><LinkButton href="/my-jobs" size="md">Back to my jobs</LinkButton></div>
+        </Card>
+      </>
+    );
+  }
   const { job, vehicle, customer, vip, gateIn, requests, media } = card;
   const roadTest = (rt as RoadTestRow | null) ?? null;
   const mine = job.assigned_to === staff.id;
