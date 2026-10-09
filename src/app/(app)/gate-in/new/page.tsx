@@ -78,7 +78,6 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
           <GateInForm
             action={createGateIn.bind(null, v.id)}
             isElectric={v.fuel_type === "electric"}
-            pictureMode={v.photo_path ? "optional" : "required"}
             branches={settings.branches}
             requests={appointment ? [appointment.reason] : []}
             mileageUnit={v.mileage_unit ?? "km"}

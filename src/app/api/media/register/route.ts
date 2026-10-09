@@ -41,6 +41,16 @@ export async function POST(request: NextRequest) {
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  if (kind === "car_picture") {
+    // The car's picture for the Cars page, the dashboard and the job card: a copy goes to the car's own folder.
+    const { data: job } = await admin.from("jobs").select("vehicle_id").eq("id", jobId).maybeSingle();
+    const { data: file } = await admin.storage.from(GATE_IN_BUCKET).download(path);
+    if (job?.vehicle_id && file) {
+      const dest = `${job.vehicle_id}/profile-${Date.now()}.jpg`;
+      const { error: copyError } = await admin.storage.from("vehicle-photos").upload(dest, Buffer.from(await file.arrayBuffer()), { contentType: file.type || "image/jpeg", upsert: false });
+      if (!copyError) await admin.from("vehicles").update({ photo_path: dest }).eq("id", job.vehicle_id);
+    }
+  }
   const checklist = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   return NextResponse.json({ ok: true, checklist });
 }

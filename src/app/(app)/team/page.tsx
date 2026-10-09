@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { StaffRow } from "@/lib/types";
-import { startViewAs } from "./view-as-actions";
+import { startActAs, startViewAs } from "./view-as-actions";
 
 export default async function TeamPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
   const owner = await requirePermission("manageTeam");
@@ -76,12 +76,19 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                     </span>
                   </Card>
                 </Link>
-                {p.id !== owner.id && p.is_active && !owner.viewingAs ? (
-                  <form action={startViewAs.bind(null, p.id)}>
-                    <button type="submit" className="min-h-10 w-full rounded-control border border-line-strong bg-white px-3 text-xs font-bold hover:border-ink">
-                      View as {p.display_name}
-                    </button>
-                  </form>
+                {p.id !== owner.id && p.is_active && !owner.viewingAs && !owner.actingAs ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <form action={startViewAs.bind(null, p.id)}>
+                      <button type="submit" className="min-h-10 w-full rounded-control border border-line-strong bg-white px-3 text-xs font-bold hover:border-ink">
+                        View as {p.display_name}
+                      </button>
+                    </form>
+                    <form action={startActAs.bind(null, p.id)}>
+                      <button type="submit" className="min-h-10 w-full rounded-control border border-ink bg-ink px-3 text-xs font-bold text-white" title="Do their work from their screen; everything is logged as you, on their behalf">
+                        Act as {p.display_name}
+                      </button>
+                    </form>
+                  </div>
                 ) : null}
                 </div>
               ))}

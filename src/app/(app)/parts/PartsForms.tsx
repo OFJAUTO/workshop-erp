@@ -2,43 +2,74 @@
 
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
-import { Button, ChoiceButtons, Field, Input, Textarea } from "@/components/ui";
+import { Button, Input, Textarea } from "@/components/ui";
 
-/** Parts turn a request into exact parts: part number, description, quantity, as many rows as needed, with an optional diagram. */
-export function AddPartsForm({ action, compact = false }: { action: FormAction; compact?: boolean }) {
-  const [rows, setRows] = useState([0]);
+const TYPES = [
+  { value: "genuine", label: "Genuine" },
+  { value: "oem", label: "OEM" },
+  { value: "aftermarket", label: "Aftermarket" },
+  { value: "used", label: "Used" },
+];
+
+export type RowValues = { part_number: string; description: string; quantity: string; part_type: string; brand: string; cost_aed: string; supplier: string; availability: string; days: string };
+const EMPTY: RowValues = { part_number: "", description: "", quantity: "1", part_type: "", brand: "", cost_aed: "", supplier: "", availability: "in_stock", days: "" };
+
+/** One part on one line: number, description, quantity, type (one tap), brand when not genuine, cost, supplier, in stock or days to arrive. */
+function PartRow({ value, onChange, suppliers, showLabels, onRemove }: { value: RowValues; onChange: (v: RowValues) => void; suppliers: string[]; showLabels: boolean; onRemove?: () => void }) {
+  const set = (k: keyof RowValues, v: string) => onChange({ ...value, [k]: v });
+  const label = (t: string) => (showLabels ? <span className="text-xs font-semibold text-muted">{t}</span> : null);
   return (
-    <ActionForm action={action} className="flex flex-col gap-3">
+    <div className="rounded-control border border-line p-2 flex flex-col gap-2">
+      <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-end">
+        <label className="flex flex-col gap-1">{label("Part number")}<Input name="part_number" value={value.part_number} onChange={(e) => set("part_number", e.target.value)} placeholder="Optional" spellCheck={false} /></label>
+        <label className="flex flex-col gap-1">{label("Description")}<Input name="description" value={value.description} onChange={(e) => set("description", e.target.value)} placeholder="For example: Front brake pads, set" /></label>
+        <label className="flex flex-col gap-1">{label("Qty")}<Input name="quantity" value={value.quantity} onChange={(e) => set("quantity", e.target.value)} inputMode="decimal" className="w-20" /></label>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="part_type" value={value.part_type} />
+        <div className="flex flex-col gap-1">
+          {label("Type (one tap)")}
+          <div className="flex gap-1">
+            {TYPES.map((t) => (
+              <button key={t.value} type="button" onClick={() => set("part_type", t.value)} aria-pressed={value.part_type === t.value} className={`min-h-11 rounded-control border-2 px-3 text-xs font-extrabold ${value.part_type === t.value ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {value.part_type && value.part_type !== "genuine" ? <label className="flex flex-col gap-1">{label("Brand")}<Input name="brand" value={value.brand} onChange={(e) => set("brand", e.target.value)} placeholder="For example: Bosch" className="w-40" /></label> : <input type="hidden" name="brand" value="" />}
+        <label className="flex flex-col gap-1">{label("Cost (AED, before VAT)")}<Input name="cost_aed" value={value.cost_aed} onChange={(e) => set("cost_aed", e.target.value)} inputMode="decimal" className="w-32" /></label>
+        <label className="flex flex-col gap-1">{label("Supplier")}<Input name="supplier" value={value.supplier} onChange={(e) => set("supplier", e.target.value)} list="suppliers" className="w-44" /></label>
+        <input type="hidden" name="availability" value={value.availability} />
+        <div className="flex flex-col gap-1">
+          {label("Availability")}
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => set("availability", "in_stock")} aria-pressed={value.availability === "in_stock"} className={`min-h-11 rounded-control border-2 px-3 text-xs font-extrabold ${value.availability === "in_stock" ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>In stock</button>
+            <button type="button" onClick={() => set("availability", "to_order")} aria-pressed={value.availability === "to_order"} className={`min-h-11 rounded-control border-2 px-3 text-xs font-extrabold ${value.availability === "to_order" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Days to arrive</button>
+            {value.availability === "to_order" ? <Input name="days" value={value.days} onChange={(e) => set("days", e.target.value)} inputMode="numeric" placeholder="days" className="w-20" /> : <input type="hidden" name="days" value="" />}
+          </div>
+        </div>
+        {onRemove ? <button type="button" aria-label="Remove row" onClick={onRemove} className="min-h-11 min-w-11 rounded-control border border-line text-sm font-bold ml-auto">✕</button> : null}
+      </div>
+      <datalist id="suppliers">{suppliers.map((s) => <option key={s} value={s} />)}</datalist>
+    </div>
+  );
+}
+
+/** Parts answer a request: as many rows as needed, one Save. An optional catalogue diagram goes on the first part. */
+export function PartRowsForm({ action, suppliers, defaultType, submitLabel = "Save parts" }: { action: FormAction; suppliers: string[]; defaultType: string; submitLabel?: string }) {
+  const [rows, setRows] = useState<{ id: number; v: RowValues }[]>([{ id: 0, v: { ...EMPTY, part_type: defaultType } }]);
+  return (
+    <ActionForm action={action} className="flex flex-col gap-2">
       {() => (
         <>
           {rows.map((r, i) => (
-            <div key={r} className="grid grid-cols-[1fr_2fr_auto_auto] gap-2 items-end">
-              <label className="flex flex-col gap-1">
-                {i === 0 ? <span className="text-xs font-semibold text-muted">Part number</span> : null}
-                <Input name="part_number" placeholder="Optional" spellCheck={false} />
-              </label>
-              <label className="flex flex-col gap-1">
-                {i === 0 ? <span className="text-xs font-semibold text-muted">Description</span> : null}
-                <Input name="description" required={i === 0} placeholder="For example: Front brake pads, set" />
-              </label>
-              <label className="flex flex-col gap-1">
-                {i === 0 ? <span className="text-xs font-semibold text-muted">Qty</span> : null}
-                <Input name="quantity" defaultValue="1" inputMode="decimal" className="w-20" />
-              </label>
-              <button type="button" aria-label="Remove row" onClick={() => setRows((p) => (p.length > 1 ? p.filter((x) => x !== r) : p))} className="min-h-11 min-w-11 rounded-control border border-line text-sm font-bold">✕</button>
-            </div>
+            <PartRow key={r.id} value={r.v} showLabels={i === 0} suppliers={suppliers} onChange={(v) => setRows((p) => p.map((x) => (x.id === r.id ? { ...x, v } : x)))} onRemove={rows.length > 1 ? () => setRows((p) => p.filter((x) => x.id !== r.id)) : undefined} />
           ))}
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" tone="secondary" size="md" onClick={() => setRows((p) => [...p, Date.now()])}>
-              + Another part
-            </Button>
-            {!compact ? (
-              <label className="flex items-center gap-2 text-sm">
-                <span className="font-semibold">Catalogue diagram</span>
-                <input type="file" name="diagram" accept="image/*,application/pdf" className="text-xs" />
-              </label>
-            ) : null}
-            <SubmitButton size="md">Add parts</SubmitButton>
+            <Button type="button" tone="secondary" size="md" onClick={() => setRows((p) => [...p, { id: Date.now(), v: { ...EMPTY, part_type: defaultType, supplier: p[p.length - 1]?.v.supplier ?? "" } }])}>+ Another part</Button>
+            <label className="flex items-center gap-2 text-sm"><span className="font-semibold">Catalogue diagram</span><input type="file" name="diagram" accept="image/*,application/pdf" className="text-xs" /></label>
+            <SubmitButton size="md">{submitLabel}</SubmitButton>
           </div>
         </>
       )}
@@ -46,37 +77,31 @@ export function AddPartsForm({ action, compact = false }: { action: FormAction; 
   );
 }
 
-/** Parts price one part: supplier, cost before VAT, available now or to order, expected delivery. */
-export function PricePartForm({ action, initial }: { action: FormAction; initial: { supplier: string; cost_aed: string; availability: string; delivery_date: string } }) {
-  const [availability, setAvailability] = useState(initial.availability || "to_order");
+/** Change one part, or add an option beside it (the same fields). */
+export function OnePartForm({ action, initial, suppliers, submitLabel }: { action: FormAction; initial: RowValues; suppliers: string[]; submitLabel: string }) {
+  const [v, setV] = useState<RowValues>(initial);
   return (
-    <ActionForm action={action} initialValues={initial} className="flex flex-col gap-3">
-      {(v) => (
+    <ActionForm action={action} className="flex flex-col gap-2">
+      {() => (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Field label="Supplier">
-              <Input name="supplier" defaultValue={v.supplier} required />
-            </Field>
-            <Field label="Cost (AED, before VAT)">
-              <Input name="cost_aed" defaultValue={v.cost_aed} inputMode="decimal" required />
-            </Field>
-            <div onChange={(e) => setAvailability((e.target as HTMLInputElement).value)}>
-              <Field label="Availability">
-                <ChoiceButtons name="availability" columns={2} defaultValue={v.availability || "to_order"} options={[{ value: "in_stock", label: "Available now" }, { value: "to_order", label: "To order" }]} />
-              </Field>
-            </div>
-          </div>
-          {availability === "to_order" ? (
-            <Field label="Expected delivery date">
-              <Input name="delivery_date" type="date" defaultValue={v.delivery_date} required className="max-w-48" />
-            </Field>
-          ) : null}
-          <div>
-            <SubmitButton size="md">Save price</SubmitButton>
-          </div>
+          <PartRow value={v} onChange={setV} suppliers={suppliers} showLabels />
+          <div><SubmitButton size="md">{submitLabel}</SubmitButton></div>
         </>
       )}
     </ActionForm>
+  );
+}
+
+/** "Ask workshop manager": a short question; he answers with one tap. */
+export function AskManagerForm({ action }: { action: (formData: FormData) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="text-xs font-semibold underline underline-offset-4">Ask workshop manager</button>;
+  return (
+    <form action={action} className="flex flex-wrap items-end gap-2">
+      <Input name="question" placeholder="Is this the right part? (optional note)" className="flex-1 min-w-48" />
+      <Button type="submit" size="md">Send</Button>
+      <Button type="button" tone="ghost" size="md" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
   );
 }
 

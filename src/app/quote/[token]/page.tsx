@@ -8,7 +8,7 @@ import { INSPECTION_BUCKET } from "@/lib/inspection-data";
 import { feeNotice, formatPromised } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation, signPaths } from "@/lib/quote-data";
-import { URGENCY_LABELS, isHidden, lineQuantityText, lineTotal, lineUnitPrice, quoteTotals, type QuoteLine } from "@/lib/quotes";
+import { URGENCY_LABELS, isHidden, isUnchosen, lineQuantityText, partTypeText, lineTotal, lineUnitPrice, quoteTotals, type QuoteLine } from "@/lib/quotes";
 import { type Currency } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -72,7 +72,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   if (q.status === "superseded" || q.status === "cancelled" || q.status === "draft" || q.status === "pending_owner") return shell(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} has been replaced. Please use the newest link the workshop sent you.</Notice>, title);
 
   // Internal lines (hidden Recovery or Other) never reach the customer.
-  const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l));
+  const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l));
   const customerName = q.sent_to_name ?? customer?.company_name ?? customer?.full_name ?? "Customer";
   const carName = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
   // Photos and remarks from the inspection for each line's source.
@@ -110,6 +110,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const hasUrgent = lines.some((l) => l.urgency === "urgent");
   const hasRecommended = lines.some((l) => l.urgency !== "urgent");
+  // A dangerous finding: the warning sits above the lines, and declining asks for an acknowledgement.
+  const dangerous = !isEstimate && lines.some((l) => l.dangerous);
 
   const lineSections = groupList.map((g) => (
     <section key={g.label} className="bg-white border border-line rounded-card p-4 flex flex-col gap-2">
@@ -121,6 +123,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
               <span className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold">{l.title}</span>
                 {l.urgency && !isEstimate ? <Badge tone={l.urgency === "urgent" ? "red" : "neutral"}>{URGENCY_LABELS[l.urgency]}</Badge> : null}
+                {partTypeText(l) ? <Badge tone="outline">{partTypeText(l)}</Badge> : null}
+                {l.dangerous && !isEstimate ? <Badge tone="red">Safety</Badge> : null}
               </span>
               <span className="font-bold"><Money amount={lineTotal(l)} currency={currency} /></span>
             </div>
@@ -188,6 +192,13 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       {q.status === "urgent_requested" ? <Notice tone="info">You asked on {formatDateTime(q.responded_at)} for a quotation with the urgent work only. We are preparing it and will send you a new link.</Notice> : null}
       {q.status === "expired" ? <Notice tone="error">This {isEstimate ? "estimate" : "quotation"} expired on {formatDate(q.valid_until)}. Please ask the workshop for a new one.</Notice> : null}
 
+      {dangerous ? (
+        <section className="rounded-card border-2 border-red-bar bg-white p-4 flex flex-col gap-2">
+          <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase text-red">Safety warning</h2>
+          <p className="text-sm whitespace-pre-wrap">{settings.dangerous_customer_text}</p>
+          {settings.dangerous_customer_text_ar ? <p className="text-sm whitespace-pre-wrap" dir="rtl" lang="ar">{settings.dangerous_customer_text_ar}</p> : null}
+        </section>
+      ) : null}
       {lineSections}
       {totalsSection}
 
@@ -204,6 +215,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           terms={settings.terms_and_conditions}
           termsAr={settings.terms_and_conditions_ar}
           hasUrgent={hasUrgent && hasRecommended}
+          dangerText={dangerous ? settings.dangerous_acknowledgement_text : null}
         />
       ) : null}
       <p className="text-xs text-muted">{settings.company_name}. Prices in UAE dirhams. VAT at {q.vat_percent}% shown separately.</p>

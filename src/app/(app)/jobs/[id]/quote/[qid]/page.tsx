@@ -4,7 +4,8 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Text
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadQuotation, loadServices, minMarkupFor } from "@/lib/quote-data";
+import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor } from "@/lib/quote-data";
+import { checklistItems, type ChecklistSection } from "@/lib/inspection";
 import { QUOTE_STATUS_LABELS, aed, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -12,7 +13,7 @@ import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { confirmEstimateUnchanged, decideQuoteApproval, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
-import { QuoteEditor } from "./QuoteEditor";
+import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,26 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
   const canSend = !staff.viewingAs;
   const services = await loadServices(staff.id);
+  const [checks, partsWait] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id)]);
+  const countedParts = bundle.parts.filter((p) => p.confirm_status !== "rejected");
+  const wait: PartsWait = {
+    openRequests: checks.openRequests,
+    partsTotal: countedParts.length,
+    partsPriced: countedParts.filter((p) => p.cost_aed !== null).length,
+    waitingMinutes: partsWait.minutes,
+    partsNames: partsWait.names.join(", "),
+    remindAfter: Number(settings.parts_remind_minutes) || 30,
+    escalateAfter: Number(settings.parts_escalate_minutes) || 60,
+    remindedAt: q.parts_reminded_at,
+    escalatedAt: q.parts_escalated_at,
+  };
+  // Hours remembered from earlier quotations: the same car model first, then any car.
+  const memory = (settings.labour_hours_memory ?? {}) as Record<string, number>;
+  const modelKey = [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" ").toLowerCase();
+  const hoursMemory: Record<string, number> = {};
+  for (const [k, v] of Object.entries(memory)) if (!k.includes("|")) hoursMemory[k] = Number(v);
+  for (const [k, v] of Object.entries(memory)) if (modelKey && k.startsWith(modelKey + "|")) hoursMemory[k.slice(modelKey.length + 1)] = Number(v);
+  const components = Array.from(new Set(checklistItems((settings.inspection_checklist ?? []) as ChecklistSection[]).map((i) => i.label)));
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_quote_template
@@ -127,6 +148,14 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={!!q.estimate_id}
+        requests={bundle.requests}
+        labourActions={(settings.labour_actions ?? []) as string[]}
+        labourPositions={(settings.labour_positions ?? []) as string[]}
+        components={components}
+        hoursMemory={hoursMemory}
+        wait={wait}
+        workshopEstimate={checks.workshopEstimate}
+        completedAt={q.completed_at}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

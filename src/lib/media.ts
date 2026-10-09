@@ -7,6 +7,7 @@ import { WHEEL_KINDS, WHEEL_LABELS, type WheelKind } from "./wheels";
 export const GATE_IN_BUCKET = "gate-in-media";
 
 export const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
+  car_picture: "Car picture",
   video: "Walk-around video",
   video_exterior: "Exterior video",
   video_interior: "Interior video",
@@ -52,6 +53,7 @@ export async function loadMedia(jobId: string): Promise<GateInMediaRow[]> {
 export type WheelState = { kind: WheelKind; label: string; photo: boolean; conditions: string[]; done: boolean };
 
 export type Checklist = {
+  carPicture: boolean;
   videoExterior: boolean;
   videoInterior: boolean;
   dashboard: boolean;
@@ -65,7 +67,7 @@ export type Checklist = {
   complete: boolean;
 };
 
-export type GateInFlags = { majorDamage: boolean; wheelsRequired: boolean; damageNote: string };
+export type GateInFlags = { majorDamage: boolean; wheelsRequired: boolean; damageNote: string; hasCarPicture: boolean };
 
 /** The newest photo of one wheel; a retaken wheel photo needs its condition chosen again. */
 export function latestWheel(media: GateInMediaRow[], kind: WheelKind): GateInMediaRow | undefined {
@@ -78,7 +80,7 @@ export function latestWheel(media: GateInMediaRow[], kind: WheelKind): GateInMed
  * from 8 October 2026.
  */
 export function mediaChecklist(media: GateInMediaRow[], flags: GateInFlags | boolean = false): Checklist {
-  const f: GateInFlags = typeof flags === "boolean" ? { majorDamage: flags, wheelsRequired: false, damageNote: "" } : flags;
+  const f: GateInFlags = typeof flags === "boolean" ? { majorDamage: flags, wheelsRequired: false, damageNote: "", hasCarPicture: false } : flags;
   const has = (k: MediaKind) => media.some((m) => m.kind === k);
   const damageCount = media.filter((m) => m.kind === "damage_photo").length;
   // Jobs gated in before 7 October 2026 have a single walk-around video and one keys photo; those still count.
@@ -90,6 +92,8 @@ export function mediaChecklist(media: GateInMediaRow[], flags: GateInFlags | boo
     return { kind, label: WHEEL_LABELS[kind], photo: !!row, conditions, done: !!row && conditions.length > 0 };
   });
   const c = {
+    // The car's picture for our dashboard: a returning car already has one.
+    carPicture: has("car_picture") || f.hasCarPicture,
     videoExterior: has("video_exterior") || legacyVideo,
     videoInterior: has("video_interior") || legacyVideo,
     dashboard: has("dashboard_photo"),
@@ -104,6 +108,7 @@ export function mediaChecklist(media: GateInMediaRow[], flags: GateInFlags | boo
   return {
     ...c,
     complete:
+      c.carPicture &&
       c.videoExterior &&
       c.videoInterior &&
       c.dashboard &&
@@ -116,6 +121,10 @@ export function mediaChecklist(media: GateInMediaRow[], flags: GateInFlags | boo
 
 export async function loadGateInFlags(jobId: string): Promise<GateInFlags> {
   const admin = createAdminClient();
-  const { data } = await admin.from("gate_ins").select("major_damage, wheels_required, damage_note").eq("job_id", jobId).maybeSingle();
-  return { majorDamage: !!data?.major_damage, wheelsRequired: data?.wheels_required ?? false, damageNote: data?.damage_note ?? "" };
+  const [{ data }, { data: job }] = await Promise.all([
+    admin.from("gate_ins").select("major_damage, wheels_required, damage_note").eq("job_id", jobId).maybeSingle(),
+    admin.from("jobs").select("vehicle:vehicles(photo_path)").eq("id", jobId).maybeSingle(),
+  ]);
+  const photo = (job?.vehicle as unknown as { photo_path: string | null } | null)?.photo_path ?? null;
+  return { majorDamage: !!data?.major_damage, wheelsRequired: data?.wheels_required ?? false, damageNote: data?.damage_note ?? "", hasCarPicture: !!photo };
 }

@@ -181,10 +181,12 @@ export function cleanTyreConditions(values: string[]) {
 
 /** Cleans one saved measurement value: tyre conditions and actions must be known choices; everything else is free text. Returns null when the key is not allowed. */
 export function cleanMeasurementValue(key: string, raw: string): string | null {
-  const value = raw.trim().slice(0, 40);
-  const tyre = /^tyre_(fl|fr|rl|rr|spare)_(cond|action)$/.exec(key);
+  const value = raw.trim().slice(0, key.endsWith("_reason") ? 200 : 40);
+  const tyre = /^tyre_(fl|fr|rl|rr|spare)_(cond|action|danger|danger_reason)$/.exec(key);
   if (tyre) {
     if (tyre[2] === "cond") return cleanTyreConditions(value.split(",")).join(",");
+    if (tyre[2] === "danger") return value === "1" ? "1" : "";
+    if (tyre[2] === "danger_reason") return value;
     return TYRE_ACTIONS.some((a) => a.value === value) ? value : "";
   }
   return MEASUREMENTS.some((m) => m.key === key) ? value : null;
@@ -273,13 +275,18 @@ export function formatMinutes(min: number) {
 export type ReportProblem = { key: string; label: string };
 
 export type ReportState = {
-  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string }[];
+  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string; dangerous?: boolean; dangerous_reason?: string }[];
   findings: { requestId: string; text: string; status: ItemStatus | null; found: string }[];
   measurements: Record<string, string>;
+  /** The technician's estimated hours; null or undefined when the screen does not ask for them. */
+  estimatedHours?: string | null;
+  /** The scan step when the gate is on. */
+  scan?: { required: boolean; read: boolean; approved: boolean };
 };
 
-export function reportProblemsOf(s: ReportState): ReportProblem[] {
+export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimits } = {}): ReportProblem[] {
   const out: ReportProblem[] = [];
+  if (s.scan?.required && !s.scan.read && !s.scan.approved) out.push({ key: "prescan", label: "Scan report: read it, or get Scan not possible approved" });
   for (const f of s.findings) {
     const short = f.text.length > 28 ? f.text.slice(0, 26) + "…" : f.text;
     if (!f.status) out.push({ key: `req-${f.requestId}`, label: `${short}: not marked` });
@@ -290,8 +297,8 @@ export function reportProblemsOf(s: ReportState): ReportProblem[] {
     const short = i.label.length > 28 ? i.label.slice(0, 26) + "…" : i.label;
     if (!i.status) {
       if (i.sectionKey !== OPTIONAL_SECTION_KEY) out.push({ key: i.key, label: `${short}: not marked` });
-    }
-    else if ((i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
+    } else if ((i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
+    if (i.dangerous && !(i.dangerous_reason ?? "").trim()) out.push({ key: i.key, label: `${short}: why is it dangerous?` });
   }
   for (const p of TYRE_POSITIONS) {
     const tread = s.measurements[`tyre_${p.key}_tread`];
@@ -302,18 +309,27 @@ export function reportProblemsOf(s: ReportState): ReportProblem[] {
     if (!year?.trim()) out.push({ key: `m-tyre_${p.key}_year`, label: `${p.label} tyre year: missing` });
     if (!cond?.trim()) out.push({ key: `m-tyre_${p.key}_cond`, label: `${p.label} tyre condition: not marked` });
     if (!action?.trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre action: not marked` });
+    if (s.measurements[`tyre_${p.key}_danger`] === "1" && !(s.measurements[`tyre_${p.key}_danger_reason`] ?? "").trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre: why is it dangerous?` });
   }
   for (const m of MEASUREMENTS) {
     if (m.optional || m.key.startsWith("tyre_")) continue;
     if (!s.measurements[m.key]?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });
   }
+  if (opts.limits) out.push(...limitProblems(s.measurements, opts.limits));
+  if (s.estimatedHours !== undefined && s.estimatedHours !== null && !(Number(String(s.estimatedHours).replace(",", ".")) > 0)) out.push({ key: "estimate", label: "Estimated hours for this job: missing" });
   return out;
 }
 
 /** "12 of 99 done": every required answer on the report, for the neutral progress shown before Submit is tapped. */
-export function reportProgressOf(s: ReportState): { done: number; total: number } {
-  const required = s.findings.length + s.items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY && i.sectionKey !== OPTIONAL_SECTION_KEY).length + TYRE_POSITIONS.length * 4 + MEASUREMENTS.filter((m) => !m.optional && !m.key.startsWith("tyre_")).length;
-  const open = reportProblemsOf(s).length;
+export function reportProgressOf(s: ReportState, opts: { limits?: InspectionLimits } = {}): { done: number; total: number } {
+  const required =
+    s.findings.length +
+    s.items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY && i.sectionKey !== OPTIONAL_SECTION_KEY).length +
+    TYRE_POSITIONS.length * 4 +
+    MEASUREMENTS.filter((m) => !m.optional && !m.key.startsWith("tyre_")).length +
+    (s.estimatedHours !== undefined && s.estimatedHours !== null ? 1 : 0) +
+    (s.scan?.required ? 1 : 0);
+  const open = reportProblemsOf(s, opts).length;
   return { done: Math.max(0, required - open), total: required };
 }
 
@@ -323,4 +339,182 @@ export function tyreItemStatus(measurements: Record<string, string>): ItemStatus
   if (actions.includes("replace_now")) return "bad";
   if (actions.includes("replace_soon")) return "average";
   return null;
+}
+
+/* ---------------------------------------------------------------------------
+   Round 2 (9 October 2026): leaks, fluids, brake discs, parts rows, the Dangerous
+   switch, number limits, tyre years, big-job tags, the estimated hours.
+   --------------------------------------------------------------------------- */
+
+export const LEAK_SEVERITIES = [
+  { value: "sweating", label: "Sweating" },
+  { value: "dripping", label: "Dripping" },
+  { value: "heavy", label: "Heavy leak" },
+] as const;
+export const LEAK_REPAIRS = [
+  { value: "gasket", label: "Gasket" },
+  { value: "seal", label: "Seal" },
+  { value: "reseal", label: "Silicone reseal" },
+  { value: "hose", label: "Hose or pipe" },
+  { value: "replace", label: "Replace" },
+] as const;
+export const DISC_CONDITIONS = [
+  { value: "good", label: "Good" },
+  { value: "close_to_minimum", label: "Close to minimum" },
+  { value: "below_minimum", label: "Below minimum" },
+] as const;
+export const DISC_ACTIONS = [
+  { value: "none", label: "None" },
+  { value: "skim", label: "Skimming possible" },
+  { value: "replace", label: "Skimming not possible, replace" },
+] as const;
+export const PARTS_UNITS = ["pc", "set", "pair", "litre", "kg", "m"] as const;
+
+/** One line of "Parts needed": the part, how many, the unit. The quantity follows the part to the price request and the quotation. */
+export type PartsRow = { part: string; qty: number; unit: string };
+
+export type InspectionLimits = { tread_max: number; pads_max: number; battery_max: number; vent_min: number; vent_max: number; fluid_max: number; tyre_years: number };
+export const DEFAULT_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
+/** The limits from Settings on top of the defaults. */
+export function inspectionLimitsOf(settings: { inspection_limits?: unknown }): InspectionLimits {
+  const raw = (settings.inspection_limits ?? {}) as Partial<Record<keyof InspectionLimits, number | string>>;
+  const out = { ...DEFAULT_LIMITS };
+  for (const k of Object.keys(DEFAULT_LIMITS) as (keyof InspectionLimits)[]) {
+    const n = Number(raw[k]);
+    if (raw[k] !== undefined && raw[k] !== "" && Number.isFinite(n)) out[k] = n;
+  }
+  return out;
+}
+
+/** Items that can leak: anything with oil, coolant, fluid, a pump, cooler, hose, seal, rack or shock in the name. */
+export function isLeakItem(label: string) {
+  return /leak|oil|coolant|fluid|pump|cooler|hose|seal|gasket|rack|shock|differential|transmission|turbo|supercharger|radiator|a\/c|compressor|condenser|evaporator|pipes|sump|cover/i.test(label);
+}
+/** Items that are a fluid: a quantity, a grade and an approval spec can be recorded. */
+export function isFluidItem(label: string) {
+  return /oil level|fluid|coolant tank|gas level|brake fluid|washer/i.test(label) && !/leak|pipes|caliper/i.test(label);
+}
+export function isDiscItem(label: string) {
+  return /brake disc/i.test(label);
+}
+/** Litres for everything except A/C gas, which is weighed in grams. */
+export function fluidUnitFor(label: string, current: string | null | undefined) {
+  if (current) return current;
+  return /gas|a\/c|refrigerant/i.test(label) ? "g" : "l";
+}
+/** The grades that make sense for this fluid, from the list in Settings. */
+export function fluidGradesFor(label: string, grades: string[]) {
+  const l = label.toLowerCase();
+  if (/brake/.test(l)) return grades.filter((g) => /dot/i.test(g));
+  if (/coolant/.test(l)) return grades.filter((g) => /^g1\d/i.test(g));
+  if (/gas|a\/c|refrigerant/.test(l)) return grades.filter((g) => /^r\d/i.test(g));
+  if (/transmission|differential|gear|transfer/.test(l)) return grades.filter((g) => /atf|cvt|dct|w-9/i.test(g));
+  if (/oil|engine/.test(l)) return grades.filter((g) => /^\d+w-\d+$/i.test(g));
+  return grades;
+}
+/** The remark written for the technician when a leak's severity or repair is tapped. */
+export function leakRemark(severity: string | null | undefined, repair: string | null | undefined) {
+  const s = LEAK_SEVERITIES.find((x) => x.value === severity)?.label;
+  const r = LEAK_REPAIRS.find((x) => x.value === repair)?.label;
+  return [s ? `${s} leak` : "", r ? `repair: ${r.toLowerCase()}` : ""].filter(Boolean).join(" · ");
+}
+/** The part a leak repair needs, added to the parts rows on its own. */
+export function leakPartFor(repair: string | null | undefined, label: string): string | null {
+  switch (repair) {
+    case "gasket":
+      return `Gasket, ${label}`;
+    case "seal":
+      return `Seal, ${label}`;
+    case "reseal":
+      return "Silicone sealant";
+    case "hose":
+      return `Hose or pipe, ${label}`;
+    case "replace":
+      return label;
+    default:
+      return null;
+  }
+}
+/** Brake discs: the condition and the action set the item's status. Below minimum means BAD and replace. */
+export function discStatus(condition: string | null | undefined, action: string | null | undefined): ItemStatus | null {
+  if (condition === "below_minimum" || action === "replace") return "bad";
+  if (condition === "close_to_minimum" || action === "skim") return "average";
+  if (condition === "good" && (!action || action === "none")) return "good";
+  return null;
+}
+/** Parts rows from the browser, cleaned: a name, a quantity of at least 1, a known unit. */
+export function cleanPartsRows(input: unknown): PartsRow[] {
+  if (!Array.isArray(input)) return [];
+  const out: PartsRow[] = [];
+  for (const r of input.slice(0, 30)) {
+    if (!r || typeof r !== "object") continue;
+    const part = String((r as { part?: unknown }).part ?? "").trim().slice(0, 120);
+    const qtyRaw = Number((r as { qty?: unknown }).qty);
+    const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.round(qtyRaw * 100) / 100 : 1;
+    const unitRaw = String((r as { unit?: unknown }).unit ?? "pc").trim().slice(0, 12);
+    const unit = (PARTS_UNITS as readonly string[]).includes(unitRaw) ? unitRaw : "pc";
+    out.push({ part, qty, unit });
+  }
+  return out;
+}
+/** "Brake pads × 1 set" lines, for the old free-text field and the Parts desk. */
+export function partsRowsText(rows: PartsRow[]) {
+  return rows.filter((r) => r.part.trim()).map((r) => `${r.part.trim()} × ${r.qty} ${r.unit}`).join("\n");
+}
+/** Tyre years: this year back the set number of years, then "Older". */
+export function tyreYearOptions(thisYear: number, years: number) {
+  const out: { value: string; label: string }[] = [];
+  for (let y = thisYear; y >= thisYear - years; y--) out.push({ value: String(y), label: String(y) });
+  out.push({ value: "older", label: "Older" });
+  return out;
+}
+/** A road test is suggested when the customer's words mention noise, vibration, steering, turning or braking. */
+export function roadTestSuggested(texts: string[]) {
+  return texts.some((t) => /nois|vibrat|steer|turn|brak|pull|shak|judder|rattl|knock|clunk|hum|whin|wobbl|drift/i.test(t));
+}
+/** Typed numbers outside the sensible range are problems, so a slip of the finger is caught on the spot. */
+export function limitProblems(m: Record<string, string>, limits: InspectionLimits): ReportProblem[] {
+  const out: ReportProblem[] = [];
+  const num = (k: string) => {
+    const v = m[k];
+    if (!v?.trim()) return null;
+    const n = Number(v.replace(",", "."));
+    return Number.isFinite(n) ? n : NaN;
+  };
+  const check = (key: string, label: string, min: number, max: number, unit: string) => {
+    const n = num(key);
+    if (n !== null && (Number.isNaN(n) || n < min || n > max)) out.push({ key: `m-${key}`, label: `${label}: ${min} to ${max} ${unit}` });
+  };
+  for (const p of [...TYRE_POSITIONS, { key: "spare", label: "Spare" }]) check(`tyre_${p.key}_tread`, `${p.label} tread`, 0, limits.tread_max, "mm");
+  check("pad_front", "Front brake pads", 0, limits.pads_max, "mm");
+  check("pad_rear", "Rear brake pads", 0, limits.pads_max, "mm");
+  check("battery_voltage", "Battery voltage", 0, limits.battery_max, "V");
+  check("vent_temp", "A/C vent temperature", limits.vent_min, limits.vent_max, "°C");
+  return out;
+}
+/** The form's state for one checklist item, from a stored row. */
+export function toItemState(i: { item_key: string; item_label: string; section_key: string; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; parts_rows?: unknown }) {
+  const s = (v: number | string | null | undefined) => (v === null || v === undefined ? "" : String(v));
+  return {
+    key: i.item_key,
+    label: i.item_label,
+    sectionKey: i.section_key,
+    status: i.status,
+    remarks: i.remarks ?? "",
+    parts_needed: i.parts_needed ?? "",
+    editedBy: i.edited_by_name ?? null,
+    dangerous: !!i.dangerous,
+    dangerous_reason: i.dangerous_reason ?? "",
+    leak_severity: i.leak_severity ?? "",
+    leak_repair: i.leak_repair ?? "",
+    fluid_qty: s(i.fluid_qty),
+    fluid_unit: i.fluid_unit ?? "",
+    fluid_grade: i.fluid_grade ?? "",
+    fluid_spec: i.fluid_spec ?? "",
+    disc_condition: i.disc_condition ?? "",
+    disc_action: i.disc_action ?? "",
+    disc_thickness: s(i.disc_thickness),
+    disc_minimum: s(i.disc_minimum),
+    parts_rows: cleanPartsRows(i.parts_rows),
+  };
 }

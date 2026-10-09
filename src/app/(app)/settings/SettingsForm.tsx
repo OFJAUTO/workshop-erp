@@ -27,6 +27,9 @@ export function SettingsForm({
   branchesText,
   labourByMake,
   qcChecksText,
+  listTexts = {},
+  limits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 },
+  prescanGate = false,
 }: {
   action: FormAction;
   initialValues: Record<string, string>;
@@ -40,6 +43,9 @@ export function SettingsForm({
   branchesText: string;
   labourByMake: Record<string, number>;
   qcChecksText: string;
+  listTexts?: Record<string, string>;
+  limits?: Record<string, number>;
+  prescanGate?: boolean;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
@@ -327,6 +333,15 @@ export function SettingsForm({
               <Field label="Bank charge, payment link (%)" hint="Of the total including VAT. Internal cost only, never shown to the customer.">
                 <Input name="bank_charge_link_percent" defaultValue={v.bank_charge_link_percent} inputMode="decimal" required />
               </Field>
+              <Field label="Bank charge on quotations (%)" hint="The automatic hidden Fee line: total including VAT times this. Corrected to the real charge at payment.">
+                <Input name="bank_charge_fee_percent" defaultValue={v.bank_charge_fee_percent} inputMode="decimal" required />
+              </Field>
+              <Field label="Remind Parts after (minutes)" hint="The advisor's Remind Parts button opens after this wait.">
+                <Input name="parts_remind_minutes" defaultValue={v.parts_remind_minutes} inputMode="numeric" required />
+              </Field>
+              <Field label="Escalate to the owner after (minutes)">
+                <Input name="parts_escalate_minutes" defaultValue={v.parts_escalate_minutes} inputMode="numeric" required />
+              </Field>
             </div>
             <details className="rounded-control border border-line p-4">
               <summary className="cursor-pointer text-sm font-bold">Labour rate per department (optional)</summary>
@@ -375,7 +390,56 @@ export function SettingsForm({
                 <Input name="label_height_mm" defaultValue={v.label_height_mm} inputMode="numeric" required />
               </Field>
             </div>
+            <Field label="Part types (one per line)" hint="One-tap choice on every part: the first is the default. Genuine needs no brand; the others ask for one.">
+              <Textarea name="part_types" defaultValue={v.part_types ?? listTexts.part_types} rows={4} required />
+            </Field>
           </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Inspection</SectionLabel>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" name="prescan_gate_enabled" defaultChecked={prescanGate} className="mt-1 h-5 w-5 accent-ink" />
+              <span className="flex flex-col text-sm">
+                <span className="font-semibold">Scan report gate</span>
+                <span className="text-xs text-muted">When on, the technician must read the Autel scan report (or get &quot;Scan not possible&quot; approved by the manager) before the checklist opens. Keep it off until the scan email link is tested.</span>
+              </span>
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <Field label="Tread depth, max (mm)"><Input name="limit__tread_max" defaultValue={String(limits.tread_max)} inputMode="decimal" required /></Field>
+              <Field label="Brake pads, max (mm)"><Input name="limit__pads_max" defaultValue={String(limits.pads_max)} inputMode="decimal" required /></Field>
+              <Field label="Battery, max (V)"><Input name="limit__battery_max" defaultValue={String(limits.battery_max)} inputMode="decimal" required /></Field>
+              <Field label="Fluids, max (L)"><Input name="limit__fluid_max" defaultValue={String(limits.fluid_max)} inputMode="decimal" required /></Field>
+              <Field label="Vent temperature, min (°C)"><Input name="limit__vent_min" defaultValue={String(limits.vent_min)} inputMode="decimal" required /></Field>
+              <Field label="Vent temperature, max (°C)"><Input name="limit__vent_max" defaultValue={String(limits.vent_max)} inputMode="decimal" required /></Field>
+              <Field label="Tyre year pick-list (years back)"><Input name="limit__tyre_years" defaultValue={String(limits.tyre_years)} inputMode="numeric" required /></Field>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Fluid grades (one per line)" hint="One-tap suggestions on fluid items.">
+                <Textarea name="fluid_grades" defaultValue={v.fluid_grades ?? listTexts.fluid_grades} rows={6} required />
+              </Field>
+              <Field label="Big-job tags (one per line)" hint="One-tap tags by the technician's notes.">
+                <Textarea name="big_job_tags" defaultValue={v.big_job_tags ?? listTexts.big_job_tags} rows={6} required />
+              </Field>
+              <Field label="Labour actions (one per line)" hint="The Action pick-list of the labour description builder on quotations.">
+                <Textarea name="labour_actions" defaultValue={v.labour_actions ?? listTexts.labour_actions} rows={6} required />
+              </Field>
+              <Field label="Labour positions (one per line)" hint="The Position pick-list of the builder.">
+                <Textarea name="labour_positions" defaultValue={v.labour_positions ?? listTexts.labour_positions} rows={6} required />
+              </Field>
+            </div>
+            <Field label="Safety warning shown to the customer (English)" hint="On the quotation page and PDF when a finding is marked dangerous. Have the wording checked legally.">
+              <Textarea name="dangerous_customer_text" defaultValue={v.dangerous_customer_text} rows={3} required />
+            </Field>
+            <Field label="Safety warning (Arabic)">
+              <Textarea name="dangerous_customer_text_ar" defaultValue={v.dangerous_customer_text_ar} rows={3} dir="rtl" lang="ar" />
+            </Field>
+            <Field label="Acknowledgement the customer ticks when declining dangerous work">
+              <Textarea name="dangerous_acknowledgement_text" defaultValue={v.dangerous_acknowledgement_text} rows={2} required />
+            </Field>
+            <p className="text-xs text-muted">Tap-first suggestions per checklist item learn from every approved report on their own.</p>
+          </Card>
+
+
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>QC, car ready and follow-up</SectionLabel>

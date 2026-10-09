@@ -22,7 +22,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
   const supabase = await createClient();
   const card = await loadJobCard(supabase, id);
   if (!card) notFound();
-  const check = mediaChecklist(card.media, { majorDamage: card.gateIn?.major_damage ?? false, wheelsRequired: card.gateIn?.wheels_required ?? false, damageNote: card.gateIn?.damage_note ?? "" });
+  const check = mediaChecklist(card.media, { majorDamage: card.gateIn?.major_damage ?? false, wheelsRequired: card.gateIn?.wheels_required ?? false, damageNote: card.gateIn?.damage_note ?? "", hasCarPicture: !!card.vehicle.photo_path });
 
   const token = await createUploadLinkToken(id);
   const site = await getSiteUrl();

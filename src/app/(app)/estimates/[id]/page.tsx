@@ -108,6 +108,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={false}
+        labourActions={(settings.labour_actions ?? []) as string[]}
+        labourPositions={(settings.labour_positions ?? []) as string[]}
+        completedAt={q.completed_at}
       />
       {!staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
         <Card className="flex flex-col gap-2 max-w-xl">

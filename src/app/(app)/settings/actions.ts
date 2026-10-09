@@ -44,13 +44,19 @@ const NUMBER_KEYS = [
   "label_width_mm",
   "label_height_mm",
   "followup_days",
+  "parts_remind_minutes",
+  "parts_escalate_minutes",
 ] as const;
 /** Settings that keep decimals (percentages like 1.9). */
-const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent"] as const;
+const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_fee_percent"] as const;
 const DECIMAL_LIMITS: Record<(typeof DECIMAL_KEYS)[number], [number, number, string]> = {
   bank_charge_card_percent: [0, 20, "Bank charge, card machine"],
   bank_charge_link_percent: [0, 20, "Bank charge, payment link"],
+  bank_charge_fee_percent: [0, 20, "Bank charge on quotations"],
 };
+/** Settings kept as a list, one entry per line on the form. */
+const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades"] as const;
+const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years"] as const;
 
 const TEXT_KEYS = [
   "company_name",
@@ -87,6 +93,9 @@ const TEXT_KEYS = [
   "labour_rate_bodyshop_aed",
   "whatsapp_ready_template",
   "whatsapp_followup_template",
+  "dangerous_customer_text",
+  "dangerous_customer_text_ar",
+  "dangerous_acknowledgement_text",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -126,6 +135,8 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   label_width_mm: [20, 200, "Label width"],
   label_height_mm: [10, 200, "Label height"],
   followup_days: [1, 90, "Follow-up after gate-out"],
+  parts_remind_minutes: [1, 1440, "Remind Parts after"],
+  parts_escalate_minutes: [1, 1440, "Escalate to the owner after"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -178,6 +189,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "labour_rate_bodyshop_aed" && text && !(Number(text) >= 0)) return { error: "The bodyshop labour rate must be a number, or empty.", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
     if (key.startsWith("whatsapp_reminder") && text.length < 10) return { error: "Enter every WhatsApp reminder message.", values };
+    if ((key === "dangerous_customer_text" || key === "dangerous_acknowledgement_text") && text.length < 10) return { error: "Enter the safety warning and the acknowledgement text.", values };
     updates.push({ key, value: text });
   }
 
@@ -227,6 +239,22 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   const days = formData.getAll("working_days").map(String).filter((d) => DAYS.includes(d));
   if (days.length === 0) return { error: "Tick at least one working day.", values };
   updates.push({ key: "working_days", value: DAYS.filter((d) => days.includes(d)) });
+
+  for (const key of LIST_KEYS) {
+    const list = Array.from(new Set(String(formData.get(key) ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, 60);
+    if (list.length === 0) return { error: `Enter at least one line for ${key.replaceAll("_", " ")}.`, values };
+    updates.push({ key, value: list });
+  }
+  updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
+  const limits: Record<string, number> = {};
+  for (const k of LIMIT_KEYS) {
+    const raw = String(formData.get(`limit__${k}`) ?? "").trim().replace(",", ".");
+    const n = Number(raw);
+    if (!raw || !Number.isFinite(n)) return { error: `The inspection limit ${k.replaceAll("_", " ")} must be a number.`, values };
+    limits[k] = n;
+  }
+  if (limits.vent_max <= limits.vent_min) return { error: "The vent temperature maximum must be above the minimum.", values };
+  updates.push({ key: "inspection_limits", value: limits });
 
   for (const u of updates) {
     const { error } = await supabase.from("settings").update({ value: u.value }).eq("key", u.key);

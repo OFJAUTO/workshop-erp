@@ -81,3 +81,14 @@ input[type="number"]::-webkit-inner-spin-button {
   .no-print { display: none !important; }
   body { background: white; }
 }
+
+/* While something is unread the bell keeps wiggling gently, a short wiggle every few seconds. */
+@keyframes bell-wiggle {
+  0%, 70%, 100% { transform: rotate(0); }
+  74% { transform: rotate(12deg); }
+  78% { transform: rotate(-10deg); }
+  82% { transform: rotate(8deg); }
+  86% { transform: rotate(-6deg); }
+  90% { transform: rotate(3deg); }
+}
+.bell-wiggle { animation: bell-wiggle 4s ease-in-out infinite; transform-origin: 50% 0; }

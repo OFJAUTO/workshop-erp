@@ -255,7 +255,8 @@ export type MediaKind =
   | "wheel_fl"
   | "wheel_fr"
   | "wheel_rl"
-  | "wheel_rr";
+  | "wheel_rr"
+  | "car_picture";
 
 export type GateInMediaRow = {
   id: string;

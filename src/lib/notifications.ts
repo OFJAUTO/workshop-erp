@@ -67,6 +67,17 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "release_approval", label: "A car with a balance due needs release approval", locked: true },
   { type: "delivery", label: "A delivery was booked, left or delivered", locked: true },
   { type: "gate_out_followup", label: "Follow-up call due after gate-out", locked: true },
+  { type: "parts_question", label: "Parts asked the workshop manager about a part", locked: true },
+  { type: "parts_answer", label: "The workshop manager answered a parts question", locked: true },
+  { type: "parts_reminder", label: "The advisor is waiting for parts prices", locked: true },
+  { type: "parts_escalation", label: "Parts prices are late (owner)", locked: true },
+  { type: "quote_complete", label: "A quotation is complete and ready to send", locked: true },
+  { type: "dangerous_found", label: "A technician marked a finding as dangerous", locked: true },
+  { type: "big_job", label: "A technician flagged a big job", locked: true },
+  { type: "estimate_hours", label: "The technician's estimated hours need the manager's agreement", locked: true },
+  { type: "scan_received", label: "An Autel scan report arrived for your car", locked: true },
+  { type: "scan_unmatched", label: "An Autel scan report could not be matched to a car", locked: true },
+  { type: "scan_approval", label: "A technician asks to skip the pre-scan", locked: true },
 ];
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };

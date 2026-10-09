@@ -3,6 +3,7 @@ import type { NavItem } from "@/components/SidebarNav";
 import { requireStaff } from "@/lib/auth";
 import { can, ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { IdleLock } from "./IdleLock";
 
@@ -18,17 +19,29 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     photoUrl = data?.signedUrl ?? null;
   }
 
-  const nav: NavItem[] = [
+  // Parts see how much is waiting for them next to the menu entry: requests to price and approved parts to order.
+  let partsPending = 0;
+  if (role === "parts" || role === "owner") {
+    const admin = createAdminClient();
+    const [{ count: toPrice }, { count: toOrder }] = await Promise.all([
+      admin.from("part_requests").select("id", { count: "exact", head: true }).eq("status", "open").eq("is_active", true),
+      admin.from("part_items").select("id", { count: "exact", head: true }).eq("order_status", "to_order").eq("is_active", true),
+    ]);
+    partsPending = (toPrice ?? 0) + (toOrder ?? 0);
+  }
+
+  const entries: (NavItem & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") },
     { href: "/assign", label: "To assign", show: can(role, "assignJobs") },
     { href: "/my-jobs", label: "My jobs", show: role === "technician" },
     { href: "/road-tests", label: "Road tests", show: can(role, "roadTest") },
+    { href: "/scans", label: "Scan reports", show: role === "owner" || role === "workshop_manager" || role === "qc_inspector" },
     { href: "/workshop", label: "Workshop list", show: role === "technician" || role === "qc_inspector" },
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") },
-    { href: "/parts", label: "Parts", show: can(role, "priceParts") },
+    { href: "/parts", label: "Parts", show: can(role, "priceParts"), badge: role === "parts" ? partsPending : undefined },
     { href: "/parts/orders", label: "Purchase orders", show: can(role, "viewPurchaseOrders") && role !== "service_advisor" },
     { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
@@ -44,17 +57,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/settings", label: "Settings", show: can(role, "manageSettings") },
     { href: "/audit", label: "Change log", show: can(role, "viewAudit") },
     { href: "/overrides", label: "Overrides", show: can(role, "viewOverrides") },
-  ]
-    .filter((n) => n.show)
-    .map(({ href, label }) => ({ href, label }));
+  ];
+  const nav: NavItem[] = entries.filter((n) => n.show).map(({ href, label, badge }) => ({ href, label, badge }));
 
   return (
     <>
-      {staff.login_type === "pin" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
+      {staff.login_type === "pin" && !staff.actingAs ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         nav={nav}
         user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
         viewingAs={staff.viewingAs}
+        actingAs={staff.actingAs}
         footer={
           <form method="post" action="/api/auth/signout">
             <button

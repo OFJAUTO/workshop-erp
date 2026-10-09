@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle } from "./inspection-data";
-import { TYRE_POSITIONS } from "./inspection";
+import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows } from "./inspection";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
 import type { Settings } from "./settings";
 import { newToken } from "./media";
@@ -9,11 +9,11 @@ import { newToken } from "./media";
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, created_at, created_by, updated_at";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, description, parts_requests, position, is_active";
-export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at";
-export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at";
+export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by";
+export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason";
 
 /** Numbers come back from Postgres as strings; the maths wants numbers. */
 function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
@@ -24,7 +24,7 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
   }
   return out;
 }
-const LINE_NUM: (keyof QuoteLine)[] = ["position", "quantity", "unit_cost", "markup_percent", "unit_price", "hours", "labour_rate", "discount_percent", "line_total"];
+const LINE_NUM: (keyof QuoteLine)[] = ["position", "quantity", "unit_cost", "markup_percent", "unit_price", "hours", "labour_rate", "discount_percent", "line_total", "recovery_trips"];
 const QUOTE_NUM: (keyof QuoteRow)[] = ["version", "discount_percent", "vat_percent", "subtotal_aed", "discount_aed", "vat_aed", "total_aed", "approved_total_aed", "deposit_aed", "validity_days"];
 const PART_NUM: (keyof PartItem)[] = ["quantity", "cost_aed", "confirmed_quantity"];
 
@@ -117,33 +117,21 @@ export async function approvedQuotations(jobId: string): Promise<{ id: string; n
 }
 
 export async function loadQuoteSummary(jobId: string): Promise<QuoteSummary> {
-  const admin = createAdminClient();
-  const [{ data: q }, { data: parts }, { data: requests }] = await Promise.all([
-    admin.from("quotations").select("id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at").eq("job_id", jobId).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    admin.from("part_items").select("id, cost_aed, confirm_status").eq("job_id", jobId).eq("is_active", true),
-    admin.from("part_requests").select("id, status").eq("job_id", jobId).eq("is_active", true),
-  ]);
-  const items = (parts ?? []) as { cost_aed: number | null; confirm_status: string }[];
-  return {
-    quotation: q ? (toQuote(q as Record<string, unknown>) as QuoteSummary["quotation"]) : null,
-    waitingPrices: items.filter((p) => p.confirm_status !== "rejected" && p.cost_aed === null).length,
-    waitingConfirm: items.filter((p) => p.confirm_status === "pending").length,
-    rejectedParts: items.filter((p) => p.confirm_status === "rejected").length,
-    openRequests: ((requests ?? []) as { status: string }[]).filter((r) => r.status === "open").length,
-  };
+  const map = await loadQuoteSummaries([jobId]);
+  return map.get(jobId) ?? { quotation: null, waitingPrices: 0, waitingConfirm: 0, rejectedParts: 0, openRequests: 0 };
 }
 
-/** Summaries for many jobs at once (dashboard). */
+/** Summaries for many jobs at once (dashboard): the latest quotation, what Parts still owe, and how far the quotation is. */
 export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, QuoteSummary>> {
   const out = new Map<string, QuoteSummary>();
   if (!jobIds.length) return out;
   const admin = createAdminClient();
   const [{ data: qs }, { data: parts }, { data: requests }] = await Promise.all([
-    admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
+    admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at, completed_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
     admin.from("part_items").select("job_id, cost_aed, confirm_status").in("job_id", jobIds).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", jobIds).eq("is_active", true),
   ]);
-  for (const id of jobIds) out.set(id, { quotation: null, waitingPrices: 0, waitingConfirm: 0, rejectedParts: 0, openRequests: 0 });
+  for (const id of jobIds) out.set(id, { quotation: null, waitingPrices: 0, waitingConfirm: 0, rejectedParts: 0, openRequests: 0, partsTotal: 0, partsPriced: 0, labourTotal: 0, labourDone: 0 });
   for (const q of (qs ?? []) as ({ job_id: string } & Record<string, unknown>)[]) {
     const s = out.get(q.job_id)!;
     if (!s.quotation) s.quotation = toQuote(q) as QuoteSummary["quotation"];
@@ -151,10 +139,26 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
   for (const p of (parts ?? []) as { job_id: string; cost_aed: number | null; confirm_status: string }[]) {
     const s = out.get(p.job_id)!;
     if (p.confirm_status === "pending") s.waitingConfirm++;
-    if (p.confirm_status !== "rejected" && p.cost_aed === null) s.waitingPrices++;
     if (p.confirm_status === "rejected") s.rejectedParts++;
+    else {
+      s.partsTotal!++;
+      if (p.cost_aed === null) s.waitingPrices++;
+      else s.partsPriced!++;
+    }
   }
   for (const r of (requests ?? []) as { job_id: string; status: string }[]) if (r.status === "open") out.get(r.job_id)!.openRequests++;
+  // Labour lines with hours on the latest quotation.
+  const byQuotation = new Map<string, QuoteSummary>();
+  for (const s of out.values()) if (s.quotation) byQuotation.set(s.quotation.id, s);
+  if (byQuotation.size) {
+    const { data: lines } = await admin.from("quotation_lines").select("quotation_id, hours").in("quotation_id", Array.from(byQuotation.keys())).eq("is_active", true).eq("line_type", "labour");
+    for (const l of (lines ?? []) as { quotation_id: string; hours: number | string | null }[]) {
+      const s = byQuotation.get(l.quotation_id);
+      if (!s) continue;
+      s.labourTotal!++;
+      if (Number(l.hours) > 0) s.labourDone!++;
+    }
+  }
   return out;
 }
 
@@ -183,7 +187,15 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
   const have = new Set((existing ?? []).map((e) => `${e.source_type}:${e.source_key}`));
   const rows: Record<string, unknown>[] = [];
   for (const i of bundle.items) {
-    if (i.parts_needed && i.parts_needed.trim() && !have.has(`item:${i.item_key}`)) {
+    const partRows = cleanPartsRows(i.parts_rows).filter((r) => r.part.trim());
+    if (partRows.length) {
+      // One request per part row, with the quantity the technician set; the row's number keeps it apart from its siblings.
+      partRows.forEach((r, idx) => {
+        const key = `${i.item_key}#${idx}`;
+        if (have.has(`item:${key}`)) return;
+        rows.push({ job_id: jobId, inspection_id: bundle.inspection.id, source_type: "item", source_key: key, label: `${r.part.trim()} (${i.item_label})`, requested_text: `${r.part.trim()} × ${r.qty} ${r.unit}${i.remarks ? ` · ${i.remarks}` : ""}`, quantity: r.qty, unit: r.unit, created_by: by, updated_by: by });
+      });
+    } else if (i.parts_needed && i.parts_needed.trim() && !have.has(`item:${i.item_key}`)) {
       rows.push({ job_id: jobId, inspection_id: bundle.inspection.id, source_type: "item", source_key: i.item_key, label: i.item_label, requested_text: i.parts_needed.trim(), created_by: by, updated_by: by });
     }
   }
@@ -213,7 +225,7 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
   const { data: reqs } = await admin.from("job_requests").select("id, text, position").eq("job_id", jobId).eq("is_active", true).order("position");
   const out: Omit<QuoteLine, "id" | "quotation_id" | "is_active">[] = [];
   let position = 0;
-  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null };
+  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null, part_type: null, brand: null, option_group: null, chosen: true, fee_kind: null, recovery_trips: null, recovery_provider: null, dangerous: false };
   for (const r of reqs ?? []) {
     const f = bundle.findings.find((x) => x.job_request_id === r.id);
     if (!f || !(f.status === "bad" || f.status === "average")) continue;
@@ -222,36 +234,65 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
   }
   for (const i of bundle.items) {
     if (!(i.status === "bad" || i.status === "average")) continue;
-    out.push({ ...base, position: position++, line_type: "labour", title: i.item_label, details: i.remarks ?? null, group_label: `${i.section_title}`, source_type: "item", source_key: i.item_key });
+    // The title follows what the technician tapped: skim or replace a disc, repair a leak; a dangerous finding is Urgent from the start.
+    const disc = DISC_ACTIONS.find((a) => a.value === i.disc_action);
+    const leak = LEAK_REPAIRS.find((r) => r.value === i.leak_repair);
+    const title = disc && i.disc_action === "skim" ? `Skim ${i.item_label.toLowerCase()}` : disc && i.disc_action === "replace" ? `Replace ${i.item_label.toLowerCase()}` : leak ? `${i.leak_repair === "replace" ? "Replace" : "Repair leak,"} ${i.item_label.toLowerCase()}${i.leak_repair === "replace" ? "" : ` (${leak.label.toLowerCase()})`}` : i.item_label;
+    const extra = [i.leak_severity ? `${LEAK_SEVERITIES.find((s) => s.value === i.leak_severity)?.label ?? ""} leak` : "", i.fluid_qty !== null && i.fluid_qty !== undefined ? `${i.fluid_qty} ${i.fluid_unit === "g" ? "g" : "L"}${i.fluid_grade ? ` ${i.fluid_grade}` : ""}${i.fluid_spec ? ` (${i.fluid_spec})` : ""}` : i.fluid_grade ? i.fluid_grade : ""].filter(Boolean).join(" · ");
+    out.push({ ...base, position: position++, line_type: "labour", title, details: [i.remarks ?? "", extra].filter(Boolean).join(" · ") || null, group_label: `${i.section_title}`, source_type: "item", source_key: i.item_key, dangerous: !!i.dangerous, urgency: i.dangerous ? "urgent" : null });
   }
   const m = bundle.inspection.measurements ?? {};
   for (const p of [...TYRE_POSITIONS, { key: "spare", label: "Spare" }]) {
     const action = String(m[`tyre_${p.key}_action`] ?? "");
     if (action === "replace_now" || action === "replace_soon") {
-      out.push({ ...base, position: position++, line_type: "labour", title: `Replace ${p.label.toLowerCase()} tyre (fitting and balancing)`, details: m[`tyre_${p.key}_tread`] ? `${m[`tyre_${p.key}_tread`]} mm tread` : null, group_label: "Tyres", source_type: "tyre", source_key: p.key });
+      const danger = String(m[`tyre_${p.key}_danger`] ?? "") === "1";
+      out.push({ ...base, position: position++, line_type: "labour", title: `Replace ${p.label.toLowerCase()} tyre (fitting and balancing)`, details: m[`tyre_${p.key}_tread`] ? `${m[`tyre_${p.key}_tread`]} mm tread` : null, group_label: "Tyres", source_type: "tyre", source_key: p.key, dangerous: danger, urgency: danger ? "urgent" : null });
     }
   }
   return out;
 }
 
-/** Recomputes and stores the totals of a quotation from its lines. */
-export async function refreshQuoteTotals(quotationId: string, settings: Settings, by: string) {
+export async function refreshQuoteTotals(quotationId: string, settings: Settings, by: string, opts: { reopen?: boolean } = {}) {
   const admin = createAdminClient();
   const [{ data: q }, { data: lines }] = await Promise.all([
-    admin.from("quotations").select("id, discount_percent, vat_percent, status").eq("id", quotationId).maybeSingle(),
+    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at").eq("id", quotationId).maybeSingle(),
     admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", quotationId).eq("is_active", true),
   ]);
   if (!q) return;
-  const ls = ((lines ?? []) as Record<string, unknown>[]).map(toLine);
+  let ls = ((lines ?? []) as Record<string, unknown>[]).map(toLine);
+  const stamp = by || null;
+  const qArgs = { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 };
+  // The automatic bank charge: one hidden Fee line at the set percentage of the total including VAT.
+  // Never shown to the customer, counted as a cost against profit, corrected by the real charge at payment.
+  if (q.status === "draft" || q.status === "pending_owner") {
+    const feePercent = Number(settings.bank_charge_fee_percent) || 0;
+    const others = ls.filter((l) => l.fee_kind !== "bank_charge");
+    const fee = feePercent > 0 ? round2(quoteTotals(others, qArgs).total * (feePercent / 100)) : 0;
+    const existing = ls.filter((l) => l.fee_kind === "bank_charge");
+    if (existing.length === 0 && fee > 0) {
+      const { data: created } = await admin.from("quotation_lines").insert({ quotation_id: quotationId, position: 9999, line_type: "fee", fee_kind: "bank_charge", title: "Bank charge (card or payment link)", details: null, group_label: null, source_type: "manual", quantity: 1, unit_cost: fee, unit_price: 0, markup_percent: 0, discount_percent: 0, visible_to_customer: false, line_total: 0, created_by: stamp, updated_by: stamp }).select(LINE_SELECT).single();
+      if (created) ls = [...ls, toLine(created as Record<string, unknown>)];
+    } else if (existing.length) {
+      const [keep, ...extra] = existing;
+      for (const e of extra) await admin.from("quotation_lines").update({ is_active: false, updated_by: stamp }).eq("id", e.id);
+      ls = ls.filter((l) => !extra.some((e) => e.id === l.id));
+      if (round2(keep.unit_cost ?? 0) !== fee) {
+        await admin.from("quotation_lines").update({ unit_cost: fee, updated_by: stamp }).eq("id", keep.id);
+        keep.unit_cost = fee;
+      }
+    }
+  }
   // Keep each line's stored total in step with its inputs.
   for (const l of ls) {
     const t = lineTotal(l);
-    if (round2(l.line_total) !== t) await admin.from("quotation_lines").update({ line_total: t, updated_by: by || null }).eq("id", l.id);
+    if (round2(l.line_total) !== t) await admin.from("quotation_lines").update({ line_total: t, updated_by: stamp }).eq("id", l.id);
   }
   const responded = q.status === "approved";
-  const totals = quoteTotals(ls, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 }, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
-  const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, updated_by: by || null };
-  if (responded) patch.approved_total_aed = quoteTotals(ls, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 }, { onlyApproved: true }).total;
+  const totals = quoteTotals(ls, qArgs, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
+  const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, updated_by: stamp };
+  if (responded) patch.approved_total_aed = quoteTotals(ls, qArgs, { onlyApproved: true }).total;
+  // A change after "Quotation complete" reopens it: the advisor checks it again before sending.
+  if (opts.reopen && q.completed_at) Object.assign(patch, { completed_at: null, completed_by: null });
   const { error } = await admin.from("quotations").update(patch).eq("id", quotationId);
   if (error) console.error("refreshQuoteTotals", error.message);
 }
@@ -278,3 +319,29 @@ export async function signPaths(bucket: string, paths: string[], seconds = 3600)
 }
 
 export { INSPECTION_BUCKET };
+
+/** What the send checks need from the job: open part requests and the workshop's estimated hours (agreed by the manager or not). */
+export async function loadQuoteChecks(jobId: string | null): Promise<{ openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }> {
+  if (!jobId) return { openRequests: 0, workshopEstimate: null };
+  const admin = createAdminClient();
+  const [{ data: reqs }, { data: insp }] = await Promise.all([
+    admin.from("part_requests").select("id").eq("job_id", jobId).eq("is_active", true).eq("status", "open"),
+    admin.from("inspections").select("estimated_hours, estimated_hours_manager").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const hours = insp?.estimated_hours === null || insp?.estimated_hours === undefined ? null : Number(insp.estimated_hours);
+  const managerHours = insp?.estimated_hours_manager === null || insp?.estimated_hours_manager === undefined ? null : Number(insp.estimated_hours_manager);
+  return { openRequests: (reqs ?? []).length, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null } };
+}
+
+/** How long the advisor has been waiting on Parts: the oldest open request or unpriced part, in minutes, and who the Parts people are. */
+export async function loadPartsWait(jobId: string): Promise<{ count: number; minutes: number; names: string[] }> {
+  const admin = createAdminClient();
+  const [{ data: reqs }, { data: parts }, { data: people }] = await Promise.all([
+    admin.from("part_requests").select("created_at").eq("job_id", jobId).eq("is_active", true).eq("status", "open"),
+    admin.from("part_items").select("created_at").eq("job_id", jobId).eq("is_active", true).neq("confirm_status", "rejected").is("cost_aed", null),
+    admin.from("staff").select("display_name").eq("role_id", "parts").eq("is_active", true).order("display_name"),
+  ]);
+  const stamps = [...(reqs ?? []), ...(parts ?? [])].map((r) => Date.parse((r as { created_at: string }).created_at)).filter((t) => Number.isFinite(t));
+  const minutes = stamps.length ? Math.max(0, Math.floor((Date.now() - Math.min(...stamps)) / 60000)) : 0;
+  return { count: stamps.length, minutes, names: (people ?? []).map((p) => p.display_name as string) };
+}

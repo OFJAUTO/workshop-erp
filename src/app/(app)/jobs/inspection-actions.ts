@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
-import { ensureInspection, inspectionLocked, loadInspection, reportProblems } from "@/lib/inspection-data";
+import { ensureInspection, inspectionDangerous, inspectionLocked, loadInspection, reportProblems } from "@/lib/inspection-data";
+import { cleanPartsRows, inspectionLimitsOf } from "@/lib/inspection";
 import { ensurePartRequests } from "@/lib/quote-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -77,10 +78,10 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
   if (insp.status !== "in_progress" && insp.status !== "returned") return { error: "The report is not open.", values };
   const admin = createAdminClient();
   const { data: requests } = await admin.from("job_requests").select("id, text").eq("job_id", jobId).eq("is_active", true);
-  const problems = reportProblems(bundle, (requests ?? []) as { id: string; text: string }[]);
+  const settings = await getSettings();
+  const problems = reportProblems(bundle, (requests ?? []) as { id: string; text: string }[], { limits: inspectionLimitsOf(settings), prescanGate: !!settings.prescan_gate_enabled });
   if (problems.length) return { error: problems.slice(0, 4).join(" "), values };
 
-  const settings = await getSettings();
   const wt = workingTimeOf(settings);
   const now = new Date();
   const elapsed = Math.round(workingHoursBetween(insp.started_at ?? now, now, wt) * 60);
@@ -98,6 +99,10 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
     jobId,
     href: `/jobs/${jobId}/inspection`,
   });
+  // Big jobs and dangerous findings are said out loud, not buried in the report.
+  if (insp.big_job_tags?.length) await notifyManagers(job?.department ?? null, { type: "big_job", title: `Big job flagged · ${job?.job_number ?? ""}`, body: `${staff.display_name}: ${insp.big_job_tags.join(", ")}${insp.estimated_hours ? ` · estimated ${insp.estimated_hours} h` : ""}.`, jobId, href: `/jobs/${jobId}/inspection` });
+  const dangers = inspectionDangerous(bundle);
+  if (dangers.length) await notifyManagers(job?.department ?? null, { type: "dangerous_found", title: `DANGEROUS findings on the report · ${job?.job_number ?? ""}`, body: dangers.join("; "), jobId, href: `/jobs/${jobId}/inspection` });
   refresh(jobId);
   // The technician sees a full-screen thank-you on My jobs; anyone else lands on the report.
   redirect(staff.role_id === "technician" ? `/my-jobs?submitted=${jobId}` : `/jobs/${jobId}/inspection`);
@@ -113,7 +118,31 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   if (!bundle || bundle.inspection.status !== "submitted") return { error: "There is no submitted report to approve.", values };
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, updated_by: staff.id }).eq("id", bundle.inspection.id);
+  // The estimated hours: the manager agrees, raises or lowers the technician's figure, with a reason when changed.
+  const techHours = bundle.inspection.estimated_hours;
+  const hoursRaw = String(formData.get("estimated_hours_manager") ?? "").trim().replace(",", ".");
+  const managerHours = hoursRaw ? Math.round(Number(hoursRaw) * 10) / 10 : null;
+  const hoursReason = blankToNull(formData.get("hours_reason"));
+  if (techHours !== null && (managerHours === null || !Number.isFinite(managerHours) || managerHours <= 0)) return { error: "Agree or change the technician's estimated hours.", values };
+  if (techHours !== null && managerHours !== null && managerHours !== techHours && !hoursReason) return { error: "Say why you changed the estimated hours.", values };
+  await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, estimated_hours_manager: techHours !== null ? managerHours : null, updated_by: staff.id }).eq("id", bundle.inspection.id);
+  if (techHours !== null && managerHours !== null && managerHours !== techHours) await logEvent(jobId, staff.id, "estimate_hours", `${staff.display_name} changed the estimated hours from ${techHours} h to ${managerHours} h: ${hoursReason}`);
+  // The tap-first suggestions learn from every approved report: remarks and parts per checklist item.
+  const settingsNow = await getSettings();
+  const learned = { ...((settingsNow.item_suggestions ?? {}) as Record<string, { parts?: string[]; remarks?: string[] }>) };
+  let learnedAny = false;
+  for (const i of bundle.items) {
+    if (!(i.status === "average" || i.status === "bad")) continue;
+    const entry = { parts: [...(learned[i.item_key]?.parts ?? [])], remarks: [...(learned[i.item_key]?.remarks ?? [])] };
+    const remark = (i.remarks ?? "").trim();
+    if (remark && remark.length <= 80 && !entry.remarks.some((r) => r.toLowerCase() === remark.toLowerCase())) { entry.remarks.unshift(remark); learnedAny = true; }
+    for (const r of cleanPartsRows(i.parts_rows)) {
+      const p = r.part.trim();
+      if (p && !entry.parts.some((x) => x.toLowerCase() === p.toLowerCase())) { entry.parts.unshift(p); learnedAny = true; }
+    }
+    learned[i.item_key] = { parts: entry.parts.slice(0, 10), remarks: entry.remarks.slice(0, 8) };
+  }
+  if (learnedAny) await admin.from("settings").update({ value: learned }).eq("key", "item_suggestions");
   const job = await jobOf(jobId);
   if (job && (job.status === "in_inspection" || job.status === "pending_inspection")) {
     await admin.from("jobs").update({ status: "pending_quote", stage: "quote" }).eq("id", jobId);
@@ -130,7 +159,7 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   await notifyStaff(advisors, {
     type: "inspection_approved",
     title: `Inspection report approved · ${job?.job_number ?? ""}`,
-    body: "Ready for the quote. Open the report for the technician's findings and suggested lines.",
+    body: `Ready for the quote. Open the report for the technician's findings and suggested lines.${techHours !== null ? ` Workshop estimate: ${managerHours} h.` : ""}`,
     jobId,
     href: `/jobs/${jobId}/inspection`,
   });
@@ -228,6 +257,20 @@ export async function setPrescanVisible(jobId: string, formData: FormData) {
   const visible = String(formData.get("visible") ?? "") === "1";
   await createAdminClient().from("inspections").update({ show_prescan_to_customer: visible, updated_by: staff.id }).eq("id", bundle.inspection.id);
   await logEvent(jobId, staff.id, "prescan_visibility", visible ? "Pre-scan will be shown to the customer" : "Pre-scan hidden from the customer");
+  refresh(jobId);
+  redirect(`/jobs/${jobId}/inspection`);
+}
+
+/** The manager approves "Scan not possible": the checklist opens for the technician without the scan report. */
+export async function approveScanNotPossible(jobId: string) {
+  const staff = await requirePermission("approveInspections");
+  const bundle = await loadInspection(jobId);
+  if (!bundle || !bundle.inspection.scan_not_possible_reason) redirect(`/jobs/${jobId}/inspection`);
+  const admin = createAdminClient();
+  await admin.from("inspections").update({ scan_approved_by: staff.id, scan_approved_at: new Date().toISOString(), updated_by: staff.id }).eq("id", bundle.inspection.id);
+  await logEvent(jobId, staff.id, "scan_not_possible_approved", `${staff.display_name} approved "scan not possible": ${bundle.inspection.scan_not_possible_reason}`);
+  const job = await jobOf(jobId);
+  if (bundle.inspection.technician_id) await notifyStaff([bundle.inspection.technician_id], { type: "scan_approval", title: `Scan not possible approved · ${job?.job_number ?? ""}`, body: "The checklist is open.", jobId, href: `/my-jobs/${jobId}` });
   refresh(jobId);
   redirect(`/jobs/${jobId}/inspection`);
 }

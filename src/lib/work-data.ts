@@ -1,6 +1,6 @@
 import "server-only";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
-import { hasCostFloor, isHidden } from "./quotes";
+import { hasCostFloor, isHidden, isUnchosen } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -130,7 +130,7 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
     admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qids).eq("is_active", true).order("position"),
     admin.from("work_lines").select("id, quotation_line_id, position, title, hours_quoted, status, is_active").eq("job_id", jobId),
   ]);
-  const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))));
+  const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && !isUnchosen(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))));
   const wantedIds = new Set(wanted.map((l) => l.id));
   const all = (existing ?? []) as { id: string; quotation_line_id: string | null; position: number; title: string; hours_quoted: number | string | null; status: string; is_active: boolean }[];
   const have = new Set(all.filter((e) => e.is_active).map((e) => e.quotation_line_id).filter(Boolean));

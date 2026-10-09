@@ -8,7 +8,7 @@ import { aed } from "@/lib/quotes";
  * The customer's answer, all or nothing: Approve the whole quotation with the terms tick and his
  * name; ask for a quotation with the urgent work only; or Decline, with the inspection fee notice.
  */
-export function QuoteResponse({ token, customerName, total, declaration, declarationAr, feeNotice, feeNoticeAr, isEstimate, terms, termsAr, hasUrgent }: { token: string; customerName: string; total: number; declaration: string; declarationAr: string | null; feeNotice: string; feeNoticeAr: string | null; isEstimate: boolean; terms: string; termsAr: string | null; hasUrgent: boolean }) {
+export function QuoteResponse({ token, customerName, total, declaration, declarationAr, feeNotice, feeNoticeAr, isEstimate, terms, termsAr, hasUrgent, dangerText = null }: { token: string; customerName: string; total: number; declaration: string; declarationAr: string | null; feeNotice: string; feeNoticeAr: string | null; isEstimate: boolean; terms: string; termsAr: string | null; hasUrgent: boolean; dangerText?: string | null }) {
   const [mode, setMode] = useState<"approve" | "urgent" | "decline">("approve");
   const nameBox = (
     <label className="flex flex-col gap-1">
@@ -69,6 +69,12 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
           <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase text-red">Decline the {isEstimate ? "estimate" : "quotation"}?</h2>
           {!isEstimate ? <Notice tone="error">{feeNotice}</Notice> : null}
           {!isEstimate && feeNoticeAr ? <p className="text-sm" dir="rtl" lang="ar">{feeNoticeAr}</p> : null}
+          {dangerText ? (
+            <label className="flex items-start gap-3 cursor-pointer rounded-control border border-red-bar p-3">
+              <input type="checkbox" name="danger_ack" className="mt-1 h-5 w-5 accent-ink" required />
+              <span className="text-sm">{dangerText}</span>
+            </label>
+          ) : null}
           {nameBox}
           <button type="submit" name="action" value="decline" className="min-h-14 w-full rounded-control bg-red-bar text-base font-extrabold text-white">
             Yes, decline

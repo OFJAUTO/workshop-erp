@@ -1,7 +1,7 @@
 import "server-only";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
-import { hasCostFloor, isHidden, lineCost, lineTotal, lineUnitPrice, takesTotalDiscount, type QuoteLine } from "./quotes";
+import { hasCostFloor, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -186,7 +186,7 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings, opts:
   let quotedDiscount = 0;
   for (const q of qs) {
     // Parts returned to the supplier come off the bill.
-    const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && partOf(l.part_item_id)?.return_status !== "returned");
+    const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
     const discountBase = round2(qLines.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
     quotedDiscount += round2(discountBase * ((Number(q.discount_percent) || 0) / 100));
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));
@@ -253,7 +253,7 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   return {
     section: isPart ? "parts" : "services",
     description: title,
-    details: l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.details,
+    details: l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : l.details,
     part_number: number,
     quantity: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : l.quantity || 1,
     hours: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : null,

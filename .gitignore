@@ -42,3 +42,6 @@ owner-setup-link.txt
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Database backups made before migrations (scripts/db-backup.mjs)
+backups/

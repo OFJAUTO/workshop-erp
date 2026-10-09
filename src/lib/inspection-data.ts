@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
-import { checklistItems, reportProblemsOf, type ChecklistSection, type InspectionStatus, type ItemStatus } from "./inspection";
+import { TYRE_POSITIONS, checklistItems, reportProblemsOf, type ChecklistSection, type InspectionLimits, type InspectionStatus, type ItemStatus } from "./inspection";
 import { workingHoursBetween, type WorkingTime } from "./working-time";
 
 export const INSPECTION_BUCKET = "inspection-media";
@@ -31,6 +31,14 @@ export type InspectionRow = {
   measurements_edited_by: string | null;
   measurements_edited_at: string | null;
   measurements_edited_by_name?: string | null;
+  scan_read_at: string | null;
+  scan_not_possible_reason: string | null;
+  scan_approved_by: string | null;
+  scan_approved_at: string | null;
+  estimated_hours: number | null;
+  estimated_hours_manager: number | null;
+  estimate_reason: string | null;
+  big_job_tags: string[];
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +59,19 @@ export type InspectionItemRow = {
   edited_at: string | null;
   original: Record<string, unknown> | null;
   edited_by_name?: string | null;
+  dangerous: boolean;
+  dangerous_reason: string | null;
+  leak_severity: string | null;
+  leak_repair: string | null;
+  fluid_qty: number | null;
+  fluid_unit: string | null;
+  fluid_grade: string | null;
+  fluid_spec: string | null;
+  disc_condition: string | null;
+  disc_action: string | null;
+  disc_thickness: number | null;
+  disc_minimum: number | null;
+  parts_rows: unknown;
 };
 
 export type InspectionFindingRow = { id: string; inspection_id: string; job_request_id: string; found: string | null; needs: string | null; status: ItemStatus | null; edited_by: string | null; edited_at: string | null; original: Record<string, unknown> | null; edited_by_name?: string | null };
@@ -95,7 +116,7 @@ export type InspectionBundle = {
 };
 
 const INSPECTION_SELECT =
-  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, created_at, updated_at";
+  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, scan_read_at, scan_not_possible_reason, scan_approved_by, scan_approved_at, estimated_hours, estimated_hours_manager, estimate_reason, big_job_tags, created_at, updated_at";
 
 /** The mechanical inspection of a job with everything attached, or null when none exists yet. */
 export async function loadInspection(jobId: string, path: "mechanical" | "bodyshop" = "mechanical"): Promise<InspectionBundle | null> {
@@ -103,8 +124,9 @@ export async function loadInspection(jobId: string, path: "mechanical" | "bodysh
   const { data: insp } = await admin.from("inspections").select(INSPECTION_SELECT).eq("job_id", jobId).eq("path", path).eq("is_active", true).maybeSingle();
   if (!insp) return null;
   const inspection = insp as unknown as InspectionRow;
+  for (const k of ["estimated_hours", "estimated_hours_manager"] as const) if (inspection[k] !== null && inspection[k] !== undefined) inspection[k] = Number(inspection[k]);
   const [{ data: items }, { data: findings }, { data: media }, { data: changes }, { data: tech }, { data: approver }] = await Promise.all([
-    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original").eq("inspection_id", inspection.id).order("position"),
+    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original, dangerous, dangerous_reason, leak_severity, leak_repair, fluid_qty, fluid_unit, fluid_grade, fluid_spec, disc_condition, disc_action, disc_thickness, disc_minimum, parts_rows").eq("inspection_id", inspection.id).order("position"),
     admin.from("inspection_findings").select("id, inspection_id, job_request_id, found, needs, status, edited_by, edited_at, original").eq("inspection_id", inspection.id),
     admin.from("inspection_media").select("id, inspection_id, item_key, job_request_id, kind, is_prescan, storage_path, caption, duration_s, taken_at, uploaded_by").eq("inspection_id", inspection.id).order("taken_at"),
     admin
@@ -193,13 +215,24 @@ export function inspectionLocked(insp: Pick<InspectionRow, "status" | "unlocked_
 }
 
 /** What still has to be done before the report can go to the manager (same rules as the technician's screen). */
-export function reportProblems(b: InspectionBundle, requests: { id: string; text: string }[]): string[] {
+export function reportProblems(b: InspectionBundle, requests: { id: string; text: string }[], opts: { limits?: InspectionLimits; prescanGate?: boolean } = {}): string[] {
   return reportProblemsOf({
-    items: b.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, status: i.status, remarks: i.remarks ?? "" })),
+    estimatedHours: String(b.inspection.estimated_hours ?? ""),
+    scan: opts.prescanGate ? { required: true, read: !!b.inspection.scan_read_at, approved: !!b.inspection.scan_approved_at } : undefined,
+    items: b.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, status: i.status, remarks: i.remarks ?? "", dangerous: !!i.dangerous, dangerous_reason: i.dangerous_reason ?? "" })),
     findings: requests.map((r) => {
       const f = b.findings.find((x) => x.job_request_id === r.id);
       return { requestId: r.id, text: r.text, status: f?.status ?? null, found: f?.found ?? "" };
     }),
     measurements: Object.fromEntries(Object.entries(b.inspection.measurements ?? {}).map(([k, v]) => [k, String(v)])),
-  }).map((p) => p.label);
+  }, { limits: opts.limits }).map((p) => p.label);
+}
+
+/** Any finding marked dangerous to drive, on an item or a tyre. */
+export function inspectionDangerous(b: Pick<InspectionBundle, "items" | "inspection">): string[] {
+  const m = b.inspection.measurements ?? {};
+  return [
+    ...b.items.filter((i) => i.dangerous).map((i) => `${i.item_label}${i.dangerous_reason ? ` (${i.dangerous_reason})` : ""}`),
+    ...TYRE_POSITIONS.filter((p) => String(m[`tyre_${p.key}_danger`] ?? "") === "1").map((p) => `${p.label} tyre${m[`tyre_${p.key}_danger_reason`] ? ` (${m[`tyre_${p.key}_danger_reason`]})` : ""}`),
+  ];
 }

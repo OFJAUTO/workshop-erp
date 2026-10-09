@@ -4,7 +4,7 @@ import { GATE_IN_BUCKET } from "@/lib/media";
 import { authoriseUpload } from "@/lib/upload-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const KINDS = ["video", "video_exterior", "video_interior", "dashboard_photo", "keys_photo", "keys_photo_front", "keys_photo_back", "damage_photo", "gate_out_photo", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"];
+const KINDS = ["video", "video_exterior", "video_interior", "dashboard_photo", "keys_photo", "keys_photo_front", "keys_photo_back", "damage_photo", "gate_out_photo", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr", "car_picture"];
 const EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",

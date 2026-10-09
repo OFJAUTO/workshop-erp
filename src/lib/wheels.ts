@@ -10,7 +10,7 @@ export const WHEEL_LABELS: Record<WheelKind, string> = {
   wheel_rr: "Rear right",
 };
 
-export const WHEEL_CONDITIONS = ["none", "curbed", "scratched", "paint_fade", "bent"] as const;
+export const WHEEL_CONDITIONS = ["none", "curbed", "scratched", "paint_fade", "bent", "total"] as const;
 export type WheelCondition = (typeof WHEEL_CONDITIONS)[number];
 
 export const WHEEL_CONDITION_LABELS: Record<WheelCondition, string> = {
@@ -19,6 +19,7 @@ export const WHEEL_CONDITION_LABELS: Record<WheelCondition, string> = {
   scratched: "Scratched",
   paint_fade: "Paint fade",
   bent: "Bent",
+  total: "Total damage",
 };
 
 export function isWheelKind(kind: string): kind is WheelKind {

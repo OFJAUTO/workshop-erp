@@ -6,7 +6,7 @@ import { Badge, Button, Card, ChoiceButtons, Empty, PageHeader, SectionLabel, Se
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatDateTime } from "@/lib/format";
-import { JOB_DEPARTMENTS, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
+import { JOB_DEPARTMENTS, jobConcernsSide, sideOfDepartment, roadTestSuggested } from "@/lib/inspection";
 import { STATUS_LABELS, clockOf, jobTiming, type JobStatus, type Stage } from "@/lib/jobs";
 import { ROAD_TEST_DECISIONS } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
@@ -31,7 +31,7 @@ type Row = {
   assignment_note_at: string | null;
   vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   customer: { full_name: string; company_name: string | null; is_vip: boolean } | null;
-  gate_in: { is_complete: boolean; condition: string } | null;
+  gate_in: { is_complete: boolean; condition: string; customer_requests: string; notes: string | null } | null;
   note_by: { display_name: string } | null;
 };
 
@@ -42,17 +42,19 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const side = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
   const settings = await getSettings();
   const supabase = await createClient();
-  const [{ data: jobs }, { data: techs }, { data: load }] = await Promise.all([
+  const [{ data: jobs }, { data: techs }, { data: load }, { data: requestRows }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, assignment_note, assignment_note_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customer_public(full_name, company_name, is_vip), gate_in:gate_ins(is_complete, condition), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
+      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, assignment_note, assignment_note_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customer_public(full_name, company_name, is_vip), gate_in:gate_ins(is_complete, condition, customer_requests, notes), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
       .eq("is_open", true)
       .is("assigned_to", null)
       .in("status", ["gate_in_pending", "pending_approval", "pending_inspection"])
       .order("gated_in_at"),
     supabase.from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name"),
     supabase.from("jobs").select("assigned_to").eq("is_open", true).not("assigned_to", "is", null),
+    supabase.from("job_requests").select("job_id, position, text").eq("is_active", true).order("position"),
   ]);
+  const requestsOf = (jobId: string) => ((requestRows ?? []) as { job_id: string; text: string }[]).filter((r) => r.job_id === jobId).map((r) => r.text);
   const rows = ((jobs ?? []) as unknown as Row[]).filter((j) => jobConcernsSide(j.department, side));
   const counts = new Map<string, number>();
   for (const l of load ?? []) if (l.assigned_to) counts.set(l.assigned_to, (counts.get(l.assigned_to) ?? 0) + 1);
@@ -67,6 +69,8 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
       {items.map((j) => {
         const timing = jobTiming(j.promised_at, j.is_open, clockOf(j, settings));
         const defaultRoadTest = j.gate_in?.condition === "does_not_run" ? "not_possible" : "needed";
+        const reqs = requestsOf(j.id);
+        const suggested = roadTestSuggested([...reqs, j.gate_in?.customer_requests ?? ""]);
         return (
           <Card key={j.id} className={`flex flex-col gap-4 ${timing.tone === "red" ? "border-red-bar" : timing.tone === "amber" ? "border-amber-bar" : ""}`}>
             <div className="flex flex-col md:flex-row md:items-center gap-4">
@@ -86,6 +90,14 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
                 <span className="text-xs text-muted">
                   {j.customer?.company_name ?? j.customer?.full_name} · {j.job_number} · gated in {formatDateTime(j.gated_in_at)} · {STATUS_LABELS[j.status]}
                 </span>
+                {reqs.length ? (
+                  <ol className="flex flex-col gap-1 rounded-control bg-chip px-3 py-2 text-sm">
+                    {reqs.map((t, i) => (
+                      <li key={i} className="flex gap-2"><span className="w-5 shrink-0 text-muted">{i + 1}.</span><span className="font-semibold">{t}</span></li>
+                    ))}
+                  </ol>
+                ) : j.gate_in?.customer_requests ? <p className="text-sm rounded-control bg-chip px-3 py-2 whitespace-pre-wrap"><span className="font-bold">Customer asked:</span> {j.gate_in.customer_requests}</p> : null}
+                {j.gate_in?.notes ? <p className="text-sm"><span className="font-bold">Gate-in notes:</span> {j.gate_in.notes}</p> : null}
                 {j.assignment_note ? (
                   <p className="text-sm rounded-control bg-chip px-3 py-2">
                     <span className="font-bold">Note from {j.note_by?.display_name ?? "the advisor"}:</span> {j.assignment_note}
@@ -111,7 +123,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
                     </Select>
                   </label>
                   <div className="flex flex-col gap-1">
-                    <span className="text-sm font-semibold">Road test</span>
+                    <span className="text-sm font-semibold">Road test{suggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber">Road test suggested: the requests mention noise, vibration, steering, turning or braking</span> : null}</span>
                     <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
                   </div>
                 </div>

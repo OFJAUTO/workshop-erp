@@ -7,8 +7,8 @@ import { PriorityBadge } from "@/components/JobBadges";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus } from "@/lib/inspection";
-import { inspectionLocked, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
+import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus, inspectionLimitsOf, toItemState } from "@/lib/inspection";
+import { inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { CONDITIONS, STATUS_LABELS, formatPromised, labelOf, workingTimeOf } from "@/lib/jobs";
 import { ROAD_TEST_ITEMS, ROAD_TEST_SELECT, roadTestLine, roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
@@ -17,14 +17,11 @@ import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
-import { PartsConfirm, type ConfirmItem } from "@/components/PartsConfirm";
-import { PARTS_BUCKET, signPaths } from "@/lib/quote-data";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { confirmPart } from "../../parts/actions";
 import { noteInspectionEdit, startInspection, submitInspection } from "../../jobs/inspection-actions";
 import { reportAdditionalWork, setLineDone, startWork, stopWork } from "../../jobs/work-actions";
 import { PAUSE_REASONS, additionalWorkLabel, latestQc, loadWork } from "@/lib/work-data";
-import { InspectionForm } from "./InspectionForm";
+import { InspectionForm, type Suggestions } from "./InspectionForm";
 import { WorkPanel, type PanelLine } from "./WorkPanel";
 
 export const dynamic = "force-dynamic";
@@ -73,12 +70,6 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const canFill = !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked));
   const canAddPrescan = !!insp && mine && insp.technician_id === staff.id && insp.status === "submitted";
   const condition = gateIn ? labelOf(CONDITIONS, gateIn.condition) : "";
-  // Parts listed for this car: the technician confirms what he needs. No prices here.
-  const { data: partRows } = mine ? await createAdminClient().from("part_items").select("id, part_number, description, quantity, diagram_path, confirm_status, confirmed_quantity, reject_note, part_request_id").eq("job_id", id).eq("is_active", true).order("created_at") : { data: [] };
-  const { data: reqRows } = partRows?.length ? await createAdminClient().from("part_requests").select("id, label, requested_text").eq("job_id", id) : { data: [] };
-  const reqOf = new Map((reqRows ?? []).map((r) => [r.id, r]));
-  const diagramUrls = await signPaths(PARTS_BUCKET, (partRows ?? []).map((p) => p.diagram_path).filter((x): x is string => !!x));
-  const confirmItems: ConfirmItem[] = (partRows ?? []).map((p) => ({ id: p.id, part_number: p.part_number, description: p.description, quantity: Number(p.quantity), diagram_url: p.diagram_path ? (diagramUrls[p.diagram_path] ?? null) : null, request_label: p.part_request_id ? (reqOf.get(p.part_request_id)?.label ?? null) : null, requested_text: p.part_request_id ? (reqOf.get(p.part_request_id)?.requested_text ?? null) : null, confirm_status: p.confirm_status as ConfirmItem["confirm_status"], confirmed_quantity: p.confirmed_quantity === null ? null : Number(p.confirmed_quantity), reject_note: p.reject_note }));
   const statusText = insp?.status === "submitted" ? "Submitted, waiting for manager" : waitingRoadTest ? "Waiting for road test" : STATUS_LABELS[job.status];
   // The work order, once the car is in Work (or back from a failed QC).
   const work = job.status === "in_work" || job.status === "pending_qc" ? await loadWork(id) : null;
@@ -92,7 +83,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const formProps = insp && bundle
     ? {
         checklist: insp.checklist as ChecklistSection[],
-        items: bundle.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, status: i.status as ItemStatus | null, remarks: i.remarks ?? "", parts_needed: i.parts_needed ?? "", editedBy: i.edited_by_name ?? null })),
+        items: bundle.items.map(toItemState),
         findings: requests.map((r) => {
           const f = bundle.findings.find((x) => x.job_request_id === r.id);
           return { requestId: r.id, text: r.text, found: f?.found ?? "", needs: f?.needs ?? "", status: (f?.status as ItemStatus | null) ?? null };
@@ -116,6 +107,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             {isVip ? <Badge tone="ink">VIP</Badge> : null}
             <PriorityBadge priority={job.priority} />
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
+            {bundle && inspectionDangerous(bundle).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{condition}</Badge> : condition ? <Badge tone="green">{condition}</Badge> : null}
             {job.promised_at ? <Badge tone="outline">Promised {formatPromised(job.promised_at)}</Badge> : null}
             <Badge tone={insp?.status === "submitted" ? "amber" : "outline"}>{statusText}</Badge>
@@ -130,6 +122,48 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>
           <p className="text-[15px] font-medium whitespace-pre-wrap">{vipNote}</p>
+        </Card>
+      ) : null}
+
+      {roadTest && job.department !== "bodyshop" ? (
+        <Card className={`flex flex-col gap-3 ${roadTestWaiting(roadTest) ? "border-ink" : ""}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <SectionLabel>Road test (QC inspector)</SectionLabel>
+            <Badge tone={roadTest.status === "done" ? "green" : roadTestWaiting(roadTest) ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge>
+          </div>
+          {roadTestWaiting(roadTest) ? (
+            <Notice tone="info">The workshop manager asked for a road test first. Your inspection opens as soon as the QC inspector submits it; you will be told.</Notice>
+          ) : roadTest.status === "done" ? (
+            <ul className="divide-y divide-line text-sm">
+              {ROAD_TEST_ITEMS.filter((it) => roadTest.items[it.key]?.status && roadTest.items[it.key]?.status !== "good").map((it) => {
+                const v = roadTest.items[it.key];
+                return (
+                  <li key={it.key} className="py-1.5 flex flex-wrap items-center gap-2">
+                    {v?.status ? <Badge tone={TONE[v.status]}>{ITEM_STATUS_LABELS[v.status]}</Badge> : null}
+                    <span className="font-semibold">{it.label}</span>
+                    {v?.remarks ? <span className="text-muted">· {v.remarks}</span> : null}
+                  </li>
+                );
+              })}
+              {ROAD_TEST_ITEMS.every((it) => !roadTest.items[it.key]?.status || roadTest.items[it.key]?.status === "good") ? <li className="py-1.5 text-sm text-green font-semibold">Nothing flagged on the road test.</li> : null}
+              <li className="py-1.5">
+                <details>
+                  <summary className="cursor-pointer text-xs font-semibold text-muted">GOOD items ({ROAD_TEST_ITEMS.filter((it) => roadTest.items[it.key]?.status === "good").length})</summary>
+                  <ul className="mt-1 flex flex-col gap-1">
+                    {ROAD_TEST_ITEMS.filter((it) => roadTest.items[it.key]?.status === "good").map((it) => (
+                      <li key={it.key} className="flex flex-wrap items-center gap-2"><Badge tone="green">GOOD</Badge><span>{it.label}</span>{roadTest.items[it.key]?.remarks ? <span className="text-muted">· {roadTest.items[it.key]?.remarks}</span> : null}</li>
+                    ))}
+                  </ul>
+                </details>
+              </li>
+            </ul>
+          ) : roadTest.status === "not_possible" ? (
+            <p className="text-sm">Not possible: {roadTest.not_possible_reason ?? roadTest.decision_note}</p>
+          ) : roadTest.decision === "not_needed" ? (
+            <p className="text-sm">The workshop manager decided no road test is needed{roadTest.decision_note ? `: ${roadTest.decision_note}` : "."}</p>
+          ) : (
+            <p className="text-sm text-muted">Not done yet. It does not hold up your inspection.</p>
+          )}
         </Card>
       ) : null}
 
@@ -167,38 +201,6 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         />
       ) : null}
       {job.status === "pending_qc" ? <Notice tone="info">Work complete. The car is with QC; you will be told if anything comes back.</Notice> : null}
-      {confirmItems.length ? <PartsConfirm items={confirmItems} action={confirmPart} /> : null}
-
-      {roadTest && job.department !== "bodyshop" ? (
-        <Card className={`flex flex-col gap-3 ${roadTestWaiting(roadTest) ? "border-ink" : ""}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <SectionLabel>Road test (QC inspector)</SectionLabel>
-            <Badge tone={roadTest.status === "done" ? "green" : roadTestWaiting(roadTest) ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge>
-          </div>
-          {roadTestWaiting(roadTest) ? (
-            <Notice tone="info">The workshop manager asked for a road test first. Your inspection opens as soon as the QC inspector submits it; you will be told.</Notice>
-          ) : roadTest.status === "done" ? (
-            <ul className="divide-y divide-line text-sm">
-              {ROAD_TEST_ITEMS.map((it) => {
-                const v = roadTest.items[it.key];
-                return (
-                  <li key={it.key} className="py-1.5 flex flex-wrap items-center gap-2">
-                    {v?.status ? <Badge tone={TONE[v.status]}>{ITEM_STATUS_LABELS[v.status]}</Badge> : null}
-                    <span className="font-semibold">{it.label}</span>
-                    {v?.remarks ? <span className="text-muted">· {v.remarks}</span> : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : roadTest.status === "not_possible" ? (
-            <p className="text-sm">Not possible: {roadTest.not_possible_reason ?? roadTest.decision_note}</p>
-          ) : roadTest.decision === "not_needed" ? (
-            <p className="text-sm">The workshop manager decided no road test is needed{roadTest.decision_note ? `: ${roadTest.decision_note}` : "."}</p>
-          ) : (
-            <p className="text-sm text-muted">Not done yet. It does not hold up your inspection.</p>
-          )}
-        </Card>
-      ) : null}
 
       <Card className={`flex flex-col gap-4 ${over && insp?.status === "in_progress" ? "border-red-bar" : ""}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -263,7 +265,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
       {insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved") ? (
         <>
-          <InspectionForm inspectionId={insp.id} {...formProps} readOnly={!canFill} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} />
+          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: true, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>

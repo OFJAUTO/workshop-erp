@@ -58,6 +58,18 @@ export type QuoteLine = {
   advisor_added: boolean;
   customer_approved: boolean | null;
   is_active: boolean;
+  /** The part's type (Genuine, OEM, Aftermarket, Used) and brand follow the part onto the customer's page and the documents. */
+  part_type: string | null;
+  brand: string | null;
+  /** Parts can offer several options for the same part; the advisor picks one. Unchosen options count for nothing. */
+  option_group: string | null;
+  chosen: boolean;
+  /** The automatic bank-charge line: hidden, one per quotation, never edited by advisors. */
+  fee_kind: "bank_charge" | null;
+  recovery_trips: number | null;
+  recovery_provider: string | null;
+  /** A dangerous finding: forced Urgent, with a safety warning for the customer. */
+  dangerous: boolean;
 };
 
 export type QuoteRow = {
@@ -100,6 +112,12 @@ export type QuoteRow = {
   approver_phone: string | null;
   decline_reason: string | null;
   reminded_at: string | null;
+  completed_at: string | null;
+  completed_by: string | null;
+  parts_reminded_at: string | null;
+  parts_escalated_at: string | null;
+  danger_acknowledged_at: string | null;
+  danger_acknowledged_by: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -128,7 +146,24 @@ export type PartItem = {
   added_by_role: string | null;
   is_active: boolean;
   created_at: string;
+  part_type: string | null;
+  brand: string | null;
+  option_group: string | null;
+  question_text: string | null;
+  question_at: string | null;
+  question_by: string | null;
+  answer_text: string | null;
+  answered_at: string | null;
+  answered_by: string | null;
 };
+
+export const PART_TYPE_LABELS: Record<string, string> = { genuine: "Genuine", oem: "OEM", aftermarket: "Aftermarket", used: "Used" };
+/** "Aftermarket - Bosch", or just the type. */
+export function partTypeText(l: { part_type?: string | null; brand?: string | null }): string | null {
+  if (!l.part_type) return null;
+  const t = PART_TYPE_LABELS[l.part_type] ?? l.part_type;
+  return l.brand && l.part_type !== "genuine" ? `${t} - ${l.brand}` : t;
+}
 
 export type PartRequest = {
   id: string;
@@ -141,6 +176,9 @@ export type PartRequest = {
   status: "open" | "listed" | "done" | "rejected";
   is_active: boolean;
   created_at: string;
+  quantity: number | null;
+  unit: string | null;
+  closed_reason: string | null;
 };
 
 export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; description: string | null; parts_requests: string[]; position: number; is_active: boolean };
@@ -164,8 +202,13 @@ export function hasCostFloor(l: Pick<QuoteLine, "line_type" | "unit_cost">) {
   return (l.line_type === "part" || l.line_type === "other") && l.unit_cost !== null && l.unit_cost !== undefined;
 }
 /** A line the customer pays nothing for (hidden recovery or other): its cost still counts against profit. */
-export function isHidden(l: Pick<QuoteLine, "line_type" | "visible_to_customer">) {
+export function isHidden(l: Pick<QuoteLine, "line_type" | "visible_to_customer"> & { fee_kind?: string | null }) {
+  if (l.fee_kind === "bank_charge") return true;
   return (l.line_type === "recovery" || l.line_type === "other") && l.visible_to_customer === false;
+}
+/** An option the advisor did not pick: it counts for nothing and the customer never sees it. */
+export function isUnchosen(l: { option_group?: string | null; chosen?: boolean }) {
+  return !!l.option_group && l.chosen === false;
 }
 /** The quotation-wide discount applies to labour and services only, never to anything with a cost. */
 export function takesTotalDiscount(l: Pick<QuoteLine, "line_type" | "unit_cost" | "visible_to_customer">) {
@@ -193,8 +236,9 @@ export function lineTotal(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_co
 }
 
 /** What the line cost us: parts, other with a cost, recovery. */
-export function lineCost(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost">): number {
+export function lineCost(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost"> & { fee_kind?: string | null }): number {
   if (l.line_type === "part" || l.line_type === "other" || l.line_type === "recovery") return round2((l.unit_cost ?? 0) * (l.quantity || 1));
+  if (l.line_type === "fee" && l.fee_kind === "bank_charge") return round2(l.unit_cost ?? 0);
   return 0;
 }
 
@@ -239,7 +283,7 @@ export function quoteTotals(
   q: { discount_percent: number; vat_percent: number; payment_by_card?: boolean },
   opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number } = {},
 ): QuoteTotals {
-  const counted = lines.filter((l) => l.is_active && (!opts.onlyApproved || l.customer_approved === true));
+  const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
   const discountBase = round2(counted.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
   const discount = round2(discountBase * ((q.discount_percent ?? 0) / 100));
@@ -253,8 +297,10 @@ export function quoteTotals(
   const labourHours = round1(labour.reduce((a, l) => a + (l.hours ?? 0), 0));
   const labourSell = round2(labour.reduce((a, l) => a + lineTotal(l), 0));
   const labourCost = round2(labourHours * (opts.technicianCostRate ?? 0));
-  const hiddenCost = round2(counted.filter(isHidden).reduce((a, l) => a + lineCost(l), 0) + counted.filter((l) => l.line_type === "recovery" && !isHidden(l)).reduce((a, l) => a + lineCost(l), 0));
-  const bankCharge = q.payment_by_card ? round2(total * ((opts.bankChargePercent ?? 0) / 100)) : 0;
+  const feeLine = counted.find((l) => l.fee_kind === "bank_charge");
+  const hiddenCost = round2(counted.filter((l) => isHidden(l) && !l.fee_kind).reduce((a, l) => a + lineCost(l), 0) + counted.filter((l) => l.line_type === "recovery" && !isHidden(l)).reduce((a, l) => a + lineCost(l), 0));
+  // The bank charge: the automatic hidden Fee line when there is one, else the old estimate from the card tick.
+  const bankCharge = feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? round2(total * ((opts.bankChargePercent ?? 0) / 100)) : 0;
   const profit = round2(net - partsCost - labourCost - hiddenCost - bankCharge);
   const threshold = opts.depositThreshold ?? 0;
   const deposit = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
@@ -264,17 +310,18 @@ export function quoteTotals(
 export type SendBlocker = { key: string; label: string };
 
 /** What stops a quotation from being sent. Empty means it can go. */
-export function sendBlockers(q: Pick<QuoteRow, "kind" | "promised_at" | "status">, lines: QuoteLine[], parts: PartItem[], settings: { minMarkup: number }): SendBlocker[] {
+export function sendBlockers(q: Pick<QuoteRow, "kind" | "promised_at" | "status">, lines: QuoteLine[], parts: PartItem[], settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null }): SendBlocker[] {
   const out: SendBlocker[] = [];
-  const active = lines.filter((l) => l.is_active);
+  const active = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.fee_kind);
   if (active.length === 0) out.push({ key: "lines", label: "Add at least one line" });
+  if (settings.openRequests) out.push({ key: "parts", label: `${settings.openRequests} part request${settings.openRequests === 1 ? "" : "s"} still with Parts` });
+  if (q.kind === "quotation" && settings.workshopEstimate && settings.workshopEstimate.hours !== null && !settings.workshopEstimate.agreed) out.push({ key: "estimate", label: "The workshop manager has not agreed the technician's estimated hours" });
   for (const l of active) {
     const short = l.title.length > 30 ? l.title.slice(0, 28) + "…" : l.title;
     if (l.line_type === "part") {
-      const p = l.part_item_id ? parts.find((x) => x.id === l.part_item_id) : null;
+      const p = l.part_item_id ? parts.find((x) => x.id === l.part_item_id) ?? null : null;
       if (p) {
-        if (p.confirm_status === "pending") out.push({ key: `line-${l.id}`, label: `${short}: waiting for the technician to confirm` });
-        else if (p.confirm_status === "rejected") out.push({ key: `line-${l.id}`, label: `${short}: rejected by the technician, remove the line` });
+        if (p.confirm_status === "rejected") out.push({ key: `line-${l.id}`, label: `${short}: rejected, remove the line` });
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       } else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
     }
@@ -286,7 +333,8 @@ export function sendBlockers(q: Pick<QuoteRow, "kind" | "promised_at" | "status"
     if (l.line_type === "recovery" && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price to the customer, or hide the line` });
     const floor = floorProblem(l, settings.minMarkup);
     if (floor) out.push({ key: `line-${l.id}`, label: `${short}: ${floor}` });
-    if (q.kind === "quotation" && !l.urgency && !isHidden(l)) out.push({ key: `line-${l.id}`, label: `${short}: mark Urgent or Recommended` });
+    // Parts take Urgent or Recommended from the work line they belong to when the quotation is completed.
+    if (q.kind === "quotation" && !l.urgency && !isHidden(l) && l.line_type !== "part") out.push({ key: `line-${l.id}`, label: `${short}: mark Urgent or Recommended` });
   }
   if (q.kind === "quotation" && !q.promised_at) out.push({ key: "promised", label: "Set the promised date" });
   return out;
@@ -341,14 +389,27 @@ export function suggestPromisedDate(lines: QuoteLine[], parts: PartItem[], today
 
 /** The plain-word state of a job's quotation for the stage card, the Next step panel and the dashboard. */
 export type QuoteSummary = {
-  quotation: Pick<QuoteRow, "id" | "number" | "version" | "status" | "token" | "sent_at" | "opened_at" | "responded_at" | "approver_name" | "total_aed" | "approved_total_aed" | "valid_until" | "promised_at" | "created_at"> | null;
+  quotation: Pick<QuoteRow, "id" | "number" | "version" | "status" | "token" | "sent_at" | "opened_at" | "responded_at" | "approver_name" | "total_aed" | "approved_total_aed" | "valid_until" | "promised_at" | "created_at"> & { completed_at?: string | null } | null;
   waitingPrices: number;
   waitingConfirm: number;
   rejectedParts: number;
   openRequests: number;
+  /** Progress for the stage card: parts priced and labour lines with hours. */
+  partsTotal?: number;
+  partsPriced?: number;
+  labourTotal?: number;
+  labourDone?: number;
 };
 
-export type QuoteState = { key: "none" | "pending_parts" | "pending_confirm" | "ready" | "link" | "pending_owner" | "sent" | "opened" | "approved" | "urgent_requested" | "declined" | "expired"; text: string; waitingOn: "advisor" | "parts" | "technician" | "owner" | "customer" | "nobody"; tone: "neutral" | "amber" | "green" | "red" };
+export type QuoteState = { key: "none" | "pending_parts" | "pending_confirm" | "finish" | "ready" | "link" | "pending_owner" | "sent" | "opened" | "approved" | "urgent_requested" | "declined" | "expired"; text: string; waitingOn: "advisor" | "parts" | "technician" | "owner" | "customer" | "nobody"; tone: "neutral" | "amber" | "green" | "red" };
+
+/** "Parts 12 of 12 priced · Labour 4 of 9 lines done", or nothing when there is nothing to count. */
+export function quoteProgressText(s: QuoteSummary): string {
+  const bits: string[] = [];
+  if (s.partsTotal) bits.push(`Parts ${s.partsPriced ?? 0} of ${s.partsTotal} priced`);
+  if (s.labourTotal) bits.push(`Labour ${s.labourDone ?? 0} of ${s.labourTotal} line${s.labourTotal === 1 ? "" : "s"} done`);
+  return bits.join(" · ");
+}
 
 export function quoteState(s: QuoteSummary, hasInspectionApproved: boolean): QuoteState {
   const q = s.quotation;
@@ -356,9 +417,9 @@ export function quoteState(s: QuoteSummary, hasInspectionApproved: boolean): Quo
   switch (q.status) {
     case "draft":
       if (q.token) return { key: "link", text: "Link created, not sent yet", waitingOn: "advisor", tone: "neutral" };
-      if (s.waitingConfirm > 0) return { key: "pending_confirm", text: `Waiting for the technician to confirm ${s.waitingConfirm} part${s.waitingConfirm === 1 ? "" : "s"}`, waitingOn: "technician", tone: "amber" };
-      if (s.waitingPrices > 0 || s.openRequests > 0) return { key: "pending_parts", text: `Waiting for parts prices (${s.waitingPrices + s.openRequests})`, waitingOn: "parts", tone: "amber" };
-      return { key: "ready", text: "Ready to send", waitingOn: "advisor", tone: "neutral" };
+      if (q.completed_at) return { key: "ready", text: "Complete, ready to send", waitingOn: "advisor", tone: "neutral" };
+      if (s.waitingPrices > 0 || s.openRequests > 0) return { key: "pending_parts", text: `Being prepared · ${quoteProgressText(s) || `waiting for parts prices (${s.waitingPrices + s.openRequests})`}`, waitingOn: "advisor", tone: "amber" };
+      return { key: "finish", text: `Finish the quotation${quoteProgressText(s) ? ` · ${quoteProgressText(s)}` : ""}`, waitingOn: "advisor", tone: "neutral" };
     case "pending_owner":
       return { key: "pending_owner", text: "Waiting for the owner's approval", waitingOn: "owner", tone: "amber" };
     case "sent":

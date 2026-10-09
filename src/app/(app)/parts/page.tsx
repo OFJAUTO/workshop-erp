@@ -2,7 +2,6 @@ import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatDateTime } from "@/lib/format";
 import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { REQUEST_SELECT } from "@/lib/quote-data";
 import { PART_FULL_SELECT, toPartFull } from "@/lib/parts-data";
@@ -27,7 +26,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const wt = workingTimeOf(settings);
   const target = Number(settings.parts_pricing_target_hours) || 4;
   const [{ data: reqRows }, { data: partRows }, { data: supplierRows }] = await Promise.all([
-    admin.from("part_requests").select(REQUEST_SELECT).eq("is_active", true).in("status", ["open", "listed"]).order("created_at"),
+    admin.from("part_requests").select(REQUEST_SELECT).eq("is_active", true).in("status", ["open"]).order("created_at"),
     admin.from("part_items").select(PART_FULL_SELECT).eq("is_active", true).order("created_at"),
     admin.from("suppliers").select("name").eq("is_active", true).order("name"),
   ]);
@@ -50,7 +49,6 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
 
   const toPrice = requests.filter((r) => jobs.has(r.job_id) && r.status === "open");
   const waitingPrice = parts.filter((p) => jobs.has(p.job_id) && p.cost_aed === null && p.confirm_status !== "rejected");
-  const waitingTech = parts.filter((p) => jobs.has(p.job_id) && p.confirm_status === "pending");
   const toOrder = parts.filter((p) => jobs.has(p.job_id) && p.order_status === "to_order" && !p.po_id);
   const ordered = parts.filter((p) => jobs.has(p.job_id) && ((p.order_status === "to_order" && !!p.po_id) || p.order_status === "ordered" || p.order_status === "partly_received"));
   const toIssue = parts.filter((p) => jobs.has(p.job_id) && p.order_status === "received" && p.issue_status !== "confirmed" && p.return_status === "none");
@@ -59,13 +57,13 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <LiveRefresh tables={["part_requests", "part_items", "jobs"]} pollMs={60000} />
-      <PageHeader title="Parts" subtitle="Price requests from inspections, exact parts, and approved parts to order." />
+      <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       <section className="flex flex-col gap-3">
-        <SectionLabel right={`${toPrice.length}`}>Price requests</SectionLabel>
-        <p className="text-xs text-muted">What the technician asked for on the report. Turn each into exact parts with a part number, description and quantity. Target: {target} working hours, amber past it, red at double.</p>
+        <SectionLabel right={`${toPrice.length}`}>To price</SectionLabel>
+        <p className="text-xs text-muted">What the technician asked for on the report, the moment the workshop manager approves it. One row per part: number, description, quantity, type, cost, supplier, availability. Target: {target} working hours, amber past it, red at double.</p>
         {toPrice.length === 0 ? <Empty title="No requests waiting" /> : null}
         {byJob(toPrice).map((jobId) => {
           const rows = toPrice.filter((r) => r.job_id === jobId);
@@ -105,20 +103,6 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
             </Card>
           ))}
         </section>
-        <section className="flex flex-col gap-3">
-          <SectionLabel right={`${waitingTech.length}`}>Waiting for the technician</SectionLabel>
-          {waitingTech.length === 0 ? <p className="text-sm text-muted">None.</p> : null}
-          {byJob(waitingTech).map((jobId) => (
-            <Card key={jobId} className="flex flex-col gap-1">
-              <Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>
-              <ul className="text-sm divide-y divide-line">
-                {waitingTech.filter((p) => p.job_id === jobId).map((p) => (
-                  <li key={p.id} className="py-1.5">{p.description} · × {p.quantity} · listed {formatDateTime(p.created_at)}</li>
-                ))}
-              </ul>
-            </Card>
-          ))}
-        </section>
       </div>
 
       <section className="flex flex-col gap-3">
@@ -152,7 +136,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <section className="flex flex-col gap-3">
-          <SectionLabel right={`${ordered.length}`}>On order</SectionLabel>
+          <SectionLabel right={`${ordered.length}`}>Deliveries expected</SectionLabel>
           {ordered.length === 0 ? <p className="text-sm text-muted">Nothing on order.</p> : null}
           {byJob(ordered).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1">

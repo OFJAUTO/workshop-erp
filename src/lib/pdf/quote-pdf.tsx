@@ -4,7 +4,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { feeNotice } from "@/lib/jobs";
 import { amountInWords, round2 } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { URGENCY_LABELS, hasCostFloor, isHidden, lineTotal, lineUnitPrice, quoteTotals } from "@/lib/quotes";
+import { URGENCY_LABELS, hasCostFloor, isHidden, isUnchosen, lineTotal, lineUnitPrice, partTypeText, quoteTotals } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -18,7 +18,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const isEstimate = q.kind === "estimate";
   const currency = currencyOf(settings);
   const vatPct = Number(q.vat_percent) || 5;
-  const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l));
+  const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l));
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const partOf = (id: string | null) => (id ? bundle.parts.find((p) => p.id === id) : undefined);
   const toDoc = (l: (typeof lines)[number]): DocLine => {
@@ -30,7 +30,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
       description: title,
-      details: l.details,
+      details: [l.line_type === "part" ? partTypeText(l) : null, l.details].filter(Boolean).join(" · ") || null,
       partNumber: number,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
@@ -43,6 +43,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   };
   const services = lines.filter((l) => l.line_type !== "part" && !(l.line_type === "other" && hasCostFloor(l))).map(toDoc);
   const parts = lines.filter((l) => l.line_type === "part" || (l.line_type === "other" && hasCostFloor(l))).map(toDoc);
+  const dangerous = !isEstimate && lines.some((l) => l.dangerous);
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), q.token ? qrPng(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : Promise.resolve(null)]);
   const carName = vehicle ? [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ") : "";
@@ -86,6 +87,12 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           status={{ title: isEstimate ? "Estimate total" : "Quotation total", value: totals.total, note: q.promised_at && !isEstimate ? `Promised date ${formatDate(q.promised_at)}` : isEstimate ? "Final price confirmed once the vehicle is with us" : null }}
         />
       </View>
+      {dangerous ? (
+        <View style={styles.note} wrap={false}>
+          <Text style={styles.smallTitle}>Safety warning</Text>
+          <Text>{settings.dangerous_customer_text}</Text>
+        </View>
+      ) : null}
       {q.customer_note ? (
         <View style={styles.note} wrap={false}>
           <Text style={styles.smallTitle}>Note</Text>

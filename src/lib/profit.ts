@@ -1,6 +1,7 @@
 import "server-only";
 import { dubaiDate } from "./jobs";
 import { round2 } from "./money";
+import { isHidden, isUnchosen, lineCost, type LineType } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
@@ -42,24 +43,34 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   const ids = invoices.map((i) => i.invoice.id);
   const jobIds = Array.from(new Set(invoices.map((i) => i.invoice.job_id).filter((x): x is string => !!x)));
   const rate = Number(settings.technician_cost_rate_aed) || 0;
-  const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }] = await Promise.all([
+  const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }, { data: hiddenRows }] = await Promise.all([
     admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed").in("invoice_id", ids).eq("is_active", true),
     admin.from("payments").select(PAYMENT_SELECT).in("invoice_id", ids).eq("is_active", true),
     jobIds.length ? admin.from("work_sessions").select("job_id, minutes, started_at, ended_at").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("stock_issues").select("job_id, quantity, unit_cost").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("purchase_orders").select("job_id, supplier_invoice_status, status").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     admin.from("invoices").select("credit_of, taxable_aed").in("credit_of", ids).eq("is_active", true).eq("status", "issued"),
+    // Hidden lines of the approved quotations: hidden Recovery or Other costs, and the automatic bank charge line.
+    jobIds.length ? admin.from("quotation_lines").select("line_type, quantity, unit_cost, visible_to_customer, fee_kind, option_group, chosen, quotation:quotations!inner(job_id, status)").eq("is_active", true).in("quotation.job_id", jobIds).eq("quotation.status", "approved") : Promise.resolve({ data: [] }),
   ]);
   const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string }[]).filter((l) => l.invoice_id === id);
   return invoices.map(({ invoice, job }) => {
     const ls = byInvoice(invoice.id);
     const partsCost = round2(ls.filter((l) => l.section === "parts").reduce((a, l) => a + Number(l.cost_aed), 0));
-    const otherCost = round2(ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0));
+    type HiddenRow = { line_type: string; quantity: number | string; unit_cost: number | string | null; visible_to_customer: boolean; fee_kind: string | null; option_group: string | null; chosen: boolean; quotation: { job_id: string; status: string } | null };
+    const hidden = ((hiddenRows ?? []) as unknown as HiddenRow[])
+      .filter((l) => l.quotation?.job_id === invoice.job_id && !isUnchosen(l) && isHidden({ line_type: l.line_type as LineType, visible_to_customer: l.visible_to_customer, fee_kind: l.fee_kind }))
+      .map((l) => ({ line_type: l.line_type as LineType, fee_kind: l.fee_kind, quantity: Number(l.quantity) || 1, unit_cost: l.unit_cost === null ? null : Number(l.unit_cost) }));
+    const hiddenCost = round2(hidden.filter((l) => !l.fee_kind).reduce((a, l) => a + lineCost(l), 0));
+    const feeEstimate = round2(hidden.filter((l) => l.fee_kind === "bank_charge").reduce((a, l) => a + lineCost(l), 0));
+    const otherCost = round2(ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0) + hiddenCost);
     const minutes = ((sessions ?? []) as { job_id: string; minutes: number | null; started_at: string; ended_at: string | null }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + (s.minutes ?? (s.ended_at ? Math.round((Date.parse(s.ended_at) - Date.parse(s.started_at)) / 60000) : 0)), 0);
     const labourCost = round2((minutes / 60) * rate);
     const stockCost = round2(((stock ?? []) as { job_id: string; quantity: number | string; unit_cost: number | string }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + Number(s.quantity) * Number(s.unit_cost), 0));
     const pays = ((payments ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.invoice_id === invoice.id);
-    const bankCharges = round2(pays.filter((p) => p.status === "recorded").reduce((a, p) => a + p.bank_charge_aed, 0));
+    // The real bank charge once a payment is recorded; until then the quotation's estimated charge.
+    const recorded = pays.filter((p) => p.status === "recorded");
+    const bankCharges = recorded.length ? round2(recorded.reduce((a, p) => a + p.bank_charge_aed, 0)) : feeEstimate;
     const credited = round2(((credits ?? []) as { credit_of: string; taxable_aed: number | string }[]).filter((c) => c.credit_of === invoice.id).reduce((a, c) => a + Number(c.taxable_aed), 0));
     const revenue = round2(invoice.taxable_aed - credited);
     const openPos = ((pos ?? []) as { job_id: string; supplier_invoice_status: string; status: string }[]).filter((p) => p.job_id === invoice.job_id && p.status !== "cancelled" && p.supplier_invoice_status !== "received");
@@ -67,6 +78,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const why: string[] = [];
     if (openPos.length) why.push(`${openPos.length} supplier invoice${openPos.length === 1 ? "" : "s"} to follow`);
     if (pending.length) why.push("cheque pending clearance");
+    if (!recorded.length && feeEstimate > 0) why.push("bank charge estimated until payment");
     const bal = invoiceBalance(invoice, pays);
     return {
       invoice,

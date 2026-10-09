@@ -28,6 +28,10 @@ export default async function SettingsPage() {
   let workingDays: string[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
   let stageHours: Record<string, number> = {};
   let branchesText = "";
+  const listTexts: Record<string, string> = {};
+  let limits: Record<string, number> = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
+  let prescanGate = false;
+  let inboundToken = "";
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
@@ -37,7 +41,11 @@ export default async function SettingsPage() {
     else if (row.key === "working_days") workingDays = Array.isArray(row.value) ? (row.value as string[]) : workingDays;
     else if (row.key === "stage_target_hours") stageHours = (row.value as Record<string, number>) ?? {};
     else if (row.key === "branches") branchesText = ((row.value as { name: string; address: string }[]) ?? []).map((b) => `${b.name} | ${b.address}`).join("\n");
-    else if (row.key === "inspection_checklist") continue;
+    else if (row.key === "inspection_checklist" || row.key === "item_suggestions" || row.key === "labour_hours_memory") continue;
+    else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
+    else if (row.key === "inspection_limits") limits = { ...limits, ...((row.value as Record<string, number>) ?? {}) };
+    else if (row.key === "prescan_gate_enabled") prescanGate = row.value === true;
+    else if (row.key === "inbound_scan_token") inboundToken = typeof row.value === "string" ? row.value : "";
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");
   }
 
@@ -82,9 +90,18 @@ export default async function SettingsPage() {
             workingDays={workingDays}
             stageHours={stageHours}
             branchesText={branchesText}
+            listTexts={listTexts}
+            limits={limits}
+            prescanGate={prescanGate}
           />
         </div>
         <div className="flex flex-col gap-6">
+          <Card className="flex flex-col gap-3">
+            <SectionLabel>Scan reports by email</SectionLabel>
+            <p className="text-xs text-muted">The inbound email service posts every email it receives to this secret address. Give it to the service when you set up the inbound address (see the delivery note for the DNS record and the forward).</p>
+            <code className="break-all rounded-control bg-chip px-3 py-2 text-xs">{`https://erp.ofjauto.com/api/inbound/scan?token=${inboundToken || "(token not set)"}`}</code>
+            <p className="text-xs text-muted">Matched scans attach themselves to the car; the rest wait on the Scan reports page.</p>
+          </Card>
           <Card className="flex flex-col gap-3">
             <SectionLabel right={formatBytes(totalBytes)}>Storage used</SectionLabel>
             <ul className="flex flex-col divide-y divide-line text-sm">

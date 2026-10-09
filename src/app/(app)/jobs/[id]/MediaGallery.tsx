@@ -6,6 +6,7 @@ import type { GateInMediaRow } from "@/lib/types";
 import { WHEEL_KINDS, WHEEL_LABELS, isWheelKind, wheelConditionText } from "@/lib/wheels";
 
 const KIND_LABEL: Record<GateInMediaRow["kind"], string> = {
+  car_picture: "Car picture",
   video: "Walk-around video",
   video_exterior: "Exterior video",
   video_interior: "Interior video",

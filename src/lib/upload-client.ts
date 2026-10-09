@@ -13,7 +13,8 @@ export type UploadKind =
   | "wheel_fl"
   | "wheel_fr"
   | "wheel_rl"
-  | "wheel_rr";
+  | "wheel_rr"
+  | "car_picture";
 
 export async function prepareUpload(jobId: string, kind: UploadKind, contentType: string, token?: string) {
   const res = await fetch("/api/media/prepare", {

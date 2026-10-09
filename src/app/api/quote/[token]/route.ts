@@ -12,6 +12,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   const name = String(form.get("approver_name") ?? "").trim();
   const note = String(form.get("note") ?? "").trim().slice(0, 500) || null;
   const agree = form.get("agree") === "on";
+  const dangerAck = form.get("danger_ack") === "on";
 
   const admin = createAdminClient();
   const { data: q } = await admin.from("quotations").select("id, status, valid_until, kind").eq("token", token).maybeSingle();
@@ -21,7 +22,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   if (name.length < 2) return back("Please type your full name.");
   if (action === "approve" && !agree) return back("Please tick the box to agree to the terms and conditions.");
 
-  const res = action === "urgent" ? await requestUrgentOnly(q.id, { name, note }) : await applyCustomerResponse(q.id, { approve: action === "approve", name, via: "customer" });
+  if (action === "decline") {
+    // Declining a quotation with a dangerous finding needs the safety acknowledgement.
+    const { data: danger } = await admin.from("quotation_lines").select("id").eq("quotation_id", q.id).eq("is_active", true).eq("dangerous", true).limit(1);
+    if ((danger ?? []).length && !dangerAck) return back("Please tick the box to confirm you have read the safety warning.");
+  }
+  const res = action === "urgent" ? await requestUrgentOnly(q.id, { name, note }) : await applyCustomerResponse(q.id, { approve: action === "approve", name, via: "customer", dangerAck });
   if (res.error) return back(res.error);
   return back();
 }

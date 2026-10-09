@@ -3,8 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus } from "@/lib/inspection";
-import { inspectionLocked, inspectionWorkingMinutes, loadInspection, type InspectionMediaRow } from "@/lib/inspection-data";
+import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus, DISC_ACTIONS, DISC_CONDITIONS, LEAK_REPAIRS, LEAK_SEVERITIES, cleanPartsRows, inspectionLimitsOf, toItemState } from "@/lib/inspection";
+import { inspectionLocked, inspectionWorkingMinutes, loadInspection, type InspectionMediaRow, inspectionDangerous, type InspectionItemRow } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { PrescanToggle } from "@/components/PrescanToggle";
@@ -13,8 +13,8 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
-import { approveInspection, decideInspectionChange, requestInspectionChange, returnInspection } from "../../inspection-actions";
-import { InspectionForm } from "@/app/(app)/my-jobs/[id]/InspectionForm";
+import { approveInspection, approveScanNotPossible, decideInspectionChange, requestInspectionChange, returnInspection } from "../../inspection-actions";
+import { InspectionForm, type Suggestions } from "@/app/(app)/my-jobs/[id]/InspectionForm";
 import { ApproveForm, RequestChangeForm, ReturnForm } from "./forms";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +38,24 @@ function Files({ rows, urls }: { rows: InspectionMediaRow[]; urls: Record<string
         ),
       )}
     </div>
+  );
+}
+
+
+/** The tap-first details behind a checklist item: danger, leak, fluid, brake disc, the parts rows. */
+function ItemExtras({ item }: { item: InspectionItemRow }) {
+  const bits: string[] = [];
+  if (item.leak_severity || item.leak_repair) bits.push(`Leak: ${[LEAK_SEVERITIES.find((x) => x.value === item.leak_severity)?.label, LEAK_REPAIRS.find((x) => x.value === item.leak_repair)?.label].filter(Boolean).join(", ")}`);
+  if (item.fluid_qty !== null && item.fluid_qty !== undefined) bits.push(`Fluid: ${item.fluid_qty} ${item.fluid_unit === "g" ? "g" : "L"}${item.fluid_grade ? `, ${item.fluid_grade}` : ""}${item.fluid_spec ? `, spec ${item.fluid_spec}` : ""}`);
+  else if (item.fluid_grade || item.fluid_spec) bits.push(`Fluid: ${[item.fluid_grade, item.fluid_spec ? `spec ${item.fluid_spec}` : ""].filter(Boolean).join(", ")}`);
+  if (item.disc_condition || item.disc_action) bits.push(`Disc: ${[DISC_CONDITIONS.find((x) => x.value === item.disc_condition)?.label, DISC_ACTIONS.find((x) => x.value === item.disc_action)?.label].filter(Boolean).join(", ")}${item.disc_thickness !== null && item.disc_thickness !== undefined ? ` · ${item.disc_thickness} mm` : ""}${item.disc_minimum !== null && item.disc_minimum !== undefined ? ` (min ${item.disc_minimum} mm)` : ""}`);
+  const rows = cleanPartsRows(item.parts_rows);
+  return (
+    <>
+      {item.dangerous ? <p className="text-sm font-bold text-red">DANGEROUS TO DRIVE{item.dangerous_reason ? `: ${item.dangerous_reason}` : ""}</p> : null}
+      {bits.length ? <p className="text-xs text-muted">{bits.join(" · ")}</p> : null}
+      {rows.length ? <p className="text-xs text-muted">Parts: {rows.map((r) => `${r.part} × ${r.qty} ${r.unit}`).join("; ")}</p> : item.parts_needed ? <p className="text-xs text-muted">Parts: {item.parts_needed}</p> : null}
+    </>
   );
 }
 
@@ -108,10 +126,12 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const m = insp.measurements ?? {};
   const reviewing = canApprove && insp.status === "submitted";
   const unlockHours = Number(settings.inspection_unlock_hours) || 1;
+  const dangers = inspectionDangerous(bundle);
+  const scanGate = !!settings.prescan_gate_enabled;
 
   const formProps = {
     checklist: insp.checklist as ChecklistSection[],
-    items: bundle.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, status: i.status as ItemStatus | null, remarks: i.remarks ?? "", parts_needed: i.parts_needed ?? "", editedBy: i.edited_by_name ?? null })),
+    items: bundle.items.map(toItemState),
     findings: requests.map((r) => {
       const f = bundle.findings.find((x) => x.job_request_id === r.id);
       return { requestId: r.id, text: r.text, found: f?.found ?? "", needs: f?.needs ?? "", status: (f?.status as ItemStatus | null) ?? null };
@@ -133,6 +153,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
             <Badge tone={insp.status === "approved" ? "green" : insp.status === "returned" ? "red" : insp.status === "submitted" ? "amber" : "outline"}>{INSPECTION_STATUS_LABELS[insp.status]}</Badge>
             {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
             {locked ? <Badge tone="ink">Locked</Badge> : null}
+            {dangers.length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
           </span>
         }
         actions={
@@ -156,6 +177,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
         }
       />
 
+      {dangers.length ? <Notice tone="error">Dangerous to drive: {dangers.join("; ")}. The quotation line is Urgent and the customer sees a safety warning.</Notice> : null}
       {reviewing ? <Notice tone="info">You are reviewing. You can change any item, remark, parts list, number or photo before approving; each change is stamped with your name and the technician&apos;s original is kept.</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -170,6 +192,9 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 { label: "Inspection time (working)", value: insp.started_at ? `${formatMinutes(workingMin)} of ${formatMinutes(target)} target${(insp.overrun_minutes ?? 0) > 0 ? ` · ${formatMinutes(insp.overrun_minutes!)} over` : workingMin > target ? " · over target" : ""}` : null },
                 { label: "Items flagged", value: `${flagged.length} of ${items.length} (${items.filter((i) => i.status === "bad").length} bad, ${items.filter((i) => i.status === "average").length} average)` },
                 { label: "Road test", value: roadTest ? `${roadTestLine(roadTest)}${roadTest.done_at && roadTest.status === "done" ? ` · ${formatDateTime(roadTest.done_at)}` : ""}${roadTest.decision ? ` · manager: ${ROAD_TEST_DECISION_LABELS[roadTest.decision]}${roadTest.decision_note ? `, ${roadTest.decision_note}` : ""}` : ""}` : "No road test record" },
+                ...(insp.estimated_hours === null ? [] : [{ label: "Estimated hours", value: insp.estimated_hours !== null ? `${insp.estimated_hours} h by the technician${insp.estimated_hours_manager !== null ? ` · ${insp.estimated_hours_manager} h agreed by the manager` : " · not yet agreed"}${insp.estimate_reason ? ` · ${insp.estimate_reason}` : ""}` : null }]),
+                ...(insp.big_job_tags?.length ? [{ label: "Big job", value: insp.big_job_tags.join(", ") }] : []),
+                ...(scanGate ? [{ label: "Scan report", value: (insp.scan_read_at ? `Read by the technician ${formatDateTime(insp.scan_read_at)}` : insp.scan_approved_at ? `Scan not possible, approved ${formatDateTime(insp.scan_approved_at)}` : insp.scan_not_possible_reason ? `Scan not possible: ${insp.scan_not_possible_reason} (waiting for approval)` : "Not read yet") }] : []),
                 ...(insp.approved_at ? [{ label: "Approved", value: `${formatDateTime(insp.approved_at)} by ${bundle.approver?.display_name ?? ""}` }] : []),
                 ...(insp.manager_note ? [{ label: "Workshop manager's note", value: <span className="whitespace-pre-wrap">{insp.manager_note}</span> }] : []),
                 ...(insp.return_reason && insp.status === "returned" ? [{ label: "Sent back because", value: insp.return_reason }] : []),
@@ -178,7 +203,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           </Card>
 
           {reviewing ? (
-            <InspectionForm inspectionId={insp.id} {...formProps} readOnly={false} submitAction={null} showPrescanToggle={can(role, "sendReport")} />
+            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} />
           ) : (
             <>
               <Card className="flex flex-col gap-3">
@@ -233,7 +258,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                             {i.edited_by_name ? <span className="text-xs text-muted">Edited by {i.edited_by_name}, {formatDateTime(i.edited_at)}</span> : null}
                           </div>
                           {i.remarks ? <p className="text-sm whitespace-pre-wrap">{i.remarks}</p> : null}
-                          {i.parts_needed ? <p className="text-xs text-muted">Parts: {i.parts_needed}</p> : null}
+                          <ItemExtras item={i} />
                           <Original original={i.original as Record<string, unknown> | null} />
                           <Files rows={bundle.media.filter((x) => x.item_key === i.item_key)} urls={bundle.mediaUrls} />
                         </li>
@@ -307,10 +332,17 @@ export default async function InspectionReportPage({ params }: { params: Promise
             </Card>
           ) : null}
 
+          {scanGate && canApprove && insp.scan_not_possible_reason && !insp.scan_approved_at && !insp.scan_read_at ? (
+            <Card className="flex flex-col gap-3 border-amber-bar">
+              <SectionLabel>Scan not possible: approve?</SectionLabel>
+              <p className="text-sm">{bundle.technician?.display_name ?? "The technician"} says: {insp.scan_not_possible_reason}</p>
+              <form action={approveScanNotPossible.bind(null, id)}><Button type="submit" size="md">Approve, open the checklist</Button></form>
+            </Card>
+          ) : null}
           {canApprove && insp.status === "submitted" ? (
             <Card className="flex flex-col gap-4 border-ink">
               <SectionLabel>Workshop manager&apos;s decision</SectionLabel>
-              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} />
+              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} />
               <ReturnForm action={returnInspection.bind(null, id)} />
             </Card>
           ) : null}

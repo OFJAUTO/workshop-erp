@@ -146,7 +146,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
 
   const picture = formData.get("car_picture");
   const hasNewPicture = picture instanceof File && picture.size > 0;
-  if (!vehicle.photo_path && !hasNewPicture) return { error: "Take a picture of the car.", values };
+  // The car picture is taken on the phone checklist now; a picture here is optional and replaces the old one.
 
   const { data: openJob } = await supabase
     .from("jobs")
@@ -317,8 +317,7 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
 
-  const picture = formData.get("car_picture");
-  if (!(picture instanceof File) || picture.size === 0) return { error: "Take a picture of the car.", values };
+  const picture = formData.get("car_picture"); // optional now: the phone checklist asks for it
 
   const supabase = await createClient();
   const newEntries: string[] = [];

@@ -14,6 +14,7 @@ export function Shell({
   user,
   footer,
   viewingAs = null,
+  actingAs = null,
   children,
 }: {
   nav?: NavItem[];
@@ -21,6 +22,8 @@ export function Shell({
   footer?: ReactNode;
   /** The owner is looking at the system as this person (view only). */
   viewingAs?: { realId: string; realName: string } | null;
+  /** The owner is doing this person's work from their screen; every change is logged on the owner's behalf. */
+  actingAs?: { realId: string; realName: string; forName: string } | null;
   children: ReactNode;
 }) {
   return (
@@ -54,9 +57,19 @@ export function Shell({
             </a>
           </div>
         ) : null}
-        {/* Bell at the top right of the page area, level with the page title; below the yellow bar when viewing as someone. */}
+        {actingAs && user ? (
+          <div className="bg-ink text-white px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="font-bold">
+              Acting as {actingAs.forName} ({user.role}). Everything you do is saved and logged as {actingAs.realName}, on behalf of {actingAs.forName}.
+            </span>
+            <a href="/api/view-as/exit" className="inline-flex min-h-10 items-center rounded-control bg-white px-4 text-sm font-bold text-ink">
+              Exit
+            </a>
+          </div>
+        ) : null}
+        {/* Bell at the top right of the page area, level with the page title; below the bar when viewing or acting as someone. */}
         {user ? (
-          <div className={`absolute ${viewingAs ? "top-[4.5rem]" : "top-5"} right-4 sm:right-6 lg:right-8 z-30`}>
+          <div className={`absolute ${viewingAs || actingAs ? "top-[4.5rem]" : "top-5"} right-4 sm:right-6 lg:right-8 z-30`}>
             <NotificationBell staffId={user.id} />
           </div>
         ) : null}

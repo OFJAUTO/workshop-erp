@@ -8,9 +8,13 @@ type Item = { id: number; staff_id?: string; type: string; title: string; body: 
 
 const VOLUME_KEY = "erp_notif_volume";
 const POLL_MS = 30000;
+/** While something is unread and the panel is closed, a soft reminder note every so often. */
+const REMIND_MS = 45000;
 /** Anything that needs the owner's personal approval gets the louder, longer sound. */
 const OWNER_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested", "po_approval", "credit_note_approval", "release_approval", "quote_owner_approval"]);
-type Volume = "off" | "low" | "normal";
+type Volume = "off" | "low" | "normal" | "loud";
+const VOLUMES: Volume[] = ["loud", "normal", "low", "off"];
+const GAIN: Record<Volume, number> = { off: 0, low: 0.18, normal: 0.45, loud: 0.85 };
 
 function timeAgo(iso: string) {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -20,37 +24,67 @@ function timeAgo(iso: string) {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-/** A short chime made on the spot (no sound files): two notes, or three rising notes for owner approvals. */
-function chime(kind: "normal" | "owner", volume: Volume) {
-  if (volume === "off") return;
+let audio: AudioContext | null = null;
+/** One sound engine for the page. Browsers keep it muted until the person has clicked somewhere once. */
+function engine(): AudioContext | null {
   try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctx();
-    const gainLevel = volume === "low" ? 0.08 : 0.25;
-    const notes = kind === "owner" ? [523, 659, 784, 1047] : [880, 1175];
-    const len = kind === "owner" ? 0.22 : 0.16;
-    notes.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = kind === "owner" ? "triangle" : "sine";
-      osc.frequency.value = freq;
-      const t = ctx.currentTime + i * len;
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(gainLevel, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + len);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(t);
-      osc.stop(t + len);
-    });
-    setTimeout(() => ctx.close().catch(() => {}), notes.length * len * 1000 + 300);
+    if (!audio) {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audio = new Ctx();
+    }
+    return audio;
   } catch {
-    // no sound available
+    return null;
   }
 }
 
 /**
- * Bell with unread count at the top right of the page, a panel below it, live arrival with a
- * chime, a one-second shake, the count on the browser tab, and a corner pop-up.
+ * The sounds, made on the spot (no sound files). "normal": a clear two-note chime, ding-dong, played
+ * twice. "owner": four rising notes, louder, for things only the owner can approve. "remind": one
+ * soft note while something is still unread.
+ */
+function play(kind: "normal" | "owner" | "remind", volume: Volume): "ok" | "blocked" | "none" {
+  if (volume === "off") return "none";
+  const ctx = engine();
+  if (!ctx) return "none";
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+    if (ctx.state === "suspended") return "blocked";
+  }
+  const level = GAIN[volume] * (kind === "remind" ? 0.4 : 1);
+  const seq = kind === "owner" ? [523, 659, 784, 1047, 784, 1047] : kind === "remind" ? [1175] : [1175, 880, 1175, 880];
+  const len = kind === "owner" ? 0.2 : kind === "remind" ? 0.25 : 0.3;
+  const gap = kind === "normal" ? [0, 1, 2.6, 3.6] : null;
+  seq.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = kind === "owner" ? "square" : "triangle";
+    osc.frequency.value = freq;
+    const t = ctx.currentTime + (gap ? gap[i] * len : i * len);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(level, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + len * 1.1);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + len * 1.2);
+  });
+  return "ok";
+}
+
+function readVolume(): Volume {
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(VOLUME_KEY) : null;
+    return v === "off" || v === "low" || v === "loud" ? v : "normal";
+  } catch {
+    return "normal";
+  }
+}
+
+/**
+ * Bell with unread count at the top right of the page, a panel below it, live arrival with a loud
+ * chime, a wiggle that keeps going while something is unread, a soft reminder note every so often,
+ * the count on the browser tab, a corner pop-up, per-person volume with a test button, and a bar
+ * that asks for one click when the browser has not allowed sound yet.
  */
 export function NotificationBell({ staffId }: { staffId: string }) {
   const router = useRouter();
@@ -59,17 +93,15 @@ export function NotificationBell({ staffId }: { staffId: string }) {
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<Item | null>(null);
   const [shake, setShake] = useState(false);
-  const [volume, setVolume] = useState<Volume>(() => {
-    try {
-      const v = typeof localStorage !== "undefined" ? localStorage.getItem(VOLUME_KEY) : null;
-      return v === "off" || v === "low" ? v : "normal";
-    } catch {
-      return "normal";
-    }
-  });
+  const [blocked, setBlocked] = useState(false);
+  const [volume, setVolume] = useState<Volume>(readVolume);
   const box = useRef<HTMLDivElement>(null);
   const known = useRef<Set<number>>(new Set());
   const baseTitle = useRef<string>("");
+  const openRef = useRef(false);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   // The count on the browser tab.
   useEffect(() => {
@@ -77,18 +109,22 @@ export function NotificationBell({ staffId }: { staffId: string }) {
     document.title = unread > 0 ? `(${unread}) ${baseTitle.current}` : baseTitle.current;
   }, [unread]);
 
-  const announce = useCallback((n: Item) => {
-    setToast(n);
-    setTimeout(() => setToast((t) => (t?.id === n.id ? null : t)), 8000);
-    setShake(true);
-    setTimeout(() => setShake(false), 1100);
-    let v: Volume = "normal";
-    try {
-      const s = localStorage.getItem(VOLUME_KEY);
-      if (s === "off" || s === "low") v = s;
-    } catch {}
-    chime(OWNER_TYPES.has(n.type) ? "owner" : "normal", v);
+  const sound = useCallback((kind: "normal" | "owner" | "remind") => {
+    const r = play(kind, readVolume());
+    if (r === "blocked") setBlocked(true);
+    else if (r === "ok") setBlocked(false);
   }, []);
+
+  const announce = useCallback(
+    (n: Item) => {
+      setToast(n);
+      setTimeout(() => setToast((t) => (t?.id === n.id ? null : t)), 10000);
+      setShake(true);
+      setTimeout(() => setShake(false), 1600);
+      sound(OWNER_TYPES.has(n.type) ? "owner" : "normal");
+    },
+    [sound],
+  );
 
   const load = useCallback(
     async (quiet = true) => {
@@ -140,6 +176,13 @@ export function NotificationBell({ staffId }: { staffId: string }) {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
+    // The first click anywhere lets the browser play sound from then on.
+    const unlock = () => {
+      const ctx = engine();
+      if (ctx && ctx.state === "suspended") ctx.resume().then(() => setBlocked(false)).catch(() => {});
+      else setBlocked(false);
+    };
+    document.addEventListener("pointerdown", unlock, { once: true });
     return () => {
       cancelled = true;
       clearTimeout(first);
@@ -147,8 +190,21 @@ export function NotificationBell({ staffId }: { staffId: string }) {
       supabase.removeChannel(channel);
       document.removeEventListener("visibilitychange", onVisible);
       document.removeEventListener("mousedown", close);
+      document.removeEventListener("pointerdown", unlock);
     };
   }, [staffId, load, announce]);
+
+  // Something unread and the panel closed: a soft note now and then, so nobody misses a hand-over.
+  useEffect(() => {
+    if (unread <= 0) return;
+    const t = setInterval(() => {
+      if (openRef.current || document.visibilityState !== "visible") return;
+      sound("remind");
+      setShake(true);
+      setTimeout(() => setShake(false), 1600);
+    }, REMIND_MS);
+    return () => clearInterval(t);
+  }, [unread, sound]);
 
   async function openItem(n: Item) {
     setOpen(false);
@@ -167,25 +223,28 @@ export function NotificationBell({ staffId }: { staffId: string }) {
     await fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ all: true }) }).catch(() => {});
   }
 
-  function cycleVolume() {
-    const next: Volume = volume === "normal" ? "low" : volume === "low" ? "off" : "normal";
-    setVolume(next);
+  function chooseVolume(v: Volume) {
+    setVolume(v);
     try {
-      localStorage.setItem(VOLUME_KEY, next);
+      localStorage.setItem(VOLUME_KEY, v);
     } catch {}
-    if (next !== "off") chime("normal", next);
+    if (v !== "off") sound("normal");
   }
 
   return (
     <div ref={box} className="relative shrink-0">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+          const ctx = engine();
+          if (ctx && ctx.state === "suspended") ctx.resume().then(() => setBlocked(false)).catch(() => {});
+        }}
         aria-label={`Notifications, ${unread} unread`}
         aria-expanded={open}
-        className={`relative inline-flex h-11 w-11 items-center justify-center rounded-control border bg-white text-ink hover:bg-chip ${open ? "border-ink" : "border-line-strong"}`}
+        className={`relative inline-flex h-11 w-11 items-center justify-center rounded-control border bg-white text-ink hover:bg-chip ${open ? "border-ink" : unread > 0 ? "border-red-bar" : "border-line-strong"}`}
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={shake ? "bell-shake" : ""}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={shake ? "bell-shake" : unread > 0 && !open ? "bell-wiggle" : ""}>
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
@@ -194,20 +253,37 @@ export function NotificationBell({ staffId }: { staffId: string }) {
         ) : null}
       </button>
 
+      {blocked && volume !== "off" ? (
+        <button
+          type="button"
+          onClick={() => {
+            const ctx = engine();
+            if (ctx) ctx.resume().then(() => { setBlocked(false); play("normal", readVolume()); }).catch(() => {});
+          }}
+          className="fixed top-0 inset-x-0 z-50 bg-ink text-white text-sm font-bold py-2 text-center"
+        >
+          Click here to turn on sounds for notifications
+        </button>
+      ) : null}
+
       {open ? (
-        <div className="z-50 rounded-card border border-line bg-white text-ink shadow-xl flex flex-col max-sm:fixed max-sm:inset-x-4 max-sm:top-20 sm:absolute sm:right-0 sm:top-13 sm:w-[360px]">
+        <div className="z-50 rounded-card border border-line bg-white text-ink shadow-xl flex flex-col max-sm:fixed max-sm:inset-x-4 max-sm:top-20 sm:absolute sm:right-0 sm:top-13 sm:w-[380px]">
           <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
             <span className="text-sm font-extrabold">Notifications</span>
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={cycleVolume} className="min-h-9 text-xs font-semibold text-muted hover:text-ink" title="Sound: normal, low or off. The shake and the count always stay.">
-                Sound {volume}
+            {unread > 0 ? (
+              <button type="button" onClick={markAll} className="min-h-9 text-xs font-semibold text-muted hover:text-ink">
+                Mark all read
               </button>
-              {unread > 0 ? (
-                <button type="button" onClick={markAll} className="min-h-9 text-xs font-semibold text-muted hover:text-ink">
-                  Mark all read
-                </button>
-              ) : null}
-            </div>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-line text-xs">
+            <span className="font-semibold text-muted">Sound</span>
+            {VOLUMES.map((v) => (
+              <button key={v} type="button" onClick={() => chooseVolume(v)} aria-pressed={volume === v} className={`min-h-8 rounded-control border px-2.5 font-bold ${volume === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                {v === "off" ? "Off" : v[0].toUpperCase() + v.slice(1)}
+              </button>
+            ))}
+            <button type="button" onClick={() => sound("normal")} className="min-h-8 rounded-control border border-line-strong bg-white px-2.5 font-bold">Test sound</button>
           </div>
           <ul className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain divide-y divide-line">
             {items.length === 0 ? <li className="px-4 py-6 text-sm text-muted text-center">Nothing yet.</li> : null}
@@ -235,7 +311,7 @@ export function NotificationBell({ staffId }: { staffId: string }) {
       ) : null}
 
       {toast ? (
-        <button type="button" onClick={() => openItem(toast)} className="fixed bottom-4 right-4 z-50 max-w-sm rounded-card border border-ink bg-white text-ink shadow-2xl px-4 py-3 text-left">
+        <button type="button" onClick={() => openItem(toast)} className="fixed bottom-4 right-4 z-50 max-w-sm rounded-card border-2 border-ink bg-white text-ink shadow-2xl px-4 py-3 text-left">
           <span className="block text-sm font-bold">{toast.title}</span>
           {toast.body ? <span className="block text-xs text-muted">{toast.body}</span> : null}
           <span className="block text-[11px] text-faint mt-1">Tap to open</span>

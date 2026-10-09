@@ -6,7 +6,7 @@ import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { LINE_SELECT, PART_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, suggestedLines, toLine, toPart } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, suggestedLines, toLine, toPart, loadPartsWait, loadQuoteChecks } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { ownerApprovalReasons, quoteTotals, sendBlockers, type QuoteLine } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -71,7 +71,7 @@ async function syncPartLines(quotationId: string, jobId: string, by: string, min
   if (rows.length) await admin.from("quotation_lines").insert(rows);
 }
 
-const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer, urgency: l.urgency, advisor_added: l.advisor_added });
+const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer, urgency: l.urgency, advisor_added: l.advisor_added, part_type: l.part_type, brand: l.brand, option_group: l.option_group, chosen: l.chosen, recovery_trips: l.recovery_trips, recovery_provider: l.recovery_provider, dangerous: l.dangerous });
 
 /** "Start quotation": suggested lines from the approved report (or the estimate), one part line per listed part. */
 export async function startQuotation(jobId: string) {
@@ -105,11 +105,16 @@ export async function startQuotation(jobId: string) {
   let lines: Record<string, unknown>[] = [];
   if (job!.estimate_id) {
     const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", job!.estimate_id).eq("is_active", true).order("position");
-    lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).map((l) => ({ quotation_id: created!.id, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: staff!.id, updated_by: staff!.id }));
+    lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !l.fee_kind).map((l) => ({ quotation_id: created!.id, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: staff!.id, updated_by: staff!.id }));
   } else {
     lines = (await suggestedLines(jobId, rate)).map((l) => ({ ...l, quotation_id: created!.id, created_by: staff!.id, updated_by: staff!.id }));
   }
   if (lines.length) await admin.from("quotation_lines").insert(lines);
+  // A car that came on our recovery truck: the recovery line is suggested, the advisor fills in the price or hides it.
+  const { data: gateIn } = await admin.from("gate_ins").select("arrived_by").eq("job_id", jobId).maybeSingle();
+  if (gateIn?.arrived_by === "our_recovery" && !lines.some((l) => l.line_type === "recovery")) {
+    await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: lines.length + 1, line_type: "recovery", title: "Recovery", details: "One way to the workshop", source_type: "manual", quantity: 1, recovery_trips: 1, markup_percent: minMarkup, visible_to_customer: true, created_by: staff!.id, updated_by: staff!.id });
+  }
   await ensurePartRequests(jobId, staff!.id);
   await syncPartLines(created!.id, jobId, staff!.id, minMarkup);
   await refreshQuoteTotals(created!.id, settings, staff!.id);
@@ -153,7 +158,7 @@ async function makeVersion(quotationId: string, urgentOnly: boolean) {
     .select("id")
     .single();
   if (error || !created) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not revise.")}`);
-  const keep = urgentOnly ? bundle.lines.filter((l) => l.urgency === "urgent" || !l.visible_to_customer) : bundle.lines;
+  const keep = (urgentOnly ? bundle.lines.filter((l) => l.urgency === "urgent" || !l.visible_to_customer) : bundle.lines).filter((l) => !l.fee_kind);
   const left = urgentOnly ? bundle.lines.filter((l) => l.urgency !== "urgent" && l.visible_to_customer) : [];
   const rows = keep.map((l) => ({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), created_by: staff.id, updated_by: staff.id }));
   if (rows.length) await admin.from("quotation_lines").insert(rows);
@@ -191,11 +196,18 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   if (q.status !== "draft" && q.status !== "pending_owner") return { error: `This quotation is ${q.status.replace("_", " ")}. Revise it to send a new version.` };
   const settings = await getSettings();
   const minMarkup = minMarkupFor(settings, bundle.vehicle?.make?.name ?? null);
-  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup });
+  const checks = await loadQuoteChecks(q.job_id);
+  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup, ...checks });
   if (blockers.length) return { error: blockers.map((b) => b.label).join(" · ") };
+  const admin = createAdminClient();
+  if (!q.completed_at) {
+    // The advisor presses "Quotation complete" first. The owner may send straight away; it is written down.
+    if (staff.role_id !== "owner") return { error: "Press \"Quotation complete\" first, then send it." };
+    await admin.from("quotations").update({ completed_at: new Date().toISOString(), completed_by: staff.id, updated_by: staff.id }).eq("id", q.id);
+    await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name} on sending (owner)`);
+  }
   const totals = quoteTotals(bundle.lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const reasons = ownerApprovalReasons(q, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 });
-  const admin = createAdminClient();
   if (reasons.length && staff.role_id !== "owner" && !q.owner_approved_at) {
     if (q.status !== "pending_owner") {
       await admin.from("quotations").update({ status: "pending_owner", owner_approval_reason: reasons.join("; "), updated_by: staff.id }).eq("id", q.id);
@@ -295,6 +307,108 @@ export async function resendQuotation(quotationId: string): Promise<SendQuoteSta
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_resent", `${q.number} re-sent by ${staff.display_name}`);
   refresh(q.job_id, q.id);
   return { ok: true, token };
+}
+
+/**
+ * "Quotation complete": every check passes, each part takes Urgent or Recommended from the work line
+ * it belongs to, and the labour hours are remembered for the next quotation on the same work.
+ */
+export async function completeQuotation(quotationId: string): Promise<{ error?: string; ok?: boolean }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Only the job's advisor or the owner can complete it." };
+  if (q.status !== "draft" && q.status !== "pending_owner") return { error: "This version has been sent." };
+  const settings = await getSettings();
+  const admin = createAdminClient();
+  const checks = await loadQuoteChecks(q.job_id);
+  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks });
+  if (blockers.length) return { error: `Not complete yet: ${blockers.map((b) => b.label).join(" · ")}` };
+  const active = bundle.lines.filter((l) => l.is_active);
+  const workLines = active.filter((l) => l.line_type !== "part" && !l.fee_kind);
+  for (const l of active.filter((x) => x.line_type === "part")) {
+    const p = l.part_item_id ? bundle.parts.find((x) => x.id === l.part_item_id) : null;
+    const req = p?.part_request_id ? bundle.requests.find((r) => r.id === p.part_request_id) : null;
+    const w = req ? (workLines.find((x) => x.source_type === req.source_type && x.source_key === req.source_key.split("#")[0]) ?? workLines.find((x) => x.group_label === req.label || x.title === req.label) ?? null) : null;
+    const urgency = w?.urgency ?? l.urgency ?? "urgent";
+    if (urgency !== l.urgency) await admin.from("quotation_lines").update({ urgency, updated_by: staff.id }).eq("id", l.id);
+  }
+  const memory = { ...((settings.labour_hours_memory ?? {}) as Record<string, number>) };
+  const model = [bundle.vehicle?.make?.name, bundle.vehicle?.model?.name].filter(Boolean).join(" ").toLowerCase();
+  let remembered = false;
+  for (const l of workLines) {
+    if (l.line_type !== "labour" || !l.hours || l.hours <= 0) continue;
+    const k = l.title.trim().toLowerCase();
+    for (const key of [k, model ? `${model}|${k}` : ""]) {
+      if (key && memory[key] !== l.hours) {
+        memory[key] = l.hours;
+        remembered = true;
+      }
+    }
+  }
+  if (remembered) await admin.from("settings").update({ value: memory }).eq("key", "labour_hours_memory");
+  await admin.from("quotations").update({ completed_at: new Date().toISOString(), completed_by: staff.id, updated_by: staff.id }).eq("id", q.id);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name}`);
+  refresh(q.job_id, q.id);
+  return { ok: true };
+}
+
+/** Back to editing after "Quotation complete". */
+export async function reopenQuotation(quotationId: string): Promise<{ error?: string; ok?: boolean }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Not allowed." };
+  if (!q.completed_at) return { ok: true };
+  const admin = createAdminClient();
+  await admin.from("quotations").update({ completed_at: null, completed_by: null, updated_by: staff.id }).eq("id", q.id);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "quote_reopened", `${q.number} v${q.version} reopened by ${staff.display_name}`);
+  refresh(q.job_id, q.id);
+  return { ok: true };
+}
+
+/** "Remind Parts": after the set number of minutes, one tap tells Parts the quotation is waiting on them. */
+export async function remindParts(quotationId: string): Promise<{ error?: string; ok?: boolean }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle || !bundle.job) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Not allowed." };
+  const settings = await getSettings();
+  const wait = await loadPartsWait(bundle.job.id);
+  if (!wait.count) return { error: "Nothing is waiting on Parts." };
+  const after = Number(settings.parts_remind_minutes) || 30;
+  if (wait.minutes < after) return { error: `Remind Parts after ${after} minutes (${wait.minutes} so far).` };
+  const admin = createAdminClient();
+  await notifyRoles(["parts"], { type: "parts_reminder", title: `Reminder: parts to price · ${bundle.job.job_number}`, body: `${staff.display_name} is waiting for ${wait.count} price${wait.count === 1 ? "" : "s"} on ${q.number} (${wait.minutes} min).`, jobId: bundle.job.id, href: `/parts/${bundle.job.id}` });
+  await admin.from("quotations").update({ parts_reminded_at: new Date().toISOString(), updated_by: staff.id }).eq("id", q.id);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "parts_reminded", `${staff.display_name} reminded Parts about ${q.number} after ${wait.minutes} min`);
+  refresh(q.job_id, q.id);
+  return { ok: true };
+}
+
+/** "Escalate": after a longer wait, the owner hears about it too. */
+export async function escalateParts(quotationId: string): Promise<{ error?: string; ok?: boolean }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle || !bundle.job) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Not allowed." };
+  const settings = await getSettings();
+  const wait = await loadPartsWait(bundle.job.id);
+  if (!wait.count) return { error: "Nothing is waiting on Parts." };
+  const after = Number(settings.parts_escalate_minutes) || 60;
+  if (wait.minutes < after) return { error: `Escalate after ${after} minutes (${wait.minutes} so far).` };
+  const admin = createAdminClient();
+  const body = `${q.number} on ${bundle.job.job_number} has waited ${wait.minutes} min for ${wait.count} price${wait.count === 1 ? "" : "s"} from Parts (${wait.names.join(", ") || "Parts"}).`;
+  await notifyRoles(["owner"], { type: "parts_escalation", title: `Parts are holding a quotation · ${bundle.job.job_number}`, body, jobId: bundle.job.id, href: `/parts/${bundle.job.id}` });
+  await notifyRoles(["parts"], { type: "parts_escalation", title: `Escalated to the owner · ${bundle.job.job_number}`, body, jobId: bundle.job.id, href: `/parts/${bundle.job.id}` });
+  await admin.from("quotations").update({ parts_escalated_at: new Date().toISOString(), updated_by: staff.id }).eq("id", q.id);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "parts_escalated", `${staff.display_name} escalated the parts wait on ${q.number} to the owner after ${wait.minutes} min`);
+  refresh(q.job_id, q.id);
+  return { ok: true };
 }
 
 export type { QuoteLine };

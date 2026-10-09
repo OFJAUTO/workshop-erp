@@ -7,14 +7,14 @@ import { StageTrack } from "@/components/StageTrack";
 import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
-import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection } from "@/lib/inspection-data";
+import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
-import { PARTS_BUCKET, PART_SELECT, loadQuoteSummary, signPaths, toPart } from "@/lib/quote-data";
+import { PART_SELECT, loadQuoteSummary, toPart } from "@/lib/quote-data";
 import { jobBalance } from "@/lib/invoice-data";
 import { jobPartsState } from "@/lib/parts-data";
 import { latestQc, loadWash, loadWork } from "@/lib/work-data";
@@ -23,8 +23,6 @@ import { followUpDone } from "../gate-out-actions";
 import { ReadySendControl } from "./ReadySendControl";
 import { aed, quoteState } from "@/lib/quotes";
 import { ROAD_TEST_DECISIONS, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
-import { PartsConfirm, type ConfirmItem } from "@/components/PartsConfirm";
-import { confirmPart } from "../../parts/actions";
 import { newQuotation, startQuotation } from "../../quotes/actions";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -54,7 +52,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, events, approvals, gateOut } = card;
-  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }] = await Promise.all([
+  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
     admin.from("move_requests").select("id, reason, status, to_status, decision_reason, decided_at, created_at, requester:staff!move_requests_requested_by_fkey(display_name), decider:staff!move_requests_decided_by_fkey(display_name)").eq("job_id", id).order("created_at", { ascending: false }),
@@ -63,6 +61,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     job.assignment_note_by ? admin.from("staff").select("display_name").eq("id", job.assignment_note_by).maybeSingle() : Promise.resolve({ data: null }),
     loadQuoteSummary(id),
     admin.from("part_items").select(PART_SELECT).eq("job_id", id).eq("is_active", true).order("created_at"),
+    admin.from("inbound_scans").select("id, kind, file_name, received_at").eq("job_id", id).eq("is_active", true).neq("status", "ignored").order("received_at", { ascending: false }),
   ]);
   const roadTest = (rt as RoadTestRow | null) ?? null;
   const partItems = ((partRows ?? []) as Record<string, unknown>[]).map(toPart);
@@ -73,7 +72,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const laterStage = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
   const [partsState, work, qc, wash, bal] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null)]);
 
-  const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "" });
+  const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "", hasCarPicture: !!vehicle.photo_path });
   const wt = workingTimeOf(settings);
   const timing = jobTiming(job.promised_at, job.is_open, clockOf(job, settings));
   const isVip = customer?.is_vip ?? customerPublic?.is_vip ?? vip?.is_vip ?? false;
@@ -145,8 +144,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // The quotation exists only for the owner and the job's advisor; nobody else sees the card or a link to it.
   const seesQuote = role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)));
   const quoteOpenStatuses = ["draft", "pending_owner", "sent", "opened"];
-  const pendingParts = partItems.filter((p) => p.confirm_status === "pending");
-  const diagramUrls = managesThisJob && pendingParts.length ? await signPaths(PARTS_BUCKET, pendingParts.map((p) => p.diagram_path).filter((x): x is string => !!x)) : {};
   const myMove = role === "owner" || step.actorRole === role || (step.actorRole === "gate_in" && can(role, "editGateIn"));
 
   // Waiting for a technician: how long, against the assignment target.
@@ -181,6 +178,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
             <PriorityBadge priority={job.priority} />
+            {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
             {isVip ? <Badge tone="ink">VIP</Badge> : null}
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
@@ -321,7 +319,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={`flex flex-col gap-2 ${toneCls[inspectionState.tone]} ${job.stage === "inspection" || job.stage === "quote" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Inspection report</span>
           <span className="text-sm font-semibold">{inspectionState.text}</span>
-          {roadTest ? <span className="text-xs text-muted">{roadTestLine(roadTest)}</span> : null}
+          {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
+          {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
+          {(scanRows ?? []).length ? <span className="text-xs text-muted">Scan reports: {(scanRows ?? []).filter((s) => s.kind === "pre").length} pre, {(scanRows ?? []).filter((s) => s.kind === "post").length} post · <a href="/scans" className="underline underline-offset-4">list</a></span> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {insp ? (
               <LinkButton href={`/jobs/${id}/inspection`} tone={insp.status === "submitted" && can(role, "approveInspections") ? "primary" : "secondary"} size="md">
@@ -358,7 +358,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             ) : null}
             {latestQuote ? (
               <LinkButton href={`/jobs/${id}/quote/${latestQuote.id}`} tone={quoteOpenStatuses.includes(latestQuote.status) && canQuote ? "primary" : "secondary"} size="md">
-                {quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (qState.key === "ready" ? "Send quotation" : "Open quotation") : "Open quotation"}
+                {quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (qState.key === "ready" ? "Send quotation" : qState.key === "finish" || qState.key === "pending_parts" ? "Finish the quotation" : "Open quotation") : "Open quotation"}
               </LinkButton>
             ) : null}
             {latestQuote && !quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (
@@ -420,6 +420,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? "On the car wash list" : "Not started"}</span>
           {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><LinkButton href="/wash" size="md">Car wash list</LinkButton></div> : null}
         </Card>
+        {role !== "parts" ? (
         <Card className={`flex flex-col gap-2 ${bal?.invoice ? "border-green" : job.status === "ready" || job.status === "pending_payment" ? "border-ink" : "bg-canvas opacity-70"} ${job.stage === "ready" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Invoice</span>
           <span className="text-sm font-semibold">{bal?.invoice ? `${bal.invoice.number} · ${bal.state === "paid" ? "paid in full" : bal.state === "part_paid" ? `part paid, AED ${bal.balance.toFixed(0)} due` : bal.state === "cheque_pending" ? "cheque pending" : `AED ${bal.balance.toFixed(0)} due`}` : job.ready_to_invoice_at ? "Ready to invoice, with accounts" : job.inspection_fee_due ? "Inspection fee to invoice" : "Not started"}</span>
@@ -431,6 +432,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
           {bal?.invoice && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? <ReadySendControl jobId={id} token={bal.invoice.token} siteUrl={site} messageTemplate={readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={job.ready_sent_at} /> : null}
         </Card>
+        ) : null}
       </div>
       {!job.is_open && job.followup_due_at && !job.followup_done_at && can(role, "sendApproval") ? (
         <Card className="flex flex-wrap items-center gap-3 border-ink">
@@ -439,14 +441,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
       ) : null}
 
-      {managesThisJob && pendingParts.length ? (
-        <PartsConfirm
-          title="Parts to confirm for the technician"
-          who="the technician"
-          items={pendingParts.map((p): ConfirmItem => ({ id: p.id, part_number: p.part_number, description: p.description, quantity: p.quantity, diagram_url: p.diagram_path ? (diagramUrls[p.diagram_path] ?? null) : null, request_label: null, requested_text: null, confirm_status: p.confirm_status, confirmed_quantity: p.confirmed_quantity, reject_note: p.reject_note }))}
-          action={confirmPart}
-        />
-      ) : null}
 
       {overrides.length ? (
         <Card className="flex flex-col gap-2 border-red-bar">

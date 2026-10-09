@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
-import { ImageCropper } from "@/components/ImageCropper";
 import { ModelYearSelect } from "@/components/ModelYearSelect";
 import { SearchSelect } from "@/components/SearchSelect";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
@@ -158,11 +157,6 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
             </Field>
           </Card>
 
-          <Card className="flex flex-col gap-4">
-            <SectionLabel>Car picture</SectionLabel>
-            <p className="text-sm text-muted">Internal only: the Cars page, the dashboard and the job card. Customers never see it.</p>
-            <ImageCropper name="car_picture" shape="wide" outputWidth={960} outputHeight={600} capture="environment" label="Take or choose a picture" />
-          </Card>
         </div>
       </div>
 

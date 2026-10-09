@@ -4,7 +4,7 @@ import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { newLabelCode } from "./parts-data";
 import { ensureWorkLines } from "./work-data";
 import { LINE_SELECT, PART_SELECT, logQuoteEvent, refreshQuoteTotals, toLine, toPart } from "./quote-data";
-import { aed, type QuoteLine, type QuoteRow } from "./quotes";
+import { aed, isUnchosen, type QuoteLine, type QuoteRow } from "./quotes";
 import { getSettings } from "./settings";
 
 /** Everyone who should hear about a customer's answer: the advisor(s) of the job and the person who sent it. */
@@ -30,7 +30,7 @@ const CORE = "id, kind, number, version, job_id, customer_id, vehicle_id, status
  * kept with the answer is the one the link was sent to. Used by the customer page and when the
  * advisor confirms an unchanged estimate.
  */
-export async function applyCustomerResponse(quotationId: string, answer: { approve: boolean; name: string; by?: string | null; via: "customer" | "estimate" }): Promise<{ error?: string; status?: string }> {
+export async function applyCustomerResponse(quotationId: string, answer: { approve: boolean; name: string; by?: string | null; via: "customer" | "estimate"; dangerAck?: boolean }): Promise<{ error?: string; status?: string }> {
   const admin = createAdminClient();
   const settings = await getSettings();
   const { data: qRaw } = await admin.from("quotations").select(CORE).eq("id", quotationId).maybeSingle();
@@ -38,19 +38,20 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   const q = qRaw as unknown as QuoteCore;
   if (!["sent", "opened", "draft", "urgent_requested"].includes(q.status)) return { error: "This quotation has already been answered." };
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", quotationId).eq("is_active", true).order("position");
-  const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine);
+  // Options the advisor did not pick count for nothing.
+  const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isUnchosen(l));
   const now = new Date().toISOString();
   const status: QuoteRow["status"] = answer.approve ? "approved" : "declined";
 
   for (const l of lines) await admin.from("quotation_lines").update({ customer_approved: answer.approve }).eq("id", l.id);
-  await admin.from("quotations").update({ status, responded_at: now, approver_name: answer.name, approver_phone: q.sent_to_phone, opened_at: now, updated_by: answer.by ?? null }).eq("id", quotationId);
+  await admin.from("quotations").update({ status, responded_at: now, approver_name: answer.name, approver_phone: q.sent_to_phone, opened_at: now, updated_by: answer.by ?? null, ...(!answer.approve && answer.dangerAck ? { danger_acknowledged_at: now, danger_acknowledged_by: answer.name } : {}) }).eq("id", quotationId);
   // One approved version per number: the older versions are replaced, so nothing is counted twice on the work order or the invoice.
   if (answer.approve) await admin.from("quotations").update({ status: "superseded", updated_by: answer.by ?? null }).eq("number", q.number).eq("kind", q.kind).lt("version", q.version).eq("is_active", true).neq("status", "superseded");
   await refreshQuoteTotals(quotationId, settings, answer.by ?? "");
   const { data: fresh } = await admin.from("quotations").select("approved_total_aed, total_aed").eq("id", quotationId).maybeSingle();
   const totalText = aed(Number(fresh?.approved_total_aed ?? fresh?.total_aed ?? 0));
   const who = answer.via === "estimate" ? "the advisor (unchanged estimate)" : `${answer.name} (customer link)`;
-  await logQuoteEvent(quotationId, q.job_id, answer.by ?? null, answer.approve ? "quote_approved" : "quote_declined", `${q.number} v${q.version}: ${answer.approve ? `approved, ${totalText} with VAT` : "declined"} by ${who}`);
+  await logQuoteEvent(quotationId, q.job_id, answer.by ?? null, answer.approve ? "quote_approved" : "quote_declined", `${q.number} v${q.version}: ${answer.approve ? `approved, ${totalText} with VAT` : `declined${answer.dangerAck ? " (safety warning acknowledged)" : ""}`} by ${who}`);
 
   // Declined work stays against the car for its next visit.
   if (!answer.approve && q.kind === "quotation") {
