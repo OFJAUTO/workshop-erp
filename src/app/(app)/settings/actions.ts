@@ -40,6 +40,13 @@ const NUMBER_KEYS = [
   "quote_send_target_hours",
   "estimate_followup_days",
 ] as const;
+/** Settings that keep decimals (percentages like 1.9). */
+const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent"] as const;
+const DECIMAL_LIMITS: Record<(typeof DECIMAL_KEYS)[number], [number, number, string]> = {
+  bank_charge_card_percent: [0, 20, "Bank charge, card machine"],
+  bank_charge_link_percent: [0, 20, "Bank charge, payment link"],
+};
+
 const TEXT_KEYS = [
   "company_name",
   "company_trn",
@@ -57,6 +64,9 @@ const TEXT_KEYS = [
   "whatsapp_report_template",
   "whatsapp_quote_template",
   "whatsapp_estimate_template",
+  "company_address",
+  "company_phone",
+  "company_email",
 ] as const;
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
@@ -124,6 +134,13 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
       return { error: `${label} must be a number between ${min} and ${max}.`, values };
     }
     updates.push({ key, value: Math.round(n) });
+  }
+  for (const key of DECIMAL_KEYS) {
+    const raw = String(formData.get(key) ?? "").trim().replace(",", ".");
+    const n = Number(raw);
+    const [min, max, label] = DECIMAL_LIMITS[key];
+    if (!raw || !Number.isFinite(n) || n < min || n > max) return { error: `${label} must be a number between ${min} and ${max}.`, values };
+    updates.push({ key, value: Math.round(n * 100) / 100 });
   }
   for (const key of TEXT_KEYS) {
     const text = String(formData.get(key) ?? "").trim();

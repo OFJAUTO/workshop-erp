@@ -4,18 +4,19 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } fro
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadQuotation, minMarkupFor } from "@/lib/quote-data";
+import { labourRateFor, loadQuotation, loadServices, minMarkupFor } from "@/lib/quote-data";
 import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { reviseQuotation } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
 
 export const dynamic = "force-dynamic";
 
-/** The estimate builder: the same lines and prices as a quotation, no promised date, sent to a page headed "Estimate". */
+/** The estimate builder: the same lines and prices as a quotation, no promised date, sent to a page headed "Estimate". Owner and the advisor who made it only. */
 export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
@@ -25,16 +26,18 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   if (!bundle || bundle.quotation.kind !== "estimate") notFound();
   const { quotation: q, vehicle, customer } = bundle;
   const mine = q.created_by === staff.id;
-  if (!(role === "owner" || role === "accounts" || (can(role, "viewEstimates") && mine))) redirect("/estimates");
-  const canEdit = (role === "owner" || mine) && !staff.viewingAs && q.status === "draft";
+  const isOwner = role === "owner";
+  if (!(isOwner || (can(role, "viewEstimates") && mine))) redirect("/estimates");
+  const canEdit = !staff.viewingAs && q.status === "draft";
+  const services = await loadServices(staff.id);
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_estimate_template
     .replaceAll("[name]", customerName)
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
-  const accepted = q.status === "approved" || q.status === "partly_approved";
-  const { data: attached } = await (await import("@/lib/supabase/admin")).createAdminClient().from("jobs").select("id, job_number").eq("estimate_id", q.id).maybeSingle();
+  const accepted = q.status === "approved";
+  const { data: attached } = await createAdminClient().from("jobs").select("id, job_number").eq("estimate_id", q.id).maybeSingle();
   const tone = accepted ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
 
   return (
@@ -48,7 +51,14 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             <Badge tone={tone}>{QUOTE_STATUS_LABELS[q.status]}</Badge>
           </span>
         }
-        actions={<LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>}
+        actions={
+          <>
+            <LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>
+            <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
+              Preview PDF
+            </a>
+          </>
+        }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -74,29 +84,32 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         quotation={q}
         lines={bundle.lines}
         parts={[]}
-        packages={bundle.packages}
+        categories={services.categories}
+        services={services.services}
+        usage={services.usage}
+        department={null}
         settings={{
           labourRate: labourRateFor(settings, null),
           minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
-          technicianCostRate: role === "owner" || role === "accounts" ? Number(settings.technician_cost_rate_aed) || 0 : null,
+          technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
+          bankChargePercent: Math.max(Number(settings.bank_charge_card_percent) || 0, Number(settings.bank_charge_link_percent) || 0),
           depositThreshold: Number(settings.deposit_threshold_aed) || 0,
           depositPercent: Number(settings.deposit_percent) || 50,
           today: dubaiDate(),
           workingTime: workingTimeOf(settings),
         }}
         readOnly={!canEdit}
-        showMargin={role !== "parts"}
-        showProfit={role === "owner" || role === "accounts"}
-        canSend={(role === "owner" || mine) && !staff.viewingAs}
-        isOwner={role === "owner"}
+        showProfit={isOwner}
+        canSend={!staff.viewingAs}
+        isOwner={isOwner}
         siteUrl={site}
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={false}
       />
-      {(role === "owner" || mine) && !staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
+      {!staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
         <Card className="flex flex-col gap-2 max-w-xl">
           <SectionLabel>Revise</SectionLabel>
           <form action={reviseQuotation.bind(null, q.id)}>

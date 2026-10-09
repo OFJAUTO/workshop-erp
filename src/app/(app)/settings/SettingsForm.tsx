@@ -51,6 +51,17 @@ export function SettingsForm({
                 <Input name="company_trn" defaultValue={v.company_trn} inputMode="numeric" maxLength={15} />
               </Field>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Company address" hint="In the header of every PDF.">
+                <Input name="company_address" defaultValue={v.company_address} />
+              </Field>
+              <Field label="Company phone" optional>
+                <Input name="company_phone" defaultValue={v.company_phone} type="tel" inputMode="tel" />
+              </Field>
+              <Field label="Company email" optional>
+                <Input name="company_email" defaultValue={v.company_email} type="email" inputMode="email" />
+              </Field>
+            </div>
             <Field label="Branches" hint="One per line: Name | Address. The first one is the default at gate-in.">
               <Textarea name="branches" defaultValue={v.branches ?? branchesText} rows={3} />
             </Field>
@@ -262,6 +273,12 @@ export function SettingsForm({
               <Field label="Quote sent after pricing (hours)" hint="Working hours for the advisor to send once the parts are priced.">
                 <Input name="quote_send_target_hours" defaultValue={v.quote_send_target_hours} inputMode="numeric" required />
               </Field>
+              <Field label="Bank charge, card machine (%)" hint="Of the total including VAT. Internal cost only, never shown to the customer.">
+                <Input name="bank_charge_card_percent" defaultValue={v.bank_charge_card_percent} inputMode="decimal" required />
+              </Field>
+              <Field label="Bank charge, payment link (%)" hint="Of the total including VAT. Internal cost only, never shown to the customer.">
+                <Input name="bank_charge_link_percent" defaultValue={v.bank_charge_link_percent} inputMode="decimal" required />
+              </Field>
             </div>
             <details className="rounded-control border border-line p-4">
               <summary className="cursor-pointer text-sm font-bold">Labour rate per department (optional)</summary>
@@ -280,7 +297,7 @@ export function SettingsForm({
             <Field label="WhatsApp estimate message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_estimate_template" defaultValue={v.whatsapp_estimate_template} rows={3} required />
             </Field>
-            <p className="text-xs text-muted">Fixed-price packages are kept on their own page: Settings, Packages.</p>
+            <p className="text-xs text-muted">The services list (categories, prices and default hours) is on its own page: Settings, Services.</p>
           </Card>
 
           <Card className="flex flex-col gap-4">

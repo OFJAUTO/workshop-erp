@@ -39,6 +39,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "quote_opened", label: "Customer opened the quotation", locked: true },
   { type: "quote_approved", label: "Customer approved a quotation", locked: true },
   { type: "quote_declined", label: "Customer declined a quotation", locked: true },
+  { type: "quote_urgent_requested", label: "Customer asked for a quotation with the urgent work only", locked: true },
   { type: "quote_expired", label: "A quotation expired without a reply", locked: true },
   { type: "parts_to_order", label: "Approved parts to order (Parts)", locked: true },
   { type: "estimate_accepted", label: "Customer accepted an estimate", locked: true },

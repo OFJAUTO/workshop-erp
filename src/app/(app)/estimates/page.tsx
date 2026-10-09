@@ -29,7 +29,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const rows = (data ?? []) as unknown as Row[];
   const followDays = Number(settings.estimate_followup_days) || 2;
   const needsFollowUp = (r: Row) => (r.status === "sent" || r.status === "opened") && olderThanDays(r.sent_at, followDays);
-  const bucket = (r: Row) => (r.status === "approved" || r.status === "partly_approved" ? "accepted" : r.status === "expired" ? "expired" : r.status === "declined" ? "declined" : needsFollowUp(r) ? "noreply" : r.status === "sent" || r.status === "opened" ? "sent" : "draft");
+  const bucket = (r: Row) => (r.status === "approved" ? "accepted" : r.status === "expired" ? "expired" : r.status === "declined" ? "declined" : needsFollowUp(r) ? "noreply" : r.status === "sent" || r.status === "opened" ? "sent" : "draft");
   const sections: { key: string; title: string }[] = [
     { key: "noreply", title: "No reply: follow up" },
     { key: "sent", title: "Sent" },
@@ -38,7 +38,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
     { key: "expired", title: "Expired" },
     { key: "declined", title: "Declined" },
   ];
-  const tone = (s: QuoteStatus) => (s === "approved" || s === "partly_approved" ? "green" : s === "declined" || s === "expired" ? "red" : s === "draft" ? "outline" : "amber");
+  const tone = (s: QuoteStatus) => (s === "approved" ? "green" : s === "declined" || s === "expired" ? "red" : s === "draft" ? "outline" : "amber");
 
   return (
     <>

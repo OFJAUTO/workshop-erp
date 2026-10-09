@@ -11,7 +11,7 @@ import { getSettings } from "@/lib/settings";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { PrintButton, ToggleBlock } from "./ReportControls";
+import { ToggleBlock } from "./ReportControls";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +79,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
       <p className="text-[15px] leading-relaxed">
         Dear {customerName}, here is the inspection report for your {vehicleTitle(card.vehicle)} ({formatPlate(card.vehicle)}), job {card.job.job_number}, inspected on {formatDateTime(insp.submitted_at)} and approved by our workshop manager on {formatDateTime(insp.approved_at)}.
       </p>
-      <PrintButton />
+      <a href={`/api/pdf/report/${token}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white">Download the report as a PDF</a>
 
       <section className="bg-white border border-line rounded-card p-4 flex flex-col gap-3">
         <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">Your requests</h2>
@@ -199,7 +199,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
           </div>
         </ToggleBlock>
       ) : null}
-      <PrintButton />
+      <a href={`/api/pdf/report/${token}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white">Download the report as a PDF</a>
       <p className="text-xs text-muted">{settings.company_name}. This report describes the condition found at inspection. A quotation follows separately.</p>
     </>,
   );

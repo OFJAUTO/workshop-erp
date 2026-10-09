@@ -82,13 +82,13 @@ export const PERMISSIONS = {
   sendReport: ["owner", "service_advisor"],
   viewOverrides: ["owner"],
   viewAs: ["owner"],
-  viewQuotes: ["owner", "service_advisor", "accounts"],
+  viewQuotes: ["owner", "service_advisor"],
   editQuotes: ["owner", "service_advisor"],
   approveQuotes: ["owner"],
   priceParts: ["owner", "parts"],
   confirmParts: ["owner", "technician", "workshop_manager"],
   viewEstimates: ["owner", "service_advisor"],
-  managePackages: ["owner"],
+  manageServices: ["owner"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

@@ -3,20 +3,20 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadQuotation, minMarkupFor } from "@/lib/quote-data";
-import { QUOTE_STATUS_LABELS, aed } from "@/lib/quotes";
+import { labourRateFor, loadQuotation, loadServices, minMarkupFor } from "@/lib/quote-data";
+import { QUOTE_STATUS_LABELS, aed, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { confirmEstimateUnchanged, decideQuoteApproval, reviseQuotation } from "@/app/(app)/quotes/actions";
+import { confirmEstimateUnchanged, decideQuoteApproval, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "./QuoteEditor";
 
 export const dynamic = "force-dynamic";
 
-/** The quotation builder for a job. Advisors see part costs and the parts margin; the owner and accounts also see labour cost and profit. */
+/** The quotation builder for a job. Only the owner and the job's advisor can open it; everyone else goes back to the job card. */
 export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
@@ -26,13 +26,13 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   if (!bundle || bundle.quotation.job_id !== id) notFound();
   const { quotation: q, job, vehicle, customer } = bundle;
 
-  // Who may open it: owner and accounts; the job's advisor; managers of the department (work lines only, no prices).
-  const isAdvisor = role === "service_advisor" && (q.created_by === staff.id || job?.gated_in_by === staff.id);
-  const isManager = role === "workshop_manager" && jobConcernsSide(job?.department ?? null, sideOfDepartment(staff.department_id));
-  if (!(role === "owner" || role === "accounts" || isAdvisor || isManager)) redirect(role === "technician" ? "/my-jobs" : `/jobs/${id}?error=${encodeURIComponent("Only the job's advisor, the owner and accounts can open the quotation.")}`);
-  const canEdit = (role === "owner" || isAdvisor) && !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
-  const canSend = role === "owner" || isAdvisor;
-  const showPrices = role !== "workshop_manager";
+  const { data: sentApprovals } = role === "service_advisor" ? await createAdminClient().from("approval_requests").select("id").eq("job_id", id).eq("sent_by", staff.id).limit(1) : { data: [] as { id: string }[] };
+  const isAdvisor = role === "service_advisor" && (q.created_by === staff.id || job?.gated_in_by === staff.id || (sentApprovals ?? []).length > 0);
+  if (!(role === "owner" || isAdvisor)) redirect(role === "technician" ? "/my-jobs" : role === "gate_in" ? "/gate-in" : `/jobs/${id}`);
+  const isOwner = role === "owner";
+  const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
+  const canSend = !staff.viewingAs;
+  const services = await loadServices(staff.id);
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_quote_template
@@ -45,13 +45,17 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
-    technicianCostRate: role === "owner" || role === "accounts" ? Number(settings.technician_cost_rate_aed) || 0 : null,
+    technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
+    // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
+    bankChargePercent: Math.max(Number(settings.bank_charge_card_percent) || 0, Number(settings.bank_charge_link_percent) || 0),
     depositThreshold: Number(settings.deposit_threshold_aed) || 0,
     depositPercent: Number(settings.deposit_percent) || 50,
     today: dubaiDate(),
     workingTime: workingTimeOf(settings),
   };
-  const tone = q.status === "approved" || q.status === "partly_approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
+  const tone = q.status === "approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
+  const urgentCount = bundle.lines.filter((l) => l.urgency === "urgent" && !isHidden(l)).length;
+  const leftOutCount = bundle.lines.filter((l) => l.urgency !== "urgent" && !isHidden(l)).length;
 
   return (
     <>
@@ -70,6 +74,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           <>
             <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>
             {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="lg">Inspection report</LinkButton> : null}
+            <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
+              Preview PDF
+            </a>
           </>
         }
       />
@@ -88,38 +95,39 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         </p>
       ) : null}
 
-      {showPrices ? (
-        <QuoteEditor
-          quotation={q}
-          lines={bundle.lines}
-          parts={bundle.parts}
-          packages={bundle.packages.filter((p) => p.department === "both" || !job?.department || job.department === "both" || p.department === job.department)}
-          settings={editorSettings}
-          readOnly={!canEdit}
-          showMargin={role === "owner" || role === "accounts" || role === "service_advisor"}
-          showProfit={role === "owner" || role === "accounts"}
-          canSend={canSend && !staff.viewingAs}
-          isOwner={role === "owner"}
-          siteUrl={site}
-          messageTemplate={template}
-          phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
-          fromEstimate={!!q.estimate_id}
-        />
-      ) : (
-        <Card className="flex flex-col gap-3">
-          <SectionLabel>Work lines</SectionLabel>
-          <ul className="divide-y divide-line text-sm">
-            {bundle.lines.filter((l) => l.line_type !== "part" && l.line_type !== "fee").map((l) => (
-              <li key={l.id} className="py-2 flex flex-wrap gap-x-3">
-                <span className="font-semibold">{l.title}</span>
-                {l.hours ? <span className="text-muted">{l.hours} h</span> : null}
-                {l.group_label ? <span className="text-muted">· {l.group_label}</span> : null}
-                {l.customer_approved === true ? <Badge tone="green">Approved</Badge> : l.customer_approved === false ? <Badge tone="red">Declined</Badge> : null}
-              </li>
-            ))}
-          </ul>
+      {q.status === "urgent_requested" && canSend ? (
+        <Card className="flex flex-col gap-2 border-amber-bar">
+          <SectionLabel>Customer asked for the urgent work only</SectionLabel>
+          <p className="text-sm">
+            {q.approver_name} asked on {formatDateTime(q.responded_at)} for a quotation with the Urgent lines only.{q.customer_request_note ? ` Note: "${q.customer_request_note}"` : ""}
+          </p>
+          <p className="text-xs text-muted">
+            Version {q.version + 1} carries the {urgentCount} Urgent line{urgentCount === 1 ? "" : "s"}; the {leftOutCount} left out {leftOutCount === 1 ? "is" : "are"} saved against the car as declined work. Review it, add anything the urgent work depends on, and send it. This version stays on record as replaced.
+          </p>
+          <form action={urgentOnlyVersion.bind(null, q.id)}>
+            <Button type="submit" size="md">Create urgent-only version</Button>
+          </form>
         </Card>
-      )}
+      ) : null}
+
+      <QuoteEditor
+        quotation={q}
+        lines={bundle.lines}
+        parts={bundle.parts}
+        categories={services.categories}
+        services={services.services}
+        usage={services.usage}
+        department={job?.department ?? null}
+        settings={editorSettings}
+        readOnly={!canEdit}
+        showProfit={isOwner}
+        canSend={canSend}
+        isOwner={isOwner}
+        siteUrl={site}
+        messageTemplate={template}
+        phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
+        fromEstimate={!!q.estimate_id}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
@@ -136,7 +144,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               </form>
             </Card>
           ) : null}
-          {q.estimate_id && q.status === "draft" && canSend && !staff.viewingAs ? (
+          {q.estimate_id && q.status === "draft" && canSend ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>From the accepted estimate</SectionLabel>
               <p className="text-sm text-muted">If nothing changed since the customer accepted the estimate, confirm it here and the earlier acceptance counts as approval. If anything changed, send the revised quotation instead.</p>
@@ -145,7 +153,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               </form>
             </Card>
           ) : null}
-          {canSend && !staff.viewingAs && ["sent", "opened", "expired", "declined", "partly_approved", "approved", "pending_owner"].includes(q.status) ? (
+          {canSend && ["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"].includes(q.status) ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>Revise</SectionLabel>
               <p className="text-sm text-muted">A new version of {q.number} with the same lines, ready to change and send again. This version stays on record.</p>
@@ -164,7 +172,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               </li>
             ))}
           </ul>
-          {showPrices && (q.status === "approved" || q.status === "partly_approved") ? <p className="text-sm font-semibold">Approved total {aed(q.approved_total_aed)}</p> : null}
+          {q.status === "approved" ? <p className="text-sm font-semibold">Approved total {aed(q.approved_total_aed)}</p> : null}
           <p className="text-xs text-muted">Prepared by {bundle.creatorName ?? "—"} · {formatDateTime(q.created_at)}</p>
         </Card>
       </div>

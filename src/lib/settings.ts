@@ -8,6 +8,11 @@ export type Branch = { name: string; address: string };
 const DEFAULTS = {
   company_name: "OFJ Automotive",
   company_trn: "",
+  company_address: "Al Quoz, Dubai, United Arab Emirates",
+  company_phone: "",
+  company_email: "",
+  bank_charge_card_percent: 1.9,
+  bank_charge_link_percent: 1.9,
   tablet_idle_lock_seconds: 120,
   pin_max_attempts: 5,
   pin_lock_minutes: 5,
@@ -50,11 +55,11 @@ const DEFAULTS = {
   quote_send_target_hours: 4,
   estimate_followup_days: 2,
   whatsapp_quote_template:
-    "Dear [name], here is the quotation for your [make model] ([plate]): [link]. Please review the lines, approve what you would like us to do, and we will begin at once. Thank you, [advisor], OFJ Automotive",
+    "Dear [name], your quotation for your [make model] ([plate]) is ready. Please review it and approve the work you would like us to do:\n[link]\nThank you, [advisor], OFJ Automotive",
   whatsapp_estimate_template:
-    "Dear [name], here is our estimate for your [make model] ([plate]): [link]. The final price is confirmed once the vehicle is with us. Thank you, [advisor], OFJ Automotive",
+    "Dear [name], our estimate for your [make model] ([plate]) is ready. The final price is confirmed once the vehicle is with us:\n[link]\nThank you, [advisor], OFJ Automotive",
   whatsapp_report_template:
-    "Dear [name], the inspection of your [make model] ([plate]) is complete. Please review the report with our findings and photos: [link]. Thank you, [advisor], OFJ Automotive",
+    "Dear [name], the inspection of your [make model] ([plate]) is complete. Please review the report with our findings and photos:\n[link]\nThank you, [advisor], OFJ Automotive",
   inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],
   appointment_reminder_hours_before: 1,
   appointment_evening_reminder_hour: 18,
@@ -68,7 +73,7 @@ const DEFAULTS = {
   whatsapp_reminder_template:
     "Dear [name], a reminder of your appointment at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
   whatsapp_approval_template:
-    "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection: [link]. Thank you, [advisor], OFJ Automotive",
+    "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection:\n[link]\nThank you, [advisor], OFJ Automotive",
 };
 
 export type Settings = typeof DEFAULTS;

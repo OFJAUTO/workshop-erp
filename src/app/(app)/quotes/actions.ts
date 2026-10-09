@@ -24,7 +24,7 @@ function refresh(jobId: string | null, quotationId?: string) {
   revalidatePath("/parts");
 }
 
-/** The owner, or an advisor who is this job's advisor. */
+/** The owner, or an advisor who is this job's advisor (or made the estimate). */
 async function mayEdit(jobId: string | null, createdBy: string | null) {
   const staff = await getCurrentStaff();
   if (!staff || staff.viewingAs) return null;
@@ -45,7 +45,7 @@ async function mayEdit(jobId: string | null, createdBy: string | null) {
 async function syncPartLines(quotationId: string, jobId: string, by: string, minMarkup: number) {
   const admin = createAdminClient();
   const [{ data: parts }, { data: lines }] = await Promise.all([
-    admin.from("part_items").select(PART_SELECT).eq("job_id", jobId).eq("is_active", true).neq("confirm_status", "rejected").order("created_at"),
+    admin.from("part_items").select(PART_SELECT).eq("job_id", jobId).eq("is_active", true).neq("confirm_status", "rejected").eq("order_status", "none").order("created_at"),
     admin.from("quotation_lines").select("id, part_item_id, position").eq("quotation_id", quotationId).eq("is_active", true),
   ]);
   const have = new Set((lines ?? []).map((l) => l.part_item_id).filter(Boolean));
@@ -71,6 +71,8 @@ async function syncPartLines(quotationId: string, jobId: string, by: string, min
   if (rows.length) await admin.from("quotation_lines").insert(rows);
 }
 
+const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer, urgency: l.urgency, advisor_added: l.advisor_added });
+
 /** "Start quotation": suggested lines from the approved report (or the estimate), one part line per listed part. */
 export async function startQuotation(jobId: string) {
   const admin = createAdminClient();
@@ -81,7 +83,7 @@ export async function startQuotation(jobId: string) {
   if (!staff) err("Only the job's advisor or the owner can start the quotation.");
   const bundle = await loadInspection(jobId);
   if (staff!.role_id !== "owner" && (!bundle || bundle.inspection.status !== "approved")) err("The quotation opens once the workshop manager has approved the inspection report.");
-  const { data: existing } = await admin.from("quotations").select("id, status").eq("job_id", jobId).eq("is_active", true).in("status", ["draft", "pending_owner", "sent", "opened"]).limit(1).maybeSingle();
+  const { data: existing } = await admin.from("quotations").select("id, status").eq("job_id", jobId).eq("is_active", true).in("status", ["draft", "pending_owner", "sent", "opened", "urgent_requested"]).limit(1).maybeSingle();
   if (existing) redirect(`/jobs/${jobId}/quote/${existing.id}`);
 
   const settings = await getSettings();
@@ -99,7 +101,7 @@ export async function startQuotation(jobId: string) {
   let lines: Record<string, unknown>[] = [];
   if (job!.estimate_id) {
     const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", job!.estimate_id).eq("is_active", true).order("position");
-    lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).map((l) => ({ quotation_id: created!.id, position: l.position, line_type: l.line_type, title: l.title, details: l.details, group_label: l.group_label, source_type: "estimate", source_key: l.id, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, package_id: l.package_id, created_by: staff!.id, updated_by: staff!.id }));
+    lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).map((l) => ({ quotation_id: created!.id, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: staff!.id, updated_by: staff!.id }));
   } else {
     lines = (await suggestedLines(jobId, rate)).map((l) => ({ ...l, quotation_id: created!.id, created_by: staff!.id, updated_by: staff!.id }));
   }
@@ -131,29 +133,43 @@ export async function newQuotation(jobId: string) {
   redirect(`/jobs/${jobId}/quote/${created.id}`);
 }
 
-/** A new version of a sent or answered quotation. The old one is kept as replaced. */
-export async function reviseQuotation(quotationId: string) {
+/** A new version with the same lines, or with the urgent lines only; the old version is kept as replaced. */
+async function makeVersion(quotationId: string, urgentOnly: boolean) {
   const bundle = await loadQuotation(quotationId);
   if (!bundle) redirect("/dashboard");
   const q = bundle.quotation;
   const staff = await mayEdit(q.job_id, q.created_by);
   const back = q.kind === "estimate" ? `/estimates/${quotationId}` : `/jobs/${q.job_id}/quote/${quotationId}`;
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
-  if (!["sent", "opened", "expired", "declined", "partly_approved", "approved", "pending_owner"].includes(q.status)) redirect(back);
+  if (!["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"].includes(q.status)) redirect(back);
   const admin = createAdminClient();
   const { data: created, error } = await admin
     .from("quotations")
-    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, created_by: staff.id, updated_by: staff.id })
+    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, created_by: staff.id, updated_by: staff.id })
     .select("id")
     .single();
   if (error || !created) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not revise.")}`);
-  const rows = bundle.lines.map((l) => ({ quotation_id: created.id, position: l.position, line_type: l.line_type, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, created_by: staff.id, updated_by: staff.id }));
+  const keep = urgentOnly ? bundle.lines.filter((l) => l.urgency === "urgent" || !l.visible_to_customer) : bundle.lines;
+  const left = urgentOnly ? bundle.lines.filter((l) => l.urgency !== "urgent" && l.visible_to_customer) : [];
+  const rows = keep.map((l) => ({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), created_by: staff.id, updated_by: staff.id }));
   if (rows.length) await admin.from("quotation_lines").insert(rows);
-  if (["sent", "opened", "expired", "pending_owner"].includes(q.status)) await admin.from("quotations").update({ status: "superseded", updated_by: staff.id }).eq("id", q.id);
+  if (left.length && q.kind === "quotation") {
+    await admin.from("declined_work").insert(left.map((l) => ({ vehicle_id: q.vehicle_id, customer_id: q.customer_id, job_id: q.job_id, quotation_id: q.id, title: l.title, details: `${l.group_label ?? ""}${l.group_label ? " · " : ""}left out of the urgent-only quotation`, amount_aed: l.line_total, declined_at: new Date().toISOString(), created_by: staff.id, updated_by: staff.id })));
+  }
+  if (["sent", "opened", "expired", "pending_owner", "urgent_requested"].includes(q.status)) await admin.from("quotations").update({ status: "superseded", updated_by: staff.id }).eq("id", q.id);
   await refreshQuoteTotals(created.id, await getSettings(), staff.id);
-  await logQuoteEvent(created.id, q.job_id, staff.id, "quote_revised", `${q.number} version ${q.version + 1} started by ${staff.display_name}`);
+  await logQuoteEvent(created.id, q.job_id, staff.id, urgentOnly ? "quote_urgent_version" : "quote_revised", `${q.number} version ${q.version + 1} started by ${staff.display_name}${urgentOnly ? ` with the urgent work only (${keep.length} line${keep.length === 1 ? "" : "s"}; ${left.length} left out and kept as declined work)` : ""}`);
   refresh(q.job_id, created.id);
   redirect(q.kind === "estimate" ? `/estimates/${created.id}` : `/jobs/${q.job_id}/quote/${created.id}`);
+}
+
+export async function reviseQuotation(quotationId: string) {
+  await makeVersion(quotationId, false);
+}
+
+/** "Create urgent-only version": the Urgent lines carry over; the rest is saved against the car as declined work. */
+export async function urgentOnlyVersion(quotationId: string) {
+  await makeVersion(quotationId, true);
 }
 
 export type SendQuoteState = { error?: string; ok?: boolean; token?: string; pendingOwner?: string[] };
@@ -171,7 +187,7 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   if (q.status !== "draft" && q.status !== "pending_owner") return { error: `This quotation is ${q.status.replace("_", " ")}. Revise it to send a new version.` };
   const settings = await getSettings();
   const minMarkup = minMarkupFor(settings, bundle.vehicle?.make?.name ?? null);
-  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: () => minMarkup });
+  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup });
   if (blockers.length) return { error: blockers.map((b) => b.label).join(" · ") };
   const totals = quoteTotals(bundle.lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const reasons = ownerApprovalReasons(q, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 });
@@ -187,7 +203,8 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   }
   const token = q.token ?? quoteToken();
   const validUntil = new Date(Date.now() + (Number(q.validity_days) || 7) * 86400000).toISOString();
-  const patch: Record<string, unknown> = { token, valid_until: validUntil, status: "draft", updated_by: staff.id };
+  // The link goes to the customer on file; that name and number stay with the answer.
+  const patch: Record<string, unknown> = { token, valid_until: validUntil, status: "draft", sent_to_name: bundle.customer?.company_name ?? bundle.customer?.full_name ?? null, sent_to_phone: bundle.customer?.phone ?? null, updated_by: staff.id };
   if (reasons.length && staff.role_id === "owner") Object.assign(patch, { owner_approved_by: staff.id, owner_approved_at: new Date().toISOString(), owner_approval_reason: reasons.join("; ") });
   const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
   if (error) return { error: error.message };
@@ -248,14 +265,14 @@ export async function confirmEstimateUnchanged(quotationId: string) {
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
   if (!q.estimate_id || q.status !== "draft") redirect(back);
   const admin = createAdminClient();
-  const { data: est } = await admin.from("quotations").select("status, approver_name, approver_phone, total_aed").eq("id", q.estimate_id).maybeSingle();
+  const { data: est } = await admin.from("quotations").select("status, approver_name, sent_to_phone").eq("id", q.estimate_id).maybeSingle();
   if (!est || est.status !== "approved") redirect(`${back}?error=${encodeURIComponent("The estimate was not accepted by the customer.")}`);
   const settings = await getSettings();
-  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: () => minMarkupFor(settings, bundle.vehicle?.make?.name ?? null) });
+  const blockers = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null) });
   if (blockers.length) redirect(`${back}?error=${encodeURIComponent(blockers.map((b) => b.label).join(" · "))}`);
-  await admin.from("quotations").update({ token: q.token ?? quoteToken(), updated_by: staff.id }).eq("id", q.id);
+  await admin.from("quotations").update({ token: q.token ?? quoteToken(), sent_to_phone: est.sent_to_phone ?? bundle.customer?.phone ?? null, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_confirmed_from_estimate", `${q.number} confirmed by ${staff.display_name} as unchanged from the accepted estimate`);
-  const res = await applyCustomerResponse(q.id, { approvedLineIds: "all", declineAll: false, name: est.approver_name ?? "Customer", phone: est.approver_phone, by: staff.id, via: "estimate" });
+  const res = await applyCustomerResponse(q.id, { approve: true, name: est.approver_name ?? "Customer", by: staff.id, via: "estimate" });
   refresh(q.job_id, q.id);
   redirect(`${back}?${res.error ? `error=${encodeURIComponent(res.error)}` : `message=${encodeURIComponent("Confirmed. The estimate's acceptance counts as the customer's approval.")}`}`);
 }

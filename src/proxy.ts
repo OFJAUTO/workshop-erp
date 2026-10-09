@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DEFAULT_SESSION_HOURS, LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions } from "@/lib/session";
 
 /** Pages anyone may open without being logged in. */
-const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet", "/api/media", "/api/approve", "/api/cron", "/u", "/approve", "/terms", "/report", "/quote", "/api/quote"];
+const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet", "/api/media", "/api/approve", "/api/cron", "/u", "/approve", "/terms", "/report", "/quote", "/api/quote", "/api/pdf"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));

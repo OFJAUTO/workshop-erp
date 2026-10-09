@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { normalisePhone } from "@/lib/format";
-import { applyCustomerResponse } from "@/lib/quote-respond";
+import { applyCustomerResponse, requestUrgentOnly } from "@/lib/quote-respond";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-/** The customer's answer from the quotation page: approve the ticked lines, or decline everything. */
+/** The customer's answer from the quotation page: approve everything, ask for urgent work only, or decline. */
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const form = await request.formData();
@@ -11,7 +10,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   const back = (message?: string) => NextResponse.redirect(`${origin}/quote/${token}${message ? `?error=${encodeURIComponent(message)}` : ""}`, { status: 303 });
   const action = String(form.get("action") ?? "approve");
   const name = String(form.get("approver_name") ?? "").trim();
-  const phone = String(form.get("approver_phone") ?? "").trim();
+  const note = String(form.get("note") ?? "").trim().slice(0, 500) || null;
   const agree = form.get("agree") === "on";
 
   const admin = createAdminClient();
@@ -22,9 +21,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   if (name.length < 2) return back("Please type your full name.");
   if (action === "approve" && !agree) return back("Please tick the box to agree to the terms and conditions.");
 
-  const approved = Array.from(form.keys()).filter((k) => k.startsWith("line_")).map((k) => k.slice(5));
-  if (action === "approve" && approved.length === 0) return back("Choose at least one line to approve, or use Decline all.");
-  const res = await applyCustomerResponse(q.id, { approvedLineIds: action === "decline" ? [] : approved, declineAll: action === "decline", name, phone: phone ? normalisePhone(phone) : null, via: "customer" });
+  const res = action === "urgent" ? await requestUrgentOnly(q.id, { name, note }) : await applyCustomerResponse(q.id, { approve: action === "approve", name, via: "customer" });
   if (res.error) return back(res.error);
   return back();
 }

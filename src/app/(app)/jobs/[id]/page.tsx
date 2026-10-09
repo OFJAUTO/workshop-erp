@@ -129,6 +129,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   });
   const canQuote = (role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)))) && job.is_open && !staff.viewingAs;
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
+  // The quotation exists only for the owner and the job's advisor; nobody else sees the card or a link to it.
+  const seesQuote = role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)));
   const quoteOpenStatuses = ["draft", "pending_owner", "sent", "opened"];
   const pendingParts = partItems.filter((p) => p.confirm_status === "pending");
   const diagramUrls = managesThisJob && pendingParts.length ? await signPaths(PARTS_BUCKET, pendingParts.map((p) => p.diagram_path).filter((x): x is string => !!x)) : {};
@@ -308,13 +310,14 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
           {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
         </Card>
+        {seesQuote ? (
         <Card id="quotation" className={`flex flex-col gap-2 ${qState.tone === "green" ? "border-green" : qState.tone === "amber" ? "border-amber-bar" : qState.tone === "red" ? "border-red-bar" : "border-line"} ${job.stage === "quote" || job.stage === "approval" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Quotation</span>
           <span className="text-sm font-semibold">{qState.text}</span>
           {latestQuote ? (
             <span className="text-xs text-muted">
               {latestQuote.number} v{latestQuote.version}
-              {seesPrices ? ` · ${aed(latestQuote.status === "approved" || latestQuote.status === "partly_approved" ? latestQuote.approved_total_aed : latestQuote.total_aed)}` : ""}
+              {` · ${aed(latestQuote.status === "approved" ? latestQuote.approved_total_aed : latestQuote.total_aed)}`}
               {latestQuote.sent_at ? ` · sent ${formatDayTime(latestQuote.sent_at)}` : ""}
               {latestQuote.opened_at ? ` · opened ${formatDayTime(latestQuote.opened_at)}` : ""}
               {latestQuote.responded_at ? ` · ${latestQuote.approver_name} ${formatDayTime(latestQuote.responded_at)}` : ""}
@@ -326,7 +329,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <Button type="submit" size="md">Start quotation</Button>
               </form>
             ) : null}
-            {latestQuote && (seesPrices || role === "workshop_manager") ? (
+            {latestQuote ? (
               <LinkButton href={`/jobs/${id}/quote/${latestQuote.id}`} tone={quoteOpenStatuses.includes(latestQuote.status) && canQuote ? "primary" : "secondary"} size="md">
                 {quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (qState.key === "ready" ? "Send quotation" : "Open quotation") : "Open quotation"}
               </LinkButton>
@@ -338,6 +341,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             ) : null}
           </div>
         </Card>
+        ) : null}
         <Card className={`flex flex-col gap-2 ${partItems.length ? "" : "bg-canvas opacity-70"} ${job.stage === "parts" ? "ring-2 ring-ink" : ""}`}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Parts</span>
           <span className="text-sm font-semibold">

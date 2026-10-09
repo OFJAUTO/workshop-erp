@@ -2,15 +2,16 @@ import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle } from "./inspection-data";
 import { TYRE_POSITIONS } from "./inspection";
-import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary } from "./quotes";
+import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
 import type { Settings } from "./settings";
 import { newToken } from "./media";
 
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, line_total, part_item_id, package_id, customer_approved, is_active";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, created_at, created_by, updated_at";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active";
+export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, description, parts_requests, position, is_active";
 export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at";
 
@@ -42,9 +43,25 @@ export type QuoteBundle = {
   vehicle: { id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   job: { id: string; job_number: string; status: string; department: string | null; assigned_to: string | null; gated_in_by: string; is_open: boolean; inspection_fee_due: boolean } | null;
   inspection: InspectionBundle | null;
-  packages: { id: string; name: string; department: string; price_aed: number; description: string | null }[];
   creatorName: string | null;
 };
+
+/** The owner's services list with its categories, and how often this person used each service (most used first on the picker). */
+export async function loadServices(staffId: string | null): Promise<{ categories: ServiceCategory[]; services: Service[]; usage: Record<string, number> }> {
+  const admin = createAdminClient();
+  const [{ data: cats }, { data: svcs }, { data: used }] = await Promise.all([
+    admin.from("service_categories").select("id, name, position, is_active").eq("is_active", true).order("position"),
+    admin.from("services").select(SERVICE_SELECT).eq("is_active", true).order("position"),
+    staffId ? admin.from("quotation_lines").select("service_id").eq("created_by", staffId).not("service_id", "is", null) : Promise.resolve({ data: [] as { service_id: string | null }[] }),
+  ]);
+  const usage: Record<string, number> = {};
+  for (const u of used ?? []) if (u.service_id) usage[u.service_id] = (usage[u.service_id] ?? 0) + 1;
+  return {
+    categories: (cats ?? []) as ServiceCategory[],
+    services: ((svcs ?? []) as (Service & { price_aed: number | string | null; default_hours: number | string | null })[]).map((s) => ({ ...s, price_aed: s.price_aed === null ? null : Number(s.price_aed), default_hours: s.default_hours === null ? null : Number(s.default_hours) })),
+    usage,
+  };
+}
 
 /** One quotation or estimate with everything the builder and the customer page need. */
 export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
@@ -52,7 +69,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
   const { data: q } = await admin.from("quotations").select(QUOTE_SELECT).eq("id", id).maybeSingle();
   if (!q) return null;
   const quotation = toQuote(q as Record<string, unknown>);
-  const [{ data: lines }, { data: parts }, { data: requests }, { data: events }, { data: versions }, { data: customer }, { data: vehicle }, { data: job }, { data: packages }, inspection, { data: creator }] = await Promise.all([
+  const [{ data: lines }, { data: parts }, { data: requests }, { data: events }, { data: versions }, { data: customer }, { data: vehicle }, { data: job }, inspection, { data: creator }] = await Promise.all([
     admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", id).eq("is_active", true).order("position"),
     quotation.job_id ? admin.from("part_items").select(PART_SELECT).eq("job_id", quotation.job_id).eq("is_active", true).order("created_at") : Promise.resolve({ data: [] }),
     quotation.job_id ? admin.from("part_requests").select(REQUEST_SELECT).eq("job_id", quotation.job_id).eq("is_active", true).order("created_at") : Promise.resolve({ data: [] }),
@@ -61,7 +78,6 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     admin.from("customers").select("id, full_name, company_name, phone").eq("id", quotation.customer_id).maybeSingle(),
     quotation.vehicle_id ? admin.from("vehicles").select("id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
-    admin.from("packages").select("id, name, department, price_aed, description").eq("is_active", true).order("name"),
     quotation.job_id ? loadInspection(quotation.job_id) : Promise.resolve(null),
     quotation.created_by ? admin.from("staff").select("display_name").eq("id", quotation.created_by).maybeSingle() : Promise.resolve({ data: null }),
   ]);
@@ -80,7 +96,6 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     vehicle: (vehicle as unknown as QuoteBundle["vehicle"]) ?? null,
     job: (job as QuoteBundle["job"]) ?? null,
     inspection,
-    packages: ((packages ?? []) as { id: string; name: string; department: string; price_aed: number | string; description: string | null }[]).map((p) => ({ ...p, price_aed: Number(p.price_aed) })),
     creatorName: (creator as { display_name: string } | null)?.display_name ?? null,
   };
 }
@@ -89,7 +104,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
 export async function loadQuoteSummary(jobId: string): Promise<QuoteSummary> {
   const admin = createAdminClient();
   const [{ data: q }, { data: parts }, { data: requests }] = await Promise.all([
-    admin.from("quotations").select("id, number, version, status, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at").eq("job_id", jobId).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    admin.from("quotations").select("id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at").eq("job_id", jobId).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }).limit(1).maybeSingle(),
     admin.from("part_items").select("id, cost_aed, confirm_status").eq("job_id", jobId).eq("is_active", true),
     admin.from("part_requests").select("id, status").eq("job_id", jobId).eq("is_active", true),
   ]);
@@ -109,7 +124,7 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
   if (!jobIds.length) return out;
   const admin = createAdminClient();
   const [{ data: qs }, { data: parts }, { data: requests }] = await Promise.all([
-    admin.from("quotations").select("id, job_id, number, version, status, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
+    admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
     admin.from("part_items").select("job_id, cost_aed, confirm_status").in("job_id", jobIds).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", jobIds).eq("is_active", true),
   ]);
@@ -181,7 +196,7 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
   const { data: reqs } = await admin.from("job_requests").select("id, text, position").eq("job_id", jobId).eq("is_active", true).order("position");
   const out: Omit<QuoteLine, "id" | "quotation_id" | "is_active">[] = [];
   let position = 0;
-  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, line_total: 0, part_item_id: null, package_id: null, customer_approved: null };
+  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null };
   for (const r of reqs ?? []) {
     const f = bundle.findings.find((x) => x.job_request_id === r.id);
     if (!f || !(f.status === "bad" || f.status === "average")) continue;
@@ -215,7 +230,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
     const t = lineTotal(l);
     if (round2(l.line_total) !== t) await admin.from("quotation_lines").update({ line_total: t, updated_by: by || null }).eq("id", l.id);
   }
-  const responded = q.status === "approved" || q.status === "partly_approved";
+  const responded = q.status === "approved";
   const totals = quoteTotals(ls, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 }, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, updated_by: by || null };
   if (responded) patch.approved_total_aed = quoteTotals(ls, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 }, { onlyApproved: true }).total;

@@ -48,6 +48,9 @@ export default async function SettingsPage() {
         subtitle="Changes apply immediately, without a rebuild. Every change is logged."
         actions={
           <>
+            <LinkButton href="/settings/services" tone="secondary">
+              Services
+            </LinkButton>
             <LinkButton href="/settings/inspection" tone="secondary">
               Inspection checklist
             </LinkButton>
