@@ -5,14 +5,20 @@ import sharp from "sharp";
 
 let logoCache: Buffer | null = null;
 
-/** The company logo from the public folder, for the header of every PDF. */
+/** The company logo from docs/ofj-logo.svg (served as /logo.svg), drawn sharp at print size for the header of every PDF. */
 export async function loadLogo(): Promise<Buffer | null> {
   if (logoCache) return logoCache;
   try {
-    logoCache = await fs.readFile(path.join(process.cwd(), "public", "logo.jpg"));
+    const svg = await fs.readFile(path.join(process.cwd(), "public", "logo.svg"));
+    logoCache = await sharp(svg, { density: 300 }).resize({ height: 480, fit: "inside" }).png().toBuffer();
     return logoCache;
   } catch {
-    return null;
+    try {
+      logoCache = await fs.readFile(path.join(process.cwd(), "public", "logo.jpg"));
+      return logoCache;
+    } catch {
+      return null;
+    }
   }
 }
 

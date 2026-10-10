@@ -259,6 +259,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
   updates.push({ key: "wash_board_show_times", value: formData.get("wash_board_show_times") === "on" });
   updates.push({ key: "wash_board_done_button", value: formData.get("wash_board_done_button") === "on" });
+  updates.push({ key: "test_mode_enabled", value: formData.get("test_mode_enabled") === "on" });
   for (const key of ["notification_tone", "notification_tone_owner"] as const) {
     const t = String(formData.get(key) ?? "");
     if (!isTone(t)) return { error: "Choose the notification sounds.", values };

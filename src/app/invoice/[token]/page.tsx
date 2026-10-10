@@ -35,12 +35,13 @@ export default async function CustomerInvoicePage({ params }: { params: Promise<
   let n = 0;
   const rowOf = (l: (typeof lines)[number]): DocRow => {
     n++;
-    return { n, description: l.description, details: [l.part_number, l.hours === null ? l.details : null].filter(Boolean).join(" · ") || null, qty: l.hours !== null ? `${l.hours.toFixed(1)} h` : String(l.quantity), rate: money(l.unit_price), amount: l.amount_aed === 0 ? "Complimentary" : money(l.amount_aed) };
+    return { n, description: l.description, details: [l.part_number, l.hours === null ? l.details : null].filter(Boolean).join(" · ") || null, qty: l.hours !== null ? `${l.hours.toFixed(1)} h` : String(l.quantity), rate: money(l.unit_price), amount: l.amount_aed === 0 ? "Complimentary" : money(l.amount_aed), amountNum: l.amount_aed };
   };
   const services = lines.filter((l) => l.section === "services").map(rowOf);
   const parts = lines.filter((l) => l.section === "parts").map(rowOf);
   const fees = lines.filter((l) => l.section === "fees").map(rowOf);
   const paid = invoice.kind === "tax_invoice" && bal.state === "paid";
+  const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
   const due = invoice.kind === "tax_invoice" && !paid;
 
   return (
@@ -54,37 +55,29 @@ export default async function CustomerInvoicePage({ params }: { params: Promise<
         ...(bundle.preparedByName ? [{ label: "Advisor", value: bundle.preparedByName }] : []),
       ]}
       boxes={[
-        { title: "Customer", strong: invoice.customer_snapshot?.company_name ?? customer?.company_name ?? invoice.customer_snapshot?.full_name ?? customer?.full_name ?? "Customer", rows: [["Name", invoice.customer_snapshot?.company_name ? invoice.customer_snapshot?.full_name : null], ["Mobile", invoice.customer_snapshot?.phone ?? customer?.phone ?? null], ["TRN", invoice.customer_snapshot?.trn ?? customer?.trn ?? null]] },
-        { title: "Vehicle", strong: invoice.vehicle_snapshot?.title ?? car ?? "Vehicle", rows: [["Variant", invoice.vehicle_snapshot?.variant ?? vehicle?.variant ?? null], ["Plate", invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null)], ["VIN", invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null]] },
+        { title: "Billed to", strong: invoice.customer_snapshot?.company_name ?? customer?.company_name ?? invoice.customer_snapshot?.full_name ?? customer?.full_name ?? "Customer", rows: [["", invoice.customer_snapshot?.company_name ? invoice.customer_snapshot?.full_name : null], ["", [invoice.customer_snapshot?.phone ?? customer?.phone, invoice.customer_snapshot?.email ?? customer?.email].filter(Boolean).join(" · ") || null]], muted: [(invoice.customer_snapshot?.trn ?? customer?.trn) ? `TRN ${invoice.customer_snapshot?.trn ?? customer?.trn}` : null] },
+        { title: "Vehicle", strong: [invoice.vehicle_snapshot?.title ?? car ?? "Vehicle", invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null)].filter(Boolean).join(" · "), rows: [["", invoice.vehicle_snapshot?.variant ?? vehicle?.variant ?? null], ["VIN", invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null]] },
       ]}
       pdfHref={`/api/pdf/invoice/${token}`}
+      preparedBy={bundle.issuedByName ?? bundle.preparedByName}
       bar={due && invoice.payment_link_url ? <a href={invoice.payment_link_url} target="_blank" rel="noreferrer" className="flex min-h-14 w-full items-center justify-center rounded-control bg-ink text-base font-extrabold text-white">Pay now · {aed(bal.balance)}</a> : null}
       footer={<>{company.legalName} · TRN {company.trn}. Prices in dirhams; VAT at 5% shown separately.</>}
     >
-      {paid ? (
-        <div className="rounded-card border-2 border-ink p-4 text-center">
-          <div className="text-xl font-extrabold">Paid, thank you</div>
-          <div className="text-sm">Final payment received {bal.paidAt ? formatDate(bal.paidAt) : ""}.</div>
-        </div>
-      ) : due ? (
-        <div className="rounded-card border-2 border-ink p-4 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[11px] font-extrabold uppercase tracking-[0.14em]">{bal.state === "cheque_pending" ? "Cheque pending clearance" : bal.state === "part_paid" ? "Balance due" : "Amount due"}</span>
-          <span className="text-2xl font-extrabold">{aed(bal.balance)}</span>
-        </div>
-      ) : null}
-      {services.length ? <DocSection title="Services"><DocLines rows={services} /></DocSection> : null}
-      {parts.length ? <DocSection title="Spare parts"><DocLines rows={parts} /></DocSection> : null}
-      {fees.length ? <DocSection title="Fees"><DocLines rows={fees} /></DocSection> : null}
+      {paid ? <div className="rounded-lg border-2 border-[#111113] p-3 text-center text-lg font-extrabold">Paid, thank you</div> : null}
+      {services.length || fees.length ? <DocLines title="Services" rows={[...services, ...fees]} discount={invoice.discount_aed ? { label: "Discount on labour and services", amount: invoice.discount_aed } : null} subtotalLabel="Services subtotal" /> : null}
+      {parts.length ? <DocLines title="Spare parts" rows={parts} subtotalLabel="Spare parts subtotal" /> : null}
       <DocTotals
         rows={[
           { label: "Gross amount", value: money(invoice.subtotal_aed) },
           ...(invoice.discount_aed ? [{ label: "Discount", value: `− ${money(invoice.discount_aed)}`, bold: true }] : []),
           ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: `− ${money(invoice.warranty_credit_aed)}`, bold: true }] : []),
+          ...(rounding ? [{ label: "Rounding", value: `${rounding < 0 ? "− " : ""}${money(Math.abs(rounding))}` }] : []),
           { label: "Taxable amount", value: money(invoice.taxable_aed) },
           { label: "VAT 5%", value: money(invoice.vat_aed) },
         ]}
-        total={{ label: "Total", value: aed(invoice.total_aed) }}
-        after={invoice.kind === "tax_invoice" ? [{ label: "Paid", value: money(bal.paid) }, { label: paid ? "Balance" : "Balance due", value: money(bal.balance), bold: true }] : []}
+        total={{ label: "Total AED", value: money(invoice.total_aed) }}
+        after={invoice.kind === "tax_invoice" && bal.paid ? [{ label: "Paid", value: `− ${money(bal.paid)}` }] : []}
+        box={invoice.kind === "tax_invoice" ? (paid ? { label: "Paid in full", value: null, note: bal.paidAt ? `Final payment received ${formatDate(bal.paidAt)}` : null } : { label: bal.state === "cheque_pending" ? "Cheque pending" : "Balance due", value: aed(bal.balance) }) : null}
       />
       {live.length ? (
         <DocSection title="Payments received">

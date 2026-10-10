@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
-import { PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, loadInvoice, nextDocumentNumber, toPayment, type InvoiceKind, type LabourMode } from "@/lib/invoice-data";
+import { PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, loadInvoice, nextDocumentNumber, toPayment, type InvoiceKind } from "@/lib/invoice-data";
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -47,16 +47,6 @@ export async function markReadyToInvoice(jobId: string) {
   redirect(`/jobs/${jobId}?message=${encodeURIComponent("Accounts have been told to issue the invoice.")}`);
 }
 
-function readOptions(formData: FormData) {
-  const labourMode: LabourMode = String(formData.get("labour_mode") ?? "itemised") === "combined" ? "combined" : "itemised";
-  const consumables = formData.get("consumables") === "on" ? Number(String(formData.get("consumables_aed") ?? "").replace(/[^\d.]/g, "")) || 0 : 0;
-  const agreedText = String(formData.get("agreed_total") ?? "").replace(/[^\d.]/g, "");
-  const agreedTotal = agreedText ? Number(agreedText) : null;
-  const discountText = String(formData.get("discount_percent") ?? "").trim();
-  const discountPercent = discountText === "" ? null : Math.max(0, Number(discountText) || 0);
-  return { labourMode, consumables, agreedTotal, discountPercent };
-}
-
 /** Accounts issue the tax invoice (or a proforma) from the approved quotations. Prices come from the quotation and cannot change. */
 export async function issueInvoice(jobId: string, formData: FormData) {
   const staff = await requirePermission("issueInvoices");
@@ -68,10 +58,8 @@ export async function issueInvoice(jobId: string, formData: FormData) {
   if (!job || !job.is_open) redirect(`${back}?error=${encodeURIComponent("This job is closed.")}`);
   const { data: existing } = await admin.from("invoices").select("id, number").eq("job_id", jobId).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).maybeSingle();
   if (kind === "tax_invoice" && existing) redirect(`/invoices/${existing.id}?error=${encodeURIComponent(`${existing.number} is already issued for this job. Corrections are by credit note.`)}`);
-  const opts = readOptions(formData);
-  const draft = await buildInvoiceDraft(jobId, settings, opts);
+  const draft = await buildInvoiceDraft(jobId, settings);
   if (!draft.lines.length) redirect(`${back}?error=${encodeURIComponent("Nothing to invoice: no approved quotation and no inspection fee.")}`);
-  if (opts.agreedTotal && draft.totals.agreedTotalProblem) redirect(`${back}?error=${encodeURIComponent(draft.totals.agreedTotalProblem)}`);
   const [{ data: customer }, { data: vehicle }] = await Promise.all([
     admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", job.customer_id).maybeSingle(),
     admin.from("vehicles").select("has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", job.vehicle_id).maybeSingle(),
@@ -88,15 +76,15 @@ export async function issueInvoice(jobId: string, formData: FormData) {
       customer_id: job.customer_id,
       vehicle_id: job.vehicle_id,
       token,
-      labour_mode: opts.labourMode,
+      labour_mode: "itemised",
       subtotal_aed: draft.totals.gross,
       discount_aed: draft.totals.discount,
       taxable_aed: draft.totals.taxable,
       vat_aed: draft.totals.vat,
       total_aed: draft.totals.total,
-      agreed_total_aed: draft.totals.agreedTotalApplied ? opts.agreedTotal : null,
+      agreed_total_aed: null,
       warranty_credit_aed: draft.totals.warrantyCredit,
-      discount_note: draft.totals.warrantyCredit ? "Warranty repair, no charge" : draft.totals.discount ? `${draft.totals.discountPercent}% on labour and services${draft.totals.agreedTotalApplied ? " (agreed total)" : ""}` : null,
+      discount_note: draft.totals.warrantyCredit ? "Warranty repair, no charge" : draft.totals.discount ? `${draft.totals.discountPercent}% on labour and services, as approved on the quotation` : null,
       prepared_by: job.gated_in_by,
       issued_by: staff.id,
       notes: blankToNull(formData.get("notes")),

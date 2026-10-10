@@ -40,6 +40,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   const pendingOwner = payments.filter((p) => p.status === "pending_owner");
   const isTax = invoice.kind === "tax_invoice";
+  const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
 
   return (
     <>
@@ -162,6 +163,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <dt className="text-muted">Gross amount</dt><dd className="text-right">AED {m(invoice.subtotal_aed)}</dd>
               {invoice.discount_aed ? <><dt className="font-bold">Discount{invoice.discount_note ? ` (${invoice.discount_note})` : ""}</dt><dd className="text-right font-bold">− AED {m(invoice.discount_aed)}</dd></> : null}
               {invoice.warranty_credit_aed ? <><dt className="font-bold">Warranty repair, no charge</dt><dd className="text-right font-bold">− AED {m(invoice.warranty_credit_aed)}</dd></> : null}
+              {rounding ? <><dt className="text-muted">Rounding, as quoted</dt><dd className="text-right">{rounding < 0 ? "− " : ""}AED {m(Math.abs(rounding))}</dd></> : null}
               <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(invoice.taxable_aed)}</dd>
               <dt className="text-muted">VAT</dt><dd className="text-right">AED {m(invoice.vat_aed)}</dd>
               <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(invoice.total_aed)}</dd>

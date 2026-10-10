@@ -499,6 +499,7 @@ export function SettingsForm({
               </Field>
             </div>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_show_times" defaultChecked={!!flags.wash_board_show_times} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board shows the needed-by date</span><span className="text-xs text-muted">The promised date on each tile of the wash board.</span></span></label>
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="test_mode_enabled" defaultChecked={flags.test_mode_enabled !== false} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Testing phase</span><span className="text-xs text-muted">Shows the owner&apos;s &quot;Clear test data&quot; button on this page. Switch off at go-live.</span></span></label>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_done_button" defaultChecked={!!flags.wash_board_done_button} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board has a Done button</span><span className="text-xs text-muted">Not built yet: for now the advisor marks the wash done. The switch is kept for later.</span></span></label>
           </Card>
 

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OFJ tax invoice, design reference</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#E9E9EC}
+table{border-collapse:collapse;width:100%}
+th,td{padding:0}
+@page{size:A4;margin:0}
+</style>
+</head>
+<body>
+<!-- Design reference for all OFJ documents. Sample lines and prices only. A4 at 96 dpi (794 x 1123 px). -->
+<div style="width: 794px; height: 1123px; box-sizing: border-box; background: #FFFFFF; color: #111113; font-family: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif; font-size: 12px; line-height: 1.4; display: flex; flex-direction: column">
+
+<header style="background: #FFFFFF; color: #111113; margin: 0 44px; padding: 30px 0 18px; border-bottom: 3px solid #111113; display: flex; justify-content: space-between; align-items: center; gap: 24px">
+<svg role="img" aria-label="OFJ Automotive" style="height: 80px; width: auto; display: block" xmlns="http://www.w3.org/2000/svg" viewBox="165 352.5 264 136.5">
+<path fill-rule="evenodd" fill="rgb(91.372681%, 91.215515%, 91.255188%)" fill-opacity="1" d="M 281.554688 487.140625 C 281.453125 487.75 281.347656 488.066406 281.238281 488.066406 C 281.132812 488.066406 281.027344 487.746094 280.925781 487.140625 Z M 281.554688 487.140625 "/>
+<path fill-rule="evenodd" fill="rgb(65.492249%, 64.863586%, 65.019226%)" fill-opacity="1" d="M 207.441406 476.523438 L 207.441406 481.5625 C 194.101562 480.722656 180.761719 479.882812 167.421875 479.042969 C 180.761719 478.203125 194.101562 477.363281 207.441406 476.523438 "/>
+<path fill-rule="evenodd" fill="rgb(65.492249%, 64.863586%, 65.019226%)" fill-opacity="1" d="M 386.707031 476.523438 L 386.707031 481.5625 L 426.726562 479.042969 Z M 386.707031 476.523438 "/>
+<path fill-rule="evenodd" fill="rgb(65.492249%, 64.863586%, 65.019226%)" fill-opacity="1" d="M 368.300781 471.144531 L 376.050781 471.144531 L 376.050781 473.398438 L 371.03125 473.398438 L 371.03125 477.800781 L 375.023438 477.800781 L 375.023438 480.058594 L 371.03125 480.058594 L 371.03125 484.6875 L 376.050781 484.6875 L 376.050781 486.945312 L 368.300781 486.945312 Z M 360.308594 471.144531 L 357.320312 486.945312 L 353.664062 486.945312 L 350.679688 471.144531 L 353.460938 471.144531 L 355.519531 483.558594 L 357.578125 471.144531 Z M 339.957031 471.144531 L 342.6875 471.144531 L 342.6875 486.945312 L 339.957031 486.945312 Z M 323.257812 471.144531 L 331.960938 471.144531 L 331.960938 473.398438 L 328.976562 473.398438 L 328.976562 486.945312 L 326.246094 486.945312 L 326.246094 473.398438 L 323.257812 473.398438 Z M 311.121094 484.914062 C 311.636719 484.914062 312.039062 484.777344 312.328125 484.507812 C 312.625 484.234375 312.769531 483.851562 312.769531 483.355469 L 312.769531 474.734375 C 312.769531 474.234375 312.625 473.851562 312.328125 473.582031 C 312.039062 473.308594 311.636719 473.175781 311.121094 473.175781 C 310.605469 473.175781 310.203125 473.308594 309.910156 473.582031 C 309.617188 473.851562 309.472656 474.234375 309.472656 474.734375 L 309.472656 483.355469 C 309.472656 483.851562 309.617188 484.234375 309.910156 484.507812 C 310.203125 484.777344 310.605469 484.914062 311.121094 484.914062 M 311.121094 487.167969 C 309.816406 487.167969 308.757812 486.820312 307.953125 486.121094 C 307.144531 485.421875 306.742188 484.5 306.742188 483.355469 L 306.742188 474.734375 C 306.742188 473.585938 307.144531 472.667969 307.953125 471.96875 C 308.757812 471.265625 309.816406 470.917969 311.121094 470.917969 C 312.425781 470.917969 313.480469 471.265625 314.289062 471.96875 C 315.09375 472.667969 315.496094 473.585938 315.496094 474.734375 L 315.496094 483.355469 C 315.496094 484.5 315.09375 485.421875 314.289062 486.121094 C 313.480469 486.820312 312.425781 487.167969 311.121094 487.167969 M 298.105469 471.144531 L 298.105469 486.945312 L 295.375 486.945312 L 295.375 476.109375 L 292.828125 486.945312 L 290.921875 486.945312 L 288.371094 476.109375 L 288.371094 486.945312 L 285.695312 486.945312 L 285.695312 471.144531 L 289.558594 471.144531 L 291.925781 481.234375 L 294.191406 471.144531 Z M 272.679688 484.914062 C 273.195312 484.914062 273.597656 484.777344 273.890625 484.507812 C 274.183594 484.234375 274.328125 483.851562 274.328125 483.355469 L 274.328125 474.734375 C 274.328125 474.234375 274.183594 473.851562 273.890625 473.582031 C 273.597656 473.308594 273.195312 473.175781 272.679688 473.175781 C 272.164062 473.175781 271.761719 473.308594 271.46875 473.582031 C 271.179688 473.851562 271.03125 474.234375 271.03125 474.734375 L 271.03125 483.355469 C 271.03125 483.851562 271.179688 484.234375 271.46875 484.507812 C 271.761719 484.777344 272.164062 484.914062 272.679688 484.914062 M 272.679688 487.167969 C 271.375 487.167969 270.320312 486.820312 269.511719 486.121094 C 268.707031 485.421875 268.300781 484.5 268.300781 483.355469 L 268.300781 474.734375 C 268.300781 473.585938 268.707031 472.667969 269.511719 471.96875 C 270.320312 471.265625 271.375 470.917969 272.679688 470.917969 C 273.984375 470.917969 275.039062 471.265625 275.847656 471.96875 C 276.652344 472.667969 277.058594 473.585938 277.058594 474.734375 L 277.058594 483.355469 C 277.058594 484.5 276.652344 485.421875 275.847656 486.121094 C 275.039062 486.820312 273.984375 487.167969 272.679688 487.167969 M 251.839844 471.144531 L 260.542969 471.144531 L 260.542969 473.398438 L 257.554688 473.398438 L 257.554688 486.945312 L 254.824219 486.945312 L 254.824219 473.398438 L 251.839844 473.398438 Z M 239.75 487.167969 C 238.5 487.167969 237.476562 486.828125 236.6875 486.144531 C 235.898438 485.457031 235.503906 484.566406 235.503906 483.46875 L 235.503906 471.144531 L 238.234375 471.144531 L 238.234375 483.46875 C 238.234375 483.921875 238.375 484.273438 238.65625 484.53125 C 238.941406 484.785156 239.304688 484.914062 239.75 484.914062 C 240.199219 484.914062 240.5625 484.785156 240.847656 484.53125 C 241.128906 484.273438 241.269531 483.921875 241.269531 483.46875 L 241.269531 471.144531 L 243.949219 471.144531 L 243.949219 483.46875 C 243.949219 484.566406 243.5625 485.457031 242.789062 486.144531 C 242.015625 486.828125 241.003906 487.167969 239.75 487.167969 M 223.980469 481.144531 L 222.875 474.53125 L 221.765625 481.144531 Z M 224.34375 483.445312 L 221.40625 483.445312 L 220.816406 486.945312 L 218.085938 486.945312 L 221.070312 471.144531 L 224.726562 471.144531 L 227.714844 486.945312 L 224.933594 486.945312 Z M 224.34375 483.445312 "/>
+<path fill-rule="evenodd" fill="rgb(0%, 0%, 0%)" fill-opacity="1" d="M 257.417969 378.976562 C 257.417969 373.265625 255.636719 368.320312 252.25 363.785156 L 234.140625 388.296875 L 234.140625 429.519531 C 234.140625 431.933594 232.140625 433.933594 229.726562 433.933594 L 200.484375 433.933594 L 184.269531 455.902344 C 185.179688 456.289062 185.757812 456.5625 186.734375 456.753906 C 188.285156 457.050781 189.886719 457.210938 191.519531 457.210938 L 232.183594 457.210938 C 246.0625 457.210938 257.417969 445.855469 257.417969 431.976562 Z M 322.25 408.035156 L 298.53125 408.035156 L 298.53125 432.855469 L 275.253906 457.210938 L 275.253906 388.621094 L 340.804688 388.621094 Z M 374.136719 353.742188 L 275.253906 353.742188 L 275.253906 372.957031 L 355.773438 372.957031 Z M 427.863281 431.976562 C 427.863281 445.855469 416.507812 457.210938 402.628906 457.210938 L 348.511719 457.210938 L 365.601562 433.933594 L 400.175781 433.933594 C 402.585938 433.933594 404.71875 431.933594 404.71875 429.519531 L 404.703125 423.613281 C 405.328125 407.175781 404.730469 389.527344 404.730469 372.957031 L 378.335938 372.957031 L 395.371094 353.742188 L 427.863281 353.742188 Z M 191.519531 353.742188 L 232.183594 353.742188 C 234.730469 353.742188 236.929688 354.035156 239.304688 354.914062 L 222.957031 377.019531 L 193.976562 377.019531 C 191.550781 377.019531 189.5625 379.007812 189.5625 381.433594 L 189.5625 422.300781 L 171.320312 447.023438 L 170.53125 445.941406 C 167.851562 441.9375 166.285156 437.132812 166.285156 431.976562 L 166.285156 378.976562 C 166.285156 365.097656 177.640625 353.742188 191.519531 353.742188 "/>
+</svg>
+
+<div style="display: flex; align-items: stretch; gap: 22px; font-size: 10.5px; line-height: 1.6; color: #111113">
+<div style="display: flex; flex-direction: column">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.02em">O F J AUTOMOTIVE WORKS L.L.C</span>
+<span style="color: #5F6368">Warehouse S02-S03, 24B Street</span>
+<span style="color: #5F6368">Al Quoz Industrial Third</span>
+<span style="color: #5F6368">Dubai, United Arab Emirates</span>
+</div>
+<div style="border-left: 1px solid #D4D4D8; padding-left: 22px; display: flex; flex-direction: column; justify-content: center; gap: 2px">
+<span style="font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368">Tax registration no.</span>
+<span style="font-size: 15px; font-weight: 800; letter-spacing: 0.03em; line-height: 1.2">100520937200003</span>
+</div>
+</div>
+</header>
+
+<div style="padding: 26px 44px 0; display: flex; flex-direction: column; gap: 18px; flex-grow: 1">
+
+<section style="display: flex; justify-content: space-between; align-items: flex-end; gap: 24px">
+<h1 style="margin: 0; font-size: 30px; font-weight: 800; letter-spacing: 0.02em; line-height: 1">TAX INVOICE</h1>
+<div style="display: grid; grid-template-columns: repeat(4, auto); gap: 4px 22px; text-align: right">
+<span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5F6368">Invoice no.</span>
+<span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5F6368">Date</span>
+<span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5F6368">Job card</span>
+<span style="font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #5F6368">Advisor</span>
+<span style="font-size: 13px; font-weight: 700">INV-00001</span>
+<span style="font-size: 13px; font-weight: 700">9 Oct 2026</span>
+<span style="font-size: 13px; font-weight: 700">J-00017</span>
+<span style="font-size: 13px; font-weight: 700">[ADVISOR]</span>
+</div>
+</section>
+
+<section style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="background: #F4F4F5; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368">Billed to</span>
+<span style="font-size: 14px; font-weight: 700">[CUSTOMER NAME]</span>
+<span>[MOBILE] · [EMAIL]</span>
+<span style="color: #5F6368">TRN shown here only if the customer has one</span>
+</div>
+<div style="background: #F4F4F5; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368">Vehicle</span>
+<span style="font-size: 14px; font-weight: 700">Porsche Cayenne S 2022 · Dubai A 12345</span>
+<span>VIN [VIN]</span>
+</div>
+</section>
+
+<section>
+<table>
+<thead>
+<tr style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #5F6368; border-bottom: 2px solid #111113">
+<th style="text-align: left; padding: 0 0 6px; width: 24px">#</th>
+<th style="text-align: left; padding: 0 0 6px">Services</th>
+<th style="text-align: right; padding: 0 0 6px; width: 54px">Qty</th>
+<th style="text-align: right; padding: 0 0 6px; width: 76px">Rate</th>
+<th style="text-align: right; padding: 0 0 6px; width: 84px">Amount</th>
+<th style="text-align: right; padding: 0 0 6px; width: 70px">VAT 5%</th>
+<th style="text-align: right; padding: 0 0 6px; width: 88px">Total AED</th>
+</tr>
+</thead>
+<tbody>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">1</td>
+<td style="padding: 7px 0; font-weight: 600">Minor service, labour</td>
+<td style="padding: 7px 0; text-align: right">1.5 h</td>
+<td style="padding: 7px 0; text-align: right">350.00</td>
+<td style="padding: 7px 0; text-align: right">525.00</td>
+<td style="padding: 7px 0; text-align: right">26.25</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">551.25</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">2</td>
+<td style="padding: 7px 0; font-weight: 600">Front brake pad replacement, labour</td>
+<td style="padding: 7px 0; text-align: right">1.2 h</td>
+<td style="padding: 7px 0; text-align: right">350.00</td>
+<td style="padding: 7px 0; text-align: right">420.00</td>
+<td style="padding: 7px 0; text-align: right">21.00</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">441.00</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">3</td>
+<td style="padding: 7px 0; font-weight: 600">Wheel alignment</td>
+<td style="padding: 7px 0; text-align: right">1</td>
+<td style="padding: 7px 0; text-align: right">250.00</td>
+<td style="padding: 7px 0; text-align: right">250.00</td>
+<td style="padding: 7px 0; text-align: right">12.50</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">262.50</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">4</td>
+<td style="padding: 7px 0; font-weight: 600">Car wash</td>
+<td style="padding: 7px 0; text-align: right">1</td>
+<td colspan="4" style="padding: 7px 0; text-align: right; color: #5F6368">Complimentary</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7; font-weight: 800">
+<td style="padding: 7px 0"></td>
+<td colspan="3" style="padding: 7px 0">Discount on labour and services</td>
+<td style="padding: 7px 0; text-align: right">−80.00</td>
+<td style="padding: 7px 0; text-align: right">−4.00</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">−84.00</td>
+</tr>
+<tr style="background: #F4F4F5; font-weight: 700">
+<td colspan="4" style="padding: 7px 8px">Services subtotal</td>
+<td style="padding: 7px 0; text-align: right">1,115.00</td>
+<td style="padding: 7px 0; text-align: right">55.75</td>
+<td style="padding: 7px 8px 7px 0; text-align: right">1,170.75</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<table>
+<thead>
+<tr style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #5F6368; border-bottom: 2px solid #111113">
+<th style="text-align: left; padding: 0 0 6px; width: 24px">#</th>
+<th style="text-align: left; padding: 0 0 6px">Spare parts</th>
+<th style="text-align: right; padding: 0 0 6px; width: 54px">Qty</th>
+<th style="text-align: right; padding: 0 0 6px; width: 76px">Rate</th>
+<th style="text-align: right; padding: 0 0 6px; width: 84px">Amount</th>
+<th style="text-align: right; padding: 0 0 6px; width: 70px">VAT 5%</th>
+<th style="text-align: right; padding: 0 0 6px; width: 88px">Total AED</th>
+</tr>
+</thead>
+<tbody>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">1</td>
+<td style="padding: 7px 0"><span style="font-weight: 600">Engine oil 0W-40</span><span style="color: #5F6368"> · [PART NO.]</span></td>
+<td style="padding: 7px 0; text-align: right">8 L</td>
+<td style="padding: 7px 0; text-align: right">65.00</td>
+<td style="padding: 7px 0; text-align: right">520.00</td>
+<td style="padding: 7px 0; text-align: right">26.00</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">546.00</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">2</td>
+<td style="padding: 7px 0"><span style="font-weight: 600">Oil filter</span><span style="color: #5F6368"> · [PART NO.]</span></td>
+<td style="padding: 7px 0; text-align: right">1</td>
+<td style="padding: 7px 0; text-align: right">145.00</td>
+<td style="padding: 7px 0; text-align: right">145.00</td>
+<td style="padding: 7px 0; text-align: right">7.25</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">152.25</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">3</td>
+<td style="padding: 7px 0"><span style="font-weight: 600">Front brake pad set</span><span style="color: #5F6368"> · [PART NO.]</span></td>
+<td style="padding: 7px 0; text-align: right">1</td>
+<td style="padding: 7px 0; text-align: right">1,480.00</td>
+<td style="padding: 7px 0; text-align: right">1,480.00</td>
+<td style="padding: 7px 0; text-align: right">74.00</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">1,554.00</td>
+</tr>
+<tr style="border-bottom: 1px solid #E4E4E7">
+<td style="padding: 7px 0; color: #5F6368">4</td>
+<td style="padding: 7px 0"><span style="font-weight: 600">Brake pad wear sensor</span><span style="color: #5F6368"> · [PART NO.]</span></td>
+<td style="padding: 7px 0; text-align: right">2</td>
+<td style="padding: 7px 0; text-align: right">120.00</td>
+<td style="padding: 7px 0; text-align: right">240.00</td>
+<td style="padding: 7px 0; text-align: right">12.00</td>
+<td style="padding: 7px 0; text-align: right; font-weight: 600">252.00</td>
+</tr>
+<tr style="background: #F4F4F5; font-weight: 700">
+<td colspan="4" style="padding: 7px 8px">Spare parts subtotal</td>
+<td style="padding: 7px 0; text-align: right">2,385.00</td>
+<td style="padding: 7px 0; text-align: right">119.25</td>
+<td style="padding: 7px 8px 7px 0; text-align: right">2,504.25</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section style="display: flex; justify-content: space-between; align-items: flex-start; gap: 32px">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368">Amount in words</span>
+<span style="font-weight: 600">Three thousand six hundred seventy-five dirhams only</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368">Payments received</span>
+<span>7 Oct 2026 · Deposit · Link · AED 1,000.00</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px; margin-top: 18px">
+<span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368">Bank transfer</span>
+<span>The National Bank of Ras Al Khaimah · OFJ Automotive Works L L C</span>
+<span>Account 0552886630001 · SWIFT NRAKAEAK</span>
+<span>IBAN AE44 0400 0005 5288 6630 001</span>
+</div>
+</div>
+<div style="width: 262px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between"><span style="color: #5F6368">Gross amount</span><span>3,580.00</span></div>
+<div style="display: flex; justify-content: space-between; font-weight: 800"><span>Discount</span><span>−80.00</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: #5F6368">Taxable amount</span><span>3,500.00</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: #5F6368">VAT 5%</span><span>175.00</span></div>
+<div style="display: flex; justify-content: space-between; border-top: 2px solid #111113; padding-top: 8px; font-size: 15px; font-weight: 800"><span>Total AED</span><span>3,675.00</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: #5F6368">Paid</span><span>−1,000.00</span></div>
+<div style="display: flex; justify-content: space-between; align-items: center; background: #FFFFFF; color: #111113; border: 2px solid #111113; border-radius: 8px; padding: 9px 12px; font-weight: 800"><span style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase">Balance due</span><span style="font-size: 16px">AED 2,675.00</span></div>
+</div>
+</section>
+
+<footer style="margin-top: auto; padding: 14px 0 12px; border-top: 1px solid #D4D4D8; display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; font-size: 10px; color: #5F6368">
+<div style="display: flex; flex-direction: column; gap: 3px">
+<span style="color: #111113; font-weight: 600">Prepared by [ACCOUNTANT]</span>
+<span>This is a computer generated document which requires no stamp and signature.</span>
+<span>Terms and conditions apply · erp.ofjauto.com/terms</span>
+<span>Page 1 of 1</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="text-align: right">Scan to view<br>this invoice online</span>
+<div style="width: 58px; height: 58px; border: 1px dashed #8A8E96; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; letter-spacing: 0.08em">QR CODE</div>
+</div>
+</footer>
+
+<div style="border-top: 3px solid #111113; padding: 10px 0 20px; display: flex; justify-content: center; align-items: baseline; gap: 34px; font-size: 10.5px; color: #111113">
+<span><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368; margin-right: 8px">Tel</span>+971 4 330 3113</span>
+<span><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368; margin-right: 8px">Web</span>www.ofjauto.com</span>
+<span><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5F6368; margin-right: 8px">Email</span>accounts@ofjauto.com</span>
+</div>
+
+</div>
+</div>
+</body>
+</html>

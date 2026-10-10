@@ -10,7 +10,7 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { DiscountLine, InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, WordsAndPayments, companyOf, currencyOf, qtyText, styles, type DocLine } from "./template";
+import { InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, WordsAndPayments, companyOf, currencyOf, qtyText, styles, type DocLine } from "./template";
 
 /** The customer's quotation or estimate on the document template: no internal costs, margins, hidden lines or bank charges. */
 export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): Promise<Buffer> {
@@ -53,7 +53,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
 
   const doc = (
-    <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} preparedBy={creatorName} footerLines={footer}>
+    <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} preparedBy={creatorName} footerLines={footer} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
       <TitleRow
         title={isEstimate ? "ESTIMATE" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
         meta={[
@@ -66,12 +66,11 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       />
       <InfoBoxes
         boxes={[
-          { title: "Customer", strong: customer?.company_name ?? customer?.full_name ?? "Customer", rows: [["Name", customer?.company_name ? customer.full_name : null], ["Mobile", customer?.phone ?? null], ["Email", customer?.email ?? null], ["TRN", customer?.trn ?? null]] },
-          { title: "Vehicle", strong: carName || "Vehicle", rows: [["Variant", vehicle?.variant ?? null], ["Plate", vehicle ? formatPlate(vehicle) : null], ["VIN", vehicle?.vin ?? null]] },
+          { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? customer.full_name : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
+          { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), lines: [vehicle?.variant ?? null, vehicle?.vin ? `VIN ${vehicle.vin}` : null] },
         ]}
       />
-      <LinesTable title="Labour and services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Labour and services subtotal" />
-      <DiscountLine amount={totals.discount} currency={currency} />
+      <LinesTable title="Labour and services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Labour and services subtotal" discount={totals.discount ? { label: `Discount ${q.discount_percent}% on labour and services`, amount: totals.discount } : null} />
       {parts.length ? <LinesTable title="Parts" lines={parts} currency={currency} vatPercent={vatPct} subtotalLabel="Parts subtotal" startAt={services.length + 1} /> : null}
       {others.length ? <LinesTable title="Other charges" lines={others} currency={currency} vatPercent={vatPct} subtotalLabel="Other charges subtotal" startAt={services.length + parts.length + 1} /> : null}
       <View style={styles.bottom}>

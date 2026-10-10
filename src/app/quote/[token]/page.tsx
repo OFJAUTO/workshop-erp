@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CustomerDocument, DocLines, DocSection, DocTotals, type DocRow } from "@/components/CustomerDocument";
+import { CustomerDocument, DocLines, DocTotals, type DocRow } from "@/components/CustomerDocument";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
@@ -70,7 +70,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     n++;
     const part = l.part_item_id ? bundle.parts.find((p) => p.id === l.part_item_id) : null;
     const details = [l.line_type === "part" ? partTypeText(l) : null, part?.part_number ?? null, l.details].filter(Boolean).join(" · ") || null;
-    return { n, description: l.line_type === "part" && part?.part_number && l.title.endsWith(`(${part.part_number})`) ? l.title.slice(0, -(part.part_number.length + 2)).trim() : l.title, details, tag: !isEstimate && l.urgency === "urgent" ? "Urgent" : null, qty: lineQuantityText(l), rate: money(lineUnitPrice(l)), amount: lineTotal(l) === 0 ? "Complimentary" : money(lineTotal(l)) };
+    return { n, description: l.line_type === "part" && part?.part_number && l.title.endsWith(`(${part.part_number})`) ? l.title.slice(0, -(part.part_number.length + 2)).trim() : l.title, details, tag: !isEstimate && l.urgency === "urgent" ? "Urgent" : null, qty: lineQuantityText(l), rate: money(lineUnitPrice(l)), amount: lineTotal(l) === 0 ? "Complimentary" : money(lineTotal(l)), amountNum: lineTotal(l) };
   };
   const labour = lines.filter((l) => blockOf(l) === "labour").map(rowOf);
   const parts = lines.filter((l) => blockOf(l) === "parts").map(rowOf);
@@ -89,8 +89,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         ...(bundle.creatorName ? [{ label: "Advisor", value: bundle.creatorName }] : []),
       ]}
       boxes={[
-        { title: "Customer", strong: customer?.company_name ?? customer?.full_name ?? "Customer", rows: [["Name", customer?.company_name ? customer.full_name : null], ["Mobile", customer?.phone ?? null], ["TRN", customer?.trn ?? null]] },
-        { title: "Vehicle", strong: carName || "Vehicle", rows: [["Variant", vehicle?.variant ?? null], ["Plate", vehicle ? formatPlate(vehicle) : null], ["VIN", vehicle?.vin ?? null]] },
+        { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", rows: [["", customer?.company_name ? customer.full_name : null], ["", customer?.phone ?? null]], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
+        { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), rows: [["", vehicle?.variant ?? null], ["VIN", vehicle?.vin ?? null]] },
       ]}
       pdfHref={`/api/pdf/quote/${token}`}
       bar={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} feeNotice={feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed)} feeNoticeAr={feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed)} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} dangerText={dangerous ? settings.dangerous_acknowledgement_text : null} /> : null}
@@ -113,9 +113,9 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           {settings.dangerous_customer_text_ar ? <p className="text-sm whitespace-pre-wrap" dir="rtl" lang="ar">{settings.dangerous_customer_text_ar}</p> : null}
         </div>
       ) : null}
-      {labour.length ? <DocSection title="Labour and services"><DocLines rows={labour} /></DocSection> : null}
-      {parts.length ? <DocSection title="Parts"><DocLines rows={parts} /></DocSection> : null}
-      {other.length ? <DocSection title="Other charges"><DocLines rows={other} /></DocSection> : null}
+      {labour.length ? <DocLines title="Labour and services" rows={labour} vatPercent={Number(q.vat_percent) || 5} discount={totals.discount ? { label: `Discount ${q.discount_percent}% on labour and services`, amount: totals.discount } : null} subtotalLabel="Labour and services subtotal" /> : null}
+      {parts.length ? <DocLines title="Parts" rows={parts} vatPercent={Number(q.vat_percent) || 5} subtotalLabel="Parts subtotal" /> : null}
+      {other.length ? <DocLines title="Other charges" rows={other} vatPercent={Number(q.vat_percent) || 5} subtotalLabel="Other charges subtotal" /> : null}
       <DocTotals
         rows={[
           { label: "Subtotal", value: money(totals.subtotal) },
@@ -124,8 +124,9 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           { label: "Taxable amount", value: money(totals.net) },
           { label: `VAT ${q.vat_percent}%`, value: money(totals.vat) },
         ]}
-        total={{ label: "Total", value: aed(totals.total) }}
+        total={{ label: "Total AED", value: money(totals.total) }}
         after={totals.deposit ? [{ label: "Deposit required", value: money(totals.deposit), bold: true }] : []}
+        box={{ label: isEstimate ? "Estimate total" : "Quotation total", value: aed(totals.total), note: q.valid_until ? `Valid until ${formatDate(q.valid_until)}` : null }}
       />
       {q.customer_note ? <div className="rounded-control border border-line p-3 text-sm whitespace-pre-wrap">{q.customer_note}</div> : null}
     </CustomerDocument>

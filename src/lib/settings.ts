@@ -60,6 +60,7 @@ const DEFAULTS = {
   markup_confirm_percent: 100,
   pin_needed_above_aed: 100,
   wash_board_show_times: false,
+  test_mode_enabled: true,
   wash_board_done_button: false,
   comeback_window_days: 90,
   recovery_providers: [] as string[],

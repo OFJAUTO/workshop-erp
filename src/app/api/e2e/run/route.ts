@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
     await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now }).eq("id", JOB1);
 
     // 9. Invoice from the approved quotation; the balance; payments with every rule.
-    const draft = await buildInvoiceDraft(JOB1, settings, { labourMode: "itemised" });
+    const draft = await buildInvoiceDraft(JOB1, settings);
     check("invoice draft has the labour line and two parts with their types", draft.lines.length === 3 && draft.lines.filter((l) => l.section === "parts").every((l) => /genuine|aftermarket/i.test(l.details ?? "")), draft.lines.map((l) => `${l.section}:${l.details}`).join("|"));
     const number1 = await nextDocumentNumber("tax_invoice", settings);
     const tok1 = newToken();
@@ -219,7 +219,7 @@ export async function POST(request: NextRequest) {
     await refreshQuoteTotals(Q2, settings, advisor.id);
     const r2 = await applyCustomerResponse(Q2, { approve: true, name: "Warranty repair (owner)", by: owner.id, via: "warranty" });
     check("warranty repair approved without the customer (L3)", !r2.error && (await job(JOB2)).status === "waiting_parts", r2.error);
-    const draft2 = await buildInvoiceDraft(JOB2, settings, { labourMode: "itemised" });
+    const draft2 = await buildInvoiceDraft(JOB2, settings);
     check("comeback invoice shows the work then a zero total (L3)", draft2.totals.gross > 0 && draft2.totals.warrantyCredit === draft2.totals.gross && draft2.totals.total === 0, `${draft2.totals.gross} ${draft2.totals.warrantyCredit} ${draft2.totals.total}`);
     const number2 = await nextDocumentNumber("tax_invoice", settings);
     await admin.from("invoices").upsert({ id: INV2, number: number2, kind: "tax_invoice", job_id: JOB2, customer_id: CUST, vehicle_id: VEH, token: newToken(), labour_mode: "itemised", subtotal_aed: draft2.totals.gross, discount_aed: 0, taxable_aed: 0, vat_aed: 0, total_aed: 0, warranty_credit_aed: draft2.totals.warrantyCredit, prepared_by: advisor.id, issued_by: owner.id, created_by: owner.id, updated_by: owner.id });

@@ -4,6 +4,8 @@ import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { formatBytes, storageUsage } from "@/lib/storage-usage";
 import { createClient } from "@/lib/supabase/server";
 import { saveSettings } from "./actions";
+import { clearTestDataAction } from "./clear-actions";
+import { ClearTestData } from "./ClearTestData";
 import { SettingsForm } from "./SettingsForm";
 
 const BUCKET_LABEL: Record<string, string> = { "gate-in-media": "Gate-in videos and photos", "vehicle-photos": "Car pictures", "staff-photos": "Staff photos" };
@@ -34,7 +36,7 @@ export default async function SettingsPage() {
   let inboundToken = "";
   let labourJobsText = "";
   let candidates: Record<string, number> = {};
-  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false };
+  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: true };
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
@@ -48,7 +50,7 @@ export default async function SettingsPage() {
     else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
     else if (row.key === "inspection_limits") limits = { ...limits, ...((row.value as Record<string, number>) ?? {}) };
     else if (row.key === "prescan_gate_enabled") prescanGate = row.value === true;
-    else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button") flags[row.key] = row.value === true;
+    else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button" || row.key === "test_mode_enabled") flags[row.key] = row.value === true;
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
     else if (row.key === "recovery_providers" || row.key === "labour_hours_memory") continue;
@@ -126,6 +128,13 @@ export default async function SettingsPage() {
             </ul>
             <p className="text-xs text-muted">Videos older than the retention period are removed every hour by the scheduled clean-up. Photos are never removed.</p>
           </Card>
+          {flags.test_mode_enabled ? (
+            <Card className="flex flex-col gap-3 border-red-bar">
+              <SectionLabel>Testing phase: clear test data</SectionLabel>
+              <ClearTestData action={clearTestDataAction} />
+              <p className="text-xs text-muted">Switch off &quot;Testing phase&quot; in the Workshop floor card at go-live; the button disappears.</p>
+            </Card>
+          ) : null}
         </div>
       </div>
     </>

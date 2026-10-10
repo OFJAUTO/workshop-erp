@@ -1,7 +1,7 @@
 import "server-only";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
-import { hasCostFloor, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
+import { isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -171,16 +171,31 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
 }
 
 export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean };
-export type DraftTotals = { gross: number; services: number; parts: number; fees: number; discount: number; discountPercent: number; taxable: number; vat: number; total: number; discountLimitAed: number; agreedTotalApplied: boolean; agreedTotalProblem: string | null; /** A free comeback: the whole bill, taken off after the lines so the customer sees the value of the repair. */ warrantyCredit: number };
+export type DraftTotals = {
+  gross: number;
+  services: number;
+  parts: number;
+  fees: number;
+  /** The discount the customer approved on the quotation (labour and services only). */
+  discount: number;
+  discountPercent: number;
+  /** The adjustment that lands the invoice on the quotation's rounded total; the VAT line takes it. */
+  rounding: number;
+  taxable: number;
+  vat: number;
+  total: number;
+  /** A free comeback: the whole bill, taken off after the lines so the customer sees the value of the repair. */
+  warrantyCredit: number;
+};
 export type InvoiceDraft = { lines: DraftLine[]; totals: DraftTotals; quotationNumbers: string[]; vatPercent: number };
 
 /**
- * The invoice from the job: every approved quotation's visible lines (and approved additional
- * quotations), the inspection fee when it applies, a Consumables line if asked for. Prices come from
- * the approved quotation and cannot change here. The discount is one bold line on labour and
- * services; an "agreed total" works it out backwards within the discount limit.
+ * The invoice lines and totals from the approved quotations, exactly as the customer approved them:
+ * every labour line itemised, the same discount, the same rounded total. Nothing is chosen or typed at
+ * invoice time; a change goes through a revised quotation or the owner. Parts returned to the supplier
+ * come off; the inspection fee is added when no work was approved; a free comeback ends at zero.
  */
-export async function buildInvoiceDraft(jobId: string, settings: Settings, opts: { labourMode: LabourMode; consumables?: number | null; agreedTotal?: number | null; discountPercent?: number | null }): Promise<InvoiceDraft> {
+export async function buildInvoiceDraft(jobId: string, settings: Settings): Promise<InvoiceDraft> {
   const admin = createAdminClient();
   const [{ data: job }, quotes] = await Promise.all([
     admin.from("jobs").select("id, inspection_fee_due, comeback_free").eq("id", jobId).maybeSingle(),
@@ -188,72 +203,58 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings, opts:
   ]);
   const qs = quotes;
   const vatPercent = qs.length ? Number(qs[0].vat_percent) || 5 : 5;
-  const [{ data: lineRows }, { data: partRows }] = await Promise.all([
+  const [{ data: lineRows }, { data: partRows }, { data: quoteRows }] = await Promise.all([
     qs.length ? admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qs.map((q) => q.id)).eq("is_active", true).order("position") : Promise.resolve({ data: [] }),
     admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status").eq("job_id", jobId).eq("is_active", true),
+    qs.length ? admin.from("quotations").select("id, rounded_total_aed, total_aed").in("id", qs.map((q) => q.id)) : Promise.resolve({ data: [] }),
   ]);
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPart(r), final_cost_aed: r.final_cost_aed === null || r.final_cost_aed === undefined ? null : Number(r.final_cost_aed), return_status: String(r.return_status ?? "none") }));
   const partOf = (id: string | null) => (id ? parts.find((p) => p.id === id) : undefined);
+  const roundedOf = new Map(((quoteRows ?? []) as { id: string; rounded_total_aed: number | string | null; total_aed: number | string }[]).map((q) => [q.id, q.rounded_total_aed === null ? null : Number(q.rounded_total_aed)]));
   const lines: DraftLine[] = [];
-  let quotedDiscount = 0;
+  let discount = 0;
+  let discountBase = 0;
+  let quotedTotal = 0;
+  let anyRounded = false;
   for (const q of qs) {
     // Parts returned to the supplier come off the bill.
     const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
-    const discountBase = round2(qLines.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
-    quotedDiscount += round2(discountBase * ((Number(q.discount_percent) || 0) / 100));
+    const base = round2(qLines.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
+    const d = round2(base * ((Number(q.discount_percent) || 0) / 100));
+    discount += d;
+    discountBase += base;
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));
+    // The quotation's own total, rounded when the advisor rounded it on sending.
+    const net = round2(qLines.reduce((a, l) => a + lineTotal(l), 0) - d);
+    const rounded = roundedOf.get(q.id);
+    if (rounded !== null && rounded !== undefined) anyRounded = true;
+    quotedTotal += rounded ?? round2(net + round2(net * (vatPercent / 100)));
   }
-  // Labour combined into one line when asked for.
-  let out = lines;
-  if (opts.labourMode === "combined") {
-    const labour = lines.filter((l) => l.hours !== null);
-    if (labour.length) {
-      const amount = round2(labour.reduce((a, l) => a + l.amount_aed, 0));
-      const hours = Math.round(labour.reduce((a, l) => a + (l.hours ?? 0), 0) * 10) / 10;
-      const combined: DraftLine = { section: "services", description: `Labour charges (${hours.toFixed(1)} h)`, details: null, part_number: null, quantity: 1, hours: null, unit_price: amount, amount_aed: amount, cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: true };
-      out = [combined, ...lines.filter((l) => l.hours === null)];
+  const out = lines;
+  if (job?.inspection_fee_due && !qs.length) {
+    const fee = Number(settings.inspection_fee_aed) || 0;
+    if (fee > 0) {
+      out.push({ section: "fees", description: "Inspection fee", details: "No work was approved after the inspection", part_number: null, quantity: 1, hours: null, unit_price: fee, amount_aed: fee, cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: false });
+      quotedTotal += round2(fee + round2(fee * (vatPercent / 100)));
     }
   }
-  if (opts.consumables && opts.consumables > 0) {
-    out.push({ section: "services", description: "Consumables", details: null, part_number: null, quantity: 1, hours: null, unit_price: round2(opts.consumables), amount_aed: round2(opts.consumables), cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: true });
-  }
-  if (job?.inspection_fee_due) {
-    const fee = Number(settings.inspection_fee_aed) || 0;
-    if (fee > 0) out.push({ section: "fees", description: "Inspection fee", details: "No work was approved after the inspection", part_number: null, quantity: 1, hours: null, unit_price: fee, amount_aed: fee, cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: false });
-  }
-  out = out.map((l, i) => ({ ...l, position: i }));
   const gross = round2(out.reduce((a, l) => a + l.amount_aed, 0));
   const services = round2(out.filter((l) => l.section === "services").reduce((a, l) => a + l.amount_aed, 0));
   const partsTotal = round2(out.filter((l) => l.section === "parts").reduce((a, l) => a + l.amount_aed, 0));
   const fees = round2(out.filter((l) => l.section === "fees").reduce((a, l) => a + l.amount_aed, 0));
-  const discountBase = round2(out.filter((l) => l.takesDiscount).reduce((a, l) => a + l.amount_aed, 0));
-  const limitPct = Number(settings.discount_limit_percent) || 0;
-  const discountLimitAed = round2(discountBase * (limitPct / 100));
-  let discount = quotedDiscount;
-  let agreedTotalApplied = false;
-  let agreedTotalProblem: string | null = null;
-  if (opts.discountPercent !== null && opts.discountPercent !== undefined) discount = round2(discountBase * (Math.max(0, opts.discountPercent) / 100));
-  if (opts.agreedTotal && opts.agreedTotal > 0) {
-    const wanted = round2(gross - opts.agreedTotal / (1 + vatPercent / 100));
-    if (wanted < 0) agreedTotalProblem = "The agreed total is more than the bill; no discount applied.";
-    else if (wanted > discountBase) agreedTotalProblem = "The agreed total would need a discount on parts, which is not allowed.";
-    else if (wanted > discountLimitAed + 0.005) agreedTotalProblem = `The agreed total needs a ${round2((wanted / (discountBase || 1)) * 100)}% discount on labour and services, above the ${limitPct}% limit.`;
-    else {
-      discount = wanted;
-      agreedTotalApplied = true;
-    }
-  }
-  discount = Math.min(discount, discountBase);
+  discount = round2(Math.min(discount, discountBase));
   // A free comeback (warranty repair): no discount, the whole bill comes off after the lines, the total is zero.
   const warrantyCredit = job?.comeback_free ? gross : 0;
-  if (warrantyCredit) { discount = 0; agreedTotalApplied = false; agreedTotalProblem = null; }
-  const taxable = round2(gross - discount - warrantyCredit);
-  // With an agreed total the customer pays exactly that figure: the VAT takes the rounding, never the total.
-  const total = agreedTotalApplied ? round2(opts.agreedTotal!) : round2(taxable + round2(taxable * (vatPercent / 100)));
+  if (warrantyCredit) discount = 0;
+  const beforeRounding = round2(gross - discount - warrantyCredit);
+  // The customer pays the figure on the quotation: the pre-VAT amount adjusts and the VAT line takes the rounding.
+  const total = warrantyCredit ? 0 : anyRounded ? round2(quotedTotal) : round2(beforeRounding + round2(beforeRounding * (vatPercent / 100)));
+  const taxable = warrantyCredit ? 0 : anyRounded ? round2(total / (1 + vatPercent / 100)) : beforeRounding;
+  const rounding = round2(taxable - beforeRounding);
   const vat = round2(total - taxable);
   return {
     lines: out,
-    totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, taxable, vat, total, discountLimitAed, agreedTotalApplied, agreedTotalProblem, warrantyCredit },
+    totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, rounding, taxable, vat, total, warrantyCredit },
     quotationNumbers: Array.from(new Set(qs.map((q) => q.number))),
     vatPercent,
   };
@@ -261,7 +262,8 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings, opts:
 
 function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed: number | null; final_cost_aed: number | null } | undefined): DraftLine {
   const amount = lineTotal(l);
-  const isPart = l.line_type === "part" || (l.line_type === "other" && hasCostFloor(l));
+  // Spare parts are the lines Parts entered (a part item with a name and a type). Anything else, even with a cost, is work or a charge.
+  const isPart = l.line_type === "part" && !!l.part_item_id;
   const number = part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null);
   const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
   const cost = l.line_type === "part" ? round2((part?.final_cost_aed ?? part?.cost_aed ?? l.unit_cost ?? 0) * (l.quantity || 1)) : lineCost(l);
