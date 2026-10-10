@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Shell } from "@/components/Shell";
 import type { NavItem } from "@/components/SidebarNav";
 import { requireStaff } from "@/lib/auth";
@@ -5,6 +6,7 @@ import { can, ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { FormGuard } from "@/components/FormGuard";
 import { IdleLock } from "./IdleLock";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -42,8 +44,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") },
     { href: "/parts", label: "Parts", show: can(role, "priceParts"), badge: role === "parts" ? partsPending : undefined },
-    { href: "/parts/orders", label: "Purchase orders", show: can(role, "viewPurchaseOrders") && role !== "service_advisor" },
+    { href: "/parts/orders", label: "LPOs", show: can(role, "viewPurchaseOrders") && role !== "service_advisor" },
     { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") },
+    { href: "/parts/suppliers", label: "Suppliers", show: can(role, "manageSuppliers") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
     { href: "/wash", label: "Car wash", show: can(role, "washCars") },
     { href: "/pauses", label: "Pause log", show: can(role, "manageWork") },
@@ -65,6 +68,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <>
+      <Suspense fallback={null}><FormGuard /></Suspense>
+      <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {staff.login_type === "pin" && !staff.actingAs ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         nav={nav}

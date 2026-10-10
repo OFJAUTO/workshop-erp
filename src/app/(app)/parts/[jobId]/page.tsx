@@ -1,3 +1,4 @@
+import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -9,8 +10,8 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { addOption, askManager, closePartRequest, coverRequest, removePart, savePartRows, updatePart } from "../actions";
-import { AskManagerForm, CloseRequestForm, OnePartForm, PartRowsForm } from "../PartsForms";
+import { addOption, askManager, closePartRequest, coverRequest, markRequestUnavailable, removePart, savePartRows, updatePart } from "../actions";
+import { AskManagerForm, CloseRequestForm, OnePartForm, PartRowsForm, UnavailableForm } from "../PartsForms";
 import { allInStock, partsPlanned, setPartPlan } from "../../jobs/planning-actions";
 import { PlanPartRow, type PlanPart } from "./PlanParts";
 
@@ -104,6 +105,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         subtitle={`${[v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ")} · ${job.job_number} · ${cust?.company_name ?? cust?.full_name ?? "Customer"}${(job.assignee as unknown as { display_name: string } | null)?.display_name ? ` · technician ${(job.assignee as unknown as { display_name: string }).display_name}` : ""}`}
         actions={
           <>
+            <CopyVin vin={v?.vin} />
             <LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>
             {can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}
           </>
@@ -140,13 +142,13 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <Card key={r.id} className={`flex flex-col gap-3 ${r.status === "open" ? "border-ink" : ""}`}>
             <div className="flex flex-wrap items-center gap-2">
               <SectionLabel>{r.label}</SectionLabel>
-              <Badge tone={r.status === "open" ? "amber" : r.status === "done" ? "green" : r.status === "rejected" ? "neutral" : "neutral"}>{r.status === "open" ? "To price" : r.status === "done" || r.status === "listed" ? "Done" : r.closed_reason === "Already covered in another request" ? "Covered elsewhere" : "Closed"}</Badge>
+              <Badge tone={r.status === "open" ? "amber" : r.status === "done" ? "green" : r.status === "unavailable" ? "red" : "neutral"}>{r.status === "open" ? "To price" : r.status === "unavailable" ? "Not available" : r.status === "done" || r.status === "listed" ? "Done" : r.closed_reason === "Already covered in another request" ? "Covered elsewhere" : "Closed"}</Badge>
               <span className="text-xs text-muted">from the report · {formatDateTime(r.created_at)}</span>
             </div>
             {r.requested_text ? <p className="text-sm"><span className="text-muted">Technician wrote:</span> {r.requested_text}{r.quantity ? <span className="text-muted"> · × {r.quantity}{r.unit ? ` ${r.unit}` : ""}</span> : null}</p> : null}
-            {r.closed_reason && r.status === "rejected" ? <p className="text-xs text-muted">{r.closed_reason}</p> : null}
+            {r.closed_reason && (r.status === "rejected" || r.status === "unavailable") ? <p className="text-xs text-muted">{r.closed_reason}</p> : null}
             {items.length ? <ul className="divide-y divide-line">{items.map(partRow)}</ul> : null}
-            {canPrice && r.status !== "rejected" ? (
+            {canPrice && r.status !== "rejected" && r.status !== "unavailable" ? (
               <details open={items.length === 0}>
                 <summary className="cursor-pointer text-sm font-bold">{items.length ? "Add more parts to this request" : "Enter the parts"}</summary>
                 <div className="mt-3"><PartRowsForm action={savePartRows.bind(null, jobId, r.id)} suppliers={suppliers} defaultType={defaultType} /></div>
@@ -154,6 +156,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
             ) : null}
             {canPrice && r.status === "open" ? (
               <div className="flex flex-wrap items-center gap-4">
+                <UnavailableForm action={markRequestUnavailable.bind(null, r.id)} />
                 <form action={coverRequest.bind(null, r.id)}><Button type="submit" tone="secondary" size="md">Already covered in another request</Button></form>
                 <CloseRequestForm action={closePartRequest.bind(null, r.id)} />
               </div>

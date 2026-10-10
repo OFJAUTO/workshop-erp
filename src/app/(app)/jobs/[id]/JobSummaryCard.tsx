@@ -19,6 +19,7 @@ export function JobSummaryCard({ jobId, job, role, viewingAs }: { jobId: string;
   const seesProfit = role === "owner";
   const rows: [string, string][] = [
     ["Hours", `${s.hoursCharged} h charged · ${hm(s.minutesUsed)} used · ${s.hoursCharged > 0 ? `${s.minutesUsed - s.hoursCharged * 60 >= 0 ? "+" : "−"}${hm(Math.abs(s.minutesUsed - s.hoursCharged * 60))}` : "no hours quoted"}`],
+    ...(s.budgetHours ? ([["Time budget", `${s.budgetHours} h set by the manager (charged ${s.hoursCharged} h): ${s.budgetReason ?? ""}`]] as [string, string][]) : []),
     ["Per technician", s.perTechnician.map((t) => `${t.name} ${hm(t.minutes)}`).join(" · ") || "nobody clocked"],
     ["On time", s.promisedAt ? (s.daysLate ? `${s.daysLate} day${s.daysLate === 1 ? "" : "s"} late (promised ${formatDate(s.promisedAt)})` : `Yes, promised ${formatDate(s.promisedAt)}`) : "No promised date"],
     ["Quality", `QC round${s.qcRounds === 1 ? "" : "s"} ${s.qcRounds}${s.managerSendbacks ? ` · sent back by the manager ${s.managerSendbacks}×` : ""}`],

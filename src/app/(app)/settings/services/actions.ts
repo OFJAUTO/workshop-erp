@@ -49,8 +49,11 @@ function serviceFields(formData: FormData): Record<string, unknown> | string {
   if (!name) return "Type the service name.";
   const department = String(formData.get("department") ?? "both");
   if (!DEPARTMENTS.includes(department)) return "Choose the department.";
-  const priceText = blankToNull(formData.get("price_aed"));
-  const hoursTyped = blankToNull(formData.get("default_hours"));
+  // One box: by hours or a fixed price (older forms still send the two separate fields).
+  const pricing = String(formData.get("pricing") ?? "");
+  const single = blankToNull(formData.get("price_value"));
+  const priceText = pricing ? (pricing === "fixed" ? single : null) : blankToNull(formData.get("price_aed"));
+  const hoursTyped = pricing ? (pricing === "hours" ? single : null) : blankToNull(formData.get("default_hours"));
   const price = priceText === null ? null : Number(priceText.replace(",", "."));
   if (price !== null && (!Number.isFinite(price) || price < 0)) return "The fixed price must be a number.";
   const hours = hoursTyped === null ? null : parseHours(hoursTyped);

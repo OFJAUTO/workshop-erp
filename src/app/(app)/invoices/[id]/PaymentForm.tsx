@@ -22,12 +22,12 @@ function RecordButton({ label }: { label: string }) {
  * The button locks while it records; the same tap twice makes one receipt, not two. More than the
  * balance goes to the owner for approval unless the owner records it.
  */
-export function PaymentForm({ invoiceId, jobId, balance, action, bankChargeCard, bankChargeLink, returnTo = null, isOwner = false }: { invoiceId: string | null; jobId: string | null; balance: number | null; action: (formData: FormData) => void; bankChargeCard: number; bankChargeLink: number; returnTo?: string | null; isOwner?: boolean }) {
+export function PaymentForm({ invoiceId, jobId, balance, action, bankChargeCard, bankChargeLink, bankChargeCash = 0, bankChargeCheque = 0, returnTo = null, isOwner = false }: { bankChargeCash?: number; bankChargeCheque?: number; invoiceId: string | null; jobId: string | null; balance: number | null; action: (formData: FormData) => void; bankChargeCard: number; bankChargeLink: number; returnTo?: string | null; isOwner?: boolean }) {
   const [method, setMethod] = useState("cash");
   const [mode, setMode] = useState<"full" | "partial">(balance && balance > 0 ? "full" : "partial");
   const [amount, setAmount] = useState("");
   const [clientKey] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`));
-  const charge = method === "card" ? bankChargeCard : method === "link" ? bankChargeLink : 0;
+  const charge = method === "card" ? bankChargeCard : method === "link" ? bankChargeLink : method === "cash" ? bankChargeCash : bankChargeCheque;
   const value = mode === "full" && balance ? balance : Number(amount) || 0;
   const over = balance !== null && value > balance + 0.005;
   return (
@@ -43,6 +43,7 @@ export function PaymentForm({ invoiceId, jobId, balance, action, bankChargeCard,
           <button key={m.value} type="button" onClick={() => setMethod(m.value)} aria-pressed={method === m.value} className={`min-h-12 rounded-control border-2 text-sm font-bold ${method === m.value ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{m.label}</button>
         ))}
       </div>
+      <p className="text-xs text-muted">{charge > 0 ? `Bank charge ${charge}% on ${METHODS.find((x) => x.value === method)?.label.toLowerCase()}${value > 0 ? ` (AED ${((value * charge) / 100).toFixed(2)})` : ""}, internal, never shown to the customer.` : `No bank charge on ${METHODS.find((x) => x.value === method)?.label.toLowerCase()}.`}</p>
       {balance && balance > 0 ? (
         <div className="grid grid-cols-2 gap-2">
           <button type="button" onClick={() => setMode("full")} aria-pressed={mode === "full"} className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "full" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Full amount · {money(balance)}</button>

@@ -13,7 +13,7 @@ import { SendQuoteControl } from "./SendQuoteControl";
 type Op = Record<string, unknown>;
 
 /** A finding of the approved report: the heading of a group of labour lines. Same shape as the server's QuoteFinding. */
-export type EditorFinding = { key: string; source_type: "request" | "item" | "tyre"; source_key: string; status: "bad" | "average"; label: string; section: string | null; remark: string | null; parts: string | null; photos: string[]; dangerous: boolean };
+export type EditorFinding = { key: string; source_type: "request" | "item" | "tyre"; source_key: string; status: "bad" | "average" | "good" | null; label: string; section: string | null; remark: string | null; parts: string | null; photos: string[]; dangerous: boolean };
 
 /** Every change goes to the server at once, through a queue kept in the browser so nothing typed is lost. A 409 asks the person to confirm first. */
 function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (op: Op, message: string) => void) {
@@ -68,7 +68,7 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
   }, [quotationId, persist, onSaved, onConfirm]);
   const save = useCallback(
     (op: Op) => {
-      queue.current.push(op);
+      queue.current.push({ opId: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`, ...op });
       persist();
       void flush();
     },
@@ -104,6 +104,8 @@ export type EditorSettings = {
   approvalAbove: number;
   technicianCostRate: number | null;
   bankChargePercent: number;
+  /** Settings: advisors see a small discount column on labour and service lines. */
+  advisorDiscount?: boolean;
   depositThreshold: number;
   depositPercent: number;
   inspectionFee: number;
@@ -112,7 +114,7 @@ export type EditorSettings = {
 };
 
 /** What the advisor is waiting for from Parts, for the status bar and the Remind and Escalate buttons. */
-export type PartsWait = { openRequests: number; partsTotal: number; partsPriced: number; waitingMinutes: number; partsNames: string; remindAfter: number; escalateAfter: number; remindedAt: string | null; escalatedAt: string | null };
+export type PartsWait = { unavailable?: { label: string; note: string | null }[]; openRequests: number; partsTotal: number; partsPriced: number; waitingMinutes: number; partsNames: string; remindAfter: number; escalateAfter: number; remindedAt: string | null; escalatedAt: string | null };
 
 const num = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 const TRIPS = [
@@ -278,9 +280,15 @@ export function QuoteEditor({
   const findingOf = (l: QuoteLine) => findings.find((f) => f.source_type === l.source_type && f.source_key === l.source_key) ?? null;
   const linesOf = (f: EditorFinding) => labourLines.filter((l) => l.source_type === f.source_type && l.source_key === f.source_key);
   const looseLabour = labourLines.filter((l) => !findingOf(l));
-  const unquoted = isQuotation ? findings.filter((f) => linesOf(f).length === 0 && !notQuoted[f.key]) : [];
+  // Customer requests are always headings; report findings become headings once they have a line, else they sit in the reference list.
+  const requestFindings = isQuotation ? findings.filter((f) => f.source_type === "request") : [];
+  const reportFindings = isQuotation ? findings.filter((f) => f.source_type !== "request") : [];
+  const rank = (f: EditorFinding) => (f.status === "bad" ? 0 : f.status === "average" ? 1 : 2);
+  const quotedReport = reportFindings.filter((f) => linesOf(f).length > 0);
+  const unquoted = reportFindings.filter((f) => linesOf(f).length === 0).sort((a, b) => rank(a) - rank(b));
+  const headings = [...requestFindings, ...quotedReport];
   const labourDone = labourLines.filter(finishedLine).length;
-  const blockers = sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, unquotedFindings: unquoted.length, confirmPercent: settings.markupConfirm });
+  const blockers = sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm });
   const reasons = ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove });
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
@@ -340,7 +348,7 @@ export function QuoteEditor({
           {needsTitle && !disabled ? (
             <JobPicker jobs={allJobs} onPick={(t) => applyTitle(l.id, t)} onBuild={() => setBuilderFor(l.id)} />
           ) : (
-            <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} className="font-semibold min-h-10" placeholder="What are we doing?" aria-label="Description" />
+            <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} className="font-semibold min-h-10" placeholder="What are we doing?" aria-label="Description" textCase="sentence" />
           )}
           {l.line_type === "labour" ? (
             <>
@@ -374,33 +382,35 @@ export function QuoteEditor({
             )
           ) : null}
           <button type="button" onClick={() => toggleKey(`details-${l.id}`)} className="font-semibold underline underline-offset-4 text-muted">{l.details ? "Details shown to the customer" : "Add details for the customer"}</button>
-          {isOwner && !disabled ? <button type="button" onClick={() => toggleKey(`disc-${l.id}`)} className="font-semibold underline underline-offset-4 text-muted">Owner discount{(l.discount_percent ?? 0) > 0 ? ` ${l.discount_percent}%` : ""}</button> : (l.discount_percent ?? 0) > 0 ? <span className="text-muted">Discount {l.discount_percent}%</span> : null}
+          {(isOwner || settings.advisorDiscount) && !disabled ? <button type="button" onClick={() => toggleKey(`disc-${l.id}`)} className="font-semibold underline underline-offset-4 text-muted">{isOwner ? "Owner discount" : "Discount"}{(l.discount_percent ?? 0) > 0 ? ` ${l.discount_percent}%` : ""}</button> : (l.discount_percent ?? 0) > 0 ? <span className="text-muted">Discount {l.discount_percent}%</span> : null}
           {done && !disabled ? <button type="button" onClick={() => toggleKey(l.id)} className="ml-auto font-semibold underline underline-offset-4 text-green">Done, collapse</button> : null}
           <span className="sm:hidden ml-auto font-bold text-ink">{aed(total)}</span>
         </div>
-        {detailsOpen ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} placeholder="Shown to the customer under the line (optional)" /> : null}
+        {detailsOpen ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} placeholder="Shown to the customer under the line (optional)" textCase="sentence" /> : null}
         {discOpen ? <label className="flex items-center gap-2 text-xs"><span className="font-semibold text-muted">Discount %</span><Input value={num(l.discount_percent)} onChange={(e) => patch(l.id, { discount_percent: Number(e.target.value) || 0 })} inputMode="decimal" className="w-20 text-right min-h-9" /></label> : null}
         {(l.labour_rate ?? 0) + 0.005 < settings.labourRate && l.line_type === "labour" ? <span className="text-xs font-semibold text-red">Rate below the standard AED {settings.labourRate}.</span> : null}
       </div>
     );
   };
 
+  const statusBadge = (f: EditorFinding) => (f.status === "bad" ? <Badge tone="red">BAD</Badge> : f.status === "average" ? <Badge tone="amber">AVG</Badge> : f.status === "good" ? <Badge tone="green">GOOD</Badge> : <Badge tone="neutral">Not checked</Badge>);
   const findingBlock = (f: EditorFinding) => {
     const ls = linesOf(f);
     const skipped = notQuoted[f.key];
     const open = openFindings.has(f.key);
     const state: "quoted" | "unquoted" | "skipped" = ls.length ? "quoted" : skipped ? "skipped" : "unquoted";
+    const needsWork = f.status === "bad" || f.status === "average";
     return (
-      <div key={f.key} id={`item-finding-${f.key}`} className={`rounded-control border ${state === "unquoted" ? "border-amber-bar" : "border-line"}`}>
+      <div key={f.key} id={`item-finding-${f.key}`} className={`rounded-control border ${state === "unquoted" && needsWork ? "border-amber-bar" : "border-line"}`}>
         <div className="flex flex-wrap items-center gap-2 bg-chip px-2 py-1.5 text-xs">
-          <Badge tone={f.status === "bad" ? "red" : "amber"}>{f.status === "bad" ? "BAD" : "AVG"}</Badge>
+          {statusBadge(f)}
           <button type="button" onClick={() => setOpenFindings((s) => { const n = new Set(s); if (n.has(f.key)) n.delete(f.key); else n.add(f.key); return n; })} className="flex-1 min-w-0 text-left">
             <span className="font-bold">{f.label}</span>
             {f.remark ? <span className="text-muted"> · {open ? f.remark : f.remark.length > 70 ? f.remark.slice(0, 68) + "…" : f.remark}</span> : null}
             {f.parts ? <span className="text-muted"> · Parts: {f.parts}</span> : null}
             {f.dangerous ? <span className="font-bold text-red"> · DANGEROUS</span> : null}
           </button>
-          {state === "unquoted" ? <span className="font-extrabold text-amber">NOT QUOTED</span> : state === "skipped" ? <span className="text-muted">Not quoting: {skipped}{!disabled ? <button type="button" onClick={() => markNotQuoted(f.key, null)} className="ml-1 underline underline-offset-4 font-semibold">undo</button> : null}</span> : <span className="text-muted">{ls.length} line{ls.length === 1 ? "" : "s"}</span>}
+          {state === "unquoted" && needsWork ? <span className="font-extrabold text-amber">NOT QUOTED</span> : state === "skipped" ? <span className="text-muted">Not quoting: {skipped}{!disabled ? <button type="button" onClick={() => markNotQuoted(f.key, null)} className="ml-1 underline underline-offset-4 font-semibold">undo</button> : null}</span> : <span className="text-muted">{ls.length} line{ls.length === 1 ? "" : "s"}</span>}
         </div>
         {open && f.photos.length ? (
           <div className="flex flex-wrap gap-2 px-2 py-2">
@@ -416,7 +426,7 @@ export function QuoteEditor({
             <button type="button" onClick={() => addLine({ line_type: "labour", title: "", source_type: f.source_type, source_key: f.source_key, group_label: f.label })} className="min-h-8 rounded-control border border-line-strong bg-white px-2 text-xs font-bold">+ Add labour</button>
             <button type="button" onClick={() => setPicker({ source: f })} className="min-h-8 rounded-control border border-line px-2 text-xs font-semibold">Add service</button>
             <button type="button" onClick={() => setPartAsk({ description: "", quantity: "1", source: f })} className="min-h-8 rounded-control border border-line px-2 text-xs font-semibold">Ask Parts for a part</button>
-            {state === "unquoted" ? (reasonFor === f.key ? (
+            {state === "unquoted" && needsWork && f.source_type !== "request" ? (reasonFor === f.key ? (
               <span className="flex items-center gap-1">
                 <Input placeholder="Why not?" className="w-48 min-h-8" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); markNotQuoted(f.key, (e.target as HTMLInputElement).value); } }} id={`reason-${f.key}`} />
                 <button type="button" onClick={() => markNotQuoted(f.key, (document.getElementById(`reason-${f.key}`) as HTMLInputElement | null)?.value ?? "")} className="min-h-8 rounded-control bg-ink px-2 text-xs font-bold text-white">Save</button>
@@ -441,16 +451,16 @@ export function QuoteEditor({
         {/* Block 1: labour and services, grouped by finding */}
         <Card className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <SectionLabel right={`${labourDone} of ${labourLines.length} lines done${unquoted.length ? ` · ${unquoted.length} finding${unquoted.length === 1 ? "" : "s"} not quoted` : ""}`}>Labour and services</SectionLabel>
+            <SectionLabel right={`${labourDone} of ${labourLines.length} lines done`}>Labour and services</SectionLabel>
             <span className="flex gap-1 text-xs">
               <button type="button" onClick={() => setOpenRows(new Set())} className="min-h-8 rounded-control border border-line px-2 font-semibold">Collapse all</button>
               <button type="button" onClick={() => setOpenRows(new Set(labourLines.map((l) => l.id)))} className="min-h-8 rounded-control border border-line px-2 font-semibold">Expand all</button>
             </span>
           </div>
-          {isQuotation && findings.length ? <div className="flex flex-col gap-2">{findings.map(findingBlock)}</div> : null}
-          {looseLabour.length || !findings.length ? (
+          {isQuotation && headings.length ? <div className="flex flex-col gap-2">{headings.map(findingBlock)}</div> : null}
+          {looseLabour.length || !headings.length ? (
             <div className="rounded-control border border-line">
-              {findings.length ? <div className="bg-chip px-2 py-1.5 text-xs font-bold">Other labour and services</div> : null}
+              {headings.length ? <div className="bg-chip px-2 py-1.5 text-xs font-bold">Other labour and services</div> : null}
               <div className="divide-y divide-line">{looseLabour.map(labourRow)}</div>
               {looseLabour.length === 0 ? <p className="px-2 py-2 text-sm text-muted">No labour lines yet.</p> : null}
             </div>
@@ -460,6 +470,24 @@ export function QuoteEditor({
               <Button type="button" size="md" onClick={() => setPicker({})}>Add service</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "labour", title: "" })}>+ Labour</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => setPartAsk({ description: "", quantity: "1" })}>Ask Parts for a part</Button>
+            </div>
+          ) : null}
+          {isQuotation && unquoted.length ? (
+            <div className="rounded-control border border-amber-bar">
+              <div className="flex flex-wrap items-center gap-2 bg-amber-soft px-2 py-1.5 text-xs">
+                <span className="font-extrabold text-amber">{unquoted.filter((f) => f.status === "bad" || f.status === "average").length} finding{unquoted.filter((f) => f.status === "bad" || f.status === "average").length === 1 ? "" : "s"} from the report not quoted</span>
+                <span className="text-muted">Reference only: nothing here stops the quotation. Add the ones the customer should be offered.</span>
+              </div>
+              <div className="divide-y divide-line">
+                {unquoted.map((f) => (
+                  <div key={f.key} id={`item-finding-${f.key}`} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs">
+                    {statusBadge(f)}
+                    <span className="flex-1 min-w-48"><span className="font-bold">{f.label}</span>{f.remark ? <span className="text-muted"> · {f.remark.length > 90 ? f.remark.slice(0, 88) + "…" : f.remark}</span> : null}{f.parts ? <span className="text-muted"> · Parts: {f.parts}</span> : null}{f.dangerous ? <span className="font-bold text-red"> · DANGEROUS</span> : null}</span>
+                    {!disabled ? <button type="button" onClick={() => addLine({ line_type: "labour", title: "", source_type: f.source_type, source_key: f.source_key, group_label: f.label })} className="min-h-9 rounded-control bg-ink px-3 font-bold text-white">Add to quotation</button> : null}
+                    {!disabled ? <button type="button" onClick={() => setPartAsk({ description: "", quantity: "1", source: f })} className="min-h-9 rounded-control border border-line px-2 font-semibold">Ask Parts</button> : null}
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
           {partAsk ? (
@@ -618,7 +646,7 @@ export function QuoteEditor({
               return (
                 <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-1.5 py-2 ${blocked ? "bg-red-soft" : ""}`}>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is this charge?" className="flex-1 min-w-48 min-h-9 font-semibold" />
+                    <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is this charge?" className="flex-1 min-w-48 min-h-9 font-semibold" textCase="sentence" />
                     <Input value={num(l.unit_cost)} onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} placeholder="Cost (optional)" className="w-28 text-right min-h-9" aria-label="Cost" />
                     {hasCostFloor(l) ? <Input value={num(l.markup_percent)} onChange={(e) => patch(l.id, { markup_percent: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} placeholder="Markup %" className="w-20 text-right min-h-9" aria-label="Markup" /> : <Input value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled || hidden} placeholder="Price" className="w-24 text-right min-h-9" aria-label="Price" />}
                     <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Number(e.target.value) || 1 })} inputMode="decimal" disabled={disabled} className="w-14 text-right min-h-9" aria-label="Quantity" />
@@ -672,8 +700,15 @@ export function QuoteEditor({
         </Card>
 
         {wait && isQuotation && !sent ? (
-          <Card className={`flex flex-col gap-2 ${wait.openRequests || wait.partsPriced < wait.partsTotal ? "border-amber-bar" : ""}`}>
+          <Card className={`flex flex-col gap-2 ${wait.openRequests || wait.partsPriced < wait.partsTotal || wait.unavailable?.length ? "border-amber-bar" : ""}`}>
             <SectionLabel>Parts</SectionLabel>
+            {wait.unavailable?.length ? (
+              <div className="rounded-control bg-amber-soft px-3 py-2 text-xs">
+                <span className="font-extrabold text-amber">Not available from Parts:</span>
+                <ul className="mt-1 flex flex-col gap-0.5">{wait.unavailable.map((u, i) => <li key={i}><span className="font-semibold">{u.label}</span>{u.note ? <span className="text-muted"> · {u.note}</span> : null}</li>)}</ul>
+                <span className="text-muted">Offer the customer another way, or leave it off.</span>
+              </div>
+            ) : null}
             <p className="text-sm font-semibold">{wait.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} parts priced` : "No parts requested"}{wait.openRequests ? ` · ${wait.openRequests} request${wait.openRequests === 1 ? "" : "s"} still open` : ""}</p>
             {wait.openRequests || wait.partsPriced < wait.partsTotal ? (
               <>

@@ -11,7 +11,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ADDITIONAL_SELECT, sessionMinutes, type AdditionalWorkRow } from "@/lib/work-data";
-import { finishMyPart, leaveJob, managerConfirmWork, pauseWork, rejectPause, startWorking, type Actor } from "@/lib/work-flow";
+import { activeTechnicians, finishMyPart, leaveJob, managerConfirmWork, pauseWork, rejectPause, startWorking, workBudget, type Actor } from "@/lib/work-flow";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -130,6 +130,33 @@ export async function decideAdditionalWork(id: string, formData: FormData) {
 }
 
 /** The manager confirms the finished work: the car goes to QC. */
+/**
+ * The manager gives the technicians more (or less) time than the hours charged, with a reason. The
+ * price and the hours on the quotation never change; the countdown and the job summary use the budget.
+ */
+export async function setTimeBudget(jobId: string, formData: FormData) {
+  const staff = await requirePermission("manageWork");
+  const admin = createAdminClient();
+  const raw = String(formData.get("budget_hours") ?? "").trim().replace(",", ".");
+  const hours = raw === "" ? null : Math.round(Number(raw) * 10) / 10;
+  const reason = String(formData.get("reason") ?? "").trim().slice(0, 300);
+  const back = (m: string, ok: boolean) => redirect(`/jobs/${jobId}/work?${ok ? "message" : "error"}=${encodeURIComponent(m)}`);
+  if (hours !== null && (!Number.isFinite(hours) || hours <= 0)) back("Enter the hours, for example 6.5.", false);
+  if (reason.length < 3) back("Write the reason for the change; it goes on the job summary.", false);
+  const { data: job } = await admin.from("jobs").select("job_number, budget_hours, is_open").eq("id", jobId).maybeSingle();
+  if (!job || !job.is_open) back("This job is closed.", false);
+  const budget = await workBudget(jobId);
+  await admin.from("jobs").update({ budget_hours: hours, budget_reason: reason, budget_by: staff.id, budget_at: new Date().toISOString() }).eq("id", jobId);
+  const text = hours === null ? `Time budget back to the ${budget.hoursCharged} h charged` : `Time budget set to ${hours} h (charged ${budget.hoursCharged} h)`;
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "budget", note: `${text} by ${staff.display_name}: ${reason}`, created_by: staff.id });
+  const techs = await activeTechnicians(jobId);
+  await notifyStaff(techs.map((t) => t.staff_id), { type: "work_assigned", title: `Time budget changed · ${job!.job_number}`, body: `${text}. ${reason}`, jobId, href: `/my-jobs/${jobId}` });
+  revalidatePath(`/jobs/${jobId}/work`);
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath(`/my-jobs/${jobId}`);
+  back(`${text}.`, true);
+}
+
 export async function confirmWorkComplete(jobId: string) {
   const staff = await requirePermission("manageWork");
   const settings = await getSettings();

@@ -346,8 +346,11 @@ export function SettingsForm({
               <Field label="Bank charge, payment link (%)" hint="Of the total including VAT. Internal cost only, never shown to the customer.">
                 <Input name="bank_charge_link_percent" defaultValue={v.bank_charge_link_percent} inputMode="decimal" required />
               </Field>
-              <Field label="Bank charge on quotations (%)" hint="The automatic hidden Fee line: total including VAT times this. Corrected to the real charge at payment.">
-                <Input name="bank_charge_fee_percent" defaultValue={v.bank_charge_fee_percent} inputMode="decimal" required />
+              <Field label="Bank charge, cash (%)" hint="Normally 0.">
+                <Input name="bank_charge_cash_percent" defaultValue={v.bank_charge_cash_percent ?? "0"} inputMode="decimal" required />
+              </Field>
+              <Field label="Bank charge, cheque (%)" hint="Normally 0. The quotation's hidden Fee line assumes the highest of the four rates; the real charge is taken at payment.">
+                <Input name="bank_charge_cheque_percent" defaultValue={v.bank_charge_cheque_percent ?? "0"} inputMode="decimal" required />
               </Field>
               <Field label="Remind Parts after (minutes)" hint="The advisor's Remind Parts button opens after this wait.">
                 <Input name="parts_remind_minutes" defaultValue={v.parts_remind_minutes} inputMode="numeric" required />
@@ -403,6 +406,9 @@ export function SettingsForm({
                 <Input name="label_height_mm" defaultValue={v.label_height_mm} inputMode="numeric" required />
               </Field>
             </div>
+            <Field label="Quick remarks (one per line)" hint="One-tap remarks on every checklist item: Noise, Crack, Broken and so on, shown before the remarks learned from earlier reports.">
+              <Textarea name="quick_remarks" defaultValue={v.quick_remarks ?? listTexts.quick_remarks} rows={4} required />
+            </Field>
             <Field label="Part types (one per line)" hint="One-tap choice on every part: the first is the default. Genuine needs no brand; the others ask for one.">
               <Textarea name="part_types" defaultValue={v.part_types ?? listTexts.part_types} rows={4} required />
             </Field>
@@ -498,6 +504,11 @@ export function SettingsForm({
                 <Input name="comeback_window_days" defaultValue={v.comeback_window_days} inputMode="numeric" required />
               </Field>
             </div>
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="advisor_labour_discount" defaultChecked={!!flags.advisor_labour_discount} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Advisors can discount labour</span><span className="text-xs text-muted">On: a small discount column on labour and service lines for advisors. Off: only the owner discounts. Parts are never discounted by advisors.</span></span></label>
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="customer_documents_uppercase" defaultChecked={!!flags.customer_documents_uppercase} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Print customer documents in CAPITALS</span><span className="text-xs text-muted">Every line on quotations, estimates, invoices and reports the customer sees, in capitals.</span></span></label>
+            <Field label="Known words" hint="Words that keep their capitals when the system tidies names and descriptions as people type: BMW, AMG, A/C. Separate with commas.">
+              <Textarea name="known_words" defaultValue={v.known_words ?? listTexts.known_words} rows={4} required />
+            </Field>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_show_times" defaultChecked={!!flags.wash_board_show_times} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board shows the needed-by date</span><span className="text-xs text-muted">The promised date on each tile of the wash board.</span></span></label>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="test_mode_enabled" defaultChecked={flags.test_mode_enabled !== false} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Testing phase</span><span className="text-xs text-muted">Shows the owner&apos;s &quot;Clear test data&quot; button on this page. Switch off at go-live.</span></span></label>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_done_button" defaultChecked={!!flags.wash_board_done_button} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board has a Done button</span><span className="text-xs text-muted">Not built yet: for now the advisor marks the wash done. The switch is kept for later.</span></span></label>
@@ -508,8 +519,11 @@ export function SettingsForm({
             <Field label="QC general checks" hint="One per line. Every car gets these after its own complaints, work lines and parts.">
               <Textarea name="qc_general_checks" defaultValue={v.qc_general_checks ?? qcChecksText} rows={8} required />
             </Field>
-            <Field label="WhatsApp car ready message" hint="Sent with the invoice link. Placeholders: [name], [make model], [plate], [link], [advisor].">
+            <Field label="WhatsApp car ready message (proforma)" hint="Sent with the proforma link; the bank details are added underneath (or where you write [bank]). Placeholders: [name], [make model], [plate], [link], [advisor], [bank].">
               <Textarea name="whatsapp_ready_template" defaultValue={v.whatsapp_ready_template} rows={3} required />
+            </Field>
+            <Field label="WhatsApp tax invoice message" hint="Sent with the tax invoice link once the proforma is paid. Placeholders: [name], [make model], [plate], [link], [advisor].">
+              <Textarea name="whatsapp_invoice_template" defaultValue={v.whatsapp_invoice_template} rows={3} required />
             </Field>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Follow-up after gate-out (days)" hint="The advisor is reminded to call the customer.">

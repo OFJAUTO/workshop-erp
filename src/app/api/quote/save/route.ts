@@ -34,6 +34,8 @@ type LinePatch = {
 };
 type Body = {
   quotationId?: string;
+  /** Set by the editor on every change; the same key twice is the same change (a retry), not a second row. */
+  opId?: string;
   addLine?: LinePatch & { service_id?: string | null };
   patchLine?: { id: string } & LinePatch;
   removeLine?: { id: string };
@@ -140,7 +142,8 @@ export async function POST(request: NextRequest) {
     }
     if (p.discount_percent !== undefined) {
       const d = Math.min(100, Math.max(0, n(p.discount_percent) ?? 0));
-      if (!isOwner) return "Only the owner gives discounts on a line.";
+      const labourish = type === "labour" || type === "package";
+      if (!isOwner && !(labourish && settings.advisor_labour_discount === true)) return labourish ? "Only the owner gives discounts on a line (Settings: Advisors can discount labour)." : "Only the owner gives discounts on a line.";
       if (type === "part" && d > 0 && !(p.discount_reason ?? current?.discount_reason)) return "Write the reason for the part discount; it is logged.";
       out.discount_percent = d;
     }
@@ -219,8 +222,13 @@ export async function POST(request: NextRequest) {
     // A part asked from under a finding keeps that finding, so it lands under the right labour line once priced.
     const srcType = body.requestPart.source_type && ["request", "item", "tyre"].includes(body.requestPart.source_type) ? body.requestPart.source_type : "manual";
     const srcKey = srcType === "manual" ? `${q.id}:${Date.now()}` : `${String(body.requestPart.source_key ?? "")}#q${Date.now()}`;
-    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, created_by: staff.id, ...stamp });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const opKey = body.opId ? String(body.opId).slice(0, 80) : null;
+    if (opKey) {
+      const { data: same } = await admin.from("part_requests").select("id").eq("client_key", opKey).maybeSingle();
+      if (same) return NextResponse.json({ ok: true });
+    }
+    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp });
+    if (error) return NextResponse.json({ ok: !!/client_key/.test(error.message), error: /client_key/.test(error.message) ? undefined : error.message }, { status: /client_key/.test(error.message) ? 200 : 500 });
     await notifyRoles(["parts"], { type: "parts_request", title: `Part to price · ${job?.job_number ?? ""}`, body: `${description} × ${qty}, asked by ${staff.display_name} on ${q.number}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     await refreshed();
     return NextResponse.json({ ok: true });
@@ -231,7 +239,11 @@ export async function POST(request: NextRequest) {
     let type = ((a.line_type as LineType | undefined) ?? "labour") as LineType;
     if (type === "fee") return NextResponse.json({ error: "The bank charge is automatic; there is no Fee line to add." }, { status: 400 });
     if (type === "part" && q.kind === "quotation") return NextResponse.json({ error: "Parts come through the Parts desk. Use \"Ask Parts for a part\"." }, { status: 400 });
-    const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", created_by: staff.id, ...stamp, title: String(a.title ?? "").trim().slice(0, 200), group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
+    if (body.opId) {
+      const { data: same } = await admin.from("quotation_lines").select("id").eq("client_key", String(body.opId).slice(0, 80)).maybeSingle();
+      if (same) return NextResponse.json({ ok: true, id: same.id });
+    }
+    const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", client_key: body.opId ? String(body.opId).slice(0, 80) : null, created_by: staff.id, ...stamp, title: String(a.title ?? "").trim().slice(0, 200), group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
     // Parts a service asks for; they go to the Parts desk once the line is safely in.
     let linked: { rows: Record<string, unknown>[]; name: string } | null = null;
     if (a.service_id) {

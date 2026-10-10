@@ -46,14 +46,13 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   const prescans = insp.show_prescan_to_customer ? bundle.media.filter((x) => x.is_prescan) : [];
 
   const doc = (
-    <PdfDocument title={`Inspection report ${card.job.job_number}`} company={company} logo={logo} qr={qr} preparedBy={bundle.approver?.display_name ?? bundle.technician?.display_name ?? null} footerLines={["This report describes the condition found at inspection. A quotation for any work follows separately."]}>
+    <PdfDocument title={`Inspection report ${card.job.job_number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={["This report describes the condition found at inspection. A quotation for any work follows separately."]}>
       <TitleRow
         title="INSPECTION REPORT"
         meta={[
           { label: "Job card", value: card.job.job_number },
           { label: "Inspected", value: formatDateTime(insp.submitted_at) },
           { label: "Approved", value: formatDateTime(insp.approved_at) },
-          { label: "Technician", value: bundle.technician?.display_name ?? "" },
         ]}
       />
       <InfoBoxes
@@ -78,12 +77,6 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
                 <Text>
                   <Text style={styles.small}>Found: </Text>
                   {f.found}
-                </Text>
-              ) : null}
-              {f?.needs ? (
-                <Text>
-                  <Text style={styles.small}>Needs: </Text>
-                  {f.needs}
                 </Text>
               ) : null}
               <Photos photos={photoBuffers(bundle.media.filter((x) => x.job_request_id === r.id))} />
@@ -128,6 +121,12 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
       {tyres.length || measures.length ? (
         <View>
           <Text style={styles.sectionTitle}>Tyres and brakes</Text>
+          {m.tyre_size_front || m.tyre_size_rear ? (
+            <View style={styles.checkRow}>
+              <Text style={[styles.lineTitle, { width: 90 }]}>Tyre size</Text>
+              <Text>Front {text(m.tyre_size_front) || "—"}   ·   Rear {text(m.tyre_size_rear) || "—"}</Text>
+            </View>
+          ) : null}
           {tyres.map((p) => (
             <View key={p.key} style={styles.checkRow}>
               <Text style={[styles.lineTitle, { width: 90 }]}>{p.label}</Text>
@@ -179,7 +178,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
       ) : null}
       {insp.technician_notes ? (
         <View style={styles.note} wrap={false}>
-          <Text style={styles.smallTitle}>Technician&apos;s notes</Text>
+          <Text style={styles.smallTitle}>Workshop notes</Text>
           <Text>{insp.technician_notes}</Text>
         </View>
       ) : null}

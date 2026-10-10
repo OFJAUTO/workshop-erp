@@ -39,6 +39,7 @@ import {
   type InspectionLimits,
   type ItemStatus,
   type PartsRow,
+  tyreSizeText,
 } from "@/lib/inspection";
 
 export type ItemState = {
@@ -213,6 +214,7 @@ export function InspectionForm({
   submitLabel = "Submit to workshop manager",
   limits = AUTO_LIMITS,
   suggestions = {},
+  quickRemarks = [],
   fluidGrades = [],
   bigJobTags = [],
   initialTags = [],
@@ -240,6 +242,8 @@ export function InspectionForm({
   limits?: InspectionLimits;
   /** Tap-first suggestions per checklist item, learned from approved reports and editable in Settings. */
   suggestions?: Suggestions;
+  /** One-tap remarks offered on every item (Settings), before the learned ones. */
+  quickRemarks?: string[];
   fluidGrades?: string[];
   bigJobTags?: string[];
   initialTags?: string[];
@@ -422,11 +426,11 @@ export function InspectionForm({
             <StatusButtons value={f.status} onPick={(s) => setFindingStatus(f.requestId, s)} disabled={locked} statuses={CHECK_STATUSES} />
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">What was found (required)</span>
-              <Textarea value={f.found} onChange={(e) => setFindingText(f.requestId, "found", e.target.value)} rows={2} disabled={locked} />
+              <Textarea value={f.found} onChange={(e) => setFindingText(f.requestId, "found", e.target.value)} rows={2} disabled={locked} textCase="sentence" />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">What it needs</span>
-              <Textarea value={f.needs} onChange={(e) => setFindingText(f.requestId, "needs", e.target.value)} rows={2} disabled={locked} />
+              <Textarea value={f.needs} onChange={(e) => setFindingText(f.requestId, "needs", e.target.value)} rows={2} disabled={locked} textCase="sentence" />
             </label>
             <div className="flex flex-wrap items-start gap-3">
               <InspectionMedia inspectionId={inspectionId} files={filesFor({ requestId: f.requestId })} where={{ requestId: f.requestId }} disabled={locked} onAdded={addFile({ requestId: f.requestId })} />
@@ -492,14 +496,14 @@ export function InspectionForm({
                   {needsDetail || it.remarks ? (
                     <div className="flex flex-col gap-1">
                       <span className="text-xs font-semibold text-muted">Remarks{needsDetail ? " (required)" : ""}</span>
-                      {sug.remarks?.length && !locked ? (
+                      {(quickRemarks.length || sug.remarks?.length) && !locked ? (
                         <div className="flex flex-wrap gap-1.5">
-                          {sug.remarks.slice(0, 8).map((r) => (
+                          {Array.from(new Set([...quickRemarks, ...(sug.remarks ?? [])])).slice(0, 12).map((r) => (
                             <button key={r} type="button" onClick={() => patchItem(it.key, { remarks: it.remarks.trim() ? `${it.remarks.trim()} · ${r}` : r })} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-semibold">{r}</button>
                           ))}
                         </div>
                       ) : null}
-                      <Textarea value={it.remarks} onChange={(e) => patchItem(it.key, { remarks: e.target.value }, false)} rows={2} disabled={locked} />
+                      <Textarea value={it.remarks} onChange={(e) => patchItem(it.key, { remarks: e.target.value }, false)} rows={2} disabled={locked} textCase="sentence" />
                     </div>
                   ) : null}
                   {needsDetail && leak ? (
@@ -577,6 +581,19 @@ export function InspectionForm({
         <div className="flex items-center justify-between gap-2">
           <SectionLabel>Tyres (all required)</SectionLabel>
           <Dot ok={tyresOk} attempted={attempted} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label id="item-m-tyre_size_front" className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-muted">Tyre size front (for example 275/40 R20)</span>
+            <Input value={measurements.tyre_size_front ?? ""} onChange={(e) => setMeasurement("tyre_size_front", e.target.value)} onBlur={(e) => setMeasurement("tyre_size_front", tyreSizeText(e.target.value), true)} disabled={locked} placeholder="275/40 R20" autoCapitalize="characters" className={problemKeys.has("m-tyre_size_front") ? "border-red-bar" : ""} />
+          </label>
+          <div id="item-m-tyre_size_rear" className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-muted">Tyre size rear</span>
+            <div className="flex gap-1.5">
+              <Input value={measurements.tyre_size_rear ?? ""} onChange={(e) => setMeasurement("tyre_size_rear", e.target.value)} onBlur={(e) => setMeasurement("tyre_size_rear", tyreSizeText(e.target.value), true)} disabled={locked} placeholder="305/35 R20" autoCapitalize="characters" className={`flex-1 ${problemKeys.has("m-tyre_size_rear") ? "border-red-bar" : ""}`} />
+              {measurements.tyre_size_front && !locked ? <button type="button" onClick={() => setMeasurement("tyre_size_rear", tyreSizeText(measurements.tyre_size_front ?? ""), true)} className="min-h-11 rounded-control border border-line-strong bg-white px-3 text-xs font-semibold whitespace-nowrap">Same as front</button> : null}
+            </div>
+          </div>
         </div>
         {[...TYRE_POSITIONS, { key: "spare", label: "Spare (optional)" }].map((p) => {
           const cond = (measurements[`tyre_${p.key}_cond`] ?? "").split(",").filter(Boolean);

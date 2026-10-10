@@ -1,3 +1,4 @@
+import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
 import { Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -45,7 +46,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
 
   return (
     <>
-      <PageHeader title={`Hand over · ${plate}`} subtitle={`${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}`} actions={<><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/labels/${jobId}`} tone="secondary" size="lg">Labels</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts desk</LinkButton></>} />
+      <PageHeader title={`Hand over · ${plate}`} subtitle={`${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}`} actions={<><CopyVin vin={j.vehicle?.vin} /><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/labels/${jobId}`} tone="secondary" size="lg">Labels</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts desk</LinkButton></>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Card className="flex flex-col gap-3">

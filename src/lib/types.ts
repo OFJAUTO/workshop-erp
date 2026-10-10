@@ -235,6 +235,11 @@ export type JobRow = {
   comeback_claim_amount: number | null;
   comeback_claim_po: string | null;
   comeback_claim_supplier: string | null;
+  invoice_sent_at: string | null;
+  budget_hours: number | null;
+  budget_reason: string | null;
+  budget_by: string | null;
+  budget_at: string | null;
   summary: Record<string, unknown> | null;
   summary_verdict: "good" | "acceptable" | "talk" | null;
   summary_at: string | null;

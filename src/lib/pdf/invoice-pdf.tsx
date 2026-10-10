@@ -58,7 +58,7 @@ export function statusBoxFor(invoice: InvoiceBundle["invoice"], payments: Paymen
 
 /** A tax invoice, proforma invoice or credit note on the document template. The status reflects the moment it is downloaded. */
 export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings): Promise<Buffer> {
-  const { invoice, lines, payments, job, preparedByName } = bundle;
+  const { invoice, lines, payments, job } = bundle;
   const currency = currencyOf(settings);
   const vatPercent = invoice.taxable_aed ? round2((invoice.vat_aed / invoice.taxable_aed) * 100) || 5 : 5;
   const services = lines.filter((l) => l.section === "services").map((l) => docLine(l, vatPercent));
@@ -71,14 +71,13 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const isCredit = invoice.kind === "credit_note";
   const rounding = round2(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)));
   const doc = (
-    <PdfDocument title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} qr={qr} preparedBy={preparedByName} scanLabel={"Scan to view\nthis invoice online"} footerLines={[invoice.kind === "proforma" ? "A proforma invoice is a request for payment, not a tax invoice." : `VAT at ${vatPercent}% shown separately. Prices in UAE dirhams.`]}>
+    <PdfDocument title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthis invoice online"} footerLines={[invoice.kind === "proforma" ? "A proforma invoice is a request for payment, not a tax invoice." : `VAT at ${vatPercent}% shown separately. Prices in UAE dirhams.`]}>
       <TitleRow
         title={TITLES[invoice.kind]}
         meta={[
           { label: NUMBER_LABELS[invoice.kind], value: invoice.number },
           { label: "Date", value: formatDate(invoice.issued_at) },
           job ? { label: "Job card", value: job.job_number } : null,
-          { label: "Advisor", value: preparedByName ?? "" },
         ]}
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
@@ -125,6 +124,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
 
 /** A receipt for one payment, on the same template. */
 export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBundle | null, customer: { full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null, job: { job_number: string } | null, settings: Settings, receivedByName: string | null): Promise<Buffer> {
+  void receivedByName;
   const currency = currencyOf(settings);
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), invoice?.invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/invoice/${invoice.invoice.token}`) : Promise.resolve(null)]);
@@ -139,7 +139,7 @@ export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBund
     total: payment.amount_aed,
   };
   const doc = (
-    <PdfDocument title={`Receipt ${payment.number}`} company={company} logo={logo} qr={qr} preparedBy={receivedByName} scanLabel={"Scan to view\nthe invoice online"} footerLines={[pending ? "This receipt is for a cheque that has not cleared yet. It counts as unpaid until it clears." : "Thank you for your payment."]}>
+    <PdfDocument title={`Receipt ${payment.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthe invoice online"} footerLines={[pending ? "This receipt is for a cheque that has not cleared yet. It counts as unpaid until it clears." : "Thank you for your payment."]}>
       <TitleRow title="RECEIPT" meta={[{ label: "Receipt no.", value: payment.number }, { label: "Date", value: formatDate(payment.received_at) }, invoice ? { label: NUMBER_LABELS[invoice.invoice.kind], value: invoice.invoice.number } : null, job ? { label: "Job card", value: job.job_number } : null]} />
       <InfoBoxes
         boxes={[
@@ -157,9 +157,9 @@ export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBund
   return renderToBuffer(doc);
 }
 
-/** A purchase order for a supplier: part numbers, quantities and the agreed cost. Internal document. */
+/** An LPO for a supplier: part numbers, quantities and the agreed cost. Internal document. */
 export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise<Buffer> {
-  const { po, lines, job, names } = bundle;
+  const { po, lines, job, names, supplier } = bundle;
   const currency = currencyOf(settings);
   const company = companyOf(settings);
   const logo = await loadLogo();
@@ -168,18 +168,18 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
     const amount = round2(l.quantity * l.unit_cost);
     const vat = round2(amount * (vatPercent / 100));
     const part = bundle.parts.find((p) => p.id === l.part_item_id);
-    return { description: l.description, partNumber: l.part_number, details: [part ? partTypeText(part) : null, l.expected_date ? `Expected ${formatDate(l.expected_date)}` : null].filter(Boolean).join(" · ") || null, qty: qtyText(l.quantity), rate: l.unit_cost, amount, vat, total: round2(amount + vat) };
+    return { description: l.part_number ? `${l.part_number} · ${l.description}` : l.description, partNumber: null, details: [part ? partTypeText(part) : null, l.expected_date ? `Expected ${formatDate(l.expected_date)}` : null].filter(Boolean).join(" · ") || null, qty: qtyText(l.quantity), rate: l.unit_cost, amount, vat, total: round2(amount + vat) };
   });
   const gross = round2(docLines.reduce((a, l) => a + l.amount, 0));
   const vat = round2(gross * (vatPercent / 100));
   const v = job?.vehicle;
   const doc = (
-    <PdfDocument title={`Purchase order ${po.number}`} company={company} logo={logo} preparedBy={po.created_by ? (names.get(po.created_by) ?? null) : null} footerLines={["Please quote the purchase order number on your delivery note and invoice. Prices before VAT as agreed."]}>
-      <TitleRow title="PURCHASE ORDER" meta={[{ label: "PO no.", value: po.number }, { label: "Date", value: formatDate(po.approved_at ?? po.created_at) }, job ? { label: "Job card", value: job.job_number } : null, { label: "Approved by", value: po.approved_by ? (names.get(po.approved_by) ?? "") : "" }]} />
+    <PdfDocument title={`LPO ${po.number}`} company={company} logo={logo} footerLines={["Please quote the LPO number on your delivery note and invoice. Prices before VAT as agreed."]}>
+      <TitleRow title="LOCAL PURCHASE ORDER" meta={[{ label: "LPO no.", value: po.number }, { label: "Date", value: formatDate(po.approved_at ?? po.created_at) }, job ? { label: "Job card", value: job.job_number } : null, { label: "Approved by", value: po.approved_by ? (names.get(po.approved_by) ?? "") : "" }]} />
       <InfoBoxes
         boxes={[
-          { title: "Supplier", strong: po.supplier_name, lines: [po.notes] },
-          { title: "Vehicle", strong: v ? [[v.make?.name, v.model?.name].filter(Boolean).join(" "), formatPlate(v)].filter(Boolean).join(" · ") : "", lines: [v?.vin ? `VIN ${v.vin}` : null, job ? `Job card ${job.job_number}` : null] },
+          { title: "Supplier", strong: po.supplier_name, lines: [supplier?.trn ? `TRN ${supplier.trn}` : null, supplier?.address ?? null, [supplier?.phone, supplier?.email].filter(Boolean).join(" · ") || null, supplier?.payment_terms ? `Terms: ${supplier.payment_terms}` : null, po.notes] },
+          { title: "Vehicle", strong: v ? [[v.make?.name, v.model?.name, (v as { model_year?: number | null }).model_year].filter(Boolean).join(" "), formatPlate(v)].filter(Boolean).join(" · ") : "", lines: [v?.vin ? `VIN ${v.vin}` : null, `Prepared by ${po.created_by ? (names.get(po.created_by) ?? "") : ""}${po.approved_by ? ` · Approved by ${names.get(po.approved_by) ?? ""}` : ""}`, job ? `Job card ${job.job_number}` : null] },
         ]}
       />
       <LinesTable title="Parts ordered" lines={docLines} currency={currency} vatPercent={vatPercent} subtotalLabel="Order subtotal" />

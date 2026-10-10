@@ -42,7 +42,7 @@ export async function confirmComeback(jobId: string, formData: FormData) {
   const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
   const advisors = Array.from(new Set([job!.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
   await notifyStaff(advisors, { type: "comeback", title: `Comeback decided · ${job!.job_number}`, body: free ? "Free of charge: build the quotation as normal and send it; it is approved on sending without the customer." : "The customer pays: quote as normal.", jobId, href: `/jobs/${jobId}` });
-  if (job!.comeback_cause === "faulty_part") await notifyRoles(["parts"], { type: "comeback", title: `Claim from the supplier · ${job!.job_number}`, body: "A part failed. Record the claim on the job card (supplier, purchase order, amount).", jobId, href: `/jobs/${jobId}#comeback` });
+  if (job!.comeback_cause === "faulty_part") await notifyRoles(["parts"], { type: "comeback", title: `Claim from the supplier · ${job!.job_number}`, body: "A part failed. Record the claim on the job card (supplier, LPO, amount).", jobId, href: `/jobs/${jobId}#comeback` });
   revalidatePath(`/jobs/${jobId}`);
   back(jobId, free ? "Confirmed: free of charge." : "Confirmed: the customer pays.");
 }

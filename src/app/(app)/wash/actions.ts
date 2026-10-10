@@ -6,6 +6,8 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ensureProforma } from "@/lib/invoice-flow";
+import { getSettings } from "@/lib/settings";
 
 function refresh(jobId: string) {
   revalidatePath("/wash");
@@ -27,7 +29,8 @@ async function toReady(jobId: string, by: string | null, byName: string, note: s
   const now = new Date().toISOString();
   await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now }).eq("id", jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_wash", to_status: "ready", note, created_by: by });
-  await notifyStaff(await advisorIds(jobId, job.gated_in_by), { type: "car_ready", title: `Car ready · ${job.job_number}`, body: `${note} (${byName}). Mark it ready to invoice so accounts can issue the invoice.`, jobId, href: `/jobs/${jobId}` });
+  const proforma = await ensureProforma(jobId, by ? { id: by, display_name: byName } : null, await getSettings()).catch(() => null);
+  await notifyStaff(await advisorIds(jobId, job.gated_in_by), { type: "car_ready", title: `Car ready · ${job.job_number}`, body: `${note} (${byName}). ${proforma ? `${proforma.number} is ready: send it to the customer.` : "Nothing to invoice yet."}`, jobId, href: `/jobs/${jobId}` });
   return job;
 }
 

@@ -1,3 +1,4 @@
+import { ServicePriceField } from "./ServicePriceField";
 import { Badge, Button, Card, Empty, Field, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadServices } from "@/lib/quote-data";
@@ -21,12 +22,7 @@ function ServiceFields({ s, categories }: { s: Service | null; categories: Servi
           ))}
         </Select>
       </Field>
-      <Field label="Fixed price (AED)" optional hint="Leave empty to quote by hours.">
-        <Input name="price_aed" defaultValue={s?.price_aed ?? ""} inputMode="decimal" />
-      </Field>
-      <Field label="Default hours" optional hint="One decimal place, 0.1 steps. Empty: the advisor types the hours.">
-        <Input name="default_hours" defaultValue={s?.default_hours ?? ""} inputMode="decimal" />
-      </Field>
+      <ServicePriceField priceAed={s?.price_aed ?? null} defaultHours={s?.default_hours ?? null} />
       {s ? (
         <Field label="Category">
           <Select name="category_id" defaultValue={s.category_id}>

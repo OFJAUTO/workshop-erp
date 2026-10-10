@@ -54,7 +54,7 @@ export function ComebackCard({ jobId, job, role, viewingAs, original, comebacks,
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Input name="supplier" defaultValue={job.comeback_claim_supplier ?? ""} placeholder="Supplier" />
-            <Input name="po" defaultValue={job.comeback_claim_po ?? ""} placeholder="Purchase order number" />
+            <Input name="po" defaultValue={job.comeback_claim_po ?? ""} placeholder="LPO number" />
             <Input name="amount" defaultValue={job.comeback_claim_amount ?? ""} inputMode="decimal" placeholder="Amount (AED)" />
           </div>
           <ChoiceButtons name="status" columns={3} defaultValue={job.comeback_claim_status === "none" ? "to_claim" : job.comeback_claim_status} options={[{ value: "to_claim", label: "To claim" }, { value: "claimed", label: "Claimed" }, { value: "paid", label: "Paid by the supplier" }]} />

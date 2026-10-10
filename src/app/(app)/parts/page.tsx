@@ -1,6 +1,7 @@
+import { CopyVin } from "@/components/CopyVin";
 import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { REQUEST_SELECT } from "@/lib/quote-data";
@@ -28,7 +29,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const [{ data: reqRows }, { data: partRows }, { data: supplierRows }] = await Promise.all([
     admin.from("part_requests").select(REQUEST_SELECT).eq("is_active", true).in("status", ["open"]).order("created_at"),
     admin.from("part_items").select(PART_FULL_SELECT).eq("is_active", true).order("created_at"),
-    admin.from("suppliers").select("name").eq("is_active", true).order("name"),
+    admin.from("suppliers").select("id, name").eq("is_active", true).order("name"),
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
@@ -72,7 +73,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           return (
             <Card key={jobId} className={`flex flex-col gap-2 ${t.tone === "red" ? "border-red-bar" : t.tone === "amber" ? "border-amber-bar" : ""}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <span className="flex items-center gap-2">
                   <Badge tone={t.tone}>{formatWait(t.min, wt)} waiting</Badge>
                   <LinkButton href={`/parts/${jobId}`} size="md">Open</LinkButton>
@@ -94,7 +95,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {waitingPrice.length === 0 ? <p className="text-sm text-muted">None.</p> : null}
           {byJob(waitingPrice).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1">
-              <Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
               <ul className="text-sm divide-y divide-line">
                 {waitingPrice.filter((p) => p.job_id === jobId).map((p) => (
                   <li key={p.id} className="py-1.5">{p.description}{p.part_number ? <span className="text-muted"> · {p.part_number}</span> : null} · × {p.confirmed_quantity ?? p.quantity}</li>
@@ -107,11 +108,11 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
 
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${toOrder.length}`}>To order (approved by the customer)</SectionLabel>
-        <p className="text-xs text-muted">Tick the parts for one supplier and raise a purchase order. It goes to the owner or the head accountant for approval; it cannot be sent before that.</p>
+        <p className="text-xs text-muted">Tick the parts for one supplier and raise an LPO. It goes to the owner or the head accountant for approval; it cannot be sent before that.</p>
         {toOrder.length === 0 ? <p className="text-sm text-muted">Nothing to order.</p> : null}
         {byJob(toOrder).map((jobId) => (
           <Card key={jobId} className="flex flex-col gap-2">
-            <Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>
+            <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
             <form action={createPurchaseOrder.bind(null, jobId)} className="flex flex-col gap-2">
               <ul className="text-sm divide-y divide-line">
                 {toOrder.filter((p) => p.job_id === jobId).map((p) => (
@@ -124,9 +125,9 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                 ))}
               </ul>
               <div className="flex flex-wrap items-end gap-2">
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier</span><Input name="supplier" list="suppliers" defaultValue={toOrder.find((p) => p.job_id === jobId)?.supplier ?? ""} required className="w-64" /></label>
+                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier</span><Select name="supplier_id" defaultValue={(supplierRows ?? []).find((s) => s.name.toLowerCase() === (toOrder.find((p) => p.job_id === jobId)?.supplier ?? "").toLowerCase())?.id ?? ""} className="w-64"><option value="">New supplier: type the name</option>{(supplierRows ?? []).map((s) => <option key={s.id as string} value={s.id as string}>{s.name as string}</option>)}</Select><Input name="supplier" list="suppliers" defaultValue={toOrder.find((p) => p.job_id === jobId)?.supplier ?? ""} placeholder="Name of a new supplier" className="w-64" textCase="title" /></label>
                 <Input name="notes" placeholder="Note on the order (optional)" className="flex-1 min-w-48" />
-                <Button type="submit" size="md">Raise purchase order</Button>
+                <Button type="submit" size="md">Raise LPO</Button>
               </div>
             </form>
           </Card>
@@ -141,8 +142,8 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {byJob(ordered).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>
-                <LinkButton href="/parts/orders" tone="secondary" size="md">Purchase orders</LinkButton>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+                <LinkButton href="/parts/orders" tone="secondary" size="md">LPOs</LinkButton>
               </div>
               <ul className="text-sm divide-y divide-line">
                 {ordered.filter((p) => p.job_id === jobId).map((p) => {
@@ -165,7 +166,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {byJob(toIssue).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1 border-ink">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <span className="flex gap-2"><LinkButton href={`/parts/labels/${jobId}`} tone="secondary" size="md">Labels</LinkButton><LinkButton href={`/parts/issue/${jobId}`} size="md">Issue</LinkButton></span>
               </div>
               <ul className="text-sm divide-y divide-line">

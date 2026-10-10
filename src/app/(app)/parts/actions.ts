@@ -264,6 +264,30 @@ export async function closePartRequest(requestId: string, formData: FormData) {
   redirect(`/parts/${r.job_id}?message=${encodeURIComponent("Request closed.")}`);
 }
 
+/**
+ * "Not available": Parts cannot get this part at all. The request closes with the note, the advisor
+ * is told at once, and the quotation shows it in amber so the customer can be offered something else.
+ */
+export async function markRequestUnavailable(requestId: string, formData: FormData) {
+  const staff = await requirePermission("priceParts");
+  const note = blankToNull(formData.get("note"));
+  const admin = createAdminClient();
+  const { data: r } = await admin.from("part_requests").select("id, job_id, label").eq("id", requestId).maybeSingle();
+  if (!r) redirect("/parts");
+  const { error } = await admin.from("part_requests").update({ status: "unavailable", closed_reason: note ?? "Not available", updated_by: staff.id }).eq("id", requestId);
+  if (error) redirect(`/parts/${r.job_id}?error=${encodeURIComponent(error.message)}`);
+  await admin.from("job_events").insert({ job_id: r.job_id, event_type: "parts_unavailable", note: `${r.label}: not available (${staff.display_name})${note ? `: ${note}` : ""}`, created_by: staff.id });
+  const job = await jobOf(r.job_id);
+  if (job) {
+    const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", r.job_id);
+    const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+    await notifyStaff(ids, { type: "parts_priced", title: `Part not available · ${job.job_number}`, body: `${r.label}: not available${note ? ` (${note})` : ""}. Offer the customer another way or leave it off the quotation.`, jobId: r.job_id, href: `/jobs/${r.job_id}` });
+  }
+  await tellAdvisorIfComplete(r.job_id);
+  refresh(r.job_id);
+  redirect(`/parts/${r.job_id}?message=${encodeURIComponent("Marked not available. The advisor has been told.")}`);
+}
+
 /** Take a part off the job (wrong listing). Its quotation line goes with it. */
 export async function removePart(partId: string) {
   const staff = await requirePermission("priceParts");

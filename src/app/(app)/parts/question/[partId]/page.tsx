@@ -1,3 +1,4 @@
+import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
 import { Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -30,7 +31,7 @@ export default async function PartQuestionPage({ params, searchParams }: { param
   const canAnswer = !staff.viewingAs && !p.answer_text;
   return (
     <>
-      <PageHeader title={`Question from Parts · ${v ? formatPlate(v) : job?.job_number ?? ""}`} subtitle={`${[v?.make?.name, v?.model?.name].filter(Boolean).join(" ")} · ${job?.job_number ?? ""}`} actions={job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : undefined} />
+      <PageHeader title={`Question from Parts · ${v ? formatPlate(v) : job?.job_number ?? ""}`} subtitle={`${[v?.make?.name, v?.model?.name].filter(Boolean).join(" ")} · ${job?.job_number ?? ""}`} actions={<><CopyVin vin={v?.vin} />{job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Card className="flex flex-col gap-3 max-w-2xl">

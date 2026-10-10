@@ -40,6 +40,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   const pendingOwner = payments.filter((p) => p.status === "pending_owner");
   const isTax = invoice.kind === "tax_invoice";
+  // A proforma takes payments until it becomes the tax invoice.
+  const payable = isTax || (invoice.kind === "proforma" && !invoice.converted_to);
   const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
 
   return (
@@ -51,7 +53,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             {job ? <span>· {job.job_number}</span> : null}
             <span>· {customer?.company_name ?? customer?.full_name}</span>
-            {isTax ? <Badge tone={bal.state === "paid" ? "green" : bal.state === "unpaid" ? "red" : "amber"}>{PAYMENT_STATE_LABELS[bal.state]}</Badge> : null}
+            {payable ? <Badge tone={bal.state === "paid" ? "green" : bal.state === "unpaid" ? "red" : "amber"}>{PAYMENT_STATE_LABELS[bal.state]}</Badge> : null}{invoice.kind === "proforma" ? <Badge tone="outline">Not a tax invoice</Badge> : null}{invoice.converted_to ? <Badge tone="green">Became the tax invoice</Badge> : null}{invoice.issue_reason ? <Badge tone="amber">Issued before full payment: {invoice.issue_reason}</Badge> : null}
             {invoice.warranty_credit_aed ? <Badge tone="ink">Warranty repair, no charge</Badge> : null}
             {invoice.status === "cancelled" ? <Badge tone="red">Cancelled</Badge> : null}
           </span>
@@ -66,7 +68,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {isTax ? (
+      {payable ? (
         <Card className={`flex flex-wrap items-center gap-x-8 gap-y-2 ${bal.state === "paid" ? "border-green" : "border-ink"}`}>
           <span className="text-lg font-extrabold">Invoice AED {m(invoice.total_aed)}</span>
           <span className="text-lg font-extrabold">Paid AED {m(bal.paid)}</span>
@@ -78,7 +80,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
-          {isTax ? (
+          {payable ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel right={`${live.length}`}>Payments</SectionLabel>
               {payments.length === 0 ? <p className="text-sm text-muted">Nothing received yet.</p> : null}
@@ -130,10 +132,10 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               </ul>
               {canPay && bal.balance > 0 ? (
                 <div className="border-t border-line pt-3">
-                  <PaymentForm invoiceId={invoice.id} jobId={null} balance={bal.balance} action={recordPayment} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} isOwner={role === "owner"} />
+                  <PaymentForm invoiceId={invoice.id} jobId={null} balance={bal.balance} action={recordPayment} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} isOwner={role === "owner"} />
                 </div>
               ) : null}
-              {isTax && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}
+              {payable && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}
             </Card>
           ) : null}
 

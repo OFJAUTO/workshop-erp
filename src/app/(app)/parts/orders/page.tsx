@@ -16,7 +16,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 
 type JobInfo = { id: string; job_number: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null };
 
-/** Purchase orders: waiting for approval, approved and not sent, ordered (late ones flagged), received, and supplier invoices still to follow. */
+/** LPOs: waiting for approval, approved and not sent, ordered (late ones flagged), received, and supplier invoices still to follow. */
 export default async function PurchaseOrdersPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   await requirePermission("viewPurchaseOrders");
   const { message, error } = await searchParams;
@@ -51,10 +51,10 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   return (
     <>
       <LiveRefresh tables={["purchase_orders"]} pollMs={60000} />
-      <PageHeader title="Purchase orders" subtitle="Raised from the Parts desk, approved by the owner or the head accountant, sent to the supplier, received line by line." actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>} />
+      <PageHeader title="LPOs" subtitle="Raised from the Parts desk, approved by the owner or the head accountant, sent to the supplier, received line by line." actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {pos.length === 0 ? <Empty title="No purchase orders yet" /> : null}
+      {pos.length === 0 ? <Empty title="No LPOs yet" /> : null}
       {groups.map((g) =>
         g.items.length ? (
           <section key={g.key} className="flex flex-col gap-3">

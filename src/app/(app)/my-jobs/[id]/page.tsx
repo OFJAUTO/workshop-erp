@@ -212,7 +212,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
       {work && inWork ? (
         <>
           <WorkClock
-            hoursCharged={work.hoursQuoted}
+            hoursCharged={job.budget_hours !== null ? Number(job.budget_hours) : work.hoursQuoted}
             minutesUsed={minutesUsed}
             running={running}
             mineRunning={running.some((r) => r.mine)}
@@ -313,7 +313,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
       {!inWork && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved") ? (
         <>
-          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: true, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
+          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: true, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>

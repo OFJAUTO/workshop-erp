@@ -3,6 +3,7 @@ import { dubaiDate } from "./jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { ensureProforma } from "./invoice-flow";
 import { WORK_SESSION_SELECT, buildQcItems, ensureWorkLines, latestQc, sessionMinutes, type WorkSessionRow } from "./work-data";
 
 /** Who is doing something: a staff row, or the owner acting for someone. */
@@ -190,7 +191,7 @@ export async function rejectPause(pauseId: string, actor: Actor, accepted: boole
 }
 
 /** The manager puts a technician on a car (or back on it after he left). */
-export async function addTechnician(jobId: string, staffId: string, actor: Actor): Promise<Result> {
+export async function addTechnician(jobId: string, staffId: string, actor: Actor, opts: { quiet?: boolean } = {}): Promise<Result> {
   const admin = createAdminClient();
   const job = await jobRow(jobId);
   if (!job || !job.is_open) return { error: "This job is closed." };
@@ -203,8 +204,47 @@ export async function addTechnician(jobId: string, staffId: string, actor: Actor
   if (!job.assigned_to) await admin.from("jobs").update({ assigned_to: staffId }).eq("id", jobId);
   if (job.work_done_at) await admin.from("jobs").update({ work_done_at: null }).eq("id", jobId);
   await event(jobId, actor.id, "work_assigned", `${tech.display_name} put on the car by ${actor.display_name}`, { to_staff: staffId });
-  await notifyStaff([staffId], { type: "work_assigned", title: `Work for you · ${job.job_number}`, body: `${actor.display_name} put you on this car.`, jobId, href: `/my-jobs/${jobId}` });
+  if (!opts.quiet) await notifyStaff([staffId], { type: "work_assigned", title: `Car for you · ${job.job_number}`, body: `${actor.display_name} put you on this car.`, jobId, href: `/my-jobs/${jobId}` });
   return { ok: true, message: `${tech.display_name} is on the car.` };
+}
+
+/**
+ * The manager takes a technician off the car: the clock stops, any pause closes, and if he was the
+ * lead the next technician on the car becomes the lead (and takes over an unapproved inspection).
+ */
+export async function removeTechnician(jobId: string, staffId: string, actor: Actor): Promise<Result> {
+  const admin = createAdminClient();
+  const job = await jobRow(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  if (["pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status)) return { error: "The work is confirmed finished; the technicians cannot change now." };
+  const { data: tech } = await admin.from("staff").select("id, display_name").eq("id", staffId).maybeSingle();
+  if (!tech) return { error: "Technician not found." };
+  await closeOpenSessions(staffId, actor.id, "stop", null, jobId);
+  await closeOpenPause(jobId, staffId, actor.id);
+  await admin.from("job_technicians").update({ left_at: new Date().toISOString(), left_reason: `Taken off by ${actor.display_name}`, updated_by: actor.id }).eq("job_id", jobId).eq("staff_id", staffId).is("left_at", null);
+  const left = await activeTechnicians(jobId);
+  if (job.assigned_to === staffId) {
+    const next = left[0]?.staff_id ?? null;
+    await admin.from("jobs").update({ assigned_to: next }).eq("id", jobId);
+    await admin.from("inspections").update({ technician_id: next ?? staffId, updated_by: actor.id }).eq("job_id", jobId).eq("is_active", true).neq("status", "approved");
+  }
+  await event(jobId, actor.id, "left_job", `${tech.display_name} taken off the car by ${actor.display_name}`, { from_staff: staffId });
+  await notifyStaff([staffId], { type: "work_assigned", title: `Taken off a car · ${job.job_number}`, body: `${actor.display_name} took you off this car.`, jobId, href: "/my-jobs" });
+  return { ok: true, message: `${tech.display_name} is off the car.${!left.length ? " Nobody is on it now." : ""}` };
+}
+
+/** Another technician on the car becomes the lead: the name on the job, and the one who does the inspection. */
+export async function setLeadTechnician(jobId: string, staffId: string, actor: Actor): Promise<Result> {
+  const admin = createAdminClient();
+  const job = await jobRow(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  const techs = await activeTechnicians(jobId);
+  if (!techs.some((t) => t.staff_id === staffId)) return { error: "Put the technician on the car first." };
+  const { data: tech } = await admin.from("staff").select("display_name").eq("id", staffId).maybeSingle();
+  await admin.from("jobs").update({ assigned_to: staffId }).eq("id", jobId);
+  await admin.from("inspections").update({ technician_id: staffId, updated_by: actor.id }).eq("job_id", jobId).eq("is_active", true).neq("status", "approved");
+  await event(jobId, actor.id, "assigned", `${tech?.display_name ?? "Technician"} made the lead by ${actor.display_name}`, { from_staff: job.assigned_to, to_staff: staffId });
+  return { ok: true, message: `${tech?.display_name ?? "Technician"} is the lead on this car.` };
 }
 
 /** The clock pauses itself at the end of the shift (hourly job): open sessions past closing time end, logged as a pause. */
@@ -254,6 +294,8 @@ export async function applyStageSideEffects(jobId: string, toStatus: string, act
     await admin.from("jobs").update({ work_started_at: now, plan_released_at: now, plan_released_by: actor.id }).eq("id", jobId);
   } else if (toStatus === "pending_wash") {
     await admin.from("jobs").update({ wash_sent_at: null }).eq("id", jobId);
+  } else if (toStatus === "ready") {
+    await ensureProforma(jobId, { id: actor.id, display_name: actor.display_name }, settings).catch(() => null);
   }
 }
 

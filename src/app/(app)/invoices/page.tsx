@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel, Input } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { verifyPaymentAction } from "./actions";
+import { verifyPaymentAction, updateBankCharges } from "./actions";
 import { Button } from "@/components/ui";
 import { INVOICE_SELECT, PAYMENT_SELECT, PAYMENT_STATE_LABELS, invoiceBalance, toInvoice, toPayment, type InvoiceRow } from "@/lib/invoice-data";
 import { can, type RoleId } from "@/lib/roles";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 
@@ -18,6 +19,7 @@ type JobRow = { id: string; job_number: string; status: string; ready_to_invoice
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string }> }) {
   const staff = await requirePermission("viewInvoices");
   const role = staff.role_id as RoleId;
+  const settings = await getSettings();
   const { message, error, show } = await searchParams;
   const admin = createAdminClient();
   const [{ data: jobs }, { data: invRows }, { data: payRows }] = await Promise.all([
@@ -27,10 +29,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   ]);
   const invoices = ((invRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ inv: toInvoice(r), job: r.job as { job_number: string; vehicle: JobRow["vehicle"] } | null, customer: r.customer as { full_name: string; company_name: string | null } | null }));
   const payments = ((payRows ?? []) as Record<string, unknown>[]).map(toPayment);
-  const invoicedJobs = new Set(invoices.filter((i) => i.inv.kind === "tax_invoice" && i.inv.status === "issued").map((i) => i.inv.job_id));
+  const invoicedJobs = new Set(invoices.filter((i) => (i.inv.kind === "tax_invoice" || (i.inv.kind === "proforma" && !i.inv.converted_to)) && i.inv.status === "issued").map((i) => i.inv.job_id));
   const toInvoiceList = ((jobs ?? []) as unknown as JobRow[]).filter((j) => !invoicedJobs.has(j.id));
-  const stateOf = (inv: InvoiceRow) => (inv.kind === "tax_invoice" ? invoiceBalance(inv, payments.filter((p) => p.invoice_id === inv.id)) : null);
+  const stateOf = (inv: InvoiceRow) => (inv.kind === "tax_invoice" || (inv.kind === "proforma" && !inv.converted_to) ? invoiceBalance(inv, payments.filter((p) => p.invoice_id === inv.id)) : null);
   const filtered = invoices.filter((i) => {
+    if (i.inv.kind === "proforma" && i.inv.converted_to) return false;
     const s = stateOf(i.inv);
     if (show === "unpaid") return s && s.state !== "paid";
     if (show === "paid") return s && s.state === "paid";
@@ -54,6 +57,18 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {can(role, "issueInvoices") && !staff.viewingAs ? (
+        <details className="rounded-card border border-line bg-white px-5 py-3">
+          <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">Bank charges: card {Number(settings.bank_charge_card_percent) || 0}% · link {Number(settings.bank_charge_link_percent) || 0}% · cash {Number(settings.bank_charge_cash_percent) || 0}% · cheque {Number(settings.bank_charge_cheque_percent) || 0}%</summary>
+          <form action={updateBankCharges} className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+            {([["bank_charge_card_percent", "Card %"], ["bank_charge_link_percent", "Payment link %"], ["bank_charge_cash_percent", "Cash %"], ["bank_charge_cheque_percent", "Cheque %"]] as const).map(([k, l]) => (
+              <label key={k} className="flex flex-col gap-1 text-xs font-semibold text-muted">{l}<Input name={k} defaultValue={String(settings[k] ?? 0)} inputMode="decimal" required /></label>
+            ))}
+            <Button type="submit" tone="secondary" size="md">Save</Button>
+            <p className="col-span-full text-xs text-muted">Taken off each payment as it is recorded (split payments each at their own rate). Quotations assume the highest rate until the money comes in.</p>
+          </form>
+        </details>
+      ) : null}
 
       {can(role, "verifyPayments") && toVerify.length ? (
         <section className="flex flex-col gap-3">
@@ -106,7 +121,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <Link key={inv.id} href={`/invoices/${inv.id}`} className="block">
               <Card className="flex flex-wrap items-center gap-3 hover:border-ink">
                 <span className="font-extrabold">{inv.number}</span>
-                <Badge tone="outline">{inv.kind === "tax_invoice" ? "Tax invoice" : inv.kind === "proforma" ? "Proforma" : "Credit note"}</Badge>
+                <Badge tone="outline">{inv.kind === "tax_invoice" ? "Tax invoice" : inv.kind === "proforma" ? "Proforma, not a tax invoice" : "Credit note"}</Badge>
                 <span className="font-semibold">{job?.vehicle ? formatPlate(job.vehicle) : ""} · {job?.job_number ?? ""}</span>
                 <span className="text-sm text-muted">{customer?.company_name ?? customer?.full_name}</span>
                 {s ? <Badge tone={tone(s.state)}>{PAYMENT_STATE_LABELS[s.state]}{s.state !== "paid" ? ` · AED ${s.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} due` : ""}</Badge> : null}

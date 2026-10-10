@@ -67,6 +67,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
 
   return (
     <CustomerDocument
+      uppercase={settings.customer_documents_uppercase === true}
       company={company}
       title="Inspection report"
       meta={[{ label: "Job card", value: card.job.job_number }, { label: "Inspected", value: formatDate(insp.submitted_at) }, { label: "Approved", value: formatDate(insp.approved_at) }]}
@@ -90,7 +91,6 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
                   {f?.status ? <Badge tone={TONE[f.status]}>{ITEM_STATUS_LABELS[f.status]}</Badge> : null}
                 </div>
                 {f?.found ? <p className="text-sm"><span className="text-muted">Found:</span> {f.found}</p> : null}
-                {f?.needs ? <p className="text-sm"><span className="text-muted">Needs:</span> {f.needs}</p> : null}
                 <Photos rows={bundle.media.filter((x) => x.job_request_id === r.id)} urls={bundle.mediaUrls} />
               </div>
             );
@@ -135,6 +135,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
 
       <DocSection title="Tyres and brakes">
         <ul className="divide-y divide-line text-sm">
+          {m.tyre_size_front || m.tyre_size_rear ? <li className="py-1.5 flex flex-wrap gap-x-3"><span className="font-semibold w-28">Tyre size</span><span>Front {String(m.tyre_size_front ?? "") || "—"} · Rear {String(m.tyre_size_rear ?? "") || "—"}</span></li> : null}
           {[...TYRE_POSITIONS, { key: "spare", label: "Spare" }].filter((p) => m[`tyre_${p.key}_tread`] || m[`tyre_${p.key}_action`]).map((p) => (
             <li key={p.key} className="py-1.5 flex flex-wrap gap-x-3">
               <span className="font-semibold w-28">{p.label}</span>
@@ -179,7 +180,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
         </ToggleBlock>
       ) : null}
       {insp.technician_notes ? (
-        <ToggleBlock title="Technician's notes">
+        <ToggleBlock title="Workshop notes">
           <p className="text-sm whitespace-pre-wrap">{insp.technician_notes}</p>
         </ToggleBlock>
       ) : null}

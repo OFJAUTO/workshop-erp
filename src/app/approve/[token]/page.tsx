@@ -73,9 +73,10 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
 
   return (
     <CustomerDocument
+      uppercase={settings.customer_documents_uppercase === true}
       company={company}
       title="Job card"
-      meta={[{ label: "Job card", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }, ...(advisor ? [{ label: "Advisor", value: advisor.name }] : [])]}
+      meta={[{ label: "Job card", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }]}
       boxes={[
         { title: "Customer", strong: card.customer?.company_name ?? customerName, rows: [["Name", card.customer?.company_name ? customerName : null], ["Mobile", card.customer?.phone ?? null]] },
         { title: "Vehicle", strong: car || "Vehicle", rows: [["Variant", vehicle.variant], ["Plate", formatPlate(vehicle)], ["VIN", vehicle.vin]] },
@@ -91,6 +92,12 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       {approved ? <Notice tone="success">Approved by {req.approver_name} on {formatDateTime(req.approved_at)}. Thank you.</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <p className="text-sm leading-relaxed">Dear {customerName}, your {car} ({formatPlate(vehicle)}) was received on {formatDateTime(job.gated_in_at)}{location ? ` at ${location}` : ""}. Please review the videos and details below, then approve so we can begin the inspection.</p>
+      {advisor && (advisor.phone || waDigits) ? (
+        <div className="grid grid-cols-2 gap-3">
+          {advisor.phone ? <a href={`tel:${advisor.phone}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call {advisor.name.split(" ")[0]}</a> : null}
+          {waDigits ? <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-base font-extrabold">WhatsApp</a> : null}
+        </div>
+      ) : null}
       <DocSection title="Your requests">
         <ol className="list-decimal pl-5 text-sm flex flex-col gap-0.5 py-1">
           {requests.length ? requests.map((r) => <li key={r.id}>{r.text}</li>) : <li className="whitespace-pre-wrap list-none -ml-5">{gateIn.customer_requests}</li>}

@@ -33,15 +33,23 @@ const DEFAULTS = {
   followup_days: 3,
   whatsapp_ready_template:
     "Dear [name], your [make model] ([plate]) is ready for collection at OFJ Automotive. Your invoice and balance are here:\n[link]\nThank you, [advisor], OFJ Automotive",
+  whatsapp_invoice_template:
+    "Dear [name], thank you for your payment. Your tax invoice for the [make model] ([plate]) is here:\n[link]\nThank you, [advisor], OFJ Automotive",
   whatsapp_followup_template:
     "Dear [name], thank you for choosing OFJ Automotive for your [make model] ([plate]). We hope everything is running well. If anything needs our attention, please let us know.\nThank you, [advisor], OFJ Automotive",
-  bank_charge_card_percent: 1.9,
-  bank_charge_link_percent: 1.9,
-  bank_charge_fee_percent: 1.9,
+  bank_charge_card_percent: 2.26,
+  bank_charge_link_percent: 1.75,
+  bank_charge_cash_percent: 0,
+  bank_charge_cheque_percent: 0,
+  bank_charge_fee_percent: 2.26,
+  quick_remarks: ["Noise", "Crack", "Broken", "Leak", "Worn", "Loose", "Missing", "Corroded"] as string[],
+  advisor_labour_discount: false,
+  customer_documents_uppercase: false,
+  known_words: ["BMW", "AMG", "A/C", "ABS", "TPMS", "VIN", "QC", "LPO", "LLC", "FZE", "UAE", "VAT", "TRN", "SUV", "AWD", "4WD", "RS", "GT", "GTS", "SRT", "McLaren", "LED", "ECU", "DPF", "OEM", "PPF", "II", "III", "IV", "V8", "V6", "V10", "V12"] as string[],
   part_types: ["Genuine", "OEM", "Aftermarket", "Used"] as string[],
   parts_remind_minutes: 30,
   parts_escalate_minutes: 60,
-  prescan_gate_enabled: false,
+  prescan_gate_enabled: true,
   dangerous_customer_text: "SAFETY WARNING: our technician found a fault that makes this vehicle unsafe to drive. We strongly recommend the repair before the vehicle is driven. If you decline it, please consider recovery instead of driving.",
   dangerous_customer_text_ar: "تحذير سلامة: وجد الفني عطلاً يجعل هذه المركبة غير آمنة للقيادة. ننصح بشدة بإجراء الإصلاح قبل قيادة المركبة. في حال رفض الإصلاح، يُرجى التفكير في نقل المركبة بالشاحنة بدلاً من قيادتها.",
   dangerous_acknowledgement_text: "I understand that this vehicle has a fault that makes it unsafe to drive, that OFJ Automotive advised the repair, and that I decline it at my own risk.",
@@ -143,3 +151,14 @@ export const getSettings = cache(async (): Promise<Settings> => {
   }
   return result as Settings;
 });
+
+/** The bank charge kept by each payment method, in percent. */
+export function bankChargePercentFor(settings: Settings, method: string): number {
+  const key = method === "card" ? "bank_charge_card_percent" : method === "link" ? "bank_charge_link_percent" : method === "cash" ? "bank_charge_cash_percent" : method === "cheque" ? "bank_charge_cheque_percent" : null;
+  return key ? Number(settings[key]) || 0 : 0;
+}
+
+/** The rate a quotation assumes for its hidden bank charge: the highest of the four, corrected at payment. */
+export function highestBankCharge(settings: Settings): number {
+  return Math.max(...["card", "link", "cash", "cheque"].map((m) => bankChargePercentFor(settings, m)));
+}

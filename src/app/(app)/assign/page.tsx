@@ -2,13 +2,14 @@ import Link from "next/link";
 import { CarPicture } from "@/components/CarPicture";
 import { TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Button, Card, ChoiceButtons, Empty, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
+import { TechnicianChecks } from "@/components/TechnicianChecks";
+import { Badge, Button, Card, ChoiceButtons, Empty, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatDateTime } from "@/lib/format";
 import { JOB_DEPARTMENTS, jobConcernsSide, sideOfDepartment, roadTestSuggested } from "@/lib/inspection";
 import { STATUS_LABELS, clockOf, jobTiming, type JobStatus, type Stage } from "@/lib/jobs";
-import { ROAD_TEST_DECISIONS } from "@/lib/road-test";
+import { ROAD_TEST_CHOICES } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
@@ -68,7 +69,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
     <div className="flex flex-col gap-3">
       {items.map((j) => {
         const timing = jobTiming(j.promised_at, j.is_open, clockOf(j, settings));
-        const defaultRoadTest = j.gate_in?.condition === "does_not_run" ? "not_possible" : "needed";
+        const defaultRoadTest = j.gate_in?.condition === "does_not_run" ? "not_possible" : null;
         const reqs = requestsOf(j.id);
         const suggested = roadTestSuggested([...reqs, j.gate_in?.customer_requests ?? ""]);
         return (
@@ -109,22 +110,13 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
               <form action={assignJob.bind(null, j.id)} className="flex flex-col gap-3 border-t border-line pt-4">
                 <input type="hidden" name="back" value="/assign" />
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <label className="flex flex-col gap-1" data-field>
-                    <span className="text-sm font-semibold" data-field-label>Technician</span>
-                    <Select name="technician" defaultValue="" required>
-                      <option value="" disabled>
-                        Choose a technician…
-                      </option>
-                      {technicians.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.display_name} · {counts.get(t.id) ?? 0} car{(counts.get(t.id) ?? 0) === 1 ? "" : "s"}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
+                  <div className="flex flex-col gap-1" data-field>
+                    <span className="text-sm font-semibold" data-field-label>Technicians (tick one or more)</span>
+                    <TechnicianChecks technicians={technicians.map((t) => ({ id: t.id, display_name: t.display_name, note: `${counts.get(t.id) ?? 0} car${(counts.get(t.id) ?? 0) === 1 ? "" : "s"}` }))} hint="The first ticked technician is the lead: he does the inspection." />
+                  </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-sm font-semibold">Road test{suggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber">Road test suggested: the requests mention noise, vibration, steering, turning or braking</span> : null}</span>
-                    <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
+                    <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_CHOICES} />
                   </div>
                 </div>
                 <label className="flex flex-col gap-1">

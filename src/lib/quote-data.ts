@@ -3,7 +3,7 @@ import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
 import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
-import type { Settings } from "./settings";
+import { highestBankCharge, type Settings } from "./settings";
 import { newToken } from "./media";
 
 export const PARTS_BUCKET = "parts-diagrams";
@@ -267,7 +267,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   // The automatic bank charge: one hidden Fee line at the set percentage of the total including VAT.
   // Never shown to the customer, counted as a cost against profit, corrected by the real charge at payment.
   if (q.status === "draft" || q.status === "pending_owner") {
-    const feePercent = Number(settings.bank_charge_fee_percent) || 0;
+    const feePercent = highestBankCharge(settings);
     const others = ls.filter((l) => l.fee_kind !== "bank_charge");
     const fee = feePercent > 0 ? round2(quoteTotals(others, qArgs).total * (feePercent / 100)) : 0;
     const existing = ls.filter((l) => l.fee_kind === "bank_charge");
@@ -360,7 +360,7 @@ export type QuoteFinding = {
   key: string;
   source_type: "request" | "item" | "tyre";
   source_key: string;
-  status: "bad" | "average";
+  status: "bad" | "average" | "good" | null;
   /** The heading: "Oil leaks · Engine top side", "Request: A/C not cooling", "Rear left tyre". */
   label: string;
   section: string | null;
@@ -378,10 +378,11 @@ export async function loadQuoteFindings(jobId: string): Promise<QuoteFinding[]> 
   const { data: reqs } = await admin.from("job_requests").select("id, text, position").eq("job_id", jobId).eq("is_active", true).order("position");
   const out: QuoteFinding[] = [];
   const photosFor = (filter: (m: InspectionMediaRow) => boolean) => bundle.media.filter((m) => m.kind === "photo" && filter(m)).map((m) => bundle.mediaUrls[m.storage_path]).filter((u): u is string => !!u);
+  // Every customer request is a heading on the quotation, whatever the technician found.
   for (const r of reqs ?? []) {
     const f = bundle.findings.find((x) => x.job_request_id === r.id);
-    if (!f || !(f.status === "bad" || f.status === "average")) continue;
-    out.push({ key: `request:${r.id}`, source_type: "request", source_key: r.id, status: f.status, label: `Request: ${r.text}`, section: null, remark: [f.found, f.needs ? `Needs: ${f.needs}` : ""].filter(Boolean).join(" · ") || null, parts: f.needs ?? null, photos: photosFor((m) => m.job_request_id === r.id), dangerous: false });
+    const status = f?.status === "bad" || f?.status === "average" || f?.status === "good" ? f.status : null;
+    out.push({ key: `request:${r.id}`, source_type: "request", source_key: r.id, status, label: `Request: ${r.text}`, section: null, remark: [f?.found, f?.needs ? `Needs: ${f.needs}` : ""].filter(Boolean).join(" · ") || null, parts: f?.needs ?? null, photos: photosFor((m) => m.job_request_id === r.id), dangerous: false });
   }
   for (const i of bundle.items) {
     if (!(i.status === "bad" || i.status === "average")) continue;

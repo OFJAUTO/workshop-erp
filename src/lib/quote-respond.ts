@@ -93,7 +93,7 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
       if (!p) continue;
       const toOrder = p.availability !== "in_stock";
       if (toOrder) needsOrder = true;
-      // A part on the shelf needs no purchase order: it counts as received from stock, with its label, ready to issue.
+      // A part on the shelf needs no LPO: it counts as received from stock, with its label, ready to issue.
       const fromStock = toOrder ? {} : { received_qty: Number(p.confirmed_quantity ?? p.quantity) || 1, label_code: newLabelCode() };
       await admin.from("part_items").update({ order_status: toOrder ? "to_order" : "received", ...fromStock, updated_by: answer.by ?? null }).eq("id", p.id);
     } else if (l.advisor_added || l.unit_cost !== null) {

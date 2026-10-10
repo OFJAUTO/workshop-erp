@@ -7,7 +7,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
 import { MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
-import { applyStageSideEffects } from "@/lib/work-flow";
+import { addTechnician, applyStageSideEffects } from "@/lib/work-flow";
 import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { toMiles } from "@/lib/mileage";
@@ -79,7 +79,7 @@ async function applyRoadTestChoice(jobId: string, jobNumber: string, technician:
 /** Workshop manager hands the car to a technician and says whether a road test is needed. Blocked until the gate-in media is complete. */
 export async function assignJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("assignJobs");
-  const technicianId = String(formData.get("technician") ?? "");
+  const technicianIds = formData.getAll("technician").map(String).filter(Boolean);
   const supabase = await createClient();
   const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
@@ -91,8 +91,10 @@ export async function assignJob(jobId: string, formData: FormData) {
   if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
   if (!job.first_approval_at && staff.role_id !== "owner") redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The customer has not approved the job card yet. No inspection before that."));
 
-  const { data: tech } = await supabase.from("staff").select("id, display_name, role_id, is_active").eq("id", technicianId).maybeSingle();
-  if (!tech || !tech.is_active) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Choose a technician."));
+  const { data: techRows } = technicianIds.length ? await supabase.from("staff").select("id, display_name, role_id, is_active").in("id", technicianIds).eq("is_active", true).eq("role_id", "technician") : { data: [] };
+  const techs = technicianIds.map((tid) => (techRows ?? []).find((t) => t.id === tid)).filter((t): t is NonNullable<typeof t> => !!t);
+  const tech = techs[0];
+  if (!tech) redirect(`${back}?error=` + encodeURIComponent("Tick at least one technician."));
 
   const toStatus: JobStatus = job.status === "gate_in_pending" || job.status === "pending_approval" ? "pending_inspection" : (job.status as JobStatus);
   const { error } = await supabase
@@ -107,8 +109,9 @@ export async function assignJob(jobId: string, formData: FormData) {
     to_status: toStatus,
     from_staff: job.assigned_to,
     to_staff: tech.id,
-    note: `Assigned to ${tech.display_name}`,
+    note: `Assigned to ${techs.map((t) => t.display_name).join(", ")}${techs.length > 1 ? ` (lead ${tech.display_name})` : ""}`,
   });
+  for (const t of techs) await addTechnician(jobId, t.id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, { quiet: true });
   const { data: jobRow } = await supabase.from("jobs").select("job_number, department").eq("id", jobId).maybeSingle();
   if (jobRow?.department !== "bodyshop") {
     const settings = await getSettings();
@@ -116,11 +119,11 @@ export async function assignJob(jobId: string, formData: FormData) {
     await applyRoadTestChoice(jobId, jobRow?.job_number ?? "", { id: tech.id, display_name: tech.display_name }, choice, { id: staff.id, display_name: staff.display_name });
   }
   const waitsForRoadTest = jobRow?.department !== "bodyshop" && choice.decision === "needed";
-  await notifyStaff([tech.id], { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: waitsForRoadTest ? `Assigned by ${staff.display_name}. The QC inspector does the road test first; you are told when the inspection opens.` : `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
+  await notifyStaff(techs.map((t) => t.id), { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: waitsForRoadTest ? `Assigned by ${staff.display_name}. The QC inspector does the road test first; you are told when the inspection opens.` : `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
   refresh(jobId);
   revalidatePath("/assign");
   revalidatePath("/road-tests");
-  redirect(`${back}?message=` + encodeURIComponent(`Assigned to ${tech.display_name}. ${ROAD_TEST_DECISION_LABELS[choice.decision]}.`));
+  redirect(`${back}?message=` + encodeURIComponent(`Assigned to ${techs.map((t) => t.display_name).join(", ")}. ${ROAD_TEST_DECISION_LABELS[choice.decision]}.`));
 }
 
 /** Manual stage move for the owner and workshop manager until later phases automate it. */

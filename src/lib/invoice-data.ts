@@ -37,6 +37,11 @@ export type InvoiceRow = {
   payment_link_url: string | null;
   /** A comeback repaired free of charge: the work at its normal value, then this credit brings the total to zero. */
   warranty_credit_aed: number;
+  /** A tax invoice generated from a proforma, and the proforma it came from. */
+  converted_from: string | null;
+  converted_to: string | null;
+  /** The owner's reason when the tax invoice was issued before full payment. */
+  issue_reason: string | null;
   created_at: string;
 };
 
@@ -93,7 +98,7 @@ export type PaymentRow = {
   created_at: string;
 };
 
-export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, created_at";
+export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, converted_from, converted_to, issue_reason, created_at";
 export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id";
 export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at";
 
@@ -298,13 +303,15 @@ export async function nextDocumentNumber(kind: InvoiceKind, settings: Settings):
 export async function jobBalance(jobId: string) {
   const admin = createAdminClient();
   const [{ data: inv }, quotes, { data: job }] = await Promise.all([
-    admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).order("issued_at", { ascending: false }).limit(1).maybeSingle(),
+    admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).order("issued_at", { ascending: false }),
     approvedQuotations(jobId),
     admin.from("jobs").select("inspection_fee_due").eq("id", jobId).maybeSingle(),
   ]);
   const needsInvoice = (quotes ?? []).length > 0 || !!job?.inspection_fee_due;
-  if (!inv) return { invoice: null, balance: 0, needsInvoice, state: needsInvoice ? ("no_invoice" as const) : ("nothing" as const), paid: 0, pending: 0 };
-  const invoice = toInvoice(inv as Record<string, unknown>);
+  const rows = ((inv ?? []) as Record<string, unknown>[]).map(toInvoice);
+  const picked = rows.find((i) => i.kind === "tax_invoice") ?? rows.find((i) => i.kind === "proforma") ?? null;
+  if (!picked) return { invoice: null, balance: 0, needsInvoice, state: needsInvoice ? ("no_invoice" as const) : ("nothing" as const), paid: 0, pending: 0 };
+  const invoice = picked;
   const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoice.id).eq("is_active", true);
   const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
   return { invoice, balance: bal.balance, needsInvoice, state: bal.state, paid: bal.paid, pending: bal.pendingAmount };

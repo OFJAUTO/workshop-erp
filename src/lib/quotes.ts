@@ -184,7 +184,7 @@ export type PartRequest = {
   source_key: string;
   label: string;
   requested_text: string | null;
-  status: "open" | "listed" | "done" | "rejected";
+  status: "open" | "listed" | "done" | "rejected" | "unavailable";
   is_active: boolean;
   created_at: string;
   quantity: number | null;
@@ -499,6 +499,20 @@ export function quoteState(s: QuoteSummary, hasInspectionApproved: boolean): Quo
 }
 
 export const AVAILABILITY_LABELS = { in_stock: "Available now", to_order: "To order" } as const;
+
+/** What the customer reads under a part: "In stock", "Arrives in 3 days" or "To order". */
+export function partAvailabilityText(p: { availability: "in_stock" | "to_order" | null; delivery_date: string | null } | null | undefined, today: string): string | null {
+  if (!p) return null;
+  if (p.availability === "in_stock") return "In stock";
+  if (p.availability === "to_order") {
+    if (p.delivery_date) {
+      const days = Math.max(1, Math.round((Date.parse(p.delivery_date) - Date.parse(today)) / 86400000));
+      return `Arrives in ${days} day${days === 1 ? "" : "s"}`;
+    }
+    return "To order";
+  }
+  return null;
+}
 export const CONFIRM_LABELS = { pending: "Waiting for the technician", confirmed: "Confirmed by the technician", rejected: "Rejected by the technician" } as const;
 
 /** The price of one unit as the customer sees it: a part's cost plus markup, labour's hourly rate, or the typed price. */

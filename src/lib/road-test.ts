@@ -23,6 +23,12 @@ export const ROAD_TEST_DECISIONS: { value: RoadTestDecision; label: string }[] =
   { value: "not_possible", label: "Road test not possible" },
 ];
 export const ROAD_TEST_DECISION_LABELS: Record<RoadTestDecision, string> = { needed: "Road test needed", not_needed: "No road test", not_possible: "Road test not possible" };
+/** The three choices as one-tap buttons, each with what it means underneath. Nothing is pre-chosen: the manager decides every time. */
+export const ROAD_TEST_CHOICES: { value: RoadTestDecision; label: string; hint: string }[] = [
+  { value: "needed", label: "Road test needed", hint: "QC inspector drives it first" },
+  { value: "not_needed", label: "No road test", hint: "inspection starts now" },
+  { value: "not_possible", label: "Not possible", hint: "write why below" },
+];
 
 export type RoadTestRow = {
   id: string;

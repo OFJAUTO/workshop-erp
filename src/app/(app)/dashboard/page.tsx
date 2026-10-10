@@ -68,7 +68,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const nameOf = new Map((names ?? []).map((n) => [n.id, n]));
   const [profit, { data: clocked }, { data: invoiced }] = await Promise.all([
     can(role, "viewProfitPanel") ? dailyProfit(settings) : Promise.resolve(null),
-    createAdminClient().from("invoices").select("job_id, number, total_aed").eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).in("job_id", all.map((j) => j.id)),
+    createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", all.map((j) => j.id)),
     createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
   ]);
   const invoicedJobs = new Map(((invoiced ?? []) as unknown as { job_id: string; number: string; total_aed: number | string }[]).map((i) => [i.job_id, i]));
@@ -158,7 +158,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       {role === "service_advisor" || role === "owner" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Card className={`flex flex-col gap-2 ${toSend.length ? "border-ink" : ""}`}>
-            <SectionLabel right={`${toSend.length}`}>Invoices to send</SectionLabel>
+            <SectionLabel right={`${toSend.length}`}>Proformas to send</SectionLabel>
             {toSend.length === 0 ? <p className="text-sm text-muted">Nothing to send.</p> : (
               <ul className="divide-y divide-line text-sm">
                 {toSend.map((j) => { const r = rows.find((x) => x.id === j.id)!; return <li key={j.id} className="py-1.5 flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{r.plate} · {r.title}</span><LinkButton href={`/jobs/${j.id}`} size="md">Send the invoice</LinkButton></li>; })}

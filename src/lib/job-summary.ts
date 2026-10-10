@@ -13,6 +13,9 @@ export const VERDICT_LABELS: Record<Verdict, string> = { good: "Good", acceptabl
 
 export type JobSummary = {
   hoursCharged: number;
+  /** The manager's time budget when it differs from the hours charged, with the reason. */
+  budgetHours?: number | null;
+  budgetReason?: string | null;
   minutesUsed: number;
   perTechnician: { id: string; name: string; minutes: number; managerSendbacks: number; qcSendbacks: number }[];
   promisedAt: string | null;
@@ -41,7 +44,7 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
   const quotes = await approvedQuotations(jobId);
   const qids = quotes.map((q) => q.id);
   const [{ data: job }, { data: lines }, { data: sessions }, { data: techRows }, { data: pauses }, { data: qcs }, { data: parts }, { data: qLines }, { data: pos }] = await Promise.all([
-    admin.from("jobs").select("promised_at, work_sendbacks, plan_start_date, department").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("promised_at, work_sendbacks, plan_start_date, department, budget_hours, budget_reason").eq("id", jobId).maybeSingle(),
     admin.from("work_lines").select("hours_quoted").eq("job_id", jobId).eq("is_active", true),
     admin.from("work_sessions").select(WORK_SESSION_SELECT).eq("job_id", jobId).eq("is_active", true),
     admin.from("job_technicians").select("staff_id, manager_sendbacks, qc_sendbacks, staff:staff!job_technicians_staff_id_fkey(display_name)").eq("job_id", jobId).eq("is_active", true),
@@ -52,6 +55,8 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
     admin.from("purchase_orders").select("id, status").eq("job_id", jobId).eq("is_active", true),
   ]);
   const hoursCharged = round2((lines ?? []).reduce((a, l) => a + (Number(l.hours_quoted) || 0), 0));
+  const budgetHours = job?.budget_hours !== null && job?.budget_hours !== undefined ? Number(job.budget_hours) : null;
+  const hoursAllowed = budgetHours ?? hoursCharged;
   const ss = (sessions ?? []) as WorkSessionRow[];
   const byTech = new Map<string, number>();
   for (const s of ss) byTech.set(s.technician_id, (byTech.get(s.technician_id) ?? 0) + sessionMinutes(s));
@@ -93,17 +98,17 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
     actualProfit = round2(revenue - partsCostActual - otherCost - (minutesUsed / 60) * rate);
   }
   const reasons: string[] = [];
-  const overBy = hoursCharged > 0 ? minutesUsed / (hoursCharged * 60) : 0;
-  if (hoursCharged > 0 && overBy > 1.3) reasons.push(`Used ${Math.round((overBy - 1) * 100)}% more time than charged`);
+  const overBy = hoursAllowed > 0 ? minutesUsed / (hoursAllowed * 60) : 0;
+  if (hoursAllowed > 0 && overBy > 1.3) reasons.push(`Used ${Math.round((overBy - 1) * 100)}% more time than charged`);
   if (qcRounds >= 3) reasons.push(`QC failed ${qcRounds - 1} times`);
   if ((Number(job?.work_sendbacks) || 0) >= 2) reasons.push(`Sent back by the manager ${job?.work_sendbacks} times`);
   if (daysLate > 1) reasons.push(`${daysLate} days after the promised date`);
   const notAccepted = pauseRows.filter((p) => p.accepted === false).length;
   if (notAccepted) reasons.push(`${notAccepted} pause${notAccepted === 1 ? "" : "s"} not accepted`);
-  const good = (hoursCharged <= 0 || overBy <= 1.1) && qcRounds === 1 && daysLate === 0 && !(Number(job?.work_sendbacks) || 0) && !notAccepted;
+  const good = (hoursAllowed <= 0 || overBy <= 1.1) && qcRounds === 1 && daysLate === 0 && !(Number(job?.work_sendbacks) || 0) && !notAccepted;
   const verdict: Verdict = reasons.length ? "talk" : good ? "good" : "acceptable";
   if (verdict === "acceptable") {
-    if (hoursCharged > 0 && overBy > 1.1) reasons.push(`Used ${Math.round((overBy - 1) * 100)}% more time than charged`);
+    if (hoursAllowed > 0 && overBy > 1.1) reasons.push(`Used ${Math.round((overBy - 1) * 100)}% more time than charged`);
     if (qcRounds === 2) reasons.push("QC failed once");
     if ((Number(job?.work_sendbacks) || 0) === 1) reasons.push("Sent back by the manager once");
     if (daysLate === 1) reasons.push("One day after the promised date");
@@ -111,6 +116,8 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
   void pos;
   return {
     hoursCharged,
+    budgetHours,
+    budgetReason: budgetHours !== null ? (job?.budget_reason ?? null) : null,
     minutesUsed,
     perTechnician: techs,
     promisedAt,

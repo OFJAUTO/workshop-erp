@@ -189,13 +189,23 @@ export function cleanMeasurementValue(key: string, raw: string): string | null {
     if (tyre[2] === "danger_reason") return value;
     return TYRE_ACTIONS.some((a) => a.value === value) ? value : "";
   }
+  if (key === "tyre_size_front" || key === "tyre_size_rear") return tyreSizeText(value);
   return MEASUREMENTS.some((m) => m.key === key) ? value : null;
 }
 
 /** Compulsory numbers, fixed (not part of the editable checklist). Tyre conditions and actions sit beside them. */
-export type MeasurementField = { key: string; label: string; unit?: string; kind: "number" | "year" | "choice"; choices?: { value: string; label: string }[]; group: string; optional?: boolean };
+export type MeasurementField = { key: string; label: string; unit?: string; kind: "number" | "year" | "choice" | "text"; choices?: { value: string; label: string }[]; group: string; optional?: boolean };
+
+/** "275/40R20", "275 40 20" or "275/40 r20" all become "275/40 R20"; anything else is kept as typed, in capitals. */
+export function tyreSizeText(raw: string): string {
+  const t = raw.trim().toUpperCase().slice(0, 20);
+  const m = /^(\d{3})\s*[\/ ]?\s*(\d{2})\s*[\/ ]?\s*(?:Z?R)?\s*(\d{2})$/.exec(t);
+  return m ? `${m[1]}/${m[2]} R${m[3]}` : t;
+}
 
 export const MEASUREMENTS: MeasurementField[] = [
+  { key: "tyre_size_front", label: "Tyre size front", kind: "text", group: "Tyres" },
+  { key: "tyre_size_rear", label: "Tyre size rear", kind: "text", group: "Tyres" },
   ...TYRE_POSITIONS.flatMap((p) => [
     { key: `tyre_${p.key}_tread`, label: `${p.label} tread`, unit: "mm", kind: "number" as const, group: "Tyres" },
     { key: `tyre_${p.key}_year`, label: `${p.label} tyre year`, kind: "year" as const, group: "Tyres" },
@@ -312,7 +322,7 @@ export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimi
     if (s.measurements[`tyre_${p.key}_danger`] === "1" && !(s.measurements[`tyre_${p.key}_danger_reason`] ?? "").trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre: why is it dangerous?` });
   }
   for (const m of MEASUREMENTS) {
-    if (m.optional || m.key.startsWith("tyre_")) continue;
+    if (m.optional || (m.key.startsWith("tyre_") && m.kind !== "text")) continue;
     if (!s.measurements[m.key]?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });
   }
   if (opts.limits) out.push(...limitProblems(s.measurements, opts.limits));
@@ -326,7 +336,7 @@ export function reportProgressOf(s: ReportState, opts: { limits?: InspectionLimi
     s.findings.length +
     s.items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY && i.sectionKey !== OPTIONAL_SECTION_KEY).length +
     TYRE_POSITIONS.length * 4 +
-    MEASUREMENTS.filter((m) => !m.optional && !m.key.startsWith("tyre_")).length +
+    MEASUREMENTS.filter((m) => !m.optional && (!m.key.startsWith("tyre_") || m.kind === "text")).length +
     (s.estimatedHours !== undefined && s.estimatedHours !== null ? 1 : 0) +
     (s.scan?.required ? 1 : 0);
   const open = reportProblemsOf(s, opts).length;

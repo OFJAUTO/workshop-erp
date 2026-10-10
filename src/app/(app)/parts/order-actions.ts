@@ -39,29 +39,31 @@ async function advisorIds(jobId: string, job: JobBrief | null) {
   return Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
 }
 
-/** Parts raise a purchase order for the ticked parts of one job with one supplier. It waits for the owner or the head accountant. */
+/** Parts raise an LPO for the ticked parts of one job with one supplier. It waits for the owner or the head accountant. */
 export async function createPurchaseOrder(jobId: string, formData: FormData) {
   const staff = await requirePermission("managePurchaseOrders");
-  const supplier = (blankToNull(formData.get("supplier")) ?? "").slice(0, 120);
+  const supplierId = blankToNull(formData.get("supplier_id"));
   const ids = formData.getAll("part").map(String).filter(Boolean);
   const notes = blankToNull(formData.get("notes"));
   const back = `/parts?error=`;
-  if (!supplier) redirect(back + encodeURIComponent("Type or choose the supplier."));
-  if (!ids.length) redirect(back + encodeURIComponent("Tick at least one part."));
   const admin = createAdminClient();
+  const { data: picked } = supplierId ? await admin.from("suppliers").select("id, name").eq("id", supplierId).maybeSingle() : { data: null };
+  const supplier = (picked?.name ?? blankToNull(formData.get("supplier")) ?? "").slice(0, 120);
+  if (!supplier) redirect(back + encodeURIComponent("Choose the supplier, or type the name of a new one."));
+  if (!ids.length) redirect(back + encodeURIComponent("Tick at least one part."));
   const { data: rows } = await admin.from("part_items").select(PART_FULL_SELECT).in("id", ids).eq("job_id", jobId).eq("is_active", true);
   const parts = ((rows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).filter((p) => p.order_status === "to_order" && !p.po_id);
-  if (!parts.length) redirect(back + encodeURIComponent("Those parts are already on a purchase order."));
+  if (!parts.length) redirect(back + encodeURIComponent("Those parts are already on an LPO."));
   const lines = parts.map((p, i) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: p.part_number, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed ?? 0 }));
   const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
-  const { data: sup } = await admin.from("suppliers").select("id").ilike("name", supplier).maybeSingle();
-  let supplierId = sup?.id ?? null;
-  if (!supplierId) {
+  const { data: sup } = picked ? { data: picked } : await admin.from("suppliers").select("id").ilike("name", supplier).maybeSingle();
+  let supplierRef = sup?.id ?? null;
+  if (!supplierRef) {
     const { data: created } = await admin.from("suppliers").insert({ name: supplier, created_by: staff.id, updated_by: staff.id }).select("id").single();
-    supplierId = created?.id ?? null;
+    supplierRef = created?.id ?? null;
   }
-  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, supplier_id: supplierId, supplier_name: supplier, notes, total_cost_aed: total, created_by: staff.id, updated_by: staff.id }).select("id, number").single();
-  if (error || !po) redirect(back + encodeURIComponent(error?.message ?? "Could not raise the purchase order."));
+  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, supplier_id: supplierRef, supplier_name: supplier, notes, total_cost_aed: total, created_by: staff.id, updated_by: staff.id }).select("id, number").single();
+  if (error || !po) redirect(back + encodeURIComponent(error?.message ?? "Could not raise the LPO."));
   const { data: createdLines } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: staff.id, updated_by: staff.id }))).select("id, part_item_id");
   for (const l of createdLines ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: staff.id }).eq("id", l.part_item_id);
   const job = await jobBrief(jobId);
@@ -69,8 +71,8 @@ export async function createPurchaseOrder(jobId: string, formData: FormData) {
   await admin.from("job_events").insert({ job_id: jobId, event_type: "po_raised", note: `${po.number} raised by ${staff.display_name} for ${supplier}: ${lines.length} part${lines.length === 1 ? "" : "s"}, AED ${total.toLocaleString("en-GB")}`, created_by: staff.id });
   // Owner and head accountant hear the approval sound.
   const { data: heads } = await admin.from("staff").select("id").eq("role_id", "accounts").eq("is_head_accountant", true).eq("is_active", true);
-  await notifyRoles(["owner"], { type: "po_approval", title: `Purchase order to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
-  await notifyStaff((heads ?? []).map((h) => h.id), { type: "po_approval", title: `Purchase order to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
+  await notifyRoles(["owner"], { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
+  await notifyStaff((heads ?? []).map((h) => h.id), { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
   refresh(jobId, po.id);
   redirect(`/parts/orders/${po.id}?message=${encodeURIComponent(`${po.number} raised. It waits for approval before it can be sent.`)}`);
 }
@@ -87,12 +89,12 @@ async function depositState(jobId: string) {
   return { required, received: round2(received), short: required > 0 && received + 0.005 < required };
 }
 
-/** The owner or the head accountant approves or refuses a purchase order. A required deposit must be recorded first, unless the owner overrides. */
+/** The owner or the head accountant approves or refuses an LPO. A required deposit must be recorded first, unless the owner overrides. */
 export async function decidePurchaseOrder(poId: string, formData: FormData) {
   const staff = await requirePermission("approvePurchaseOrders");
   const role = staff.role_id as RoleId;
   const back = `/parts/orders/${poId}`;
-  if (role === "accounts" && !staff.is_head_accountant) redirect(`${back}?error=${encodeURIComponent("Only the owner or the head accountant can approve a purchase order.")}`);
+  if (role === "accounts" && !staff.is_head_accountant) redirect(`${back}?error=${encodeURIComponent("Only the owner or the head accountant can approve an LPO.")}`);
   const admin = createAdminClient();
   const { data: raw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", poId).maybeSingle();
   if (!raw) redirect("/parts/orders");
@@ -107,7 +109,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_refused", note: `${po.number} refused by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
     if (po.created_by) await notifyStaff([po.created_by], { type: "po_decided", title: `${po.number} refused`, body: note ?? "", jobId: po.job_id, href: back });
     refresh(po.job_id, poId);
-    redirect(`${back}?message=${encodeURIComponent("Purchase order refused.")}`);
+    redirect(`${back}?message=${encodeURIComponent("LPO refused.")}`);
   }
   const deposit = await depositState(po.job_id);
   let override: { by: string; reason: string } | null = null;
@@ -233,7 +235,7 @@ export async function supplierInvoice(poId: string, formData: FormData) {
 
 /**
  * Issue: Parts scan each label, the technician ticks each part and enters his PIN. No "confirm all".
- * Only parts received on an approved purchase order can be issued.
+ * Only parts received on an approved LPO can be issued.
  */
 export async function issueParts(jobId: string, formData: FormData) {
   const staff = await requirePermission("managePurchaseOrders");
@@ -254,7 +256,7 @@ export async function issueParts(jobId: string, formData: FormData) {
   let issued = 0;
   for (const p of parts) {
     const fromStock = p.availability === "in_stock";
-    if (!(fromStock || (p.po_id && approvedPo.has(p.po_id))) || p.received_qty <= 0) redirect(`${back}?error=${encodeURIComponent(`${p.description} did not come in on an approved purchase order or from stock and cannot be issued.`)}`);
+    if (!(fromStock || (p.po_id && approvedPo.has(p.po_id))) || p.received_qty <= 0) redirect(`${back}?error=${encodeURIComponent(`${p.description} did not come in on an approved LPO or from stock and cannot be issued.`)}`);
     if (p.return_status !== "none") redirect(`${back}?error=${encodeURIComponent(`${p.description} is marked for return.`)}`);
     if (p.issue_status === "confirmed") continue;
     await admin.from("part_items").update({ issue_status: "confirmed", issued_qty: p.received_qty, issued_at: now, issued_by: staff.id, issue_confirmed_at: now, issue_confirmed_by: tech.id, updated_by: staff.id }).eq("id", p.id);
@@ -345,7 +347,7 @@ export async function issueStock(formData: FormData) {
   redirect(`${back}?message=${encodeURIComponent(`${qty} × ${item.name} issued to ${tech.display_name}.`)}`);
 }
 
-/** Who may see purchase orders: the owner, Parts, accounts and advisors. */
+/** Who may see LPOs: the owner, Parts, accounts and advisors. */
 export async function canSeeOrders() {
   const staff = await getCurrentStaff();
   return !!staff && can(staff.role_id as RoleId, "viewPurchaseOrders");

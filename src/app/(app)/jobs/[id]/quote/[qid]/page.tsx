@@ -8,7 +8,7 @@ import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServi
 import { checklistItems, type ChecklistSection } from "@/lib/inspection";
 import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
-import { getSettings } from "@/lib/settings";
+import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -39,7 +39,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const candidates = Object.entries(candidateMap).filter(([, n]) => Number(n) >= 2).map(([t]) => t);
   const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
   const countedParts = bundle.parts.filter((p) => p.confirm_status !== "rejected");
+  const { data: unavailableRows } = await createAdminClient().from("part_requests").select("label, closed_reason").eq("job_id", id).eq("status", "unavailable").eq("is_active", true);
   const wait: PartsWait = {
+    unavailable: (unavailableRows ?? []).map((u) => ({ label: u.label as string, note: (u.closed_reason as string | null) ?? null })),
     openRequests: checks.openRequests,
     partsTotal: countedParts.length,
     partsPriced: countedParts.filter((p) => p.cost_aed !== null).length,
@@ -74,7 +76,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
     technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
-    bankChargePercent: Math.max(Number(settings.bank_charge_card_percent) || 0, Number(settings.bank_charge_link_percent) || 0),
+    bankChargePercent: highestBankCharge(settings),
+    advisorDiscount: settings.advisor_labour_discount === true,
     depositThreshold: Number(settings.deposit_threshold_aed) || 0,
     depositPercent: Number(settings.deposit_percent) || 50,
     today: dubaiDate(),

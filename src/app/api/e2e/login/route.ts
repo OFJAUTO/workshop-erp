@@ -11,9 +11,9 @@ export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { role?: string };
+  const body = (await request.json().catch(() => ({}))) as { role?: string; id?: string };
   const admin = createAdminClient();
-  const { data: staff } = await admin.from("staff").select("id, display_name").eq("role_id", body.role ?? "owner").eq("is_active", true).limit(1).maybeSingle();
+  const { data: staff } = body.id ? await admin.from("staff").select("id, display_name").eq("id", body.id).maybeSingle() : await admin.from("staff").select("id, display_name").eq("role_id", body.role ?? "owner").eq("is_active", true).order("display_name").limit(1).maybeSingle();
   if (!staff) return NextResponse.json({ error: "No such person." }, { status: 400 });
   const { data: userData } = await admin.auth.admin.getUserById(staff.id);
   if (!userData.user?.email) return NextResponse.json({ error: "No login record." }, { status: 400 });

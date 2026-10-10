@@ -7,8 +7,9 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { feeNotice } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { aed, blockOf, isHidden, isUnchosen, lineQuantityText, lineTotal, lineUnitPrice, partTypeText, quoteTotals } from "@/lib/quotes";
+import { aed, blockOf, isHidden, isUnchosen, lineQuantityText, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
+import { dubaiDate } from "@/lib/jobs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { QuoteResponse } from "./QuoteResponse";
@@ -65,11 +66,12 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
   const title = isEstimate ? "Estimate" : q.version > 1 ? "Revised quotation" : "Quotation";
   const money = (n: number) => aed(n).replace("AED ", "");
+  const today = dubaiDate();
   let n = 0;
   const rowOf = (l: (typeof lines)[number]): DocRow => {
     n++;
     const part = l.part_item_id ? bundle.parts.find((p) => p.id === l.part_item_id) : null;
-    const details = [l.line_type === "part" ? partTypeText(l) : null, part?.part_number ?? null, l.details].filter(Boolean).join(" · ") || null;
+    const details = [l.line_type === "part" ? partTypeText(l) : null, part?.part_number ?? null, l.line_type === "part" ? partAvailabilityText(part, today) : null, l.details].filter(Boolean).join(" · ") || null;
     return { n, description: l.line_type === "part" && part?.part_number && l.title.endsWith(`(${part.part_number})`) ? l.title.slice(0, -(part.part_number.length + 2)).trim() : l.title, details, tag: !isEstimate && l.urgency === "urgent" ? "Urgent" : null, qty: lineQuantityText(l), rate: money(lineUnitPrice(l)), amount: lineTotal(l) === 0 ? "Complimentary" : money(lineTotal(l)), amountNum: lineTotal(l) };
   };
   const labour = lines.filter((l) => blockOf(l) === "labour").map(rowOf);
@@ -86,13 +88,13 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
         { label: "Valid until", value: q.valid_until ? formatDate(q.valid_until) : `${q.validity_days} days` },
         ...(job ? [{ label: "Job card", value: job.job_number }] : []),
-        ...(bundle.creatorName ? [{ label: "Advisor", value: bundle.creatorName }] : []),
       ]}
       boxes={[
         { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", rows: [["", customer?.company_name ? customer.full_name : null], ["", customer?.phone ?? null]], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
         { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), rows: [["", vehicle?.variant ?? null], ["VIN", vehicle?.vin ?? null]] },
       ]}
       pdfHref={`/api/pdf/quote/${token}`}
+      uppercase={settings.customer_documents_uppercase === true}
       bar={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} feeNotice={feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed)} feeNoticeAr={feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed)} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} dangerText={dangerous ? settings.dangerous_acknowledgement_text : null} /> : null}
       footer={<>{isEstimate ? "The final price is confirmed once the vehicle is with us." : `Prices in UAE dirhams; VAT at ${q.vat_percent}% shown separately.`} {!isEstimate ? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed) : ""}</>}
     >

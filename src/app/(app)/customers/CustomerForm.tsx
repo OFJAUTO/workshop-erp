@@ -30,10 +30,10 @@ export function CustomerForm({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Name" hint="For a company: the person you deal with.">
-              <Input name="full_name" defaultValue={v.full_name} required minLength={2} autoFocus={mode === "create"} />
+              <Input name="full_name" defaultValue={v.full_name} required minLength={2} autoFocus={mode === "create"} textCase="title" />
             </Field>
             <Field label="Company name" hint="Only for companies.">
-              <Input name="company_name" defaultValue={v.company_name} />
+              <Input name="company_name" defaultValue={v.company_name} textCase="title" />
             </Field>
             <Field label="Phone (WhatsApp)">
               <Input name="phone" type="tel" inputMode="tel" defaultValue={v.phone} required placeholder="+971 50 123 4567" />
@@ -63,7 +63,7 @@ export function CustomerForm({
           </div>
 
           <Field label="Notes" optional>
-            <Textarea name="notes" defaultValue={v.notes} />
+            <Textarea name="notes" defaultValue={v.notes} textCase="sentence" />
           </Field>
 
           <div>

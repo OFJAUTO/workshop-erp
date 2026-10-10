@@ -3,9 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { INSPECTION_BUCKET, inspectionLocked } from "@/lib/inspection-data";
 import { can, type RoleId } from "@/lib/roles";
+import { technicianOnJob } from "@/lib/job-technicians";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "video/webm": "webm", "video/mp4": "mp4", "video/quicktime": "mov", "application/pdf": "pdf" };
+const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic", "image/heif": "heif", "video/webm": "webm", "video/mp4": "mp4", "video/quicktime": "mov", "video/3gpp": "3gp", "application/pdf": "pdf" };
 
 /**
  * Who may add files to an inspection: the assigned technician, a workshop manager or the owner, while
@@ -15,10 +16,10 @@ export async function authoriseInspectionUpload(inspectionId: string, contentTyp
   const staff = await getCurrentStaff();
   if (!staff) return null;
   const admin = createAdminClient();
-  const { data } = await admin.from("inspections").select("id, technician_id, status, unlocked_until").eq("id", inspectionId).maybeSingle();
+  const { data } = await admin.from("inspections").select("id, job_id, technician_id, status, unlocked_until").eq("id", inspectionId).maybeSingle();
   if (!data) return null;
   const role = staff.role_id as RoleId;
-  const allowed = (role === "technician" && data.technician_id === staff.id) || can(role, "approveInspections") || role === "service_advisor" || role === "qc_inspector";
+  const allowed = (role === "technician" && (data.technician_id === staff.id || (await technicianOnJob(data.job_id as string, staff.id)))) || can(role, "approveInspections") || role === "service_advisor" || role === "qc_inspector";
   if (!allowed) return null;
   if (data.status === "submitted" && role === "technician" && contentType !== "application/pdf") return null;
   if (inspectionLocked(data)) return null;

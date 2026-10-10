@@ -2,7 +2,8 @@ import "server-only";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
 import { notifyRoles, notifyStaff } from "./notifications";
-import type { Settings } from "./settings";
+import { bankChargePercentFor, getSettings, type Settings } from "./settings";
+import { convertProformaIfPaid } from "./invoice-flow";
 import { createAdminClient } from "./supabase/admin";
 
 export type Actor = { id: string; display_name: string; role_id: string; is_head_accountant?: boolean };
@@ -18,7 +19,7 @@ async function advisorsOf(jobId: string) {
 }
 
 /** After a payment, a void or a cheque change: the job is Ready when the invoice is settled, pending payment otherwise. */
-export async function settleJob(jobId: string, invoiceId: string, by: string) {
+export async function settleJob(jobId: string, invoiceId: string, by: string, settings?: Settings) {
   const admin = createAdminClient();
   const [{ data: inv }, { data: pays }, { data: job }] = await Promise.all([
     admin.from("invoices").select(INVOICE_SELECT).eq("id", invoiceId).maybeSingle(),
@@ -26,7 +27,16 @@ export async function settleJob(jobId: string, invoiceId: string, by: string) {
     admin.from("jobs").select("status, is_open").eq("id", jobId).maybeSingle(),
   ]);
   if (!inv || !job || !job.is_open) return;
-  const bal = invoiceBalance(toInvoice(inv as Record<string, unknown>), ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
+  const invoice = toInvoice(inv as Record<string, unknown>);
+  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
+  // A proforma paid in full becomes the tax invoice; the job is Ready.
+  if (invoice.kind === "proforma" && !invoice.converted_to && bal.balance <= 0.005) {
+    const tax = await convertProformaIfPaid(jobId, by, settings ?? (await getSettings()));
+    if (tax) {
+      if (job.status === "pending_payment") await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_payment", to_status: "ready", note: "Proforma paid in full", created_by: by });
+      return;
+    }
+  }
   if (job.status === "pending_payment" && bal.balance <= 0) {
     await admin.from("jobs").update({ status: "ready" }).eq("id", jobId);
     await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_payment", to_status: "ready", note: "Invoice paid in full", created_by: by });
@@ -56,8 +66,9 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   let balance: number | null = null;
   if (input.invoiceId) {
     const { data: inv } = await admin.from("invoices").select(INVOICE_SELECT).eq("id", input.invoiceId).maybeSingle();
-    if (!inv || inv.status !== "issued" || inv.kind !== "tax_invoice") return { error: "Invoice not found." };
+    if (!inv || inv.status !== "issued" || !["tax_invoice", "proforma"].includes(String(inv.kind))) return { error: "Invoice not found." };
     const invoice = toInvoice(inv as Record<string, unknown>);
+    if (invoice.converted_to) return { error: `${invoice.number} became a tax invoice. Record the payment against the tax invoice.` };
     jobId = invoice.job_id;
     customerId = invoice.customer_id;
     const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoice.id).eq("is_active", true);
@@ -81,20 +92,20 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const isOwner = actor.role_id === "owner";
   if (over && !isOwner) {
     // Staff cannot record more than the balance: it waits for the owner.
-    const pct = method === "card" ? Number(settings.bank_charge_card_percent) || 0 : method === "link" ? Number(settings.bank_charge_link_percent) || 0 : 0;
+    const pct = bankChargePercentFor(settings, method);
     const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
     if (error || !created) return { error: error?.message ?? "Could not record the payment." };
     await notifyRoles(["owner"], { type: "overpayment_approval", title: `Payment above the balance needs your approval · ${created.number}`, body: `${actor.display_name} wants to record ${money(amount)} by ${method}; the balance is ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
     if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method} is above the balance of ${money(balance ?? 0)}; waiting for the owner's approval (asked by ${actor.display_name})`, created_by: actor.id });
     return { ok: true, pendingOwner: true, number: created.number, paymentId: created.id, message: `${created.number} is above the balance. The owner has been asked to approve it.` };
   }
-  const pct = method === "card" ? Number(settings.bank_charge_card_percent) || 0 : method === "link" ? Number(settings.bank_charge_link_percent) || 0 : 0;
+  const pct = bankChargePercentFor(settings, method);
   const verifies = actor.role_id === "owner" || actor.role_id === "accounts";
   const now = new Date().toISOString();
   const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (error || !created) return { error: error?.message ?? "Could not record the payment." };
   if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as a deposit"} received by ${actor.display_name}${over ? " (above the balance, owner)" : ""}`, created_by: actor.id });
-  if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id);
+  if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
   if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
   if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
   if (over) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });

@@ -104,6 +104,7 @@ export const PERMISSIONS = {
   markReadyToInvoice: ["owner", "service_advisor"],
   viewInvoices: ["owner", "accounts", "service_advisor"],
   issueInvoices: ["owner", "accounts"],
+  manageSuppliers: ["owner", "parts", "accounts"],
   recordPayments: ["owner", "accounts", "service_advisor"],
   verifyPayments: ["owner", "accounts"],
   approveCreditNotes: ["owner"],

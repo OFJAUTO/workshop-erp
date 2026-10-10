@@ -5,6 +5,7 @@ import { inspectionLocked, type InspectionRow } from "@/lib/inspection-data";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { technicianOnJob } from "@/lib/job-technicians";
 
 type ItemPatch = {
   key: string;
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
   if (!data) return NextResponse.json({ error: "Inspection not found." }, { status: 404 });
   const insp = data as unknown as Pick<InspectionRow, "id" | "job_id" | "technician_id" | "status" | "unlocked_until" | "measurements" | "measurements_original">;
 
-  const isTech = role === "technician" && insp.technician_id === staff.id;
+  const isTech = role === "technician" && (insp.technician_id === staff.id || (await technicianOnJob(insp.job_id, staff.id)));
   const isManager = can(role, "approveInspections");
   if (body.prescanVisible !== undefined) {
     // Show to customer / Hide from customer belongs to advisors and the owner.

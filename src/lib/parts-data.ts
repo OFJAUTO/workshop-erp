@@ -92,20 +92,22 @@ export const toPo = (r: Record<string, unknown>) => num(r as unknown as Purchase
 export const toPoLine = (r: Record<string, unknown>) => num(r as unknown as PoLineRow, ["position", "quantity", "unit_cost", "received_qty", "invoice_unit_cost"]);
 export const toPartFull = (r: Record<string, unknown>) => num({ ...toPart(r), ...(r as object) } as unknown as PartFull, ["quantity", "cost_aed", "confirmed_quantity", "received_qty", "issued_qty", "returned_qty", "final_cost_aed"]);
 
-export type JobBrief = { id: string; job_number: string; status: string; is_open: boolean; customer_id: string; gated_in_by: string; assigned_to: string | null; department: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null };
-export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, gated_in_by, assigned_to, department, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))";
+export type JobBrief = { id: string; job_number: string; status: string; is_open: boolean; customer_id: string; gated_in_by: string; assigned_to: string | null; department: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year?: number | null; make: { name: string } | null; model: { name: string } | null } | null };
+export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, gated_in_by, assigned_to, department, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))";
 
-export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[] };
+export type SupplierRow = { id: string; name: string; trn: string | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null };
+export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[]; supplier: SupplierRow | null };
 
 export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
   const admin = createAdminClient();
   const { data: raw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", id).maybeSingle();
   if (!raw) return null;
   const po = toPo(raw as Record<string, unknown>);
-  const [{ data: lines }, { data: job }, { data: parts }] = await Promise.all([
+  const [{ data: lines }, { data: job }, { data: parts }, { data: supplier }] = await Promise.all([
     admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", id).eq("is_active", true).order("position"),
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", po.job_id).maybeSingle(),
     admin.from("part_items").select(PART_FULL_SELECT).eq("po_id", id).eq("is_active", true),
+    po.supplier_id ? admin.from("suppliers").select("id, name, trn, phone, email, address, payment_terms").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const ids = [po.created_by, po.approved_by, po.ordered_by, po.supplier_invoice_by, po.deposit_override_by].filter((x): x is string => !!x);
   const { data: people } = ids.length ? await admin.from("staff").select("id, display_name").in("id", ids) : { data: [] as { id: string; display_name: string }[] };
@@ -115,6 +117,7 @@ export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
     job: (job as unknown as JobBrief) ?? null,
     names: new Map((people ?? []).map((p) => [p.id, p.display_name])),
     parts: ((parts ?? []) as unknown as Record<string, unknown>[]).map(toPartFull),
+    supplier: (supplier as SupplierRow | null) ?? null,
   };
 }
 

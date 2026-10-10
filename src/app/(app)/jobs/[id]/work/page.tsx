@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
+import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
@@ -14,8 +14,9 @@ import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/work-data";
 import { activeTechnicians } from "@/lib/work-flow";
-import { putTechnicianOnCar } from "../../planning-actions";
-import { confirmWorkComplete, decideAdditionalWork, decidePause, sendWorkBack } from "../../work-actions";
+import { TechniciansCard } from "../TechniciansCard";
+import { loadJobTechnicians } from "@/lib/job-technicians";
+import { confirmWorkComplete, decideAdditionalWork, decidePause, sendWorkBack, setTimeBudget } from "../../work-actions";
 import { BudgetTimer } from "@/app/(app)/my-jobs/[id]/WorkPanel";
 
 export const dynamic = "force-dynamic";
@@ -191,35 +192,26 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
 
         <div className="flex flex-col gap-4">
           <Card className="flex flex-col gap-2">
-            <SectionLabel>Time budget</SectionLabel>
-            <BudgetTimer hoursCharged={work.hoursQuoted} minutesUsed={minutesUsed} running={running.map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: false }))} locked={!!job.work_done_at} />
+            <SectionLabel right={job.budget_hours !== null ? `${work.hoursQuoted.toFixed(1)} h charged` : undefined}>Time budget</SectionLabel>
+            {job.budget_hours !== null ? <p className="text-xs text-muted">Budget {Number(job.budget_hours).toFixed(1)} h set by the manager: {job.budget_reason}. The price and the hours charged are unchanged.</p> : null}
+            <BudgetTimer hoursCharged={job.budget_hours !== null ? Number(job.budget_hours) : work.hoursQuoted} minutesUsed={minutesUsed} running={running.map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: false }))} locked={!!job.work_done_at} />
+            {canEdit && job.is_open && job.status === "in_work" ? (
+              <details className="text-xs">
+                <summary className="cursor-pointer min-h-10 flex items-center font-semibold text-muted underline underline-offset-4">Change the technicians&apos; time budget</summary>
+                <form action={setTimeBudget.bind(null, id)} className="mt-1 flex flex-wrap items-end gap-2">
+                  <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Hours (empty: back to the hours charged)</span><Input name="budget_hours" defaultValue={job.budget_hours !== null ? String(job.budget_hours) : ""} inputMode="decimal" placeholder={work.hoursQuoted.toFixed(1)} className="w-28" /></label>
+                  <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="font-semibold text-muted">Reason (shown on the job summary)</span><Input name="reason" required placeholder="Why" /></label>
+                  <Button type="submit" tone="secondary" size="md">Save budget</Button>
+                </form>
+              </details>
+            ) : null}
             <ul className="text-sm divide-y divide-line">
               {Array.from(work.minutesByTechnician.entries()).map(([tid, min]) => (
                 <li key={tid} className="py-1.5 flex justify-between"><span>{work.names.get(tid) ?? "Technician"}</span><span className="font-semibold">{fmt(min)}{seesCost ? ` · AED ${((min / 60) * rate).toFixed(0)}` : ""}</span></li>
               ))}
             </ul>
           </Card>
-          <Card className="flex flex-col gap-2">
-            <SectionLabel right={`${techs.length}`}>On the car</SectionLabel>
-            {techs.length === 0 ? <p className="text-sm text-muted">Nobody yet.</p> : null}
-            <ul className="text-sm divide-y divide-line">
-              {techs.map((t) => (
-                <li key={t.id} className="py-1.5 flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">{nameOf.get(t.staff_id) ?? work.names.get(t.staff_id) ?? "Technician"}</span>
-                  {running.some((s) => s.technician_id === t.staff_id) ? <Badge tone="green">Working</Badge> : t.done_at ? <Badge tone="ink">Done</Badge> : <Badge tone="neutral">Paused</Badge>}
-                </li>
-              ))}
-            </ul>
-            {canEdit && job.is_open && (job.status === "in_work" || job.status === "pending_qc") ? (
-              <form action={putTechnicianOnCar.bind(null, id)} className="flex items-center gap-2 border-t border-line pt-2">
-                <Select name="technician" defaultValue="" required className="flex-1">
-                  <option value="" disabled>Put a technician on the car…</option>
-                  {technicians.filter((t) => !techs.some((x) => x.staff_id === t.id)).map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}
-                </Select>
-                <Button type="submit" tone="secondary" size="md">Add</Button>
-              </form>
-            ) : null}
-          </Card>
+          <TechniciansCard jobId={id} technicians={await loadJobTechnicians(id)} available={technicians} canEdit={canEdit && job.is_open && job.status === "in_work"} canChangeLead={canEdit && job.is_open && job.status === "in_work"} from="work" />
           <Card className="flex flex-col gap-2">
             <SectionLabel>Parts on this car</SectionLabel>
             {parts.needed.length === 0 ? <p className="text-sm text-muted">No parts needed.</p> : (

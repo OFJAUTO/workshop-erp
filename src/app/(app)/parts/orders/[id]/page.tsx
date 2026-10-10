@@ -1,3 +1,4 @@
+import { CopyVin } from "@/components/CopyVin";
 import { approvedQuotations } from "@/lib/quote-data";
 import { notFound } from "next/navigation";
 import { Badge, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** One purchase order: approve, send, mark ordered, receive, supplier invoice, labels and issue. */
+/** One LPO: approve, send, mark ordered, receive, supplier invoice, labels and issue. */
 export default async function PurchaseOrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requirePermission("viewPurchaseOrders");
   const role = staff.role_id as RoleId;
@@ -56,7 +57,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
         }
         actions={
           <>
-            <LinkButton href="/parts/orders" tone="secondary" size="lg">All orders</LinkButton>
+            <CopyVin vin={v?.vin} />
+            <LinkButton href="/parts/orders" tone="secondary" size="lg">All LPOs</LinkButton>
             {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}
             {po.status !== "pending_approval" && po.status !== "cancelled" ? (
               <a href={`/api/pdf/po/${po.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-ink text-white hover:bg-black min-h-14 px-6 text-base">PO PDF</a>
@@ -97,7 +99,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
 
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
-              <SectionLabel>Approve this purchase order</SectionLabel>
+              <SectionLabel>Approve this LPO</SectionLabel>
               <DecideForm action={decidePurchaseOrder.bind(null, po.id)} depositShort={depositShort} isOwner={role === "owner"} />
             </Card>
           ) : null}

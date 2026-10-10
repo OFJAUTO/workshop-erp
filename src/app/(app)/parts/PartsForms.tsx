@@ -21,8 +21,8 @@ function PartRow({ value, onChange, suppliers, showLabels, onRemove }: { value: 
   return (
     <div className="rounded-control border border-line p-2 flex flex-col gap-2">
       <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-end">
-        <label className="flex flex-col gap-1">{label("Part number")}<Input name="part_number" value={value.part_number} onChange={(e) => set("part_number", e.target.value)} placeholder="Optional" spellCheck={false} /></label>
-        <label className="flex flex-col gap-1">{label("Description")}<Input name="description" value={value.description} onChange={(e) => set("description", e.target.value)} placeholder="For example: Front brake pads, set" /></label>
+        <label className="flex flex-col gap-1">{label("Part number")}<Input name="part_number" value={value.part_number} onChange={(e) => set("part_number", e.target.value)} placeholder="Optional" textCase="upper" /></label>
+        <label className="flex flex-col gap-1">{label("Description")}<Input name="description" value={value.description} onChange={(e) => set("description", e.target.value)} placeholder="For example: Front brake pads, set" textCase="sentence" /></label>
         <label className="flex flex-col gap-1">{label("Qty")}<Input name="quantity" value={value.quantity} onChange={(e) => set("quantity", e.target.value)} inputMode="decimal" className="w-20" /></label>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -37,9 +37,9 @@ function PartRow({ value, onChange, suppliers, showLabels, onRemove }: { value: 
             ))}
           </div>
         </div>
-        {value.part_type && value.part_type !== "genuine" ? <label className="flex flex-col gap-1">{label("Brand")}<Input name="brand" value={value.brand} onChange={(e) => set("brand", e.target.value)} placeholder="For example: Bosch" className="w-40" /></label> : <input type="hidden" name="brand" value="" />}
+        {value.part_type && value.part_type !== "genuine" ? <label className="flex flex-col gap-1">{label("Brand")}<Input name="brand" value={value.brand} onChange={(e) => set("brand", e.target.value)} placeholder="For example: Bosch" className="w-40" textCase="title" /></label> : <input type="hidden" name="brand" value="" />}
         <label className="flex flex-col gap-1">{label("Cost (AED, before VAT)")}<Input name="cost_aed" value={value.cost_aed} onChange={(e) => set("cost_aed", e.target.value)} inputMode="decimal" className="w-32" /></label>
-        <label className="flex flex-col gap-1">{label("Supplier")}<Input name="supplier" value={value.supplier} onChange={(e) => set("supplier", e.target.value)} list="suppliers" className="w-44" /></label>
+        <label className="flex flex-col gap-1">{label("Supplier")}<Input name="supplier" value={value.supplier} onChange={(e) => set("supplier", e.target.value)} list="suppliers" className="w-44" textCase="title" /></label>
         <input type="hidden" name="availability" value={value.availability} />
         <div className="flex flex-col gap-1">
           {label("Availability")}
@@ -100,6 +100,19 @@ export function AskManagerForm({ action }: { action: (formData: FormData) => voi
     <form action={action} className="flex flex-wrap items-end gap-2">
       <Input name="question" placeholder="Is this the right part? (optional note)" className="flex-1 min-w-48" />
       <Button type="submit" size="md">Send</Button>
+      <Button type="button" tone="ghost" size="md" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
+
+/** "Not available": one tap, an optional note, the advisor is told. */
+export function UnavailableForm({ action }: { action: (formData: FormData) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <Button type="button" tone="secondary" size="md" onClick={() => setOpen(true)}>Not available</Button>;
+  return (
+    <form action={action} className="flex flex-wrap items-end gap-2">
+      <Input name="note" placeholder="Note for the advisor (optional)" className="w-64" textCase="sentence" />
+      <Button type="submit" size="md">Confirm: not available</Button>
       <Button type="button" tone="ghost" size="md" onClick={() => setOpen(false)}>Cancel</Button>
     </form>
   );

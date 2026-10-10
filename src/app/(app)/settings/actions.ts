@@ -54,14 +54,15 @@ const NUMBER_KEYS = [
   "comeback_window_days",
 ] as const;
 /** Settings that keep decimals (percentages like 1.9). */
-const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_fee_percent"] as const;
+const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent"] as const;
 const DECIMAL_LIMITS: Record<(typeof DECIMAL_KEYS)[number], [number, number, string]> = {
   bank_charge_card_percent: [0, 20, "Bank charge, card machine"],
   bank_charge_link_percent: [0, 20, "Bank charge, payment link"],
-  bank_charge_fee_percent: [0, 20, "Bank charge on quotations"],
+  bank_charge_cash_percent: [0, 20, "Bank charge, cash"],
+  bank_charge_cheque_percent: [0, 20, "Bank charge, cheque"],
 };
 /** Settings kept as a list, one entry per line on the form. */
-const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades"] as const;
+const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words"] as const;
 const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years"] as const;
 
 const TEXT_KEYS = [
@@ -80,6 +81,7 @@ const TEXT_KEYS = [
   "whatsapp_reminder_customer_collects",
   "whatsapp_report_template",
   "whatsapp_quote_template",
+  "whatsapp_invoice_template",
   "whatsapp_estimate_template",
   "company_address",
   "company_phone",
@@ -252,11 +254,15 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   updates.push({ key: "working_days", value: DAYS.filter((d) => days.includes(d)) });
 
   for (const key of LIST_KEYS) {
-    const list = Array.from(new Set(String(formData.get(key) ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, 60);
+    const list = Array.from(new Set(String(formData.get(key) ?? "").split(key === "known_words" ? /[\r\n,]+/ : /\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, key === "known_words" ? 400 : 60);
     if (list.length === 0) return { error: `Enter at least one line for ${key.replaceAll("_", " ")}.`, values };
     updates.push({ key, value: list });
   }
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
+  updates.push({ key: "advisor_labour_discount", value: formData.get("advisor_labour_discount") === "on" });
+  updates.push({ key: "customer_documents_uppercase", value: formData.get("customer_documents_uppercase") === "on" });
+  // The quotation's hidden bank charge assumes the highest rate; the real one is taken at payment.
+  updates.push({ key: "bank_charge_fee_percent", value: Math.max(...DECIMAL_KEYS.map((k) => Number(String(formData.get(k) ?? "0").replace(",", ".")) || 0)) });
   updates.push({ key: "wash_board_show_times", value: formData.get("wash_board_show_times") === "on" });
   updates.push({ key: "wash_board_done_button", value: formData.get("wash_board_done_button") === "on" });
   updates.push({ key: "test_mode_enabled", value: formData.get("test_mode_enabled") === "on" });

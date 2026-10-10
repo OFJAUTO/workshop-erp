@@ -6,7 +6,7 @@ import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { LINE_SELECT, PART_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, suggestedLines, toLine, toPart, loadPartsWait, loadQuoteChecks, loadQuoteFindings, parentLineFor } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, suggestedLines, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { ownerApprovalReasons, quoteTotals, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -333,9 +333,8 @@ export async function resendQuotation(quotationId: string): Promise<SendQuoteSta
 /** The checks before completing or sending: the findings not yet quoted and the markups to confirm are counted in. */
 async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQuotation>>>, settings: Awaited<ReturnType<typeof getSettings>>, checks: { openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }) {
   const q = bundle.quotation;
-  const findings = q.kind === "quotation" && q.job_id ? await loadQuoteFindings(q.job_id) : [];
-  const unquoted = findings.filter((f) => !bundle.lines.some((l) => l.is_active && blockOf(l) === "labour" && l.source_type === f.source_type && l.source_key === f.source_key) && !(q.not_quoted ?? {})[f.key]).length;
-  return sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, unquotedFindings: unquoted, confirmPercent: Number(settings.markup_confirm_percent) || 100 });
+  // Findings not quoted never block: the advisor sees them as a reference list and decides.
+  return sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, confirmPercent: Number(settings.markup_confirm_percent) || 100 });
 }
 
 /**

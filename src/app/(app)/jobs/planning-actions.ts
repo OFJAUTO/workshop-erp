@@ -13,7 +13,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { JobRow } from "@/lib/types";
 import { ensureWorkLines } from "@/lib/work-data";
-import { addTechnician } from "@/lib/work-flow";
+import { addTechnician, removeTechnician, setLeadTechnician } from "@/lib/work-flow";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -153,6 +153,36 @@ export async function remindPlanning(jobId: string) {
   await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `${staff.display_name} reminded ${plan.waitingOn === "parts" ? "Parts" : plan.waitingOn === "workshop" ? "the workshop manager" : "the advisor"} about the planning`, created_by: staff.id });
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=${encodeURIComponent("Reminder sent.")}#planning`);
+}
+
+const techBack = (jobId: string, formData: FormData, res: { error?: string; message?: string }) => {
+  const from = String(formData.get("from") ?? "job");
+  const base = from === "work" ? `/jobs/${jobId}/work` : `/jobs/${jobId}`;
+  redirect(`${base}?${res.error ? "error" : "message"}=${encodeURIComponent(res.error ?? res.message ?? "Done.")}#technicians`);
+};
+
+/** One tap on a name: the technician is on the car (job card or work order). */
+export async function addTechnicianToJob(jobId: string, formData: FormData) {
+  const staff = await requirePermission("manageWork");
+  const res = await addTechnician(jobId, String(formData.get("technician") ?? ""), { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  refresh(jobId);
+  techBack(jobId, formData, res);
+}
+
+/** "Take off": the technician leaves the car; the lead passes on if needed. */
+export async function removeTechnicianFromJob(jobId: string, staffId: string, formData: FormData) {
+  const staff = await requirePermission("manageWork");
+  const res = await removeTechnician(jobId, staffId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  refresh(jobId);
+  techBack(jobId, formData, res);
+}
+
+/** "Make lead": another technician on the car carries the job and the inspection. */
+export async function makeLeadTechnician(jobId: string, staffId: string, formData: FormData) {
+  const staff = await requirePermission("manageWork");
+  const res = await setLeadTechnician(jobId, staffId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  refresh(jobId);
+  techBack(jobId, formData, res);
 }
 
 /** A technician put on the car by the manager from the job card or the work order (also back after leaving). */

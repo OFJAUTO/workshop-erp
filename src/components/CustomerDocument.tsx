@@ -11,7 +11,7 @@ type Company = { tradingName: string; legalName: string; legalNameAr?: string | 
  * the title with its numbers; two pale boxes; the sections; the footer row and the contact row. On a
  * phone the tables reshape; on a PC it reads like the A4 page. A sticky bar at the bottom can hold buttons.
  */
-export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabel = "Download PDF", bar, footer, preparedBy, children }: { company: Company; title: string; meta: DocMeta[]; boxes: DocBox[]; pdfHref?: string | null; pdfLabel?: string; bar?: ReactNode; footer?: ReactNode; preparedBy?: string | null; children: ReactNode }) {
+export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabel = "Download PDF", bar, footer, uppercase = false, children }: { uppercase?: boolean; company: Company; title: string; meta: DocMeta[]; boxes: DocBox[]; pdfHref?: string | null; pdfLabel?: string; bar?: ReactNode; footer?: ReactNode; children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#E9E9EC] text-[#111113]">
       <main className={`mx-auto w-full max-w-[794px] px-0 py-0 sm:px-4 sm:py-6 ${bar ? "pb-32" : "pb-10"}`}>
@@ -29,7 +29,7 @@ export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabe
               </div>
             </div>
           </header>
-          <div className="flex flex-col gap-[18px] pt-[26px] pb-6 flex-1">
+          <div className={`flex flex-col gap-[18px] pt-[26px] pb-6 flex-1 ${uppercase ? "uppercase" : ""}`}>
             <section className="flex flex-wrap items-end justify-between gap-4">
               <h1 className="text-[26px] sm:text-[30px] font-extrabold tracking-[0.02em] leading-none uppercase">{title}</h1>
               <div className="flex flex-wrap justify-end gap-x-[22px] gap-y-1 text-right">
@@ -60,7 +60,6 @@ export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabe
           </div>
           <footer className="mt-auto border-t border-[#D4D4D8] pt-3.5 pb-3 flex flex-wrap justify-between gap-4 text-[10px] text-[#5F6368]">
             <div className="flex flex-col gap-[3px]">
-              {preparedBy ? <span className="text-[#111113] font-semibold">Prepared by {preparedBy}</span> : null}
               <span>This is a computer generated document which requires no stamp and signature.</span>
               {footer ? <span>{footer}</span> : null}
               <span>Terms and conditions apply · erp.ofjauto.com/terms</span>

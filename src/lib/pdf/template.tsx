@@ -171,7 +171,7 @@ export function Amount({ value, currency, size = px(12), bold = false, color = I
   );
 }
 
-export function PdfDocument({ title, company, logo, qr, preparedBy, footerLines = [], scanLabel = "Scan to view\nthis document online", children }: { title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; preparedBy?: string | null; footerLines?: string[]; scanLabel?: string; children: ReactNode }) {
+export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, children }: { uppercase?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; children: ReactNode }) {
   return (
     <Document title={title} author={company.tradingName} creator={company.tradingName} producer={company.tradingName}>
       <Page size="A4" style={styles.page}>
@@ -196,7 +196,6 @@ export function PdfDocument({ title, company, logo, qr, preparedBy, footerLines 
         <View style={styles.footer} fixed>
           <View style={styles.footerMain}>
             <View style={{ flex: 1 }}>
-              {preparedBy ? <Text style={styles.footerStrong}>Prepared by {preparedBy}</Text> : null}
               <Text style={styles.footerText}>This is a computer generated document which requires no stamp and signature.</Text>
               {footerLines.filter(Boolean).map((l, i) => (
                 <Text key={i} style={styles.footerText}>{l}</Text>
@@ -217,7 +216,7 @@ export function PdfDocument({ title, company, logo, qr, preparedBy, footerLines 
             {company.email ? <Text><Text style={styles.contactLabel}>Email   </Text>{company.email}</Text> : null}
           </View>
         </View>
-        {children}
+        <View style={uppercase ? { textTransform: "uppercase" } : undefined}>{children}</View>
       </Page>
     </Document>
   );
@@ -413,7 +412,7 @@ export function WordsAndPayments({ words, payments, bank, currency, showBank = t
       ) : null}
       {showBank && (bank.iban || bank.accountNumber) ? (
         <View style={styles.bank}>
-          <Text style={styles.smallTitle}>Bank transfer</Text>
+          <Text style={styles.smallTitle}>Bank details</Text>
           <Text style={styles.bankLine}>{[bank.name, bank.accountName].filter(Boolean).join(" · ")}</Text>
           <Text style={styles.bankLine}>{[bank.accountNumber ? `Account ${bank.accountNumber}` : "", bank.swift ? `SWIFT ${bank.swift}` : ""].filter(Boolean).join(" · ")}</Text>
           {bank.iban ? <Text style={styles.bankLine}>IBAN {bank.iban}</Text> : null}

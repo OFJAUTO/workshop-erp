@@ -22,7 +22,7 @@ import { markReadyToInvoice } from "../../invoices/actions";
 import { followUpDone } from "../gate-out-actions";
 import { ReadySendControl } from "./ReadySendControl";
 import { aed, quoteState } from "@/lib/quotes";
-import { ROAD_TEST_DECISIONS, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
+import { ROAD_TEST_CHOICES, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { newQuotation, startQuotation } from "../../quotes/actions";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -40,11 +40,17 @@ import { WashForms } from "../../wash/WashForms";
 import { MediaGallery } from "./MediaGallery";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
 import { PlanningCard } from "./PlanningCard";
+import { TechniciansCard } from "./TechniciansCard";
+import { TechnicianChecks } from "@/components/TechnicianChecks";
+import { loadJobTechnicians } from "@/lib/job-technicians";
 import { JobSummaryCard } from "./JobSummaryCard";
 import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
 
 export const dynamic = "force-dynamic";
+
+/** Money never reaches the workshop floor: these history lines show only to the owner, accounts and advisors. */
+const MONEY_EVENTS = new Set(["payment", "invoice_issued", "proforma_issued", "ready_sent", "invoice_sent", "ready_to_invoice"]);
 
 type MoveRequestRow = { id: string; reason: string; status: "pending" | "approved" | "refused"; to_status: string | null; decision_reason: string | null; decided_at: string | null; created_at: string; requester: { display_name: string } | null; decider: { display_name: string } | null };
 
@@ -110,6 +116,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const { data: technicians } = canAssign
     ? await supabase.from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name")
     : { data: [] as { id: string; display_name: string; department_id: string | null }[] };
+  const onCar = canAssign || job.assigned_to ? await loadJobTechnicians(id) : [];
+  const techniciansCanChange = canAssign && !staff.viewingAs && !["pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
 
   const latestApproval = approvals[0] ?? null;
   void link;
@@ -118,7 +126,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name);
   const approvalTemplate = fillCar(settings.whatsapp_approval_template);
   const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", customerName);
-  const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", customerName);
+  // The proforma message carries the bank details (the page has them too, with Pay now); the tax invoice has its own message.
+  const bankLines = [settings.bank_name ? `Bank transfer: ${settings.bank_account_name}, ${settings.bank_name}` : "", settings.bank_iban ? `IBAN ${settings.bank_iban}` : ""].filter(Boolean).join("\n");
+  const readyRaw = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", customerName);
+  const readyTemplate = readyRaw.includes("[bank]") ? readyRaw.replaceAll("[bank]", bankLines) : bankLines ? `${readyRaw}\n${bankLines}` : readyRaw;
+  const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? "")).replaceAll("[name]", customerName);
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
   const insp = inspection?.inspection ?? null;
@@ -146,7 +158,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
     gateInComplete: check.complete,
     quote: qState,
-    extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
+    extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, invoiceKind: bal?.invoice?.kind ?? null, invoiceSent: !!job.invoice_sent_at, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
   });
   const canQuote = (role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)))) && job.is_open && !staff.viewingAs;
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
@@ -175,7 +187,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const mapHref = gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
   const overrides = events.filter((e) => e.event_type === "override");
   const pendingMove = moveRequests.find((m) => m.status === "pending");
-  const defaultRoadTest = roadTest?.decision ?? (gateIn?.condition === "does_not_run" ? "not_possible" : "needed");
+  const defaultRoadTest = roadTest?.decision ?? (gateIn?.condition === "does_not_run" ? "not_possible" : null);
 
   return (
     <>
@@ -192,7 +204,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
-            {job.inspection_fee_due ? <Badge tone="red">Inspection fee due · AED {Number(settings.inspection_fee_aed).toLocaleString("en-GB")}</Badge> : null}
+            {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : null}
             {job.comeback_of ? <Badge tone={job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "outline" : "red"}>{job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "Return visit" : "Comeback"}{comebackOriginal ? ` of ${comebackOriginal.job_number}` : ""}{job.comeback_free ? " · free of charge" : ""}</Badge> : null}
             {comebacksOfThis.length ? <Badge tone="red">Came back: {comebacksOfThis.map((c) => c.job_number).join(", ")}</Badge> : null}
             <TimingBadge timing={timing} />
@@ -276,7 +288,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               {step.done.by ? <span className="text-muted"> · {step.done.by}</span> : null}
             </p>
           ) : null}
-          <p className="text-[15px] font-semibold">{step.next}</p>
+          <p className="text-[15px] font-semibold">{!can(role, "viewInvoices") && ["ready", "pending_payment", "in_delivery"].includes(job.status) ? "QC passed and the car is ready. The advisor and accounts take it from here." : step.next}</p>
           <p className="text-sm text-muted">
             Waiting on <span className="font-semibold text-ink">{step.waitingOn}</span> · {waitedText(step.since, wt)}
           </p>
@@ -443,17 +455,18 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? (job.wash_sent_at ? `At the wash since ${formatDayTime(job.wash_sent_at)}` : "Ready for wash") : "Not started"}</span>
           {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><WashForms jobId={id} atWash={!!job.wash_sent_at} canAct={(role === "owner" || role === "service_advisor") && !staff.viewingAs} from="job" sendAction={sendToWash.bind(null, id)} doneAction={washDone.bind(null, id)} skipAction={skipWash.bind(null, id)} /></div> : null}
         </Card>
-        {role !== "parts" ? (
-        <Card className={`flex flex-col gap-2 ${bal?.invoice ? "border-green" : job.status === "ready" || job.status === "pending_payment" ? "border-ink" : "bg-canvas opacity-70"} ${job.stage === "ready" ? "ring-2 ring-ink" : ""}`}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Invoice</span>
-          <span className="text-sm font-semibold">{bal?.invoice ? `${bal.invoice.number} · ${bal.state === "paid" ? "paid in full" : bal.state === "part_paid" ? `part paid, AED ${bal.balance.toFixed(0)} due` : bal.state === "cheque_pending" ? "cheque pending" : `AED ${bal.balance.toFixed(0)} due`}` : job.ready_to_invoice_at ? "Ready to invoice, with accounts" : job.inspection_fee_due ? "Inspection fee to invoice" : "Not started"}</span>
-          {job.ready_sent_at ? <span className="text-xs text-muted">Customer told {formatDayTime(job.ready_sent_at)}</span> : null}
+        {can(role, "viewInvoices") ? (
+        <Card id="invoice" className={`flex flex-col gap-2 ${bal?.invoice?.kind === "tax_invoice" && bal.state === "paid" ? "border-green" : bal?.invoice || job.status === "ready" || job.status === "pending_payment" ? "border-ink" : "bg-canvas opacity-70"} ${job.stage === "ready" ? "ring-2 ring-ink" : ""}`}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{bal?.invoice?.kind === "tax_invoice" ? "Tax invoice" : "Proforma"}</span>
+          <span className="text-sm font-semibold">{bal?.invoice ? `${bal.invoice.number} · ${bal.state === "paid" ? (bal.invoice.kind === "tax_invoice" ? "paid in full" : "paid, tax invoice on its way") : bal.state === "part_paid" ? `part paid, AED ${bal.balance.toFixed(0)} due` : bal.state === "cheque_pending" ? "cheque pending" : `awaiting payment, AED ${bal.balance.toFixed(0)}`}` : job.status === "ready" || job.status === "pending_payment" ? (bal?.needsInvoice ? "Proforma to prepare" : "Nothing to invoice") : job.inspection_fee_due ? "Inspection fee to invoice" : "After QC and the wash"}</span>
+          {job.ready_sent_at ? <span className="text-xs text-muted">Proforma sent {formatDayTime(job.ready_sent_at)}</span> : null}
+          {job.invoice_sent_at ? <span className="text-xs text-muted">Tax invoice sent {formatDayTime(job.invoice_sent_at)}</span> : null}
           <div className="mt-auto flex flex-wrap gap-2">
-            {!bal?.invoice && !job.ready_to_invoice_at && ["ready", "pending_wash", "pending_qc"].includes(job.status) && can(role, "markReadyToInvoice") && !staff.viewingAs ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="md">Ready to invoice</Button></form> : null}
-            {can(role, "issueInvoices") && !bal?.invoice && laterStage && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} tone={job.ready_to_invoice_at ? "primary" : "secondary"} size="md">Issue invoice</LinkButton> : null}
-            {bal?.invoice && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open invoice</LinkButton> : null}
+            {!bal?.invoice && bal?.needsInvoice && ["ready", "pending_wash", "pending_qc", "pending_payment"].includes(job.status) && can(role, "markReadyToInvoice") && !staff.viewingAs ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="md">Prepare the proforma</Button></form> : null}
+            {can(role, "issueInvoices") && laterStage && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} tone="secondary" size="md">Payments and invoice</LinkButton> : null}
+            {bal?.invoice && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open {bal.invoice.kind === "tax_invoice" ? "tax invoice" : "proforma"}</LinkButton> : null}
           </div>
-          {bal?.invoice && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? <ReadySendControl jobId={id} token={bal.invoice.token} siteUrl={site} messageTemplate={readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={job.ready_sent_at} /> : null}
+          {bal?.invoice && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? <ReadySendControl jobId={id} token={bal.invoice.token} kind={bal.invoice.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={bal.invoice.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={bal.invoice.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} /> : null}
         </Card>
         ) : null}
       </div>
@@ -564,7 +577,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
           <Collapsible title="History" right={`${events.length}`}>
             <ul className="flex flex-col divide-y divide-line">
-              {events.map((e) => (
+              {events.filter((e) => can(role, "viewInvoices") || !MONEY_EVENTS.has(e.event_type)).map((e) => (
                 <li key={e.id} className={`py-2.5 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4 ${e.event_type === "override" ? "text-red" : ""}`}>
                   <span className="text-xs text-muted sm:w-36 shrink-0">{formatDateTime(e.created_at)}</span>
                   <span className="text-sm">
@@ -580,23 +593,17 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
         <div className="flex flex-col gap-6">
 
-          {canAssign ? (
+          {canAssign && onCar.length ? (
+            <TechniciansCard jobId={id} technicians={onCar} available={technicians ?? []} canEdit={techniciansCanChange} canChangeLead={techniciansCanChange && inspection?.inspection.status !== "approved"} />
+          ) : null}
+          {canAssign && !onCar.length ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel>Assign technician</SectionLabel>
               <form action={assignJob.bind(null, id)} className="flex flex-col gap-3">
-                <Select name="technician" defaultValue={job.assigned_to ?? ""} required>
-                  <option value="" disabled>
-                    Choose a technician…
-                  </option>
-                  {(technicians ?? []).map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.display_name}
-                    </option>
-                  ))}
-                </Select>
+                <TechnicianChecks technicians={technicians ?? []} checked={job.assigned_to ? [job.assigned_to] : []} hint="Tick one or more. The first ticked is the lead and does the inspection." />
                 <div className="flex flex-col gap-1">
                   <span className="text-sm font-semibold">Road test</span>
-                  <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
+                  <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_CHOICES} />
                 </div>
                 <Textarea name="road_test_note" rows={1} placeholder="Note (required when the road test is not possible)" defaultValue={roadTest?.decision_note ?? ""} />
                 <Button type="submit" disabled={!check.complete || (!job.first_approval_at && role !== "owner")}>
@@ -624,7 +631,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <span className="text-muted"> · {roadTestLine(roadTest)}</span>
               </p>
               <form action={decideRoadTest.bind(null, id)} className="flex flex-col gap-3">
-                <ChoiceButtons name="road_test" columns={3} defaultValue={roadTest.decision ?? defaultRoadTest} options={ROAD_TEST_DECISIONS.map((d) => ({ value: d.value, label: d.label }))} />
+                <ChoiceButtons name="road_test" columns={3} defaultValue={roadTest.decision ?? defaultRoadTest} options={ROAD_TEST_CHOICES} />
                 <Textarea name="road_test_note" rows={1} required placeholder="Why the change (required)" />
                 <Button type="submit" tone="secondary" size="md">
                   Save road test choice

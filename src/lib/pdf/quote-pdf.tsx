@@ -4,8 +4,9 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { feeNotice } from "@/lib/jobs";
 import { amountInWords, round2 } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partTypeText, quoteTotals } from "@/lib/quotes";
+import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
+import { dubaiDate } from "@/lib/jobs";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
@@ -14,13 +15,14 @@ import { InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, WordsAndPaym
 
 /** The customer's quotation or estimate on the document template: no internal costs, margins, hidden lines or bank charges. */
 export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): Promise<Buffer> {
-  const { quotation: q, customer, vehicle, job, creatorName } = bundle;
+  const { quotation: q, customer, vehicle, job } = bundle;
   const isEstimate = q.kind === "estimate";
   const currency = currencyOf(settings);
   const vatPct = Number(q.vat_percent) || 5;
   const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l));
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const partOf = (id: string | null) => (id ? bundle.parts.find((p) => p.id === id) : undefined);
+  const today = dubaiDate();
   const toDoc = (l: (typeof lines)[number]): DocLine => {
     const amount = lineTotal(l);
     const unit = lineUnitPrice(l);
@@ -30,7 +32,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
       description: title,
-      details: [l.line_type === "part" ? partTypeText(l) : null, l.details].filter(Boolean).join(" · ") || null,
+      details: [l.line_type === "part" ? partTypeText(l) : null, l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.details].filter(Boolean).join(" · ") || null,
       partNumber: number,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
@@ -53,7 +55,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
 
   const doc = (
-    <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} preparedBy={creatorName} footerLines={footer} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
+    <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={footer} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
       <TitleRow
         title={isEstimate ? "ESTIMATE" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
         meta={[
@@ -61,7 +63,6 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
           { label: "Valid until", value: q.valid_until ? formatDate(q.valid_until) : `${q.validity_days} days` },
           job ? { label: "Job card", value: job.job_number } : null,
-          { label: "Advisor", value: creatorName ?? "" },
         ]}
       />
       <InfoBoxes

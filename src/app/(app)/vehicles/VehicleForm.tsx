@@ -92,7 +92,7 @@ function Fields({
         ) : null}
         <div className="grid grid-cols-3 gap-4">
           <Field label="Code" optional hint="Letter(s), e.g. F">
-            <Input name="plate_code" defaultValue={v.plate_code} className="uppercase" maxLength={5} autoCapitalize="characters" />
+            <Input name="plate_code" defaultValue={v.plate_code} className="uppercase" maxLength={5} textCase="upper" />
           </Field>
           <div className="col-span-2">
             <Field label="Number">
@@ -101,7 +101,7 @@ function Fields({
                 defaultValue={v.plate_number}
                 required
                 className="uppercase text-lg font-bold tracking-[0.05em]"
-                autoCapitalize="characters"
+                textCase="upper"
                 autoFocus={mode === "create"}
               />
             </Field>
@@ -112,7 +112,7 @@ function Fields({
       </div>
 
       <Field label="VIN" optional hint="17 characters, from the door jamb or windscreen plate.">
-        <Input name="vin" defaultValue={v.vin} className="uppercase font-mono" maxLength={17} autoCapitalize="characters" />
+        <Input name="vin" defaultValue={v.vin} className="uppercase font-mono" maxLength={17} textCase="upper" />
       </Field>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -167,7 +167,7 @@ function Fields({
           <Input name="model_year" inputMode="numeric" defaultValue={v.model_year} maxLength={4} />
         </Field>
         <Field label="Colour" optional>
-          <Input name="colour" defaultValue={v.colour} />
+          <Input name="colour" defaultValue={v.colour} textCase="title" />
         </Field>
         <Field label="Last known mileage (km)" optional>
           <Input name="last_mileage" inputMode="numeric" defaultValue={v.last_mileage} />
@@ -184,7 +184,7 @@ function Fields({
       </Field>
 
       <Field label="Notes" optional>
-        <Textarea name="notes" defaultValue={v.notes} />
+        <Textarea name="notes" defaultValue={v.notes} textCase="sentence" />
       </Field>
 
       <div>

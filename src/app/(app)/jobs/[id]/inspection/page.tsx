@@ -43,6 +43,32 @@ function Files({ rows, urls }: { rows: InspectionMediaRow[]; urls: Record<string
 
 
 /** The tap-first details behind a checklist item: danger, leak, fluid, brake disc, the parts rows. */
+/** One line per checklist item: status, name, section and the start of the remark; everything else opens on a tap. */
+function ItemLine({ item: i, media, urls }: { item: InspectionItemRow; media: InspectionMediaRow[]; urls: Record<string, string> }) {
+  const short = (i.remarks ?? "").replace(/\s+/g, " ").trim();
+  return (
+    <li>
+      <details>
+        <summary className="list-none cursor-pointer min-h-11 flex flex-wrap items-center gap-2 py-1.5 text-sm">
+          {i.status ? <Badge tone={TONE[i.status]}>{ITEM_STATUS_LABELS[i.status]}</Badge> : <Badge tone="neutral">Not marked</Badge>}
+          <span className="font-semibold">{i.item_label}</span>
+          <span className="text-xs text-muted">{i.section_title}</span>
+          {i.dangerous ? <Badge tone="red">Dangerous</Badge> : null}
+          {short ? <span className="text-muted truncate max-w-[22rem]">{short.length > 60 ? short.slice(0, 58) + "…" : short}</span> : null}
+          {media.length ? <span className="text-xs text-muted">{media.length} file{media.length === 1 ? "" : "s"}</span> : null}
+          {i.edited_by_name ? <span className="text-xs text-muted">edited by {i.edited_by_name}</span> : null}
+        </summary>
+        <div className="pb-3 pl-1 flex flex-col gap-1.5">
+          {i.remarks ? <p className="text-sm whitespace-pre-wrap">{i.remarks}</p> : <p className="text-xs text-muted">No remark.</p>}
+          <ItemExtras item={i} />
+          <Original original={i.original as Record<string, unknown> | null} />
+          <Files rows={media} urls={urls} />
+        </div>
+      </details>
+    </li>
+  );
+}
+
 function ItemExtras({ item }: { item: InspectionItemRow }) {
   const bits: string[] = [];
   if (item.leak_severity || item.leak_repair) bits.push(`Leak: ${[LEAK_SEVERITIES.find((x) => x.value === item.leak_severity)?.label, LEAK_REPAIRS.find((x) => x.value === item.leak_repair)?.label].filter(Boolean).join(", ")}`);
@@ -119,7 +145,6 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const workingMin = inspectionWorkingMinutes(insp, wt);
   const target = insp.target_minutes ?? (Number(settings.inspection_target_minutes) || 90);
   const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY);
-  const sections = Array.from(new Map(items.map((i) => [i.section_key, i.section_title])).entries());
   const flagged = items.filter((i) => i.status === "average" || i.status === "bad");
   const prescans = bundle.media.filter((m) => m.is_prescan);
   const pendingChange = bundle.changeRequests.find((c) => c.status === "pending");
@@ -203,7 +228,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           </Card>
 
           {reviewing ? (
-            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} />
+            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} />
           ) : (
             <>
               <Card className="flex flex-col gap-3">
@@ -244,33 +269,30 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 </Card>
               ) : null}
 
-              {sections.map(([key, title]) => {
-                const rows = items.filter((i) => i.section_key === key);
-                return (
-                  <Card key={key} className="flex flex-col gap-2">
-                    <SectionLabel right={`${rows.filter((i) => i.status === "good").length} good · ${rows.filter((i) => i.status === "average").length} average · ${rows.filter((i) => i.status === "bad").length} bad${rows.some((i) => i.status === "na") ? ` · ${rows.filter((i) => i.status === "na").length} N/A` : ""}`}>{title}</SectionLabel>
-                    <ul className="flex flex-col divide-y divide-line">
-                      {rows.map((i) => (
-                        <li key={i.id} className="py-2 flex flex-col gap-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {i.status ? <Badge tone={TONE[i.status]}>{ITEM_STATUS_LABELS[i.status]}</Badge> : <Badge tone="neutral">Not marked</Badge>}
-                            <span className="text-sm font-semibold">{i.item_label}</span>
-                            {i.edited_by_name ? <span className="text-xs text-muted">Edited by {i.edited_by_name}, {formatDateTime(i.edited_at)}</span> : null}
-                          </div>
-                          {i.remarks ? <p className="text-sm whitespace-pre-wrap">{i.remarks}</p> : null}
-                          <ItemExtras item={i} />
-                          <Original original={i.original as Record<string, unknown> | null} />
-                          <Files rows={bundle.media.filter((x) => x.item_key === i.item_key)} urls={bundle.mediaUrls} />
-                        </li>
+              <Card className="flex flex-col gap-2">
+                <SectionLabel right={`${items.filter((i) => i.status === "bad").length} bad · ${items.filter((i) => i.status === "average").length} average · ${items.filter((i) => i.status === "good").length} good${items.some((i) => i.status === "na") ? ` · ${items.filter((i) => i.status === "na").length} n/a` : ""}${items.some((i) => !i.status) ? ` · ${items.filter((i) => !i.status).length} not marked` : ""}`}>Checklist</SectionLabel>
+                <p className="text-xs text-muted">One line per item, BAD first. Tap a line to open it.</p>
+                <ul className="divide-y divide-line">
+                  {[...items.filter((i) => i.status === "bad"), ...items.filter((i) => i.status === "average"), ...items.filter((i) => !i.status)].map((i) => (
+                    <ItemLine key={i.id} item={i} media={bundle.media.filter((x) => x.item_key === i.item_key)} urls={bundle.mediaUrls} />
+                  ))}
+                </ul>
+                {items.some((i) => i.status === "good" || i.status === "na") ? (
+                  <details className="border-t border-line pt-2">
+                    <summary className="cursor-pointer min-h-11 flex items-center text-sm font-semibold text-muted">{items.filter((i) => i.status === "good").length} good{items.some((i) => i.status === "na") ? ` and ${items.filter((i) => i.status === "na").length} not applicable` : ""}: tap to see them</summary>
+                    <ul className="divide-y divide-line">
+                      {[...items.filter((i) => i.status === "good"), ...items.filter((i) => i.status === "na")].map((i) => (
+                        <ItemLine key={i.id} item={i} media={bundle.media.filter((x) => x.item_key === i.item_key)} urls={bundle.mediaUrls} />
                       ))}
                     </ul>
-                  </Card>
-                );
-              })}
+                  </details>
+                ) : null}
+              </Card>
 
               <Card className="flex flex-col gap-3">
                 <SectionLabel>Tyres and numbers{insp.measurements_edited_by_name ? ` · edited by ${insp.measurements_edited_by_name}, ${formatDateTime(insp.measurements_edited_at)}` : ""}</SectionLabel>
                 <ul className="divide-y divide-line text-sm">
+                  {m.tyre_size_front || m.tyre_size_rear ? <li className="py-1.5 flex flex-wrap gap-x-3"><span className="font-semibold w-28">Tyre size</span><span>Front {String(m.tyre_size_front ?? "") || "—"} · Rear {String(m.tyre_size_rear ?? "") || "—"}</span></li> : null}
                   {[...TYRE_POSITIONS, { key: "spare", label: "Spare" }]
                     .filter((p) => m[`tyre_${p.key}_tread`] || m[`tyre_${p.key}_action`])
                     .map((p) => (

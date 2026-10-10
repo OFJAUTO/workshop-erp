@@ -7,7 +7,7 @@ import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { labourRateFor, loadQuotation, loadServices, minMarkupFor } from "@/lib/quote-data";
 import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
-import { getSettings } from "@/lib/settings";
+import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -97,7 +97,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
           technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
-          bankChargePercent: Math.max(Number(settings.bank_charge_card_percent) || 0, Number(settings.bank_charge_link_percent) || 0),
+          bankChargePercent: highestBankCharge(settings),
+          advisorDiscount: settings.advisor_labour_discount === true,
           depositThreshold: Number(settings.deposit_threshold_aed) || 0,
           depositPercent: Number(settings.deposit_percent) || 50,
           today: dubaiDate(),

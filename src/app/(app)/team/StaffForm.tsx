@@ -113,7 +113,7 @@ export function StaffForm({
               defaultChecked={v.is_head_accountant === "on"}
               className="h-5 w-5 accent-ink"
             />
-            <span className="text-sm font-semibold">Head accountant (can approve purchase orders later)</span>
+            <span className="text-sm font-semibold">Head accountant (can approve LPOs later)</span>
           </label>
 
           <div className="flex gap-2">

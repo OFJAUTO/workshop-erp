@@ -10,15 +10,25 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 
 /** The receipt for one payment: owner, accounts and advisors. */
-export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const staff = await getCurrentStaff();
-  if (!staff) return new NextResponse("Please sign in.", { status: 401 });
-  if (!can(staff.role_id as RoleId, "viewInvoices")) return new NextResponse("Not allowed.", { status: 403 });
   const admin = createAdminClient();
   const { data: raw } = await admin.from("payments").select(PAYMENT_SELECT).eq("id", id).maybeSingle();
   if (!raw) return new NextResponse("Not found.", { status: 404 });
   const payment = toPayment(raw as Record<string, unknown>);
+  // The customer opens a receipt from the invoice page with the invoice's own link token; staff with a login.
+  const t = request.nextUrl.searchParams.get("t");
+  let allowed = false;
+  if (t && payment.invoice_id) {
+    const { data: inv } = await admin.from("invoices").select("token, converted_from").eq("id", payment.invoice_id).maybeSingle();
+    const { data: from } = inv?.converted_from ? await admin.from("invoices").select("token").eq("id", inv.converted_from).maybeSingle() : { data: null };
+    allowed = !!inv && (inv.token === t || from?.token === t);
+  }
+  if (!allowed) {
+    const staff = await getCurrentStaff();
+    if (!staff) return new NextResponse("Please sign in.", { status: 401 });
+    if (!can(staff.role_id as RoleId, "viewInvoices")) return new NextResponse("Not allowed.", { status: 403 });
+  }
   const [invoice, { data: customer }, { data: job }, { data: by }] = await Promise.all([
     payment.invoice_id ? loadInvoice(payment.invoice_id) : Promise.resolve(null),
     admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", payment.customer_id).maybeSingle(),

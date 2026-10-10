@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { NumericInput } from "./NumericInput";
+import { CasedInput, CasedTextarea } from "./CasedInput";
+import type { TextCase } from "@/lib/text-case";
 import type { ReactNode } from "react";
 
 /* ---------------------------------------------------------------------------
@@ -146,14 +148,17 @@ const controlClass =
 const WORDY_TYPES = new Set([undefined, "text", "search", "url"]);
 
 /** Text boxes get English spell check by default (a standing rule); numbers, emails, dates and codes do not. */
-export function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+export function Input({ className = "", textCase, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { textCase?: TextCase }) {
   const wordy = WORDY_TYPES.has(props.type) && props.inputMode !== "numeric" && props.inputMode !== "decimal" && props.inputMode !== "tel";
   // Money and number boxes take digits only (and one dot for decimals): letters typed by mistake disappear as you type.
   if (props.inputMode === "numeric" || props.inputMode === "decimal") return <NumericInput className={`${controlClass} ${className}`} {...props} />;
+  // Names, codes and descriptions tidy their own case when the person leaves the box (the database does it again on save).
+  if (textCase) return <CasedInput textCase={textCase} spellCheck={wordy && textCase !== "upper" ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
   return <input spellCheck={wordy ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
 }
 
-export function Textarea({ className = "", ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ className = "", textCase, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { textCase?: TextCase }) {
+  if (textCase) return <CasedTextarea textCase={textCase} spellCheck lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
   return <textarea spellCheck lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
 }
 

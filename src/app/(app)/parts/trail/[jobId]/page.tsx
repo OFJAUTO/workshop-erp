@@ -1,3 +1,4 @@
+import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
 import { Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -30,7 +31,7 @@ export default async function PartsTrailPage({ params }: { params: Promise<{ job
   const rows = (handovers ?? []) as unknown as Handover[];
   return (
     <>
-      <PageHeader title={`Parts trail · ${j.vehicle ? formatPlate(j.vehicle) : j.job_number}`} subtitle={`${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}`} actions={<>{can(role, "managePurchaseOrders") ? <LinkButton href={`/parts/handover/${jobId}`} size="lg">Hand over</LinkButton> : null}{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
+      <PageHeader title={`Parts trail · ${j.vehicle ? formatPlate(j.vehicle) : j.job_number}`} subtitle={`${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}`} actions={<><CopyVin vin={j.vehicle?.vin} />{can(role, "managePurchaseOrders") ? <LinkButton href={`/parts/handover/${jobId}`} size="lg">Hand over</LinkButton> : null}{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
       <Card className="flex flex-col gap-3">
         <SectionLabel right={`${rows.length}`}>Handovers</SectionLabel>
         {rows.length === 0 ? <Empty title="No handover yet" /> : null}
