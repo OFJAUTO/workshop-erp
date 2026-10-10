@@ -46,7 +46,11 @@ export default async function TabletPage() {
   const urlByPath = new Map((signed.data ?? []).map((s) => [s.path, s.signedUrl]));
 
   const scoped = device.kind === "personal" ? (rows ?? []).filter((r) => r.id === device.staff_id) : (rows ?? []);
+  // A red dot on a photo: that person has something waiting.
+  const { data: unreadRows } = await admin.from("notifications").select("staff_id").is("read_at", null).in("staff_id", scoped.map((r) => r.id));
+  const unread = new Set((unreadRows ?? []).map((n) => n.staff_id as string));
   const people: TabletPerson[] = scoped.map((r) => ({
+    unread: unread.has(r.id),
     id: r.id,
     display_name: r.display_name,
     full_name: r.full_name,

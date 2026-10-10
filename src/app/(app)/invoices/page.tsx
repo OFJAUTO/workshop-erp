@@ -23,8 +23,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const { message, error, show } = await searchParams;
   const admin = createAdminClient();
   const [{ data: jobs }, { data: invRows }, { data: payRows }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, status, ready_to_invoice_at, stage_entered_at, inspection_fee_due, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)").eq("is_open", true).in("status", ["ready", "pending_payment", "in_delivery"]).order("stage_entered_at"),
-    admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)), customer:customers(full_name, company_name)").eq("is_active", true).order("issued_at", { ascending: false }).limit(200),
+    admin.from("jobs").select("id, job_number, status, ready_to_invoice_at, stage_entered_at, inspection_fee_due, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)").eq("is_open", true).in("status", ["ready", "pending_payment", "in_delivery"]).order("stage_entered_at"),
+    admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)), customer:customers(full_name, company_name)").eq("is_active", true).order("issued_at", { ascending: false }).limit(200),
     admin.from("payments").select(PAYMENT_SELECT).eq("is_active", true).not("invoice_id", "is", null),
   ]);
   const invoices = ((invRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ inv: toInvoice(r), job: r.job as { job_number: string; vehicle: JobRow["vehicle"] } | null, customer: r.customer as { full_name: string; company_name: string | null } | null }));

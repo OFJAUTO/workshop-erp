@@ -109,6 +109,8 @@ export type EditorSettings = {
   depositThreshold: number;
   depositPercent: number;
   inspectionFee: number;
+  /** The usual amount for a Consumables line when the advisor adds one (never added by itself). */
+  consumablesDefault?: number;
   today: string;
   workingTime: WorkingTime;
 };
@@ -357,7 +359,7 @@ export function QuoteEditor({
             </>
           ) : (
             <>
-              <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Number(e.target.value) || 1 })} inputMode="decimal" disabled={disabled} aria-label="Quantity" className="text-right min-h-10" />
+              {l.line_type === "package" && (!l.price_per || l.price_per === "job") ? <span className="text-right text-sm text-muted min-h-10 inline-flex items-center justify-end">per job</span> : <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Math.max(1, Math.round(Number(e.target.value) || 1)) })} inputMode="numeric" disabled={disabled} aria-label="Quantity" className="text-right min-h-10" />}
               <Input value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} aria-label="Price" className="text-right min-h-10 hidden sm:block" />
             </>
           )}
@@ -387,6 +389,7 @@ export function QuoteEditor({
           <span className="sm:hidden ml-auto font-bold text-ink">{aed(total)}</span>
         </div>
         {detailsOpen ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} placeholder="Shown to the customer under the line (optional)" textCase="sentence" /> : null}
+        {l.line_type === "package" && l.price_per && l.price_per !== "job" ? <span className="text-xs text-muted">{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1} = {aed(total)}</span> : null}
         {discOpen ? <label className="flex items-center gap-2 text-xs"><span className="font-semibold text-muted">Discount %</span><Input value={num(l.discount_percent)} onChange={(e) => patch(l.id, { discount_percent: Number(e.target.value) || 0 })} inputMode="decimal" className="w-20 text-right min-h-9" /></label> : null}
         {(l.labour_rate ?? 0) + 0.005 < settings.labourRate && l.line_type === "labour" ? <span className="text-xs font-semibold text-red">Rate below the standard AED {settings.labourRate}.</span> : null}
       </div>
@@ -649,7 +652,7 @@ export function QuoteEditor({
                     <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is this charge?" className="flex-1 min-w-48 min-h-9 font-semibold" textCase="sentence" />
                     <Input value={num(l.unit_cost)} onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} placeholder="Cost (optional)" className="w-28 text-right min-h-9" aria-label="Cost" />
                     {hasCostFloor(l) ? <Input value={num(l.markup_percent)} onChange={(e) => patch(l.id, { markup_percent: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} placeholder="Markup %" className="w-20 text-right min-h-9" aria-label="Markup" /> : <Input value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled || hidden} placeholder="Price" className="w-24 text-right min-h-9" aria-label="Price" />}
-                    <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Number(e.target.value) || 1 })} inputMode="decimal" disabled={disabled} className="w-14 text-right min-h-9" aria-label="Quantity" />
+                    <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Math.max(1, Math.round(Number(e.target.value) || 1)) })} inputMode="numeric" disabled={disabled} className="w-14 text-right min-h-9" aria-label="Quantity" />
                     {showHide(l, hidden)}
                     <span className="ml-auto w-28 text-right font-bold">{aed(total)}</span>
                     {!disabled ? <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 px-2 text-xs font-bold text-red" aria-label="Remove">×</button> : null}
@@ -664,6 +667,7 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "recovery" })}>+ Recovery</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "" })}>+ Other</Button>
+              {!otherLines.some((l) => /consumables/i.test(l.title)) ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "Consumables", unit_price: settings.consumablesDefault || null })}>+ Consumables</Button> : null}
               {settings.inspectionFee > 0 && !otherLines.some((l) => /inspection fee/i.test(l.title)) ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "Inspection fee", unit_price: settings.inspectionFee, quantity: 1, visible_to_customer: true })}>+ Inspection fee ({aed(settings.inspectionFee)})</Button> : null}
             </div>
           ) : null}

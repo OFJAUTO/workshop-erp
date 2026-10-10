@@ -17,8 +17,8 @@ export default async function QcListPage({ searchParams }: { searchParams: Promi
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const [{ data: jobs }, { data: checks }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, status, qc_round, rework_count, work_completed_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").eq("is_open", true).eq("status", "pending_qc").order("work_completed_at"),
-    admin.from("qc_checks").select(QC_SELECT + ", job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).neq("status", "open").order("finished_at", { ascending: false }).limit(20),
+    admin.from("jobs").select("id, job_number, status, qc_round, rework_count, work_completed_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").eq("is_open", true).eq("status", "pending_qc").order("work_completed_at"),
+    admin.from("qc_checks").select(QC_SELECT + ", job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).neq("status", "open").order("finished_at", { ascending: false }).limit(20),
   ]);
   const rows = (jobs ?? []) as unknown as Row[];
   const done = (checks ?? []) as unknown as (QcCheckRow & { job: { job_number: string; vehicle: Row["vehicle"] } | null })[];

@@ -13,11 +13,11 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
   const supabase = await createClient();
   const { data } = await supabase
     .from("vehicles")
-    .select("id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at")
+    .select("kind, id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at")
     .eq("id", id)
     .maybeSingle();
   if (!data) notFound();
-  const v = data as VehicleRow;
+  const v = data as unknown as VehicleRow;
   const lists = await loadVehicleFormData();
 
   return (

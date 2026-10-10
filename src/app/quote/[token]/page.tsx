@@ -91,7 +91,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       ]}
       boxes={[
         { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", rows: [["", customer?.company_name ? customer.full_name : null], ["", customer?.phone ?? null]], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
-        { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), rows: [["", vehicle?.variant ?? null], ["VIN", vehicle?.vin ?? null]] },
+        vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items", rows: [] } : { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), rows: [["", vehicle?.variant ?? null], ["VIN", vehicle?.vin ?? null]] },
       ]}
       pdfHref={`/api/pdf/quote/${token}`}
       uppercase={settings.customer_documents_uppercase === true}

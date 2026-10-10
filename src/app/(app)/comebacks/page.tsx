@@ -24,7 +24,7 @@ export default async function ComebacksPage({ searchParams }: { searchParams: Pr
   const next = new Date(`${month}-01T00:00:00+04:00`);
   next.setUTCMonth(next.getUTCMonth() + 1);
   const admin = createAdminClient();
-  const { data } = await admin.from("jobs").select("id, job_number, gated_in_at, status, comeback_of, comeback_cause, comeback_free, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").not("comeback_of", "is", null).gte("gated_in_at", from).lt("gated_in_at", next.toISOString()).order("gated_in_at", { ascending: false });
+  const { data } = await admin.from("jobs").select("id, job_number, gated_in_at, status, comeback_of, comeback_cause, comeback_free, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").not("comeback_of", "is", null).gte("gated_in_at", from).lt("gated_in_at", next.toISOString()).order("gated_in_at", { ascending: false });
   const rows = (data ?? []) as unknown as Row[];
   const originalIds = Array.from(new Set(rows.map((r) => r.comeback_of)));
   const [{ data: originals }, { data: techRows }, profits] = await Promise.all([

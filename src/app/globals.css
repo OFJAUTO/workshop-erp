@@ -92,3 +92,6 @@ input[type="number"]::-webkit-inner-spin-button {
   90% { transform: rotate(3deg); }
 }
 .bell-wiggle { animation: bell-wiggle 4s ease-in-out infinite; transform-origin: 50% 0; }
+
+/* A finished step on the job card: a small tick after its title. */
+.tile-done > span:first-child::after { content: " \2713"; color: var(--color-green); font-weight: 800; }

@@ -42,7 +42,7 @@ export default async function QcPage({ params, searchParams }: { params: Promise
       {gateIn?.old_parts_return ? <Notice tone="info">The customer asked for the old parts: check they are kept.</Notice> : null}
       {open && open.round > 1 ? <Notice tone="info">Recheck after rework: only the items that failed last time are listed.</Notice> : null}
       {open ? (
-        <QcForm jobId={jobId} items={open.items} initialMileage={open.mileage ?? gateIn?.mileage ?? null} mileageUnit={open.mileage_unit ?? gateIn?.mileage_unit ?? "km"} postscan={open.postscan_path ? { id: open.id, path: open.postscan_path, url: scanUrl ?? null, caption: "post-scan.pdf", contentType: "application/pdf" } : null} waivedReason={open.postscan_waived_reason} notes={open.notes} readOnly={!canDo} action={saveQc.bind(null, jobId)} />
+        <QcForm jobId={jobId} items={open.items} initialMileage={open.mileage ?? gateIn?.mileage ?? null} mileageUnit={open.mileage_unit ?? gateIn?.mileage_unit ?? "km"} postscan={open.postscan_path ? { id: open.id, path: open.postscan_path, url: scanUrl ?? null, caption: "post-scan.pdf", contentType: "application/pdf" } : null} waivedReason={open.postscan_waived_reason} notes={open.notes} readOnly={!canDo} loose={card.job.job_kind === "loose"} action={saveQc.bind(null, jobId)} />
       ) : canOpen ? (
         <Card className="flex flex-col gap-3 border-ink">
           <SectionLabel>No QC round is open yet</SectionLabel>

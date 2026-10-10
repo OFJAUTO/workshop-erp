@@ -5,6 +5,8 @@ import { getCurrentDevice } from "@/lib/devices";
 import { formatPromised } from "@/lib/jobs";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { getSettings } from "@/lib/settings";
+import { departmentBreak } from "@/lib/breaks";
+import { breakNow } from "@/lib/working-time";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { Reload } from "../Reload";
@@ -34,7 +36,7 @@ export default async function WashBoardPage() {
   }
   const settings = await getSettings();
   const admin = createAdminClient();
-  const { data } = await admin.from("jobs").select("id, job_number, wash_sent_at, promised_at, vehicle:vehicles(id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).eq("status", "pending_wash").not("wash_sent_at", "is", null).order("wash_sent_at");
+  const { data } = await admin.from("jobs").select("id, job_number, wash_sent_at, promised_at, vehicle:vehicles(kind, id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).eq("status", "pending_wash").not("wash_sent_at", "is", null).order("wash_sent_at");
   const rows = (data ?? []) as unknown as Row[];
   const pictures = await signCarPictures(rows.map((r) => r.vehicle?.photo_path));
   // Cars without a picture of their own: the first gate-in photo.
@@ -51,9 +53,11 @@ export default async function WashBoardPage() {
     }
   }
   const showTimes = settings.wash_board_show_times === true;
+  const bodyshopBreak = breakNow(departmentBreak(settings, "bodyshop"));
   return shell(
     <>
       <Reload seconds={30} />
+      {bodyshopBreak?.inBreak ? <p className="mb-4 rounded-card bg-white/10 px-5 py-3 text-2xl font-extrabold text-center">On break until {departmentBreak(settings, "bodyshop")?.end}</p> : null}
       {rows.length === 0 ? (
         <p className="text-3xl font-extrabold text-white/70 text-center mt-24">No cars waiting for wash</p>
       ) : (

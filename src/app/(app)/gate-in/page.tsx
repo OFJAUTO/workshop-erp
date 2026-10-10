@@ -4,7 +4,6 @@ import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
-import { BarcodeScan } from "./BarcodeScan";
 
 type Row = VehicleRow & {
   make: { name: string } | null;
@@ -22,7 +21,7 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
   // The person's own gate-ins still waiting for photos or video.
   const { data: pendingRows } = await supabase
     .from("jobs")
-    .select("id, job_number, gated_in_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+    .select("id, job_number, gated_in_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
     .eq("status", "gate_in_pending")
     .eq("gated_in_by", staff.id)
     .order("gated_in_at", { ascending: false })
@@ -36,7 +35,7 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
     const { data } = await supabase
       .from("vehicles")
       .select(
-        "id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name, phone, is_vip)",
+        "kind, id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name, phone, is_vip)",
       )
       .eq("is_active", true)
       .or(`plate_number.ilike.${like},vin.ilike.${like}`)
@@ -54,7 +53,7 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
 
   return (
     <>
-      <PageHeader title="Gate in a car" subtitle="Find the car by plate or VIN. New car? Add the customer and car in one step." actions={<LinkButton href="/gate-in/new-car" tone="secondary" size="lg">New customer and car</LinkButton>} />
+      <PageHeader title="Gate in a car" subtitle="Find the car by plate or VIN. New car? Add the customer and car in one step." actions={<><LinkButton href="/gate-in/loose" tone="secondary" size="lg">Loose items, no car</LinkButton><LinkButton href="/gate-in/new-car" tone="secondary" size="lg">New customer and car</LinkButton></>} />
 
       {pending.length ? (
         <Card className="flex flex-col gap-3 border-amber-bar">
@@ -82,7 +81,6 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
             Search
           </Button>
         </form>
-        <BarcodeScan />
       </Card>
 
       {term && rows.length === 0 ? (

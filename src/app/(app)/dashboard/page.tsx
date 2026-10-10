@@ -53,7 +53,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
+      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true);
   const all = (data ?? []) as unknown as Row[];
@@ -69,7 +69,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const [profit, { data: clocked }, { data: invoiced }] = await Promise.all([
     can(role, "viewProfitPanel") ? dailyProfit(settings) : Promise.resolve(null),
     createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", all.map((j) => j.id)),
-    createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
+    createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
   ]);
   const invoicedJobs = new Map(((invoiced ?? []) as unknown as { job_id: string; number: string; total_aed: number | string }[]).map((i) => [i.job_id, i]));
   const toSend = all.filter((j) => invoicedJobs.has(j.id) && !(j as unknown as { ready_sent_at: string | null }).ready_sent_at);
@@ -101,11 +101,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       roadTest: j.road_test?.[0] ?? null,
       approval: latestApproval,
       gateInComplete: !!j.gate_in?.is_complete,
+      loose: j.job_kind === "loose",
       quote: quoteSummaries.has(j.id) ? quoteState(quoteSummaries.get(j.id)!, !!insp && insp.status === "approved") : null,
     });
     return {
       statusLine: step.line || STATUS_LABELS[j.status as JobStatus],
       id: j.id,
+      loose: j.job_kind === "loose",
       jobNumber: j.job_number,
       plate: j.vehicle ? formatPlate(j.vehicle) : "?",
       title: [j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" "),

@@ -10,6 +10,8 @@ export type TabletPerson = {
   full_name: string;
   department: string | null;
   photoUrl: string | null;
+  /** Something is waiting for this person: a red dot on the photo. */
+  unread?: boolean;
 };
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
@@ -120,7 +122,7 @@ export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[
             }}
             className="flex flex-col items-center gap-3 rounded-card border border-line bg-white p-5 min-h-36 hover:border-ink active:bg-chip cursor-pointer"
           >
-            <Avatar name={p.full_name} photoUrl={p.photoUrl} size={64} />
+            <span className="relative"><Avatar name={p.full_name} photoUrl={p.photoUrl} size={64} />{p.unread ? <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-bar ring-2 ring-white" aria-label="Something waiting" /> : null}</span>
             <span className="flex flex-col items-center gap-0.5">
               <span className="font-bold text-base leading-tight">{p.display_name}</span>
               {p.department ? <span className="text-xs text-muted">{p.department}</span> : null}

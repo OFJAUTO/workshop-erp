@@ -59,7 +59,11 @@ function serviceFields(formData: FormData): Record<string, unknown> | string {
   const hours = hoursTyped === null ? null : parseHours(hoursTyped);
   if (price !== null && hours !== null) return "Give a fixed price or default hours, not both.";
   const parts = String(formData.get("parts_requests") ?? "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean).slice(0, 10);
-  return { name: name.slice(0, 120), department, price_aed: price, default_hours: hours, description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
+  const perRaw = (blankToNull(formData.get("price_per_other")) ?? blankToNull(formData.get("price_per")) ?? "job").toLowerCase().slice(0, 30);
+  const usual = Math.max(1, Math.round(Number(String(formData.get("usual_quantity") ?? "1").replace(",", ".")) || 1));
+  const allowanceRaw = blankToNull(formData.get("time_allowance_hours"));
+  const allowance = allowanceRaw === null ? null : parseHours(allowanceRaw);
+  return { name: name.slice(0, 120), department, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
 }
 
 export async function addCategory(formData: FormData) {

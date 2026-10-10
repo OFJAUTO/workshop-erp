@@ -25,7 +25,7 @@ export default async function RoadTestsPage({ searchParams }: { searchParams: Pr
   const [{ data: insp }, { data: tests }] = await Promise.all([
     supabase
       .from("inspections")
-      .select("id, job_id, status, started_at, job:jobs(job_number, is_open, assigned_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(condition), assignee:staff!jobs_assigned_to_fkey(display_name))")
+      .select("id, job_id, status, started_at, job:jobs(job_number, is_open, assigned_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(condition), assignee:staff!jobs_assigned_to_fkey(display_name))")
       .eq("is_active", true)
       .order("created_at", { ascending: false }),
     supabase.from("road_tests").select(ROAD_TEST_SELECT),

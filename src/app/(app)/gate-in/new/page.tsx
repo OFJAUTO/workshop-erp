@@ -27,7 +27,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("vehicles")
     .select(
-      "id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, mileage_unit, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
+      "kind, id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, mileage_unit, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
     )
     .eq("id", vehicleId)
     .maybeSingle();

@@ -19,7 +19,7 @@ export default async function PausesPage({ searchParams }: { searchParams: Promi
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : dubaiDate();
   const from = new Date(`${date}T00:00:00+04:00`).toISOString();
   const to = new Date(new Date(`${date}T00:00:00+04:00`).getTime() + 86400000).toISOString();
-  const { data } = await createAdminClient().from("work_pauses").select("id, job_id, technician_id, reason, started_at, ended_at, minutes, accepted, technician:staff!work_pauses_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).gte("started_at", from).lt("started_at", to).order("started_at");
+  const { data } = await createAdminClient().from("work_pauses").select("id, job_id, technician_id, reason, started_at, ended_at, minutes, accepted, technician:staff!work_pauses_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).gte("started_at", from).lt("started_at", to).order("started_at");
   const rows = (data ?? []) as unknown as Row[];
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const nowMs = Date.now();

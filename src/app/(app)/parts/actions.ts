@@ -93,7 +93,7 @@ function readRow(formData: FormData, i: number, prefix = ""): { error?: string; 
   const g = (k: string) => String(formData.getAll(`${prefix}${k}`)[i] ?? "").trim();
   const description = g("description").slice(0, 200);
   if (!description) return {};
-  const qty = Number(g("quantity").replace(",", ".")) || 1;
+  const qty = Math.max(1, Math.round(Number(g("quantity").replace(",", ".")) || 1));
   const type = g("part_type");
   if (!PART_TYPES.includes(type)) return { error: `${description}: tap the part type (Genuine, OEM, Aftermarket or Used).` };
   const costText = g("cost_aed").replace(/[^\d.]/g, "");

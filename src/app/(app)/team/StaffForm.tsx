@@ -54,6 +54,13 @@ export function StaffForm({
             </div>
           </Field>
 
+          <Field label="Own break (optional)" hint="Leave empty for the department's break from Settings (Mechanical 12:30 to 13:30, Bodyshop 13:30 to 14:30).">
+            <div className="flex items-center gap-2">
+              <Input name="break_start" type="time" defaultValue={v.break_start} className="w-36" />
+              <span className="text-sm text-muted">to</span>
+              <Input name="break_end" type="time" defaultValue={v.break_end} className="w-36" />
+            </div>
+          </Field>
           <Field label="Department">
             <ChoiceButtons
               name="department_id"

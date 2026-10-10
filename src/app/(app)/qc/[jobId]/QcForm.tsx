@@ -6,7 +6,7 @@ import { Button, Card, Input, Notice, SectionLabel, Textarea } from "@/component
 import { QC_KIND_LABELS, type QcItem } from "@/lib/qc-items";
 
 /** The QC checklist: every item Pass or Fail with a remark on Fail, the mileage, and the post-scan PDF or a reason. */
-export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, waivedReason, notes, readOnly, action }: { jobId: string; items: QcItem[]; initialMileage: number | null; mileageUnit: string; postscan: JobFile | null; waivedReason: string | null; notes: string | null; readOnly: boolean; action: (formData: FormData) => void }) {
+export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, waivedReason, notes, readOnly, loose = false, action }: { /** Loose items: no mileage, no Autel scan. */ loose?: boolean; jobId: string; items: QcItem[]; initialMileage: number | null; mileageUnit: string; postscan: JobFile | null; waivedReason: string | null; notes: string | null; readOnly: boolean; action: (formData: FormData) => void }) {
   const [results, setResults] = useState<Record<string, "pass" | "fail" | null>>(Object.fromEntries(items.map((i) => [i.key, i.result])));
   const [scan, setScan] = useState<JobFile | null>(postscan);
   const [attempted, setAttempted] = useState(false);
@@ -23,8 +23,8 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
     if (missing.length) reasons.push(`${missing.length} item${missing.length === 1 ? "" : "s"} not marked Pass or Fail`);
     const noRemark = items.filter((i) => results[i.key] === "fail" && !String(fd.get(`remark__${i.key}`) ?? "").trim());
     if (noRemark.length) reasons.push(`write what is wrong on: ${noRemark.map((i) => i.label).join(", ")}`);
-    if (!String(fd.get("mileage") ?? "").replace(/[^\d]/g, "")) reasons.push("record the mileage");
-    if (!scan && !String(fd.get("postscan_waived_reason") ?? "").trim()) reasons.push("attach the post-scan PDF or write why there is none");
+    if (!loose && !String(fd.get("mileage") ?? "").replace(/[^\d]/g, "")) reasons.push("record the mileage");
+    if (!loose && !scan && !String(fd.get("postscan_waived_reason") ?? "").trim()) reasons.push("attach the post-scan PDF or write why there is none");
     if (reasons.length) {
       setAttempted(true);
       setProblem(`Cannot finish yet: ${reasons.join("; ")}.`);
@@ -58,6 +58,7 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
           })}
         </Card>
       ))}
+      {!loose ? (
       <Card className="flex flex-col gap-3">
         <SectionLabel>Mileage at QC</SectionLabel>
         <div className="flex flex-wrap items-end gap-2">
@@ -66,6 +67,8 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
           <label className="flex items-center gap-2 text-sm font-semibold"><input type="radio" name="mileage_unit" value="mi" defaultChecked={mileageUnit === "mi"} /> miles</label>
         </div>
       </Card>
+      ) : null}
+      {!loose ? (
       <Card className="flex flex-col gap-3">
         <SectionLabel>Post-scan from the Autel (PDF)</SectionLabel>
         <JobFileUpload jobId={jobId} kind="qc_postscan" files={scan ? [scan] : []} accept="pdf" label="Attach the post-scan PDF" disabled={readOnly} onAdded={(f) => setScan(f)} />
@@ -74,6 +77,7 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
           <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">No scan? Write the reason (required to pass without it)</span><Textarea name="postscan_waived_reason" rows={2} defaultValue={waivedReason ?? ""} disabled={readOnly} /></label>
         ) : null}
       </Card>
+      ) : null}
       <Card className="flex flex-col gap-3">
         <SectionLabel>Notes</SectionLabel>
         <Textarea name="notes" rows={2} defaultValue={notes ?? ""} disabled={readOnly} />

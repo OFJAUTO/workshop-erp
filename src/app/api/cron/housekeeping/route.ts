@@ -6,7 +6,8 @@ import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { workingHoursBetween } from "@/lib/working-time";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { autoPauseEndOfShift } from "@/lib/work-flow";
+import { autoPauseBreaks, autoPauseEndOfShift } from "@/lib/work-flow";
+import { monthKey, monthLabel, monthlySummary, shiftMonth } from "@/lib/owner-report";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -201,6 +202,7 @@ export async function GET(request: NextRequest) {
 
   // 10. The job clocks pause themselves at the end of the shift.
   report.clocksPaused = await autoPauseEndOfShift(settings);
+  report.breaksPaused = await autoPauseBreaks(settings);
 
   // 11. Planning that waits too long on one person: a reminder every working day.
   {
@@ -238,5 +240,15 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // 13. On the 1st (the first run of a new month): last month's summary goes to the owner, once.
+  {
+    const last = shiftMonth(monthKey(), -1);
+    if (String(settings.monthly_summary_sent_for ?? "") !== last) {
+      const s = await monthlySummary(settings, last);
+      await notifyRoles(["owner"], { type: "monthly_summary", title: `Monthly summary · ${monthLabel(last)}`, body: `${s.count} gated out, invoiced AED ${s.invoiced.toLocaleString("en-GB")}, profit AED ${s.profit.toLocaleString("en-GB")}${s.marginPercent !== null ? ` (${s.marginPercent}%)` : ""}, ${s.verdicts.talk} need a talk. Open it, or download the PDF.`, href: `/reports/monthly?month=${last}` });
+      await admin.from("settings").update({ value: last }).eq("key", "monthly_summary_sent_for");
+      report.monthlySummary = 1;
+    }
+  }
   return NextResponse.json({ ok: true, ...report });
 }

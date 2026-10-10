@@ -18,7 +18,7 @@ export type CurrentStaff = StaffRow & {
   actingAs: { realId: string; realName: string; forName: string } | null;
 };
 
-const STAFF_COLUMNS = "id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, colour, is_active, disabled_at, created_at, updated_at";
+const STAFF_COLUMNS = "id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, colour, break_start, break_end, is_active, disabled_at, created_at, updated_at";
 
 /**
  * The logged-in staff member, or null. Cached for the length of one request.

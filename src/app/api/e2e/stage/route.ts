@@ -6,6 +6,11 @@ import { applyCustomerResponse } from "@/lib/quote-respond";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensureProforma } from "@/lib/invoice-flow";
+import { hashPin } from "@/lib/pin";
+import { ensureWorkLines } from "@/lib/work-data";
+import { openQcRound } from "@/lib/work-flow";
+import { ensureLooseMake } from "@/lib/loose-items";
+import { ensureQrLink } from "@/lib/stickers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -18,14 +23,33 @@ export const maxDuration = 60;
  */
 const ID = (n: string) => `22222222-0000-4000-8000-00000000e3${n}`;
 const CUST = ID("01"), VEH = ID("02"), JOB = ID("03"), GI = ID("04"), Q1 = ID("05"), PA = ID("06"), REQ1 = ID("07"), REQ2 = ID("08"), PR1 = ID("09");
+const LVEH = ID("20"), LJOB = ID("21"), LIT1 = ID("22"), LIT2 = ID("23"), LREQ = ID("24");
 
 export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { stage?: string };
+  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string };
   const stage = body.stage ?? "inspection";
   const admin = createAdminClient();
+  // Two side doors for the tests: the work order lines of a job, and an open QC round with its items.
+  if (stage === "worklines" && body.id) {
+    const { data: o } = await admin.from("staff").select("id").eq("role_id", "owner").limit(1).maybeSingle();
+    await ensureWorkLines(body.id, o?.id ?? null);
+    const { data: lines } = await admin.from("work_lines").select("title, hours_quoted, quotation_line_id").eq("job_id", body.id).eq("is_active", true);
+    return NextResponse.json({ lines });
+  }
+  if (stage === "qc-open" && body.id) {
+    const { data: o } = await admin.from("staff").select("id").eq("role_id", "owner").limit(1).maybeSingle();
+    await openQcRound(body.id, o?.id ?? "", await getSettings());
+    const { data: qc } = await admin.from("qc_checks").select("id, items").eq("job_id", body.id).eq("status", "open").order("round", { ascending: false }).limit(1).maybeSingle();
+    return NextResponse.json({ qc });
+  }
+  // A known PIN for one person, so the tests can sign for parts and finish jobs.
+  if (stage === "pin" && body.id && body.pin) {
+    await admin.from("staff_private").upsert({ staff_id: body.id, pin_hash: hashPin(body.pin) }, { onConflict: "staff_id" });
+    return NextResponse.json({ ok: true });
+  }
   const settings = await getSettings();
   const { data: staff } = await admin.from("staff").select("id, display_name, role_id").eq("is_active", true);
   const by = (role: string, n = 0) => (staff ?? []).filter((s) => s.role_id === role)[n];
@@ -34,6 +58,25 @@ export async function POST(request: NextRequest) {
   const { data: make } = await admin.from("vehicle_makes").select("id").limit(1).maybeSingle();
   const now = new Date().toISOString();
   await admin.from("customers").upsert({ id: CUST, customer_type: "individual", full_name: "stage test customer", phone: "+971500000003", created_by: owner.id, updated_by: owner.id });
+  if (stage === "loose") {
+    // Loose items at Quote, with two items and a request; the optional "at" moves it on (pending_qc or ready).
+    const at = (body as { at?: string }).at ?? "pending_quote";
+    const looseMake = await ensureLooseMake();
+    await admin.from("vehicles").upsert({ id: LVEH, customer_id: CUST, kind: "loose", has_plate: false, plate_country: "UAE", make_id: looseMake, variant: "4 wheels, 1 bumper", created_by: owner.id, updated_by: owner.id });
+    const stageOfAt = at === "ready" ? "ready" : at === "pending_qc" ? "qc" : at === "in_work" ? "work" : "quote";
+    await admin.from("jobs").upsert({ id: LJOB, vehicle_id: LVEH, customer_id: CUST, job_kind: "loose", stage: stageOfAt, status: at, priority: "normal", department: "bodyshop", gated_in_by: advisor.id, first_approval_at: now, stage_entered_at: now, brought_by: "Stage Driver", assessment_note: "kerb marks on two wheels", is_open: true, created_by: owner.id, updated_by: owner.id });
+    await admin.from("job_items").upsert([{ id: LIT1, job_id: LJOB, position: 1, item_type: "Wheel", description: "21 inch, black", quantity: 4, created_by: owner.id, updated_by: owner.id }, { id: LIT2, job_id: LJOB, position: 2, item_type: "Bumper", description: "front, scratched", quantity: 1, created_by: owner.id, updated_by: owner.id }]);
+    for (const itemId of [LIT1, LIT2]) {
+      const code = await ensureQrLink("item", { jobId: LJOB, vehicleId: LVEH, refId: itemId }, owner.id);
+      await admin.from("job_items").update({ qr_code: code }).eq("id", itemId);
+    }
+    await admin.from("job_requests").upsert([{ id: LREQ, job_id: LJOB, position: 1, text: "Repair the kerb damage and repaint" }]);
+    if (at === "pending_qc") {
+      const { data: open } = await admin.from("qc_checks").select("id").eq("job_id", LJOB).eq("status", "open").limit(1);
+      if (!(open ?? []).length) await admin.from("qc_checks").insert({ job_id: LJOB, round: 1, status: "open", items: [{ key: "general:1", kind: "general", label: "Paint matches and no runs", result: null, remark: null }], created_by: owner.id, updated_by: owner.id });
+    }
+    return NextResponse.json({ jobId: LJOB, vehicleId: LVEH, items: [LIT1, LIT2], technicians: (staff ?? []).filter((s) => s.role_id === "technician").map((t) => ({ id: t.id, name: t.display_name })) });
+  }
   await admin.from("vehicles").upsert({ id: VEH, customer_id: CUST, plate_country: "UAE", plate_emirate: "Dubai", plate_code: "S", plate_number: "30303", has_plate: true, make_id: make?.id, vin: "wba1234567stage01", model_year: 2021, created_by: owner.id, updated_by: owner.id });
   const status = stage === "ready" ? "ready" : stage === "approved" ? "waiting_parts" : stage === "quote" ? "pending_quote" : "pending_inspection";
   const stageOf = stage === "ready" ? "ready" : stage === "approved" ? "parts" : stage === "quote" ? "quote" : "inspection";

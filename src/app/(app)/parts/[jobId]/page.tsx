@@ -11,6 +11,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { addOption, askManager, closePartRequest, coverRequest, markRequestUnavailable, removePart, savePartRows, updatePart } from "../actions";
+import { makeLabel } from "../handover-actions";
 import { AskManagerForm, CloseRequestForm, OnePartForm, PartRowsForm, UnavailableForm } from "../PartsForms";
 import { allInStock, partsPlanned, setPartPlan } from "../../jobs/planning-actions";
 import { PlanPartRow, type PlanPart } from "./PlanParts";
@@ -27,7 +28,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const admin = createAdminClient();
   const settings = await getSettings();
   const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, status, is_open, customer_id, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("id, job_number, status, is_open, customer_id, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT).eq("job_id", jobId).eq("is_active", true).order("created_at"),
     admin.from("part_items").select(PART_SELECT + ", po_id, expected_date, received_qty, issue_status, return_status").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     admin.from("suppliers").select("name").eq("is_active", true).order("name"),
@@ -67,7 +68,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         {p.cost_aed !== null ? <Badge tone="neutral">{aed(p.cost_aed)} · {p.supplier ?? "no supplier"}</Badge> : <Badge tone="amber">No price yet</Badge>}
         {p.availability ? <Badge tone={p.availability === "in_stock" ? "green" : "neutral"}>{AVAILABILITY_LABELS[p.availability]}{p.delivery_date ? ` · ${p.delivery_date}` : ""}</Badge> : null}
         {p.option_group ? <Badge tone="ink">Option</Badge> : null}
-        {p.order_status !== "none" ? <Badge tone="ink">{p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received"}</Badge> : null}
+        {p.order_status !== "none" ? <Badge tone="ink">{p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received"}</Badge> : null}{(p.order_status === "received" || p.order_status === "partly_received") && canPrice ? <form action={makeLabel.bind(null, jobId, p.id)} className="inline"><button type="submit" className="min-h-8 rounded-control border border-line px-2 text-xs font-semibold">Print label</button></form> : null}
         {p.diagram_path && urls[p.diagram_path] ? <a href={urls[p.diagram_path]} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Diagram</a> : null}
       </div>
       {p.question_text ? (

@@ -8,6 +8,7 @@ export type JobCard = {
   job: JobRow;
   vehicle: {
     id: string;
+    kind: "car" | "loose";
     photo_path: string | null;
     has_plate: boolean;
     plate_country: string;
@@ -41,7 +42,7 @@ export type JobCard = {
 };
 
 const JOB_SELECT =
-  "invoice_sent_at, budget_hours, budget_reason, budget_by, budget_at, id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, assignment_note, assignment_note_by, assignment_note_at, assignment_reminded_at, assignment_overdue_notified_at, estimate_id, inspection_fee_due, parts_state, work_started_at, work_completed_at, qc_round, rework_count, mileage_out, ready_to_invoice_at, ready_to_invoice_by, ready_token, ready_sent_at, followup_due_at, followup_done_at, plan_parts_done_at, plan_parts_by, plan_parts_ready_date, plan_start_date, plan_released_at, plan_released_by, plan_release_note, plan_date_confirmed_at, plan_date_confirmed_by, plan_reminded_at, work_done_at, work_sendbacks, wash_sent_at, wash_sent_by, comeback_of, comeback_cause, comeback_cause_by, comeback_cause_at, comeback_confirmed_by, comeback_confirmed_at, comeback_free, comeback_claim_status, comeback_claim_amount, comeback_claim_po, comeback_claim_supplier, summary, summary_verdict, summary_at, summary_comment, summary_comment_by, created_at, updated_at";
+  "service_sticker, job_kind, assessment_note, brought_by, owner_report_at, invoice_sent_at, budget_hours, budget_reason, budget_by, budget_at, id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, assignment_note, assignment_note_by, assignment_note_at, assignment_reminded_at, assignment_overdue_notified_at, estimate_id, inspection_fee_due, parts_state, work_started_at, work_completed_at, qc_round, rework_count, mileage_out, ready_to_invoice_at, ready_to_invoice_by, ready_token, ready_sent_at, followup_due_at, followup_done_at, plan_parts_done_at, plan_parts_by, plan_parts_ready_date, plan_start_date, plan_released_at, plan_released_by, plan_release_note, plan_date_confirmed_at, plan_date_confirmed_by, plan_reminded_at, work_done_at, work_sendbacks, wash_sent_at, wash_sent_by, comeback_of, comeback_cause, comeback_cause_by, comeback_cause_at, comeback_confirmed_by, comeback_confirmed_at, comeback_free, comeback_claim_status, comeback_claim_amount, comeback_claim_po, comeback_claim_supplier, summary, summary_verdict, summary_at, summary_comment, summary_comment_by, created_at, updated_at";
 
 /** Everything a job card screen needs. `client` decides what the viewer may see (their own session, or the master key for public pages). */
 export async function loadJobCard(client: SupabaseClient, jobId: string): Promise<JobCard | null> {
@@ -52,7 +53,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
     await Promise.all([
       client
         .from("vehicles")
-        .select("id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, fuel_type, variant, model_year, colour, make:vehicle_makes(name), model:vehicle_models(name)")
+        .select("id, kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, fuel_type, variant, model_year, colour, make:vehicle_makes(name), model:vehicle_models(name)")
         .eq("id", job.vehicle_id)
         .maybeSingle(),
       client
@@ -134,5 +135,6 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
 }
 
 export function vehicleTitle(v: JobCard["vehicle"]) {
+  if (v.kind === "loose") return "Loose items, no car";
   return [v.make?.name, v.model?.name, v.variant, v.model_year].filter(Boolean).join(" ") || "Make and model not set";
 }

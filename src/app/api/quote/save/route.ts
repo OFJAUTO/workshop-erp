@@ -250,7 +250,7 @@ export async function POST(request: NextRequest) {
       const { data: svc } = await admin.from("services").select(SERVICE_SELECT).eq("id", String(a.service_id)).maybeSingle();
       if (!svc) return NextResponse.json({ error: "Service not found." }, { status: 404 });
       type = svc.price_aed !== null ? "package" : "labour";
-      Object.assign(row, { line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
+      Object.assign(row, { quantity: type === "package" ? Math.max(1, Math.round(Number(svc.usual_quantity) || 1)) : 1, price_per: type === "package" ? (svc.price_per ?? "job") : null, line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
       if (q.job_id && Array.isArray(svc.parts_requests) && svc.parts_requests.length) {
         linked = { name: svc.name, rows: (svc.parts_requests as string[]).map((label, i) => ({ job_id: q.job_id, source_type: "manual", source_key: `${svc.id}:${Date.now()}:${i}`, label, requested_text: `For ${svc.name}, added by ${staff.display_name} on ${q.number}`, created_by: staff.id, ...stamp })) };
       }

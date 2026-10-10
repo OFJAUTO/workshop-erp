@@ -8,7 +8,9 @@ import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { jobBalance } from "@/lib/invoice-data";
-import { askReleaseApproval, gateOutJob, markDelivered } from "../../gate-out-actions";
+import { askReleaseApproval, collectItems, gateOutJob, markDelivered } from "../../gate-out-actions";
+import { loadJobItems } from "@/lib/loose-items";
+import { CollectItemsForm } from "./CollectItemsForm";
 import { DeliveredForm, GateOutForm } from "./GateOutForm";
 
 export const dynamic = "force-dynamic";
@@ -22,9 +24,12 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const { message, error } = await searchParams;
   const supabase = await createClient();
   const [card, bal] = await Promise.all([loadJobCard(supabase, id), jobBalance(id)]);
-  if (!card || !card.gateIn) notFound();
+  if (!card) notFound();
   if (!card.job.is_open) redirect(`/jobs/${id}`);
+  const loose = card.job.job_kind === "loose";
+  if (!loose && !card.gateIn) notFound();
   const g = card.gateIn;
+  const items = loose ? await loadJobItems(id) : [];
   const role = staff.role_id as RoleId;
   const keysPhotos = card.media.filter((m) => m.kind === "keys_photo_front" || m.kind === "keys_photo_back" || m.kind === "keys_photo");
   const job = card.job;
@@ -35,7 +40,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
       <PageHeader title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {job.status !== "ready" && job.status !== "pending_payment" && job.status !== "in_delivery" ? <Notice tone="info">This car is not marked ready yet ({STATUS_LABELS[job.status]}). Gate-out is still allowed and will be logged.</Notice> : null}
+      {job.status !== "ready" && job.status !== "pending_payment" && job.status !== "in_delivery" ? <Notice tone="info">{loose ? "The items are" : "This car is"} not marked ready yet ({STATUS_LABELS[job.status]}). Gate-out is still allowed and will be logged.</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
@@ -45,9 +50,13 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
               {card.gateOut ? <p className="text-sm">Left the workshop {formatDateTime(card.gateOut.created_at)} for {(card.gateOut as unknown as { delivery_address: string | null }).delivery_address ?? "the customer"}.</p> : null}
               <DeliveredForm jobId={id} action={markDelivered.bind(null, id)} />
             </Card>
+          ) : loose ? (
+            <Card>
+              <CollectItemsForm action={collectItems.bind(null, id)} items={items.map((it) => ({ id: it.id, label: `${it.quantity > 1 ? `${it.quantity} × ` : ""}${it.item_type}${it.description ? ` · ${it.description}` : ""}`, collected: !!it.collected_at }))} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} />
+            </Card>
           ) : (
             <Card>
-              <GateOutForm jobId={id} action={gateOutJob.bind(null, id)} keysCount={g.keys_count} keychain={g.keys_keychain} dashCam={g.dash_cam} oldParts={g.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} />
+              <GateOutForm jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} />
             </Card>
           )}
         </div>
@@ -64,6 +73,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
               </form>
             ) : null}
           </Card>
+          {!loose && g ? (
           <Card className="flex flex-col gap-3">
             <SectionLabel>Keys at gate-in</SectionLabel>
             {keysPhotos.length ? (
@@ -83,6 +93,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             )}
             <DescriptionList items={[{ label: "Keys received", value: `${g.keys_count}` }, { label: "Keychain", value: g.keys_keychain ? "Yes" : "No" }, { label: "Dash cam", value: g.dash_cam ? "Fitted, was disconnected" : "Not fitted" }, { label: "Old parts", value: g.old_parts_return ? "Customer wants them back" : "Not requested" }]} />
           </Card>
+          ) : null}
         </div>
       </div>
     </>

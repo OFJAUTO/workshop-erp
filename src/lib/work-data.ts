@@ -1,6 +1,8 @@
+import { jobHasOilChange } from "./stickers";
+import { breakMinutesBetween, type BreakWindow } from "./working-time";
 import "server-only";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
-import { hasCostFloor, isHidden, isUnchosen } from "./quotes";
+import { hasCostFloor, isHidden, isUnchosen, type QuoteLine } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -22,7 +24,7 @@ export type WorkLineRow = {
   notes: string | null;
   created_at: string;
 };
-export type WorkSessionRow = { id: string; job_id: string; technician_id: string; started_at: string; ended_at: string | null; end_reason: "stop" | "pause" | "complete" | "auto" | null; pause_reason: string | null; minutes: number | null };
+export type WorkSessionRow = { id: string; job_id: string; technician_id: string; started_at: string; ended_at: string | null; end_reason: "stop" | "pause" | "complete" | "auto" | null; pause_reason: string | null; minutes: number | null; through_break?: boolean };
 export type AdditionalWorkRow = { id: string; job_id: string; technician_id: string | null; work_line_id: string | null; remark: string; parts_needed: string | null; status: "pending" | "approved" | "rejected"; decided_by: string | null; decided_at: string | null; decision_note: string | null; quotation_id: string | null; created_at: string; quotation_status?: string | null };
 
 /** What an approved finding is waiting for, from the state of its quotation. */
@@ -43,7 +45,7 @@ export type JobFileRow = { id: string; job_id: string; kind: string; ref_id: str
 export type ShiftRow = { id: string; staff_id: string; shift_date: string; clock_in: string; clock_out: string | null; late_minutes: number };
 
 export const WORK_LINE_SELECT = "id, job_id, quotation_line_id, source, position, title, details, hours_quoted, assigned_to, status, done_at, done_by, notes, created_at";
-export const WORK_SESSION_SELECT = "id, job_id, technician_id, started_at, ended_at, end_reason, pause_reason, minutes";
+export const WORK_SESSION_SELECT = "id, job_id, technician_id, started_at, ended_at, end_reason, pause_reason, minutes, through_break";
 export const ADDITIONAL_SELECT = "id, job_id, technician_id, work_line_id, remark, parts_needed, status, decided_by, decided_at, decision_note, quotation_id, created_at";
 export const QC_SELECT = "id, job_id, round, status, inspector_id, started_at, finished_at, mileage, mileage_unit, postscan_path, postscan_waived_reason, items, notes, created_at";
 export const WASH_SELECT = "id, job_id, done_by, done_at, photo_path, skipped, skip_reason, skipped_by, created_at";
@@ -53,9 +55,12 @@ export const SHIFT_SELECT = "id, staff_id, shift_date, clock_in, clock_out, late
 export const PAUSE_REASONS = ["Waiting for parts", "Waiting for the manager", "Another job", "Break", "Tools or lift busy", "Other"] as const;
 
 /** Minutes of a session, running or finished. */
-export function sessionMinutes(s: Pick<WorkSessionRow, "started_at" | "ended_at" | "minutes">, now = Date.now()) {
+export function sessionMinutes(s: Pick<WorkSessionRow, "started_at" | "ended_at" | "minutes"> & { through_break?: boolean }, now = Date.now(), brk: BreakWindow | null = null) {
   if (s.minutes !== null && s.minutes !== undefined && s.ended_at) return s.minutes;
-  return Math.max(0, Math.round(((s.ended_at ? Date.parse(s.ended_at) : now) - Date.parse(s.started_at)) / 60000));
+  const end = s.ended_at ? Date.parse(s.ended_at) : now;
+  const gross = Math.max(0, Math.round((end - Date.parse(s.started_at)) / 60000));
+  // The break is not counted against the technician unless he chose to work through it.
+  return s.through_break ? gross : Math.max(0, gross - breakMinutesBetween(s.started_at, end, brk));
 }
 
 export type WorkBundle = {
@@ -130,6 +135,11 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
     admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qids).eq("is_active", true).order("position"),
     admin.from("work_lines").select("id, quotation_line_id, position, title, hours_quoted, status, is_active").eq("job_id", jobId),
   ]);
+  const serviceIds = Array.from(new Set(((lines ?? []) as { service_id?: string | null }[]).map((l) => l.service_id).filter((x): x is string => !!x)));
+  const { data: svcRows } = serviceIds.length ? await admin.from("services").select("id, time_allowance_hours").in("id", serviceIds) : { data: [] as { id: string; time_allowance_hours: number | string | null }[] };
+  const allowance = new Map((svcRows ?? []).map((s) => [s.id as string, s.time_allowance_hours === null ? null : Number(s.time_allowance_hours)]));
+  // The technician's budget: labour hours as quoted; a fixed-price service brings its time allowance times the quantity.
+  const hoursFor = (l: QuoteLine): number | null => (l.line_type === "labour" ? l.hours : l.line_type === "package" && l.service_id && allowance.get(l.service_id) ? Math.round(Number(allowance.get(l.service_id)) * (l.quantity || 1) * 10) / 10 : null);
   const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && !isUnchosen(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))));
   const wantedIds = new Set(wanted.map((l) => l.id));
   const all = (existing ?? []) as { id: string; quotation_line_id: string | null; position: number; title: string; hours_quoted: number | string | null; status: string; is_active: boolean }[];
@@ -143,10 +153,10 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
     const twin = spare.find((e) => e.title === l.title);
     if (twin) {
       spare.splice(spare.indexOf(twin), 1);
-      await admin.from("work_lines").update({ quotation_line_id: l.id, hours_quoted: l.line_type === "labour" ? l.hours : null, details: l.details, updated_by: by }).eq("id", twin.id);
+      await admin.from("work_lines").update({ quotation_line_id: l.id, hours_quoted: hoursFor(l), details: l.details, updated_by: by }).eq("id", twin.id);
       continue;
     }
-    rows.push({ job_id: jobId, quotation_line_id: l.id, source: "quotation", position: ++position, title: l.title, details: l.details, hours_quoted: l.line_type === "labour" ? l.hours : null, created_by: by, updated_by: by });
+    rows.push({ job_id: jobId, quotation_line_id: l.id, source: "quotation", position: ++position, title: l.title, details: l.details, hours_quoted: hoursFor(l), created_by: by, updated_by: by });
   }
   // Lines of a replaced version that nobody started are retired; started or finished ones stay as history.
   const stale = spare.filter((e) => e.status === "todo").map((e) => e.id);
@@ -180,6 +190,7 @@ export async function buildQcItems(jobId: string, settings: Settings, previous: 
   for (const p of parts ?? []) items.push({ key: `part:${p.id}`, kind: "part", label: `${p.description}${p.part_number ? ` (${p.part_number})` : ""}: fitted?`, result: null, remark: null });
   const general = Array.isArray(settings.qc_general_checks) ? (settings.qc_general_checks as string[]) : [];
   general.forEach((g, i) => items.push({ key: `general:${i}`, kind: "general", label: g, result: null, remark: null }));
+  if (settings.sticker_service_required !== false && (await jobHasOilChange(jobId))) items.push({ key: "sticker:service", kind: "general", label: "Oil service sticker fitted and details correct", result: null, remark: null });
   return items;
 }
 

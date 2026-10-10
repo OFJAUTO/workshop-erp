@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { breakMinutesBetween, breakNow, type BreakWindow } from "@/lib/working-time";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
-import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea } from "@/components/ui";
+import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea, Input } from "@/components/ui";
 
 export type PanelLine = { id: string; title: string; details: string | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
 export type PanelPart = { id: string; description: string; quantity: number; state: "handed" | "here" | "coming"; when: string | null };
 export type PanelFinding = { id: string; remark: string; parts_needed: string | null; status: "pending" | "approved" | "rejected"; decision_note: string | null; label: string; tone: "neutral" | "amber" | "green" | "red" | "ink" };
 export type QcFailed = { round: number; items: { label: string; remark: string | null }[] };
-export type RunningSession = { since: string; name: string; mine: boolean };
+export type RunningSession = { since: string; name: string; mine: boolean; throughBreak?: boolean };
 
 const fmtHm = (min: number) => {
   const m = Math.max(0, Math.round(Math.abs(min)));
@@ -19,14 +20,14 @@ const fmtHm = (min: number) => {
  * The one big countdown on the technician's tablet: the hours charged to the customer minus every
  * technician's clocked time on this car. Green, amber under a fifth left, red once over.
  */
-export function BudgetTimer({ hoursCharged, minutesUsed, running, locked }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; locked: boolean }) {
+export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakWindow = null }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; locked: boolean; breakWindow?: BreakWindow | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running.length) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [running.length]);
-  const live = running.reduce((a, r) => a + Math.max(0, (now - Date.parse(r.since)) / 60000), 0);
+  const live = running.reduce((a, r) => a + Math.max(0, (now - Date.parse(r.since)) / 60000 - (r.throughBreak ? 0 : breakMinutesBetween(r.since, now, breakWindow))), 0);
   const used = minutesUsed + live;
   const budget = hoursCharged * 60;
   const left = budget - used;
@@ -42,11 +43,32 @@ export function BudgetTimer({ hoursCharged, minutesUsed, running, locked }: { ho
 }
 
 /** Timer, Working and Pause, Leave this job. Sits at the top of the technician's screen. */
-export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, reminders, pauseReasons, canWork, workDone, waitingOnManager, sendBack, qcFailed = null, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
+export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, reminders, pauseReasons, canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakWindow | null; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
   const [pausing, setPausing] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [brk, setBrk] = useState(() => breakNow(breakWindow));
+  const autoPaused = useRef(false);
+  // The break: the clock pauses itself at the start (reason Break, never counted against him) and offers to resume at the end.
+  useEffect(() => {
+    const t = setInterval(() => setBrk(breakNow(breakWindow)), 15000);
+    return () => clearInterval(t);
+  }, [breakWindow]);
+  useEffect(() => {
+    if (!brk?.inBreak || !mineRunning || mineThroughBreak || autoPaused.current || !canWork || workDone) return;
+    autoPaused.current = true;
+    const fd = new FormData();
+    fd.set("pause_reason", "Break");
+    void pauseAction(fd);
+  }, [brk, mineRunning, mineThroughBreak, canWork, workDone, pauseAction]);
   return (
     <div className="flex flex-col gap-3">
+      {brk?.inBreak && canWork && !workDone ? (
+        <Card className="border-ink flex flex-col gap-2">
+          <SectionLabel right={`until ${breakWindow?.end ?? ""}`}>Break</SectionLabel>
+          <p className="text-[15px] font-semibold">{mineThroughBreak ? "You chose to keep working through the break; it is written down." : "Your clock is paused for the break. It is not counted against you."}</p>
+          {!mineThroughBreak && keepWorkingAction ? <form action={keepWorkingAction}><Button type="submit" tone="secondary" size="lg">Keep working</Button></form> : null}
+        </Card>
+      ) : null}
       {sendBack ? (
         <Card className="border-red-bar flex flex-col gap-1">
           <SectionLabel>Not done, sent back by the manager</SectionLabel>
@@ -64,7 +86,7 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, rem
         </Card>
       ) : null}
       <Card className={`flex flex-col gap-3 ${mineRunning ? "border-green" : workDone ? "border-line" : "border-ink"}`}>
-        <BudgetTimer hoursCharged={hoursCharged} minutesUsed={minutesUsed} running={running} locked={workDone} />
+        <BudgetTimer hoursCharged={hoursCharged} minutesUsed={minutesUsed} running={running} locked={workDone} breakWindow={breakWindow} />
         {reminders.length && !mineRunning && !workDone ? (
           <ul className="flex flex-col gap-1">
             {reminders.map((r) => <li key={r}><Notice tone="error">{r}</Notice></li>)}
@@ -106,7 +128,7 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, rem
 }
 
 /** The read-only job list with the parts, "Additional work found", and "Job finished". */
-export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, severalTechnicians, myPartDone, finishAction, reportAction }: { jobId: string; lines: PanelLine[]; parts: PanelPart[]; findings: PanelFinding[]; canWork: boolean; workDone: boolean; severalTechnicians: boolean; myPartDone: boolean; finishAction: () => void; reportAction: (formData: FormData) => void }) {
+export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, severalTechnicians, myPartDone, finishNeedsPin = false, finishAction, reportAction }: { finishNeedsPin?: boolean; jobId: string; lines: PanelLine[]; parts: PanelPart[]; findings: PanelFinding[]; canWork: boolean; workDone: boolean; severalTechnicians: boolean; myPartDone: boolean; finishAction: () => void; reportAction: (formData: FormData) => void }) {
   const [reportOpen, setReportOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [findingFiles, setFindingFiles] = useState<JobFile[]>([]);
@@ -181,7 +203,7 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
             <div className="flex flex-col gap-3">
               <p className="text-lg font-bold">{severalTechnicians ? "Is your part of the work on this car done?" : "All work on this car is done?"}</p>
               <div className="grid grid-cols-2 gap-2">
-                <form action={finishAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg">Yes</Button></form>
+                <form action={finishAction} className="contents">{finishNeedsPin ? <Input name="pin" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" required placeholder="Your PIN" aria-label="Your PIN" className="text-center text-xl tracking-[0.4em]" /> : null}<Button type="submit" size="lg" className="min-h-16 text-lg">Yes</Button></form>
                 <Button type="button" tone="secondary" size="lg" className="min-h-16 text-lg" onClick={() => setConfirming(false)}>Not yet</Button>
               </div>
             </div>

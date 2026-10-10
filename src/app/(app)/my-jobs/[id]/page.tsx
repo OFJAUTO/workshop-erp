@@ -10,6 +10,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus, inspectionLimitsOf, toItemState } from "@/lib/inspection";
 import { inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
+import { loadJobItems } from "@/lib/loose-items";
 import { CONDITIONS, STATUS_LABELS, formatPromised, labelOf, workingTimeOf } from "@/lib/jobs";
 import { jobPartsState } from "@/lib/parts-data";
 import { ROAD_TEST_ITEMS, ROAD_TEST_SELECT, roadTestLine, roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
@@ -20,7 +21,13 @@ import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { noteInspectionEdit, startInspection, submitInspection } from "../../jobs/inspection-actions";
-import { jobFinished, leaveJobAction, pauseWorkAction, reportAdditionalWork, startWork } from "../../jobs/work-actions";
+import { jobFinished, keepWorking, leaveJobAction, pauseWorkAction, reportAdditionalWork, startWork } from "../../jobs/work-actions";
+import { breakOf } from "@/lib/breaks";
+import { getCurrentDevice } from "@/lib/devices";
+import { ScanStepCard } from "./ScanStepCard";
+import { PendingHandoverCard } from "./PendingHandoverCard";
+import { pendingHandoversFor } from "@/lib/handover";
+import { confirmHandoverOnDevice } from "../../parts/handover-actions";
 import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/work-data";
 import { PAUSE_REASONS, activeTechnicians } from "@/lib/work-flow";
 import { InspectionForm, type Suggestions } from "./InspectionForm";
@@ -74,6 +81,9 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const locked = insp ? inspectionLocked(insp) : false;
   const waitingRoadTest = roadTestWaiting(roadTest) && role !== "owner";
   const inWork = job.status === "in_work";
+  const loose = job.job_kind === "loose";
+  const looseItems = loose ? await loadJobItems(id) : [];
+  const scanGateOn = settings.prescan_gate_enabled === true;
   const canFill = !inWork && !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked));
   const canAddPrescan = !!insp && mine && insp.technician_id === staff.id && insp.status === "submitted";
   const condition = gateIn ? labelOf(CONDITIONS, gateIn.condition) : "";
@@ -92,8 +102,12 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const qcFailed = qc && qc.status === "failed" && inWork ? { round: qc.round, items: qc.items.filter((i) => i.result === "fail").map((i) => ({ label: i.label, remark: i.remark })) } : null;
   const panelLines: PanelLine[] = work ? work.lines.map((l) => ({ id: l.id, title: l.title, details: l.details, hours_quoted: l.hours_quoted, status: l.status })) : [];
   const panelParts: PanelPart[] = parts ? parts.needed.map((p) => ({ id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, state: p.issue_status === "confirmed" ? "handed" : p.order_status === "received" ? "here" : "coming", when: p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : null })) : [];
-  const running: RunningSession[] = work ? work.sessions.filter((s) => !s.ended_at).map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: s.technician_id === staff.id })) : [];
+  const running: RunningSession[] = work ? work.sessions.filter((s) => !s.ended_at).map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: s.technician_id === staff.id, throughBreak: !!s.through_break })) : [];
+  const breakWindow = breakOf(settings, staff);
+  const device = await getCurrentDevice();
+  const pendingHandovers = (await pendingHandoversFor(staff.id, id)).map((h) => ({ id: h.id, giverName: h.giverName, plate: h.plate, items: h.items, jobId: h.job_id }));
   const minutesUsed = work ? work.sessions.filter((s) => s.ended_at).reduce((a, s) => a + sessionMinutes(s), 0) : 0;
+  const mineThroughBreak = !!work?.sessions.some((s) => !s.ended_at && s.technician_id === staff.id && s.through_break);
   const reminders = [gateIn?.dash_cam ? "Disconnect the dash cam before you start." : "", gateIn?.old_parts_return ? "Keep the old parts: the customer asked for them." : ""].filter(Boolean);
   // The manager's send-back note stays on top until the job is finished again.
   const sendBack = inWork && !job.work_done_at && sendBackEvent && (!job.plan_released_at || sendBackEvent.created_at > job.plan_released_at) ? sendBackEvent.note.replace(/^Sent back by [^:]+: /, "") : null;
@@ -209,6 +223,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         </Card>
       ) : null}
 
+      <PendingHandoverCard handovers={pendingHandovers} confirm={confirmHandoverOnDevice} />
       {work && inWork ? (
         <>
           <WorkClock
@@ -223,12 +238,21 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             waitingOnManager={managerName}
             sendBack={sendBack}
             qcFailed={qcFailed}
+            breakWindow={breakWindow}
+            mineThroughBreak={mineThroughBreak}
+            keepWorkingAction={keepWorking.bind(null, id)}
             startAction={startWork.bind(null, id)}
             pauseAction={pauseWorkAction.bind(null, id)}
             leaveAction={leaveJobAction.bind(null, id)}
           />
           {roadTestCard}
           {requestsCard}
+          {looseItems.length ? (
+            <Card className="flex flex-col gap-2">
+              <SectionLabel right={`${looseItems.length}`}>Items on the bench</SectionLabel>
+              <ul className="divide-y divide-line">{looseItems.map((it) => <li key={it.id} className="py-2 font-semibold">{it.quantity > 1 ? `${it.quantity} × ` : ""}{it.item_type}{it.description ? ` · ${it.description}` : ""}</li>)}</ul>
+            </Card>
+          ) : null}
           <WorkJobs
             jobId={id}
             lines={panelLines}
@@ -238,6 +262,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             workDone={!!job.work_done_at}
             severalTechnicians={techs.length > 1}
             myPartDone={!!myTech?.done_at}
+            finishNeedsPin={device?.kind === "personal" && role === "technician"}
             finishAction={jobFinished.bind(null, id)}
             reportAction={reportAdditionalWork.bind(null, id)}
           />
@@ -249,11 +274,15 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         </>
       ) : (
         <>
+          {scanGateOn && insp && insp.status !== "approved" && insp.status !== "submitted" ? (
+            <ScanStepCard inspectionId={insp.id} files={(bundle?.media ?? []).filter((m) => m.is_prescan).map((m) => ({ id: m.id, kind: m.kind, url: bundle?.mediaUrls[m.storage_path] ?? null, caption: m.caption, isPrescan: true }))} readAt={insp.scan_read_at} approvedAt={insp.scan_approved_at} notPossibleReason={insp.scan_not_possible_reason} canAct={mine && !staff.viewingAs} />
+          ) : null}
           {roadTestCard}
           {requestsCard}
           {job.status === "pending_qc" ? <Notice tone="info">Work complete. The car is with QC; you will be told if anything comes back.</Notice> : null}
           {["approved", "waiting_parts"].includes(job.status) ? <Notice tone="info">The customer approved the work. Parts and the workshop manager are planning it; the car opens for you when it is released.</Notice> : null}
 
+          {!loose ? (
           <Card className={`flex flex-col gap-4 ${over && insp?.status === "in_progress" ? "border-red-bar" : ""}`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <SectionLabel>Inspection</SectionLabel>
@@ -275,7 +304,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
                 {(insp.technician_id === staff.id || manager) && job.first_approval_at && !waitingRoadTest ? (
                   <form action={startInspection.bind(null, id)} className="flex flex-col gap-2">
                     <p className="text-sm text-muted">{insp.status === "returned" ? "Open the report again to make the changes, then submit it again." : "Press start when you begin. The time counts as labour on this job."}</p>
-                    <Button type="submit" size="lg">{insp.status === "returned" ? "Open the report" : "Start inspection"}</Button>
+                    <Button type="submit" size="lg" disabled={scanGateOn && !insp.scan_read_at && !insp.scan_approved_at && insp.status !== "returned"}>{insp.status === "returned" ? "Open the report" : "Start inspection"}</Button>
+                    {scanGateOn && !insp.scan_read_at && !insp.scan_approved_at && insp.status !== "returned" ? <p className="text-xs font-semibold text-amber">Step 1 first: the scan report above.</p> : null}
                   </form>
                 ) : (
                   <p className="text-sm text-muted">{waitingRoadTest ? "Waiting for road test." : `Assigned to ${bundle?.technician?.display_name ?? "a technician"}.`}</p>
@@ -304,12 +334,13 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
               </Notice>
             ) : null}
           </Card>
+          ) : null}
         </>
       )}
 
-      <Collapsible title="Gate-in photos and videos" right={`${media.length}`}>
+      {!loose ? <Collapsible title="Gate-in photos and videos" right={`${media.length}`}>
         <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} compact />
-      </Collapsible>
+      </Collapsible> : null}
 
       {!inWork && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved") ? (
         <>

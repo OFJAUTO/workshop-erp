@@ -23,7 +23,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const { message } = await searchParams;
   const settings = await getSettings();
   const admin = createAdminClient();
-  let query = admin.from("quotations").select("id, number, version, status, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, customer:customers(full_name, company_name), vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), creator:staff!quotations_created_by_fkey(display_name)").eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
+  let query = admin.from("quotations").select("id, number, version, status, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), creator:staff!quotations_created_by_fkey(display_name)").eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
   if (staff.role_id !== "owner") query = query.eq("created_by", staff.id);
   const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];

@@ -73,8 +73,8 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/services" tone="secondary">
               Services
             </LinkButton>
-            <LinkButton href="/parts/labels/test?test=1" tone="secondary">
-              Test print a label
+            <LinkButton href="/settings/stickers" tone="secondary">
+              Stickers
             </LinkButton>
             <LinkButton href="/settings/inspection" tone="secondary">
               Inspection checklist

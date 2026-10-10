@@ -3,6 +3,9 @@ import { dubaiDate } from "./jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { breakOf } from "./breaks";
+import { breakNow } from "./working-time";
+import { getSettings } from "./settings";
 import { ensureProforma } from "./invoice-flow";
 import { WORK_SESSION_SELECT, buildQcItems, ensureWorkLines, latestQc, sessionMinutes, type WorkSessionRow } from "./work-data";
 
@@ -35,11 +38,12 @@ async function closeOpenSessions(technicianId: string, by: string, endReason: "s
   const admin = createAdminClient();
   let qy = admin.from("work_sessions").select(WORK_SESSION_SELECT).eq("technician_id", technicianId).is("ended_at", null);
   if (jobId) qy = qy.eq("job_id", jobId);
-  const { data: open } = await qy;
+  const [{ data: open }, { data: person }, settings] = await Promise.all([qy, admin.from("staff").select("department_id, break_start, break_end").eq("id", technicianId).maybeSingle(), getSettings()]);
+  const brk = breakOf(settings, person);
   const now = new Date().toISOString();
   let minutes = 0;
   for (const s of (open ?? []) as WorkSessionRow[]) {
-    const m = sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null });
+    const m = sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null, through_break: s.through_break }, Date.now(), brk);
     minutes += m;
     await admin.from("work_sessions").update({ ended_at: now, end_reason: endReason, pause_reason: pauseReason, minutes: m, updated_by: by }).eq("id", s.id);
   }
@@ -66,7 +70,7 @@ export async function startWorking(jobId: string, actor: Actor): Promise<Result>
   if (!onJob) await admin.from("job_technicians").insert({ job_id: jobId, staff_id: actor.id, added_by: actor.id, created_by: actor.id, updated_by: actor.id });
   if (onJob?.done_at) await admin.from("job_technicians").update({ done_at: null, updated_by: actor.id }).eq("id", onJob.id);
   if (job.work_done_at) await admin.from("jobs").update({ work_done_at: null }).eq("id", jobId);
-  const closed = await closeOpenSessions(actor.id, actor.id, "auto", "Switched to another car");
+  const closed = await closeOpenSessions(actor.id, actor.id, "auto", "Another job");
   if (closed.count) await event(jobId, actor.id, "work_clock", `${actor.display_name} stopped on another car (switched) after ${closed.minutes} min`);
   await closeOpenPause(jobId, actor.id, actor.id);
   await admin.from("work_sessions").insert({ job_id: jobId, technician_id: actor.id, started_at: new Date().toISOString(), created_by: actor.id, updated_by: actor.id });
@@ -245,6 +249,51 @@ export async function setLeadTechnician(jobId: string, staffId: string, actor: A
   await admin.from("inspections").update({ technician_id: staffId, updated_by: actor.id }).eq("job_id", jobId).eq("is_active", true).neq("status", "approved");
   await event(jobId, actor.id, "assigned", `${tech?.display_name ?? "Technician"} made the lead by ${actor.display_name}`, { from_staff: job.assigned_to, to_staff: staffId });
   return { ok: true, message: `${tech?.display_name ?? "Technician"} is the lead on this car.` };
+}
+
+/** "Keep working": the technician works through his break; the running session counts the break and it is written down. */
+export async function keepWorkingThroughBreak(jobId: string, actor: Actor): Promise<Result> {
+  const admin = createAdminClient();
+  const { data: open } = await admin.from("work_sessions").select("id").eq("job_id", jobId).eq("technician_id", actor.id).is("ended_at", null).limit(1);
+  if (!(open ?? []).length) {
+    const r = await startWorking(jobId, actor);
+    if (r.error) return r;
+  }
+  await admin.from("work_sessions").update({ through_break: true, updated_by: actor.id }).eq("job_id", jobId).eq("technician_id", actor.id).is("ended_at", null);
+  await event(jobId, actor.id, "work_clock", `${actor.display_name} kept working through the break`);
+  return { ok: true, message: "Working through the break. It is written down." };
+}
+
+/**
+ * The clock pauses itself at the start of the break (hourly job as the safety net; the tablet does it
+ * at the minute when the page is open): a session that was running when the break started ends at
+ * that moment with the reason "Break", which never counts against the technician.
+ */
+export async function autoPauseBreaks(settings: Settings): Promise<number> {
+  const admin = createAdminClient();
+  const { data: open } = await admin.from("work_sessions").select(WORK_SESSION_SELECT).is("ended_at", null);
+  const sessions = (open ?? []) as WorkSessionRow[];
+  if (!sessions.length) return 0;
+  const { data: people } = await admin.from("staff").select("id, department_id, break_start, break_end").in("id", Array.from(new Set(sessions.map((s) => s.technician_id))));
+  const byId = new Map((people ?? []).map((p) => [p.id, p]));
+  let n = 0;
+  for (const s of sessions) {
+    if (s.through_break) continue;
+    const brk = breakOf(settings, byId.get(s.technician_id));
+    const b = breakNow(brk);
+    if (!b) continue;
+    const started = Date.parse(s.started_at);
+    const now = Date.now();
+    // Only once the break has started, only for a session that was running before it, and only within the break or the hour after.
+    if (now < b.startsAt || started >= b.startsAt || now > b.endsAt + 65 * 60000) continue;
+    const at = new Date(b.startsAt).toISOString();
+    const minutes = sessionMinutes({ started_at: s.started_at, ended_at: at, minutes: null }, now, brk);
+    await admin.from("work_sessions").update({ ended_at: at, end_reason: "pause", pause_reason: "Break", minutes }).eq("id", s.id);
+    await admin.from("work_pauses").insert({ job_id: s.job_id, technician_id: s.technician_id, reason: "Break", started_at: at, accepted: true });
+    await event(s.job_id, null, "work_pause", "Clock paused for the break");
+    n++;
+  }
+  return n;
 }
 
 /** The clock pauses itself at the end of the shift (hourly job): open sessions past closing time end, logged as a pause. */

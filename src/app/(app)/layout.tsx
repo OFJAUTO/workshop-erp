@@ -8,10 +8,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { FormGuard } from "@/components/FormGuard";
 import { IdleLock } from "./IdleLock";
+import { getCurrentDevice } from "@/lib/devices";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const staff = await requireStaff();
   const settings = await getSettings();
+  // A personal tablet stays logged in; a shared one locks after a few minutes idle.
+  const device = await getCurrentDevice();
   const role = staff.role_id as RoleId;
 
   let photoUrl: string | null = null;
@@ -49,11 +52,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/parts/suppliers", label: "Suppliers", show: can(role, "manageSuppliers") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
     { href: "/wash", label: "Car wash", show: can(role, "washCars") },
+    { href: "/workshop-load", label: "Workshop load", show: can(role, "manageWork") },
     { href: "/pauses", label: "Pause log", show: can(role, "manageWork") },
     { href: "/scoreboard", label: "Scoreboard", show: can(role, "manageWork") },
     { href: "/comebacks", label: "Comebacks", show: can(role, "manageWork") },
     { href: "/invoices", label: "Invoices", show: can(role, "viewInvoices") },
     { href: "/profit", label: "Profit", show: can(role, "viewProfitList") },
+    { href: "/reports/monthly", label: "Reports", show: role === "owner" },
     { href: "/attendance", label: "Attendance", show: can(role, "viewAttendance") },
     { href: "/estimates", label: "Estimates", show: can(role, "viewEstimates") },
     { href: "/customers", label: "Customers", show: can(role, "viewCustomers") },
@@ -70,7 +75,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <>
       <Suspense fallback={null}><FormGuard /></Suspense>
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
-      {staff.login_type === "pin" && !staff.actingAs ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
+      {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         nav={nav}
         user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}

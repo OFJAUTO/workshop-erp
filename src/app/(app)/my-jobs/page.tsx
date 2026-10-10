@@ -1,3 +1,4 @@
+import { pendingHandoversFor } from "@/lib/handover";
 import Link from "next/link";
 import { CarPicture } from "@/components/CarPicture";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
@@ -49,10 +50,11 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
     admin.from("job_technicians").select("job_id").eq("staff_id", staff.id).eq("is_active", true).is("left_at", null),
   ]);
   const carIds = (onCar ?? []).map((t) => t.job_id);
+  const pendingHandovers = await pendingHandoversFor(staff.id);
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, work_done_at, plan_start_date, comeback_of, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active), inspection:inspections(status, is_active), road_test:road_tests(status, decision)",
+      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, work_done_at, plan_start_date, comeback_of, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(dash_cam, customer_requests), requests:job_requests(id, position, text, is_active), inspection:inspections(status, is_active), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true)
     .or(carIds.length ? `assigned_to.eq.${staff.id},id.in.(${carIds.join(",")})` : `assigned_to.eq.${staff.id}`);
@@ -93,6 +95,9 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
         }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
+      {pendingHandovers.map((h) => (
+        <Link key={h.id} href={`/my-jobs/${h.job_id}#handover`} className="block rounded-card border-2 border-ink bg-white px-4 py-3 text-[15px] font-semibold">{h.giverName} is handing you {h.items.length} part{h.items.length === 1 ? "" : "s"} for {h.plate}: tap to enter your PIN.</Link>
+      ))}
       {rows.length === 0 ? (
         <Empty title="No cars for you right now" />
       ) : (

@@ -60,9 +60,10 @@ export type PoLineRow = {
 export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status, notes, total_cost_aed, approved_by, approved_at, deposit_override_by, deposit_override_reason, ordered_at, ordered_by, received_at, supplier_invoice_status, supplier_invoice_number, supplier_invoice_path, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_by, created_at, created_by";
 export const PO_LINE_SELECT = "id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, expected_date, received_qty, received_at, flag, flag_note, invoice_unit_cost";
 /** The part columns the Parts desk needs after approval, on top of the quotation ones. */
-export const PART_FULL_SELECT = PART_SELECT + ", po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed";
+export const PART_FULL_SELECT = PART_SELECT + ", stickers_printed, po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed";
 
 export type PartFull = PartItem & {
+  stickers_printed: number;
   po_id: string | null;
   po_line_id: string | null;
   expected_date: string | null;
@@ -93,7 +94,7 @@ export const toPoLine = (r: Record<string, unknown>) => num(r as unknown as PoLi
 export const toPartFull = (r: Record<string, unknown>) => num({ ...toPart(r), ...(r as object) } as unknown as PartFull, ["quantity", "cost_aed", "confirmed_quantity", "received_qty", "issued_qty", "returned_qty", "final_cost_aed"]);
 
 export type JobBrief = { id: string; job_number: string; status: string; is_open: boolean; customer_id: string; gated_in_by: string; assigned_to: string | null; department: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year?: number | null; make: { name: string } | null; model: { name: string } | null } | null };
-export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, gated_in_by, assigned_to, department, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))";
+export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, gated_in_by, assigned_to, department, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))";
 
 export type SupplierRow = { id: string; name: string; trn: string | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null };
 export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[]; supplier: SupplierRow | null };

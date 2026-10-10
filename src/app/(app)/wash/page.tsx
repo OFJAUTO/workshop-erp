@@ -20,7 +20,7 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const [{ data: jobs }, { data: recent }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, stage_entered_at, wash_sent_at, promised_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).eq("status", "pending_wash").order("stage_entered_at"),
+    admin.from("jobs").select("id, job_number, stage_entered_at, wash_sent_at, promised_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).eq("status", "pending_wash").order("stage_entered_at"),
     admin.from("washes").select(WASH_SELECT + ", job:jobs(job_number), person:staff!washes_done_by_fkey(display_name)").eq("is_active", true).order("updated_at", { ascending: false }).limit(15),
   ]);
   const rows = (jobs ?? []) as unknown as Row[];

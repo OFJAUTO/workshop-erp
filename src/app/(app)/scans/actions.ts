@@ -42,3 +42,24 @@ export async function ignoreScan(scanId: string) {
   revalidatePath("/scans");
   redirect(`/scans?message=${encodeURIComponent("Ignored. It stays on the list below.")}`);
 }
+
+/** Owner only: a new secret for the inbound address. The old address stops working the moment it is saved. */
+export async function regenerateInboundToken() {
+  const staff = await requirePermission("manageSettings");
+  const admin = createAdminClient();
+  const { randomBytes } = await import("node:crypto");
+  const token = randomBytes(24).toString("hex");
+  await admin.from("settings").update({ value: token }).eq("key", "inbound_scan_token");
+  await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { inbound_scan_token: "regenerated", by: staff.display_name } }).then(() => null, () => null);
+  revalidatePath("/scans");
+  redirect(`/scans?message=${encodeURIComponent("New token saved. The old address no longer works: paste the new address into the Postmark inbound webhook (Server > Inbound > Settings > Webhook URL).")}`);
+}
+
+/** Owner only: an email that was not a scan report, once read, can be put away. */
+export async function dismissInboundEmail(id: string) {
+  await requirePermission("manageSettings");
+  const admin = createAdminClient();
+  await admin.from("inbound_emails").update({ is_active: false }).eq("id", id);
+  revalidatePath("/scans");
+  redirect("/scans");
+}

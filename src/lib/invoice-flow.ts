@@ -38,9 +38,9 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   const by = actor?.id ?? job.gated_in_by;
   const [{ data: customer }, { data: vehicle }] = await Promise.all([
     admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", job.customer_id).maybeSingle(),
-    admin.from("vehicles").select("has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", job.vehicle_id).maybeSingle(),
+    admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", job.vehicle_id).maybeSingle(),
   ]);
-  const v = vehicle as unknown as { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
+  const v = vehicle as unknown as { kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   const number = await nextDocumentNumber("proforma", settings);
   const token = newToken();
   const { data: inv, error } = await admin
@@ -64,7 +64,7 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
       prepared_by: job.gated_in_by,
       issued_by: by,
       customer_snapshot: customer ?? null,
-      vehicle_snapshot: v ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: v.variant, plate: formatPlate(v), vin: v.vin } : null,
+      vehicle_snapshot: v ? (v.kind === "loose" ? { title: "Items", variant: null, plate: v.variant ?? "Loose items", vin: null } : { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: v.variant, plate: formatPlate(v), vin: v.vin }) : null,
       created_by: by,
       updated_by: by,
     })

@@ -18,7 +18,7 @@ const vehicleSchema = z
     plate_emirate: z.string().trim(),
     plate_code: z.string().trim().toUpperCase(),
     plate_number: z.string().trim().toUpperCase(),
-    vin: z.string().trim().toUpperCase(),
+    vin: z.string().trim().toUpperCase().refine((v) => v === "" || /^[A-HJ-NPR-Z0-9]{17}$/.test(v), "A VIN is 17 letters and digits; it never has I, O or Q."),
     make_id: z.string().trim(),
     new_make: z.string().trim(),
     model_id: z.string().trim(),

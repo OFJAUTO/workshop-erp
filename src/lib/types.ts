@@ -12,6 +12,8 @@ export type StaffRow = {
   is_head_accountant: boolean;
   photo_path: string | null;
   colour: string | null;
+  break_start: string | null;
+  break_end: string | null;
   is_active: boolean;
   disabled_at: string | null;
   created_at: string;
@@ -144,6 +146,9 @@ export type AuditRow = {
 
 /** Formats a plate for display, e.g. "Dubai F 60238" or "Saudi Arabia 1234 ABC". */
 export type PlateFields = {
+  /** "loose": items without a car; the variant carries the item summary and stands in for the plate. */
+  kind?: string | null;
+  variant?: string | null;
   plate_country: string;
   plate_emirate: string | null;
   plate_code: string | null;
@@ -153,6 +158,7 @@ export type PlateFields = {
 };
 
 export function formatPlate(v: PlateFields) {
+  if (v.kind === "loose") return v.variant || "Loose items";
   if (v.has_plate === false || !v.plate_number) {
     return v.vin ? `No plate · VIN …${v.vin.slice(-6)}` : "No plate";
   }
@@ -236,6 +242,11 @@ export type JobRow = {
   comeback_claim_po: string | null;
   comeback_claim_supplier: string | null;
   invoice_sent_at: string | null;
+  service_sticker: Record<string, unknown> | null;
+  job_kind: "car" | "loose";
+  assessment_note: string | null;
+  brought_by: string | null;
+  owner_report_at: string | null;
   budget_hours: number | null;
   budget_reason: string | null;
   budget_by: string | null;
@@ -281,6 +292,9 @@ export type GateInRow = {
 };
 
 export type MediaKind =
+  | "item_photo"
+  | "assessment_photo"
+  | "item_collect_photo"
   | "video"
   | "video_exterior"
   | "video_interior"
@@ -300,6 +314,8 @@ export type GateInMediaRow = {
   id: string;
   job_id: string;
   kind: MediaKind;
+  /** A loose item's photo belongs to that item. */
+  item_id?: string | null;
   storage_path: string;
   duration_s: number | null;
   caption: string | null;

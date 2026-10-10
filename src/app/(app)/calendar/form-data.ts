@@ -20,14 +20,14 @@ export async function loadAppointmentFormData(supabase: Client): Promise<{ custo
     supabase.from("customers").select("id, full_name, company_name, phone").eq("is_active", true).order("full_name").limit(3000),
     supabase
       .from("vehicles")
-      .select("id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)")
+      .select("kind, id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)")
       .eq("is_active", true)
       .limit(5000),
     // Bookings belong to service advisors or the owner only.
     supabase.from("staff").select("id, display_name, colour").eq("is_active", true).in("role_id", ["service_advisor", "owner"]).order("display_name"),
     supabase
       .from("jobs")
-      .select("id, job_number, customer_id, vehicle_id, customer:customers(full_name, company_name), vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+      .select("id, job_number, customer_id, vehicle_id, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
       .eq("is_open", true)
       .order("job_number"),
   ]);
@@ -42,7 +42,7 @@ export async function loadAppointmentFormData(supabase: Client): Promise<{ custo
 }
 
 export const APPOINTMENT_SELECT =
-  "id, kind, department, customer_id, vehicle_id, vehicle_text, reason, starts_at, duration_minutes, advisor_id, status, job_id, notes, cancel_reason, collect_address, collect_method, reminder_sent_at, reminder_notified_at, notified_hour_before_at, notified_evening_before_at, missed_notified_at, is_active, created_at, created_by, updated_at, updated_by, customer:customers(full_name, company_name, phone, is_vip), vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), advisor:staff!appointments_advisor_id_fkey(id, display_name, colour), job:jobs(job_number, gated_out_at, is_open)";
+  "id, kind, department, customer_id, vehicle_id, vehicle_text, reason, starts_at, duration_minutes, advisor_id, status, job_id, notes, cancel_reason, collect_address, collect_method, reminder_sent_at, reminder_notified_at, notified_hour_before_at, notified_evening_before_at, missed_notified_at, is_active, created_at, created_by, updated_at, updated_by, customer:customers(full_name, company_name, phone, is_vip), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), advisor:staff!appointments_advisor_id_fkey(id, display_name, colour), job:jobs(job_number, gated_out_at, is_open)";
 
 export type AppointmentFull = {
   id: string;

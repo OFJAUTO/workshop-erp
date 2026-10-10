@@ -23,7 +23,7 @@ function PartRow({ value, onChange, suppliers, showLabels, onRemove }: { value: 
       <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-end">
         <label className="flex flex-col gap-1">{label("Part number")}<Input name="part_number" value={value.part_number} onChange={(e) => set("part_number", e.target.value)} placeholder="Optional" textCase="upper" /></label>
         <label className="flex flex-col gap-1">{label("Description")}<Input name="description" value={value.description} onChange={(e) => set("description", e.target.value)} placeholder="For example: Front brake pads, set" textCase="sentence" /></label>
-        <label className="flex flex-col gap-1">{label("Qty")}<Input name="quantity" value={value.quantity} onChange={(e) => set("quantity", e.target.value)} inputMode="decimal" className="w-20" /></label>
+        <label className="flex flex-col gap-1">{label("Qty")}<Input name="quantity" value={value.quantity} onChange={(e) => set("quantity", e.target.value)} inputMode="numeric" className="w-20" /></label>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="part_type" value={value.part_type} />

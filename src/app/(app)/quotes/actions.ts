@@ -79,14 +79,16 @@ const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, title: l.title,
 /** "Start quotation": suggested lines from the approved report (or the estimate), one part line per listed part. */
 export async function startQuotation(jobId: string) {
   const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, department, is_open, status, estimate_id, gated_in_by").eq("id", jobId).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, department, is_open, status, estimate_id, gated_in_by, job_kind").eq("id", jobId).maybeSingle();
   const err = (m: string) => redirect(`/jobs/${jobId}?error=${encodeURIComponent(m)}`);
   if (!job || !job.is_open) err("This job is closed.");
   const staff = await mayEdit(jobId, null);
   if (!staff) err("Only the job's advisor or the owner can start the quotation.");
-  const bundle = await loadInspection(jobId);
-  if (staff!.role_id !== "owner" && (!bundle || bundle.inspection.status !== "approved")) err("The quotation opens once the workshop manager has approved the inspection report.");
-  if (staff!.role_id === "owner" && (!bundle || bundle.inspection.status !== "approved")) {
+  // Loose items have no inspection report: the quotation is the first step after gate-in.
+  const loose = job!.job_kind === "loose";
+  const bundle = loose ? null : await loadInspection(jobId);
+  if (!loose && staff!.role_id !== "owner" && (!bundle || bundle.inspection.status !== "approved")) err("The quotation opens once the workshop manager has approved the inspection report.");
+  if (!loose && staff!.role_id === "owner" && (!bundle || bundle.inspection.status !== "approved")) {
     // The owner may go ahead of the gate; it is written down.
     await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Quotation started by ${staff!.display_name} before the inspection report was approved (owner override)`, created_by: staff!.id });
   }

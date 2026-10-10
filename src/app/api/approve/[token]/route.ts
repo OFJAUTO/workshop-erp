@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
 
   const { data: job } = await admin
     .from("jobs")
-    .select("job_number, status, first_approval_at, gated_in_by, department, vehicle:vehicles(plate_number, plate_code, has_plate, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+    .select("job_number, status, first_approval_at, gated_in_by, department, vehicle:vehicles(kind, plate_number, plate_code, has_plate, vin, make:vehicle_makes(name), model:vehicle_models(name))")
     .eq("id", req.job_id)
     .maybeSingle();
   const update: Record<string, unknown> = { first_approval_at: job?.first_approval_at ?? now };

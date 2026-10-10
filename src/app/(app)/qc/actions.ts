@@ -10,7 +10,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { QC_SELECT, type QcCheckRow, type QcItem } from "@/lib/work-data";
-import { activeTechnicians, openQcRound } from "@/lib/work-flow";
+import { activeTechnicians, applyStageSideEffects, openQcRound } from "@/lib/work-flow";
 
 function refresh(jobId: string) {
   revalidatePath("/qc");
@@ -47,7 +47,7 @@ export async function saveQc(jobId: string, formData: FormData) {
   const admin = createAdminClient();
   const settings = await getSettings();
   const [{ data: job }, { data: worked }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, status, department, assigned_to, is_open, gated_in_by, rework_count").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("id, job_number, status, department, assigned_to, is_open, gated_in_by, rework_count, job_kind").eq("id", jobId).maybeSingle(),
     admin.from("work_sessions").select("technician_id").eq("job_id", jobId).eq("technician_id", staff.id).limit(1),
   ]);
   if (!job || !job.is_open || job.status !== "pending_qc") redirect(`${back}?error=${encodeURIComponent("This car is not waiting for QC.")}`);
@@ -84,8 +84,9 @@ export async function saveQc(jobId: string, formData: FormData) {
   if (missing.length) redirect(`${back}?error=${encodeURIComponent(`${missing.length} item${missing.length === 1 ? "" : "s"} not marked: ${missing.slice(0, 3).map((i) => i.label).join("; ")}${missing.length > 3 ? "…" : ""}`)}`);
   const noRemark = items.filter((i) => i.result === "fail" && !(i.remark ?? "").trim());
   if (noRemark.length) redirect(`${back}?error=${encodeURIComponent(`Write a remark on every Fail: ${noRemark.map((i) => i.label).join("; ")}`)}`);
-  if (mileage === null) redirect(`${back}?error=${encodeURIComponent("Record the mileage at QC.")}`);
-  if (!postscan && !waived) redirect(`${back}?error=${encodeURIComponent("Attach the post-scan PDF from the Autel, or write the reason it is missing.")}`);
+  const loose = job.job_kind === "loose";
+  if (mileage === null && !loose) redirect(`${back}?error=${encodeURIComponent("Record the mileage at QC.")}`);
+  if (!postscan && !waived && !loose) redirect(`${back}?error=${encodeURIComponent("Attach the post-scan PDF from the Autel, or write the reason it is missing.")}`);
   const failed = items.filter((i) => i.result === "fail");
   const now = new Date().toISOString();
   await admin.from("qc_checks").update({ ...patch, status: failed.length ? "failed" : "passed", finished_at: now }).eq("id", qc.id);
@@ -109,9 +110,19 @@ export async function saveQc(jobId: string, formData: FormData) {
     refresh(jobId);
     redirect(`/qc?message=${encodeURIComponent(`${job.job_number}: ${failed.length} fail${failed.length === 1 ? "" : "s"}. The car is back in Work with the failed items.`)}`);
   }
+  // Passed. Loose items have no wash: they are Ready at once and the proforma prepares itself.
+  if (loose) {
+    await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now }).eq("id", jobId);
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_qc", to_status: "ready", note: `QC passed (${staff.display_name})${qc.round > 1 ? `, round ${qc.round}` : ""}. Loose items: no wash, ready for collection.`, created_by: staff.id });
+    await applyStageSideEffects(jobId, "ready", { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, settings);
+    await notifyStaff(await advisorIds(jobId, job.gated_in_by), { type: "wash", title: `QC passed · ${job.job_number}`, body: `Passed by ${staff.display_name}. The items are ready: send the proforma and arrange the collection.`, jobId, href: `/jobs/${jobId}` });
+    await recordJobSummary(jobId, job.job_number, job.department ?? null, settings);
+    refresh(jobId);
+    redirect(`/qc?message=${encodeURIComponent(`${job.job_number} passed QC. The items are ready for collection.`)}`);
+  }
   // Passed: the car waits for the advisor to send it to the wash; the owner and the manager get the job summary.
   await admin.from("jobs").update({ status: "pending_wash", stage: "wash", stage_entered_at: now, wash_sent_at: null, wash_sent_by: null }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_qc", to_status: "pending_wash", note: `QC passed (${staff.display_name}), mileage ${mileage.toLocaleString("en-GB")} ${mileageUnit}${qc.round > 1 ? `, round ${qc.round}` : ""}`, created_by: staff.id });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_qc", to_status: "pending_wash", note: `QC passed (${staff.display_name}), mileage ${(mileage ?? 0).toLocaleString("en-GB")} ${mileageUnit}${qc.round > 1 ? `, round ${qc.round}` : ""}`, created_by: staff.id });
   await notifyStaff(await advisorIds(jobId, job.gated_in_by), { type: "wash", title: `QC passed · ${job.job_number}`, body: `Passed by ${staff.display_name}. The car is ready for the wash: press "Send to wash" on the job card when it should go.`, jobId, href: `/jobs/${jobId}` });
   await recordJobSummary(jobId, job.job_number, job.department ?? null, settings);
   refresh(jobId);

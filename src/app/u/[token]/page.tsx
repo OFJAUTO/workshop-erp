@@ -32,7 +32,7 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
   const admin = createAdminClient();
   const { data: link } = await admin
     .from("upload_links")
-    .select("job_id, expires_at, job:jobs(job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)))")
+    .select("job_id, expires_at, job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)))")
     .eq("token", token)
     .maybeSingle();
 

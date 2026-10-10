@@ -29,6 +29,8 @@ const staffSchema = z
     pin: z.string().trim().optional(),
     is_head_accountant: z.boolean(),
     colour: z.string().trim().regex(/^(#[0-9a-f]{6})?$/, "Choose a colour from the list."),
+    break_start: z.string().trim().regex(/^(\d{1,2}:\d{2})?$/, "Break start looks like 12:30."),
+    break_end: z.string().trim().regex(/^(\d{1,2}:\d{2})?$/, "Break end looks like 13:30."),
   })
   .superRefine((d, ctx) => {
     if ((d.login_type === "password" || d.login_type === "both") && !z.email().safeParse(d.email ?? "").success) {
@@ -56,6 +58,8 @@ function parseStaff(formData: FormData) {
     pin: formData.get("pin") ?? "",
     is_head_accountant: formData.get("is_head_accountant") === "on",
     colour: String(formData.get("colour") ?? "").toLowerCase(),
+    break_start: String(formData.get("break_start") ?? ""),
+    break_end: String(formData.get("break_end") ?? ""),
   });
 }
 
@@ -96,6 +100,8 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
     login_type: d.login_type,
     is_head_accountant: d.is_head_accountant,
     colour: d.colour || null,
+    break_start: d.break_start || null,
+    break_end: d.break_end || null,
     created_by: owner.id,
     updated_by: owner.id,
   });
@@ -149,6 +155,8 @@ export async function updateStaff(id: string, _state: FormState, formData: FormD
       employee_number: blankToNull(d.employee_number),
       is_head_accountant: d.is_head_accountant,
       colour: d.colour || null,
+      break_start: d.break_start || null,
+      break_end: d.break_end || null,
     })
     .eq("id", id);
   if (error) {
@@ -305,6 +313,29 @@ export async function setLoginType(id: string, formData: FormData) {
 }
 
 /** Owner only: register a device from the Team page is not possible; devices register themselves. This removes one at once. */
+/** A lost or broken tablet is locked out at once; its sessions end on their next request. */
+export async function blockDevice(id: string) {
+  const staff = await requirePermission("manageTablets");
+  const supabase = await createClient();
+  const { error } = await supabase.from("devices").update({ is_active: false, blocked_at: new Date().toISOString(), blocked_by: staff.id, removed_at: new Date().toISOString() }).eq("id", id);
+  revalidatePath("/team/tablets");
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  redirect("/team/tablets?message=" + encodeURIComponent("Device blocked. It is locked out at once."));
+}
+
+/** One tap switches a tablet between shared (photos, PIN, idle lock) and personal (one technician, stays logged in). */
+export async function setDeviceKind(id: string, formData: FormData) {
+  await requirePermission("manageTablets");
+  const kind = String(formData.get("kind") ?? "") === "personal" ? "personal" : "shared";
+  const staffId = kind === "personal" ? String(formData.get("staff_id") ?? "") : null;
+  if (kind === "personal" && !staffId) redirect("/team/tablets?error=" + encodeURIComponent("Choose the technician the device belongs to."));
+  const supabase = await createClient();
+  const { error } = await supabase.from("devices").update({ kind, staff_id: staffId }).eq("id", id);
+  revalidatePath("/team/tablets");
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  redirect("/team/tablets?message=" + encodeURIComponent(kind === "personal" ? "Now a personal device: it stays logged in; the PIN is asked only to sign for parts or finish a job." : "Now a shared device: it opens on the photos and locks when idle."));
+}
+
 export async function removeDevice(id: string) {
   await requirePermission("manageTablets");
   const supabase = await createClient();

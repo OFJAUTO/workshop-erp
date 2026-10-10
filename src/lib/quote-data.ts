@@ -10,8 +10,8 @@ export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
   "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed";
-export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, description, parts_requests, position, is_active";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per";
+export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active";
 export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason";
 
@@ -40,7 +40,7 @@ export type QuoteBundle = {
   events: { id: number; event_type: string; note: string | null; created_at: string; by_name: string | null }[];
   versions: { id: string; version: number; status: string; created_at: string }[];
   customer: { id: string; full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null;
-  vehicle: { id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
+  vehicle: { id: string; kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
   job: { id: string; job_number: string; status: string; department: string | null; assigned_to: string | null; gated_in_by: string; is_open: boolean; inspection_fee_due: boolean; comeback_free?: boolean } | null;
   inspection: InspectionBundle | null;
   creatorName: string | null;
@@ -76,7 +76,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     admin.from("quotation_events").select("id, event_type, note, created_at, created_by").eq("quotation_id", id).order("created_at", { ascending: false }),
     admin.from("quotations").select("id, version, status, created_at").eq("number", quotation.number).eq("kind", quotation.kind).order("version"),
     admin.from("customers").select("id, full_name, company_name, phone, email, trn").eq("id", quotation.customer_id).maybeSingle(),
-    quotation.vehicle_id ? admin.from("vehicles").select("id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
+    quotation.vehicle_id ? admin.from("vehicles").select("kind, id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due, comeback_free").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? loadInspection(quotation.job_id) : Promise.resolve(null),
     quotation.created_by ? admin.from("staff").select("display_name").eq("id", quotation.created_by).maybeSingle() : Promise.resolve({ data: null }),
@@ -225,7 +225,7 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
   const { data: reqs } = await admin.from("job_requests").select("id, text, position").eq("job_id", jobId).eq("is_active", true).order("position");
   const out: Omit<QuoteLine, "id" | "quotation_id" | "is_active">[] = [];
   let position = 0;
-  const base = { quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null, part_type: null, brand: null, option_group: null, chosen: true, fee_kind: null, recovery_trips: null, recovery_provider: null, dangerous: false, parent_line_id: null, recovery_provider_kind: null, markup_confirmed: false };
+  const base = { price_per: null, quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: labourRate, discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null, service_id: null, visible_to_customer: true, urgency: null, advisor_added: false, customer_approved: null, part_type: null, brand: null, option_group: null, chosen: true, fee_kind: null, recovery_trips: null, recovery_provider: null, dangerous: false, parent_line_id: null, recovery_provider_kind: null, markup_confirmed: false };
   for (const r of reqs ?? []) {
     const f = bundle.findings.find((x) => x.job_request_id === r.id);
     if (!f || !(f.status === "bad" || f.status === "average")) continue;

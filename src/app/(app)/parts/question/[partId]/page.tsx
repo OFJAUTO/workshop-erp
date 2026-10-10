@@ -21,7 +21,7 @@ export default async function PartQuestionPage({ params, searchParams }: { param
   if (!raw) notFound();
   const p = toPart(raw as Record<string, unknown>);
   const [{ data: job }, { data: req }, { data: asker }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", p.job_id).maybeSingle(),
+    admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", p.job_id).maybeSingle(),
     p.part_request_id ? admin.from("part_requests").select("label, requested_text").eq("id", p.part_request_id).maybeSingle() : Promise.resolve({ data: null }),
     p.question_by ? admin.from("staff").select("display_name").eq("id", p.question_by).maybeSingle() : Promise.resolve({ data: null }),
   ]);

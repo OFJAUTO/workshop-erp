@@ -10,7 +10,7 @@ import { formatPlate } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type Handover = { id: string; kind: "handover" | "return"; from_staff: string | null; to_staff: string | null; signed_for_by: string | null; pin_used: boolean; items: { description: string; quantity: number }[]; note: string | null; created_at: string };
+type Handover = { stickers?: Record<string, unknown> | null; stickers_printed_at?: string | null; status?: string; id: string; kind: "handover" | "return"; from_staff: string | null; to_staff: string | null; signed_for_by: string | null; pin_used: boolean; items: { description: string; quantity: number }[]; note: string | null; created_at: string };
 
 /** The parts trail of one car: every handover and return, who gave, who took, when, and the part events in between. */
 export default async function PartsTrailPage({ params }: { params: Promise<{ jobId: string }> }) {
@@ -21,7 +21,7 @@ export default async function PartsTrailPage({ params }: { params: Promise<{ job
   const admin = createAdminClient();
   const [{ data: job }, { data: handovers }, { data: events }, { data: people }] = await Promise.all([
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", jobId).maybeSingle(),
-    admin.from("part_handovers").select("id, kind, from_staff, to_staff, signed_for_by, pin_used, items, note, created_at").eq("job_id", jobId).eq("is_active", true).order("created_at", { ascending: false }),
+    admin.from("part_handovers").select("id, kind, from_staff, to_staff, signed_for_by, pin_used, items, note, created_at, stickers, stickers_printed_at, status").eq("job_id", jobId).eq("is_active", true).order("created_at", { ascending: false }),
     admin.from("job_events").select("id, event_type, note, created_at, created_by").eq("job_id", jobId).in("event_type", ["parts_issued", "part_return", "part_returned", "parts_received", "po_raised", "po_ordered", "parts_delayed", "planning"]).order("created_at", { ascending: false }),
     admin.from("staff").select("id, display_name"),
   ]);
@@ -45,6 +45,7 @@ export default async function PartsTrailPage({ params }: { params: Promise<{ job
                 <span className="text-muted">from {nameOf.get(h.from_staff ?? "") ?? "Parts"} to {nameOf.get(h.to_staff ?? "") ?? "the technician"}{h.signed_for_by ? ` · signed for by ${nameOf.get(h.signed_for_by) ?? "the manager"}` : h.pin_used ? " · PIN" : ""}</span>
               </div>
               <span className="text-xs">{h.items.map((i) => `${i.description} × ${i.quantity}`).join(" · ")}</span>
+              {h.kind === "handover" && h.stickers && Object.keys(h.stickers as Record<string, unknown>).length ? <a href={`/print/stickers/${h.id}?back=${encodeURIComponent(`/parts/trail/${jobId}`)}`} className="self-start text-xs font-bold underline underline-offset-4">Print the stickers again (logged)</a> : null}
               {h.note ? <span className="text-xs text-muted">{h.note}</span> : null}
             </li>
           ))}

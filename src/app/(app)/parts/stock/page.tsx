@@ -18,7 +18,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const settings = await getSettings();
   const [{ data: items }, { data: jobs }, { data: techs }] = await Promise.all([
     admin.from("stock_items").select("id, name, unit, quantity, minimum_level, unit_cost").eq("is_active", true).order("name"),
-    admin.from("jobs").select("id, job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).in("status", ["in_work", "waiting_parts", "approved", "pending_qc"]).order("job_number"),
+    admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).in("status", ["in_work", "waiting_parts", "approved", "pending_qc"]).order("job_number"),
     admin.from("staff").select("id, display_name").eq("role_id", "technician").eq("is_active", true).order("display_name"),
   ]);
   const list = (items ?? []) as Item[];

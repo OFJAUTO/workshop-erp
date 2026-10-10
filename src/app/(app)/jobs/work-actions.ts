@@ -10,8 +10,10 @@ import { ensurePartRequests, labourRateFor, logQuoteEvent, refreshQuoteTotals } 
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getCurrentDevice } from "@/lib/devices";
+import { verifyPin } from "@/lib/pin";
 import { ADDITIONAL_SELECT, sessionMinutes, type AdditionalWorkRow } from "@/lib/work-data";
-import { activeTechnicians, finishMyPart, leaveJob, managerConfirmWork, pauseWork, rejectPause, startWorking, workBudget, type Actor } from "@/lib/work-flow";
+import { activeTechnicians, finishMyPart, keepWorkingThroughBreak, leaveJob, managerConfirmWork, pauseWork, rejectPause, startWorking, workBudget, type Actor } from "@/lib/work-flow";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -63,8 +65,22 @@ export async function leaveJobAction(jobId: string, formData: FormData) {
 }
 
 /** "Job finished" (or "My part is done"): the clock stops and locks; the manager confirms. */
-export async function jobFinished(jobId: string) {
+/** "Keep working" through the break: recorded, and the break counts on this session. */
+export async function keepWorking(jobId: string) {
   const staff = await requirePermission("doWork");
+  const r = await keepWorkingThroughBreak(jobId, actorOf(staff));
+  refresh(jobId);
+  back(`/my-jobs/${jobId}`, r);
+}
+
+export async function jobFinished(jobId: string, formData?: FormData) {
+  const staff = await requirePermission("doWork");
+  // On a personal device the PIN is the signature for "Job finished".
+  const device = await getCurrentDevice();
+  if (device?.kind === "personal" && staff.role_id === "technician") {
+    const { data: priv } = await createAdminClient().from("staff_private").select("pin_hash").eq("staff_id", staff.id).maybeSingle();
+    if (priv?.pin_hash && !verifyPin(String(formData?.get("pin") ?? ""), priv.pin_hash)) back(`/my-jobs/${jobId}`, { error: "Wrong PIN." });
+  }
   const r = await finishMyPart(jobId, actorOf(staff));
   refresh(jobId);
   back(`/my-jobs/${jobId}`, r);

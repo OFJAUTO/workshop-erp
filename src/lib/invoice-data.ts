@@ -140,7 +140,7 @@ export type InvoiceBundle = {
   lines: InvoiceLineRow[];
   payments: PaymentRow[];
   customer: { id: string; full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null;
-  vehicle: { id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
+  vehicle: { id: string; kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
   job: { id: string; job_number: string; status: string; is_open: boolean; gated_in_by: string } | null;
   creditNotes: InvoiceRow[];
   preparedByName: string | null;
@@ -156,7 +156,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
     admin.from("invoice_lines").select(INVOICE_LINE_SELECT).eq("invoice_id", id).eq("is_active", true).order("position"),
     admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", id).eq("is_active", true).order("received_at"),
     admin.from("customers").select("id, full_name, company_name, phone, email, trn").eq("id", invoice.customer_id).maybeSingle(),
-    invoice.vehicle_id ? admin.from("vehicles").select("id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", invoice.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
+    invoice.vehicle_id ? admin.from("vehicles").select("kind, id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", invoice.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
     invoice.job_id ? admin.from("jobs").select("id, job_number, status, is_open, gated_in_by").eq("id", invoice.job_id).maybeSingle() : Promise.resolve({ data: null }),
     admin.from("invoices").select(INVOICE_SELECT).eq("credit_of", id).eq("is_active", true).order("issued_at"),
     admin.from("staff").select("id, display_name").in("id", [invoice.prepared_by, invoice.issued_by].filter((x): x is string => !!x)),

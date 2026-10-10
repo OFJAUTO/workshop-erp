@@ -26,7 +26,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   const pos = ((data ?? []) as Record<string, unknown>[]).map(toPo);
   const jobIds = Array.from(new Set(pos.map((p) => p.job_id)));
   const [{ data: jobs }, { data: lines }] = await Promise.all([
-    jobIds.length ? admin.from("jobs").select("id, job_number, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").in("id", jobIds) : Promise.resolve({ data: [] }),
+    jobIds.length ? admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").in("id", jobIds) : Promise.resolve({ data: [] }),
     pos.length ? admin.from("purchase_order_lines").select("po_id, expected_date, quantity, received_qty").in("po_id", pos.map((p) => p.id)).eq("is_active", true) : Promise.resolve({ data: [] }),
   ]);
   const jobOf = new Map(((jobs ?? []) as unknown as JobInfo[]).map((j) => [j.id, j]));

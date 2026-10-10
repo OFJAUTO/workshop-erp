@@ -72,6 +72,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     markupWarn: Number(settings.markup_warn_percent) || 50,
     markupConfirm: Number(settings.markup_confirm_percent) || 100,
     inspectionFee: Number(settings.inspection_fee_aed) || 0,
+    consumablesDefault: Number(settings.consumables_default_aed) || 0,
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
     technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,

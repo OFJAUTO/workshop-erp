@@ -49,7 +49,11 @@ export async function POST(request: NextRequest) {
     stored.push(path);
     if (job && kind === "pre") await attachPrescan(job.id, bytes, a.Name ?? "scan.pdf");
   }
-  if (!stored.length) return NextResponse.json({ ok: true, stored: 0 });
+  if (!stored.length) {
+    // Not a scan report (a forwarding confirmation, a reply): kept for the owner to read, never thrown away.
+    await admin.from("inbound_emails").insert({ from_email: from, subject: subject || null, text_body: String(mail.TextBody ?? "").slice(0, 20000) || null });
+    return NextResponse.json({ ok: true, stored: 0, kept: true });
+  }
   if (job) {
     const kind = scanKindFor(job.status);
     const n = { type: "scan_received", title: `${kind === "pre" ? "Pre-scan" : "Post-scan"} report received · ${job.job_number}`, body: `${stored.length} PDF${stored.length === 1 ? "" : "s"} from the scanner${vin ? ` for VIN ${vin}` : ""}.`, jobId: job.id, href: `/jobs/${job.id}/inspection` };

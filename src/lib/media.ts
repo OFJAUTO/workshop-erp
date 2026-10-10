@@ -21,6 +21,9 @@ export const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
   wheel_fr: "Front right wheel",
   wheel_rl: "Rear left wheel",
   wheel_rr: "Rear right wheel",
+  item_photo: "Item photo",
+  assessment_photo: "Assessment photo",
+  item_collect_photo: "Item collected, photo",
 };
 
 export function newToken() {

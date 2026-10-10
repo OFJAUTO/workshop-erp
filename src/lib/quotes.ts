@@ -53,6 +53,8 @@ export type QuoteLine = {
   part_item_id: string | null;
   package_id: string | null;
   service_id: string | null;
+  /** Fixed-price services: what the price is per (job, tyre, wheel, injector, cylinder, axle, unit or a word of the owner's). */
+  price_per: string | null;
   visible_to_customer: boolean;
   urgency: Urgency | null;
   advisor_added: boolean;
@@ -192,7 +194,7 @@ export type PartRequest = {
   closed_reason: string | null;
 };
 
-export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; description: string | null; parts_requests: string[]; position: number; is_active: boolean };
+export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean };
 export type ServiceCategory = { id: string; name: string; position: number; is_active: boolean };
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;

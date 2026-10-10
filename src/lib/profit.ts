@@ -35,7 +35,7 @@ export type JobProfit = {
  */
 export async function jobProfits(settings: Settings, filter: { from?: string; to?: string; jobIds?: string[]; limit?: number; noComebacks?: boolean } = {}): Promise<JobProfit[]> {
   const admin = createAdminClient();
-  let q = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number, comeback_of, comeback_cause, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(plate_number, plate_code, plate_emirate, has_plate, vin))").eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").order("issued_at", { ascending: false });
+  let q = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number, comeback_of, comeback_cause, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(kind, plate_number, plate_code, plate_emirate, has_plate, vin))").eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").order("issued_at", { ascending: false });
   if (filter.from) q = q.gte("issued_at", filter.from);
   if (filter.to) q = q.lt("issued_at", filter.to);
   if (filter.jobIds) q = q.in("job_id", filter.jobIds);

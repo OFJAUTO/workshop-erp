@@ -58,7 +58,7 @@ export default async function CustomerInvoicePage({ params }: { params: Promise<
       ]}
       boxes={[
         { title: "Billed to", strong: invoice.customer_snapshot?.company_name ?? customer?.company_name ?? invoice.customer_snapshot?.full_name ?? customer?.full_name ?? "Customer", rows: [["", invoice.customer_snapshot?.company_name ? invoice.customer_snapshot?.full_name : null], ["", [invoice.customer_snapshot?.phone ?? customer?.phone, invoice.customer_snapshot?.email ?? customer?.email].filter(Boolean).join(" · ") || null]], muted: [(invoice.customer_snapshot?.trn ?? customer?.trn) ? `TRN ${invoice.customer_snapshot?.trn ?? customer?.trn}` : null] },
-        { title: "Vehicle", strong: [invoice.vehicle_snapshot?.title ?? car ?? "Vehicle", invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null)].filter(Boolean).join(" · "), rows: [["", invoice.vehicle_snapshot?.variant ?? vehicle?.variant ?? null], ["VIN", invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null]] },
+        vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items", rows: [] } : { title: "Vehicle", strong: [invoice.vehicle_snapshot?.title ?? car ?? "Vehicle", invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null)].filter(Boolean).join(" · "), rows: [["", invoice.vehicle_snapshot?.variant ?? vehicle?.variant ?? null], ["VIN", invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null]] },
       ]}
       pdfHref={`/api/pdf/invoice/${token}`}
       uppercase={settings.customer_documents_uppercase === true}

@@ -4,7 +4,8 @@ import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { DeviceRow } from "@/lib/types";
-import { removeDevice } from "../actions";
+import { blockDevice, removeDevice, setDeviceKind } from "../actions";
+import { Select } from "@/components/ui";
 
 const LOCATION_LABEL = { workshop: "Workshop", bodyshop: "Bodyshop", office: "Office", personal: "Personal" } as const;
 
@@ -12,6 +13,8 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
   const staff = await requirePermission("viewTablets");
   const { error, message } = await searchParams;
   const canManage = can(staff.role_id as RoleId, "manageTablets");
+  const { data: techRows } = await (await createClient()).from("staff").select("id, display_name").eq("role_id", "technician").eq("is_active", true).order("display_name");
+  const technicians = (techRows ?? []) as { id: string; display_name: string }[];
 
   const supabase = await createClient();
   const { data } = await supabase
@@ -66,11 +69,19 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
                 </div>
               </dl>
               {canManage ? (
-                <form action={removeDevice.bind(null, d.id)}>
-                  <Button type="submit" tone="danger" size="md">
-                    Remove this device
-                  </Button>
-                </form>
+                <div className="flex flex-col gap-2 border-t border-line pt-2">
+                  <form action={setDeviceKind.bind(null, d.id)} className="flex flex-wrap items-center gap-2">
+                    {d.kind === "personal" ? (
+                      <><input type="hidden" name="kind" value="shared" /><Button type="submit" tone="secondary" size="md">Switch to shared</Button></>
+                    ) : (
+                      <><input type="hidden" name="kind" value="personal" /><Select name="staff_id" defaultValue="" required className="w-44"><option value="" disabled>Technician…</option>{technicians.map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}</Select><Button type="submit" tone="secondary" size="md">Make personal</Button></>
+                    )}
+                  </form>
+                  <div className="flex flex-wrap gap-2">
+                    <form action={blockDevice.bind(null, d.id)}><Button type="submit" tone="danger" size="md">Block this device</Button></form>
+                    <form action={removeDevice.bind(null, d.id)}><Button type="submit" tone="ghost" size="md">Remove</Button></form>
+                  </div>
+                </div>
               ) : null}
             </Card>
           ))}

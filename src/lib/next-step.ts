@@ -20,6 +20,8 @@ export type NextStepInput = {
   roadTest: Pick<RoadTestRow, "status" | "decision"> | null;
   approval: { sent_at: string | null; opened_at: string | null; approved_at: string | null; approver_name: string | null } | null;
   gateInComplete: boolean;
+  /** Loose items: no inspection report, no wash. */
+  loose?: boolean;
   /** The quotation's plain-word state, when the job is at or past the quote. */
   quote?: QuoteState | null;
   /** Later stages: parts, work, QC, wash, invoice, delivery. */
@@ -80,7 +82,7 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
   if (j.status === "pending_quote") {
     const since = insp?.approved_at ?? j.stage_entered_at;
     const qs = j.quote;
-    if (!qs || qs.key === "none") return { done: { label: "Inspection report approved", by: null }, next: "Start the quotation and send the report to the customer.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Start the quotation", href: `/jobs/${jobId}#quotation` }, since, line: `Pending quote, waiting on ${advisor}` };
+    if (!qs || qs.key === "none") return { done: { label: j.loose ? "Items received" : "Inspection report approved", by: null }, next: j.loose ? "Start the quotation for the items." : "Start the quotation and send the report to the customer.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Start the quotation", href: `/jobs/${jobId}#quotation` }, since, line: `Pending quote, waiting on ${advisor}` };
     if (qs.key === "pending_parts") return { done: { label: "Quotation started", by: j.advisorName }, next: "Parts price the requests from the report.", waitingOn: "Parts", actorRole: "parts", action: { label: "Price the parts", href: `/parts/${jobId}` }, since, line: "Waiting for parts prices" };
     if (qs.key === "pending_confirm") return { done: { label: "Parts listed", by: null }, next: `${tech} confirms the parts on the tablet.`, waitingOn: tech, actorRole: "technician", action: { label: "Confirm the parts", href: `/my-jobs/${jobId}` }, since, line: `Waiting for ${tech} to confirm the parts` };
     if (qs.key === "link") return { done: { label: "Quotation link created", by: j.advisorName }, next: "Send the link to the customer on WhatsApp.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Send the quotation", href: `/jobs/${jobId}#quotation` }, since, line: `Quotation link created, waiting on ${advisor} to send it` };
@@ -115,7 +117,7 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
     return { done: { label: "Sent to the wash", by: j.advisorName }, next: `At the wash. ${advisor} presses Wash done; the car is Ready.`, waitingOn: "the wash", actorRole: "service_advisor", action: null, since: x.washSentAt, line: "At the wash" };
   }
   if (j.status === "ready") {
-    if (!x.invoiced) return { done: { label: "Car ready", by: null }, next: "The proforma is prepared by itself from the approved quotation. If it is not there, tap Prepare the proforma on the job card.", waitingOn: advisor, actorRole: "service_advisor", action: null, since: j.stage_entered_at, line: `Ready, proforma to prepare` };
+    if (!x.invoiced) return { done: { label: j.loose ? "Items ready" : "Car ready", by: null }, next: "The proforma is prepared by itself from the approved quotation. If it is not there, tap Prepare the proforma on the job card.", waitingOn: advisor, actorRole: "service_advisor", action: null, since: j.stage_entered_at, line: `Ready, proforma to prepare` };
     if (x.invoiceKind === "proforma" && !x.readySent) return { done: { label: "Proforma ready", by: null }, next: "Send the proforma to the customer on WhatsApp: the bank details and Pay now are on the page. The tax invoice is generated when it is paid in full.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Send the proforma", href: `/jobs/${jobId}#invoice` }, since: j.stage_entered_at, line: `Proforma to send, waiting on ${advisor}` };
     if (x.invoiceKind === "proforma") return { done: { label: "Proforma sent", by: j.advisorName }, next: "Awaiting payment. The tax invoice is generated the moment the balance reaches zero.", waitingOn: "the customer", actorRole: "accounts", action: null, since: j.stage_entered_at, line: "Awaiting payment" };
     if (!x.invoiceSent) return { done: { label: "Paid in full, tax invoice generated", by: null }, next: "Tax invoice ready to send: send it to the customer on WhatsApp, then gate out.", waitingOn: advisor, actorRole: "service_advisor", action: { label: "Send the tax invoice", href: `/jobs/${jobId}#invoice` }, since: j.stage_entered_at, line: `Tax invoice ready to send, waiting on ${advisor}` };

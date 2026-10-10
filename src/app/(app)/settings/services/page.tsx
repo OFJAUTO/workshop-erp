@@ -22,7 +22,8 @@ function ServiceFields({ s, categories }: { s: Service | null; categories: Servi
           ))}
         </Select>
       </Field>
-      <ServicePriceField priceAed={s?.price_aed ?? null} defaultHours={s?.default_hours ?? null} />
+      <ServicePriceField priceAed={s?.price_aed ?? null} defaultHours={s?.default_hours ?? null} pricePer={s?.price_per ?? "job"} usualQuantity={s?.usual_quantity ?? 1} timeAllowance={s?.time_allowance_hours ?? null} />
+      <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="includes_oil_change" defaultChecked={!!s?.includes_oil_change} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Includes an oil change</span><span className="block text-xs text-muted">Jobs with this service need the oil service sticker, and QC checks it.</span></span></label>
       {s ? (
         <Field label="Category">
           <Select name="category_id" defaultValue={s.category_id}>

@@ -11,6 +11,7 @@ import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { recordOwnerReport } from "@/lib/owner-report";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -34,6 +35,8 @@ async function closeJob(jobId: string, by: string, byName: string, how: string) 
   await admin.from("jobs").update({ status: "closed", stage: "ready", is_open: false, gated_out_at: new Date().toISOString(), gated_out_by: by, followup_due_at: dubaiDate(due) }).eq("id", jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "gate_out", from_status: job?.status ?? null, to_status: "closed", note: `Gated out by ${byName}: ${how}`, created_by: by });
   await admin.from("appointments").update({ status: "done", updated_by: by }).eq("job_id", jobId).eq("kind", "customer_collects").eq("status", "booked");
+  // The owner's report on the job, written now that it is over.
+  await recordOwnerReport(jobId, settings).catch(() => null);
 }
 
 /**
@@ -181,4 +184,49 @@ export async function askReleaseApproval(jobId: string) {
   const { data: job } = await createAdminClient().from("jobs").select("job_number").eq("id", jobId).maybeSingle();
   await notifyRoles(["owner", "accounts"], { type: "release_approval", title: `Release approval needed · ${job?.job_number ?? ""}`, body: bal.state === "no_invoice" ? `${staff.display_name} wants to release the car with no invoice issued.` : `${staff.display_name} wants to release the car with AED ${bal.balance.toLocaleString("en-GB")} due.`, jobId, href: `/jobs/${jobId}/gate-out` });
   redirect(`/jobs/${jobId}/gate-out?message=${encodeURIComponent("The owner and accounts have been asked to approve the release.")}`);
+}
+
+/** Loose items leave one by one: tick what goes, name who took it. The job closes when the last item has gone. */
+export async function collectItems(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePermission("gateOut");
+  const role = staff.role_id as RoleId;
+  const values = formValues(formData);
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, status, is_open, job_number, gated_in_by, job_kind").eq("id", jobId).maybeSingle();
+  if (!job || !job.is_open) return { error: "This job is already closed.", values };
+  if (job.job_kind !== "loose") return { error: "This job has a car: use the gate-out form.", values };
+  const ids = formData.getAll("item").map(String).filter(Boolean);
+  if (!ids.length) return { error: "Tick at least one item.", values };
+  const collector = blankToNull(formData.get("collector_name"));
+  if (!collector) return { error: "Enter the name of the person collecting.", values };
+  if (formData.get("handover_confirmed") !== "on") return { error: "Tick that the handover is confirmed with the collecting person.", values };
+  if (!["ready", "pending_payment"].includes(job.status)) {
+    if (role !== "owner") return { error: "The items are not ready to leave yet: QC and the invoice come first.", values };
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, note: `Items released by ${staff.display_name} while the job was still at ${STATUS_LABELS[job.status as JobStatus]} (owner override)`, created_by: staff.id });
+  }
+  const bal = await jobBalance(jobId);
+  const releaseReason = String(formData.get("release_reason") ?? "").trim();
+  const blocked = bal.state === "no_invoice" || bal.balance > 0;
+  if (blocked) {
+    if (!can(role, "approveRelease")) return { error: bal.state === "no_invoice" ? "No invoice has been issued for this job. Accounts must issue it before the items leave." : `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner or accounts can approve the release.`, values };
+    if (releaseReason.length < 5) return { error: "Write the reason for releasing with the balance open (logged).", values };
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Release approved by ${staff.display_name} with ${bal.state === "no_invoice" ? "no invoice" : `AED ${bal.balance.toLocaleString("en-GB")} due`}: ${releaseReason}`, created_by: staff.id });
+  }
+  const now = new Date().toISOString();
+  const { data: items } = await admin.from("job_items").select("id, item_type, description, quantity, collected_at").eq("job_id", jobId).eq("is_active", true);
+  const all = items ?? [];
+  const leaving = all.filter((i) => ids.includes(i.id) && !i.collected_at);
+  if (!leaving.length) return { error: "Those items have already been collected.", values };
+  await admin.from("job_items").update({ collected_at: now, collected_by: staff.id, collector_name: collector, updated_by: staff.id }).in("id", leaving.map((i) => i.id));
+  const left = all.filter((i) => !i.collected_at && !ids.includes(i.id)).length;
+  const names = leaving.map((i) => `${Number(i.quantity) > 1 ? `${i.quantity} × ` : ""}${i.item_type}${i.description ? ` (${i.description})` : ""}`).join(", ");
+  await admin.from("gate_outs").upsert({ job_id: jobId, leave_method: "customer", collector_name: collector, handover_confirmed: true, keys_returned: 0, keychain_returned: false, keys_match: true, balance_due_aed: bal.balance, release_approved_by: blocked ? staff.id : null, release_reason: blocked ? releaseReason : null, notes: blankToNull(formData.get("notes")), created_by: staff.id, updated_by: staff.id }, { onConflict: "job_id" });
+  if (left === 0) {
+    await closeJob(jobId, staff.id, staff.display_name, `last items collected by ${collector}: ${names}`);
+    refresh(jobId);
+    redirect(`/jobs/${jobId}?message=${encodeURIComponent("All items collected. The job is closed.")}`);
+  }
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "gate_out", note: `Collected by ${collector}: ${names}. ${left} item${left === 1 ? "" : "s"} still with us.`, created_by: staff.id });
+  refresh(jobId);
+  redirect(`/jobs/${jobId}/gate-out?message=${encodeURIComponent(`${leaving.length} item${leaving.length === 1 ? "" : "s"} collected. ${left} still with us.`)}`);
 }

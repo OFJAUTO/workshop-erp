@@ -41,7 +41,7 @@ type JobLite = {
   vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null;
 };
 
-const VEHICLE = "vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))";
+const VEHICLE = "vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))";
 
 export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; who?: string }> }) {
   const staff = await requirePermission("viewCalendar");

@@ -68,7 +68,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       <InfoBoxes
         boxes={[
           { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? customer.full_name : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
-          { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), lines: [vehicle?.variant ?? null, vehicle?.vin ? `VIN ${vehicle.vin}` : null] },
+          vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items" } : { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), lines: [vehicle?.variant ?? null, vehicle?.vin ? `VIN ${vehicle.vin}` : null] },
         ]}
       />
       <LinesTable title="Labour and services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Labour and services subtotal" discount={totals.discount ? { label: `Discount ${q.discount_percent}% on labour and services`, amount: totals.discount } : null} />

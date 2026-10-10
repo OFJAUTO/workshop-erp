@@ -2,7 +2,8 @@ import Link from "next/link";
 import { CarPicture } from "@/components/CarPicture";
 import { TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { TechnicianChecks } from "@/components/TechnicianChecks";
+import { TechnicianPicker } from "@/components/TechnicianPicker";
+import { technicianLoads } from "@/lib/technician-load";
 import { Badge, Button, Card, ChoiceButtons, Empty, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
@@ -43,10 +44,10 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const side = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
   const settings = await getSettings();
   const supabase = await createClient();
-  const [{ data: jobs }, { data: techs }, { data: load }, { data: requestRows }] = await Promise.all([
+  const [{ data: jobs }, , { data: load }, { data: requestRows }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, assignment_note, assignment_note_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customer_public(full_name, company_name, is_vip), gate_in:gate_ins(is_complete, condition, customer_requests, notes), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
+      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, assignment_note, assignment_note_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customer_public(full_name, company_name, is_vip), gate_in:gate_ins(is_complete, condition, customer_requests, notes), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
       .eq("is_open", true)
       .is("assigned_to", null)
       .in("status", ["gate_in_pending", "pending_approval", "pending_inspection"])
@@ -55,11 +56,10 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
     supabase.from("jobs").select("assigned_to").eq("is_open", true).not("assigned_to", "is", null),
     supabase.from("job_requests").select("job_id, position, text").eq("is_active", true).order("position"),
   ]);
+  const loads = await technicianLoads(settings, side);
   const requestsOf = (jobId: string) => ((requestRows ?? []) as { job_id: string; text: string }[]).filter((r) => r.job_id === jobId).map((r) => r.text);
   const rows = ((jobs ?? []) as unknown as Row[]).filter((j) => jobConcernsSide(j.department, side));
-  const counts = new Map<string, number>();
-  for (const l of load ?? []) if (l.assigned_to) counts.set(l.assigned_to, (counts.get(l.assigned_to) ?? 0) + 1);
-  const technicians = (techs ?? []).filter((t) => !side || !sideOfDepartment(t.department_id) || sideOfDepartment(t.department_id) === side);
+  void load;
   const pictures = await signCarPictures(rows.map((j) => j.vehicle?.photo_path));
   const ready = rows.filter((j) => j.status === "pending_inspection");
   const waiting = rows.filter((j) => j.status !== "pending_inspection");
@@ -112,7 +112,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1" data-field>
                     <span className="text-sm font-semibold" data-field-label>Technicians (tick one or more)</span>
-                    <TechnicianChecks technicians={technicians.map((t) => ({ id: t.id, display_name: t.display_name, note: `${counts.get(t.id) ?? 0} car${(counts.get(t.id) ?? 0) === 1 ? "" : "s"}` }))} hint="The first ticked technician is the lead: he does the inspection." />
+                    <TechnicianPicker technicians={loads} hint="Freest first. The first ticked technician is the lead: he does the inspection. A busy technician can still be ticked; it asks once." />
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-sm font-semibold">Road test{suggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber">Road test suggested: the requests mention noise, vibration, steering, turning or braking</span> : null}</span>
@@ -144,15 +144,9 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
       <PageHeader title="To assign" subtitle={side ? `${side === "mechanical" ? "Mechanical" : "Bodyshop"} cars waiting for a technician` : "All cars waiting for a technician"} />
       {message ? <p className="rounded-control bg-green-soft px-4 py-3 text-sm font-semibold text-green">{message}</p> : null}
       {error ? <p className="rounded-control bg-red-soft px-4 py-3 text-sm font-semibold text-red">{error}</p> : null}
-      <Card className="flex flex-wrap gap-2 items-center">
-        <SectionLabel>Technicians</SectionLabel>
-        {technicians.map((t) => (
-          <span key={t.id} className="inline-flex items-center gap-2 rounded-full border border-line px-3 py-1.5 text-sm font-semibold">
-            {t.display_name}
-            <span className="inline-flex min-w-6 h-6 items-center justify-center rounded-full bg-ink px-1.5 text-xs font-bold text-white">{counts.get(t.id) ?? 0}</span>
-          </span>
-        ))}
-        {technicians.length === 0 ? <span className="text-sm text-muted">No technicians in this department yet. Set departments on the Team page.</span> : null}
+      <Card className="flex flex-col gap-2">
+        <SectionLabel right={`${loads.filter((l) => l.status === "free").length} free`}>Technicians, freest first</SectionLabel>
+        <TechnicianPicker technicians={loads} pick={false} />
       </Card>
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${ready.length}`}>Ready to assign (customer approved)</SectionLabel>

@@ -10,7 +10,7 @@ import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, forma
 import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
@@ -41,9 +41,14 @@ import { MediaGallery } from "./MediaGallery";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
 import { PlanningCard } from "./PlanningCard";
 import { TechniciansCard } from "./TechniciansCard";
-import { TechnicianChecks } from "@/components/TechnicianChecks";
+import { ServiceStickerCard } from "./ServiceStickerCard";
+import { jobHasOilChange, serviceStickerDefaults, stickerSettings, type ServiceStickerData } from "@/lib/stickers";
+import { TechnicianPicker } from "@/components/TechnicianPicker";
+import { technicianLoads } from "@/lib/technician-load";
 import { loadJobTechnicians } from "@/lib/job-technicians";
 import { JobSummaryCard } from "./JobSummaryCard";
+import { ItemsCard } from "./ItemsCard";
+import { LOOSE_SKIP_STAGES, loadJobItems } from "@/lib/loose-items";
 import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
 
@@ -64,7 +69,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const admin = createAdminClient();
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
-  const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, events, approvals, gateOut } = card;
+  const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
   const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
@@ -87,6 +92,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const comebackOriginal = job.comeback_of ? ((comebackRows ?? []).find((r) => r.id === job.comeback_of) ?? null) : null;
   const comebacksOfThis = (comebackRows ?? []).filter((r) => r.id !== job.comeback_of);
 
+  // Loose items: no inspection, no wash; the items card replaces the gate-in media.
+  const loose = job.job_kind === "loose";
+  const looseItems = loose ? await loadJobItems(id) : [];
+  const itemPhotoUrls = new Map<string, string>();
+  for (const m of media) if (m.kind === "item_photo" && m.item_id && mediaUrls.get(m.storage_path)) itemPhotoUrls.set(m.item_id, mediaUrls.get(m.storage_path)!);
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "", hasCarPicture: !!vehicle.photo_path });
   const wt = workingTimeOf(settings);
   const timing = jobTiming(job.promised_at, job.is_open, clockOf(job, settings));
@@ -107,7 +117,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
   const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
   const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending" && (gateOutReached || role === "owner");
-  const gateOutReason = !gateOutReached && job.is_open ? "After QC, the wash and the invoice" : null;
+  const gateOutReason = !gateOutReached && job.is_open ? (job.job_kind === "loose" ? "After QC and the invoice" : "After QC, the wash and the invoice") : null;
   const canPlan = can(role, "setPriority") && job.is_open;
   const canSendReport = can(role, "sendReport") && job.is_open && inspection?.inspection.status === "approved";
   const canNote = can(role, "noteToManager") && job.is_open;
@@ -117,6 +127,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     ? await supabase.from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name")
     : { data: [] as { id: string; display_name: string; department_id: string | null }[] };
   const onCar = canAssign || job.assigned_to ? await loadJobTechnicians(id) : [];
+  // The oil service sticker: on any job with an oil change, from the moment work starts.
+  const stickerOn = ["in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status) && settings.sticker_service_required !== false && (await jobHasOilChange(id));
+  const stickerData: ServiceStickerData | null = stickerOn ? serviceStickerDefaults(stickerSettings(settings), job as unknown as { work_started_at?: string | null; plan_released_at?: string | null; gated_in_at?: string | null; service_sticker?: unknown }, gateIn ? { mileage: gateIn.mileage, mileage_unit: gateIn.mileage_unit } : null, dubaiDate()) : null;
   const techniciansCanChange = canAssign && !staff.viewingAs && !["pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
 
   const latestApproval = approvals[0] ?? null;
@@ -157,6 +170,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     roadTest,
     approval: latestApproval ? { sent_at: latestApproval.sent_at, opened_at: latestApproval.opened_at, approved_at: latestApproval.approved_at, approver_name: latestApproval.approver_name } : null,
     gateInComplete: check.complete,
+    loose,
     quote: qState,
     extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, invoiceKind: bal?.invoice?.kind ?? null, invoiceSent: !!job.invoice_sent_at, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
   });
@@ -183,7 +197,18 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     return { text: `${INSPECTION_STATUS_LABELS[insp.status]}${inspection?.technician ? ` · ${inspection.technician.display_name}` : ""}`, tone: "neutral" as const };
   })();
   const approvalState = latestApproval?.approved_at || job.first_approval_at ? { text: `Approved${latestApproval?.approver_name ? ` by ${latestApproval.approver_name}` : ""}, ${formatDate(latestApproval?.approved_at ?? job.first_approval_at)}`, tone: "green" as const } : latestApproval?.opened_at ? { text: "Opened by the customer, not yet approved", tone: "amber" as const } : latestApproval?.sent_at ? { text: `Sent ${formatDate(latestApproval.sent_at)}, not yet opened`, tone: "amber" as const } : latestApproval ? { text: "Link created, not sent yet", tone: "neutral" as const } : { text: check.complete ? "Not sent yet" : "Gate-in photos and video pending", tone: "neutral" as const };
-  const toneCls = { green: "border-green", amber: "border-amber-bar", red: "border-red-bar", neutral: "border-line" };
+  // Every step tile: done (pale green with a tick), the current step (white, black outline), waiting on something (pale amber), not reached (grey).
+  const STAGE_ORDER = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"];
+  const tile = (keys: string[], tone: "green" | "amber" | "red" | "neutral" = "neutral", started = true) => {
+    const idx = Math.max(...keys.map((k) => STAGE_ORDER.indexOf(k)));
+    const current = keys.includes(job.stage);
+    const done = !current && idx < stageIndex;
+    if (current) return `flex flex-col gap-2 bg-white ring-2 ring-ink ${tone === "red" ? "border-red-bar" : tone === "amber" ? "bg-amber-soft/40 border-amber-bar" : "border-ink"}`;
+    if (done) return "flex flex-col gap-2 tile-done bg-green-soft/50 border-green";
+    if (tone === "amber" && started) return "flex flex-col gap-2 bg-amber-soft/40 border-amber-bar";
+    if (tone === "red" && started) return "flex flex-col gap-2 border-red-bar";
+    return started ? "flex flex-col gap-2 border-line" : "flex flex-col gap-2 bg-canvas opacity-70";
+  };
   const mapHref = gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
   const overrides = events.filter((e) => e.event_type === "override");
   const pendingMove = moveRequests.find((m) => m.status === "pending");
@@ -201,6 +226,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <PriorityBadge priority={job.priority} />
             {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
             {isVip ? <Badge tone="ink">VIP</Badge> : null}
+            {loose ? <Badge tone="ink">Loose items</Badge> : null}
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
@@ -213,7 +239,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         }
         actions={
           <>
-            {canEditGateIn && !check.complete ? (
+            {canEditGateIn && !check.complete && !loose ? (
               <LinkButton href={`/jobs/${id}/media`} size="lg">
                 Add video and photos
               </LinkButton>
@@ -260,7 +286,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
               </span>
             </div>
-            <StageTrack stage={job.stage} timing={timing} />
+            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
@@ -277,6 +303,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               <p className="text-[16px] font-semibold whitespace-pre-wrap">{gateIn?.customer_requests}</p>
             )}
           </section>
+          {loose ? <ItemsCard jobId={id} items={looseItems} broughtBy={job.brought_by} assessmentNote={job.assessment_note} photoUrls={itemPhotoUrls} canPrint={job.is_open && !staff.viewingAs} /> : null}
         </div>
 
         <section className="rounded-card bg-track border border-ink p-5 flex flex-col gap-3">
@@ -342,15 +369,19 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {job.comeback_of || comebacksOfThis.length ? (
         <ComebackCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} original={comebackOriginal} comebacks={comebacksOfThis} inspectionApproved={inspection?.inspection.status === "approved"} />
       ) : null}
+      {stickerData ? <ServiceStickerCard jobId={id} data={stickerData} canPrint={(["owner", "gate_in", "parts", "service_advisor"].includes(role) || can(role, "manageWork")) && !staff.viewingAs && job.is_open} printedBy={null} /> : null}
       {job.summary ? <JobSummaryCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} /> : null}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card className={`flex flex-col gap-2 ${toneCls[approvalState.tone]} ${job.stage === "gate_in" ? "ring-2 ring-ink" : ""}`}>
+        {!loose ? (
+        <Card className={tile(["gate_in"], approvalState.tone)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
           <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
         </Card>
-        <Card className={`flex flex-col gap-2 ${toneCls[inspectionState.tone]} ${job.stage === "inspection" || job.stage === "quote" ? "ring-2 ring-ink" : ""}`}>
+        ) : null}
+        {!loose ? (
+        <Card className={tile(["inspection", "quote"], inspectionState.tone)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Inspection report</span>
           <span className="text-sm font-semibold">{inspectionState.text}</span>
           {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
@@ -365,8 +396,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
           {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
         </Card>
+        ) : null}
         {seesQuote ? (
-        <Card id="quotation" className={`flex flex-col gap-2 ${qState.tone === "green" ? "border-green" : qState.tone === "amber" ? "border-amber-bar" : qState.tone === "red" ? "border-red-bar" : "border-line"} ${job.stage === "quote" || job.stage === "approval" ? "ring-2 ring-ink" : ""}`}>
+        <Card id="quotation" className={tile(["quote", "approval"], qState.tone)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Quotation</span>
           <span className="text-sm font-semibold">{qState.text}</span>
           {latestQuote ? (
@@ -379,10 +411,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </span>
           ) : null}
           <div className="flex flex-wrap gap-2 mt-auto">
-            {!latestQuote && canQuote && (inspection?.inspection.status === "approved" || role === "owner") ? (
+            {!latestQuote && canQuote && (loose || inspection?.inspection.status === "approved" || role === "owner") ? (
               <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
                 <Button type="submit" size="md">Start quotation</Button>
-                {inspection?.inspection.status !== "approved" ? <span className="text-xs font-semibold text-amber-bar">Owner override: the inspection report is not approved yet (logged)</span> : null}
+                {!loose && inspection?.inspection.status !== "approved" ? <span className="text-xs font-semibold text-amber-bar">Owner override: the inspection report is not approved yet (logged)</span> : null}
               </form>
             ) : !latestQuote && canQuote ? (
               <span className="flex flex-col gap-1">
@@ -403,7 +435,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
         </Card>
         ) : null}
-        <Card className={`flex flex-col gap-2 ${partItems.length ? "" : "bg-canvas opacity-70"} ${job.stage === "parts" ? "ring-2 ring-ink" : ""}`}>
+        <Card className={tile(["parts"], "neutral", partItems.length > 0)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Parts</span>
           <span className="text-sm font-semibold">
             {partItems.length === 0 ? (quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
@@ -433,7 +465,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           {partsState.late.length ? <span className="text-xs font-bold text-red">{partsState.late.length} part{partsState.late.length === 1 ? "" : "s"} late</span> : null}
           {partsState.needed.length ? <span className="text-xs text-muted">Handed over {partsState.confirmed.length} of {partsState.needed.length}</span> : null}
         </Card>
-        <Card className={`flex flex-col gap-2 ${work ? "" : "bg-canvas opacity-70"} ${job.stage === "work" ? "ring-2 ring-ink" : ""}`}>
+        <Card className={tile(["work"], job.status === "in_work" && job.work_done_at ? "amber" : "neutral", !!work)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Work</span>
           <span className="text-sm font-semibold">{job.status === "in_work" && job.work_done_at ? `Job finished, waiting on ${managerLabel} to confirm` : work && job.plan_released_at ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} jobs done` : work ? "Planned, not released" : "Not started"}</span>
           {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min used of {work.hoursQuoted.toFixed(1)} h charged{plan?.technicians.length ? ` · ${plan.technicians.filter((t) => !t.left_at).map((t) => t.display_name).join(", ")}` : ""}{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
@@ -444,19 +476,21 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </div>
           ) : null}
         </Card>
-        <Card className={`flex flex-col gap-2 ${qc ? "" : "bg-canvas opacity-70"} ${job.stage === "qc" ? "ring-2 ring-ink" : ""}`}>
+        <Card className={tile(["qc"], qc?.status === "failed" ? "red" : "neutral", !!qc)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">QC</span>
           <span className="text-sm font-semibold">{qc ? (qc.status === "open" ? `Round ${qc.round} in progress` : qc.status === "passed" ? `Passed, round ${qc.round}` : `Failed, round ${qc.round}`) : "Not started"}</span>
           {job.rework_count ? <span className="text-xs text-red font-bold">Rework {job.rework_count}×</span> : null}
           {(qc || job.status === "pending_qc") && (can(role, "doQc") || can(role, "viewWorkOrders")) ? <div className="mt-auto"><LinkButton href={`/qc/${id}`} tone={job.status === "pending_qc" && can(role, "doQc") ? "primary" : "secondary"} size="md">{job.status === "pending_qc" && can(role, "doQc") ? "Start QC" : "QC"}</LinkButton></div> : null}
         </Card>
-        <Card className={`flex flex-col gap-2 ${wash ? "" : "bg-canvas opacity-70"} ${job.stage === "wash" ? "ring-2 ring-ink" : ""}`}>
+        {!loose ? (
+        <Card className={tile(["wash"], job.status === "pending_wash" && !job.wash_sent_at ? "amber" : "neutral", !!wash || job.status === "pending_wash")}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Wash</span>
           <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? (job.wash_sent_at ? `At the wash since ${formatDayTime(job.wash_sent_at)}` : "Ready for wash") : "Not started"}</span>
           {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><WashForms jobId={id} atWash={!!job.wash_sent_at} canAct={(role === "owner" || role === "service_advisor") && !staff.viewingAs} from="job" sendAction={sendToWash.bind(null, id)} doneAction={washDone.bind(null, id)} skipAction={skipWash.bind(null, id)} /></div> : null}
         </Card>
+        ) : null}
         {can(role, "viewInvoices") ? (
-        <Card id="invoice" className={`flex flex-col gap-2 ${bal?.invoice?.kind === "tax_invoice" && bal.state === "paid" ? "border-green" : bal?.invoice || job.status === "ready" || job.status === "pending_payment" ? "border-ink" : "bg-canvas opacity-70"} ${job.stage === "ready" ? "ring-2 ring-ink" : ""}`}>
+        <Card id="invoice" className={tile(["ready"], bal?.invoice?.kind === "tax_invoice" && bal.state === "paid" ? "green" : bal?.invoice ? "amber" : "neutral", !!bal?.invoice || job.status === "ready" || job.status === "pending_payment")}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{bal?.invoice?.kind === "tax_invoice" ? "Tax invoice" : "Proforma"}</span>
           <span className="text-sm font-semibold">{bal?.invoice ? `${bal.invoice.number} · ${bal.state === "paid" ? (bal.invoice.kind === "tax_invoice" ? "paid in full" : "paid, tax invoice on its way") : bal.state === "part_paid" ? `part paid, AED ${bal.balance.toFixed(0)} due` : bal.state === "cheque_pending" ? "cheque pending" : `awaiting payment, AED ${bal.balance.toFixed(0)}`}` : job.status === "ready" || job.status === "pending_payment" ? (bal?.needsInvoice ? "Proforma to prepare" : "Nothing to invoice") : job.inspection_fee_due ? "Inspection fee to invoice" : "After QC and the wash"}</span>
           {job.ready_sent_at ? <span className="text-xs text-muted">Proforma sent {formatDayTime(job.ready_sent_at)}</span> : null}
@@ -600,7 +634,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <Card className="flex flex-col gap-3">
               <SectionLabel>Assign technician</SectionLabel>
               <form action={assignJob.bind(null, id)} className="flex flex-col gap-3">
-                <TechnicianChecks technicians={technicians ?? []} checked={job.assigned_to ? [job.assigned_to] : []} hint="Tick one or more. The first ticked is the lead and does the inspection." />
+                <TechnicianPicker technicians={await technicianLoads(settings, job.department === "bodyshop" ? "bodyshop" : "mechanical")} checked={job.assigned_to ? [job.assigned_to] : []} hint="Freest first. Tick one or more; the first ticked is the lead and does the inspection." />
                 <div className="flex flex-col gap-1">
                   <span className="text-sm font-semibold">Road test</span>
                   <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_CHOICES} />
@@ -675,7 +709,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <SectionLabel>Move to step (owner)</SectionLabel>
                 <form action={moveJob.bind(null, id)} className="flex flex-col gap-3">
                   <Select name="status" defaultValue={job.status}>
-                    {MANUAL_STATUS_OPTIONS.map((s) => (
+                    {MANUAL_STATUS_OPTIONS.filter((s) => !loose || !["pending_inspection", "in_inspection", "pending_wash"].includes(s)).map((s) => (
                       <option key={s} value={s}>
                         {STATUS_LABELS[s]}
                       </option>

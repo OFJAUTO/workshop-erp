@@ -11,6 +11,8 @@ import { PENDING_GROUPS, STATUS_LABELS, type JobStatus, type Priority, type Stag
 /** One car on the dashboard, already shaped on the server so the list can be filtered and sorted here. */
 export type DashRow = {
   id: string;
+  /** Items without a car: no inspection, no wash. */
+  loose: boolean;
   jobNumber: string;
   plate: string;
   title: string;
@@ -231,6 +233,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.plate}</span>
                       {j.vip ? <Badge tone="ink">VIP</Badge> : null}
+                      {j.loose ? <Badge tone="ink">Loose items</Badge> : null}
                       <PriorityBadge priority={j.priority} />
                       <TimingBadge timing={j.timing} />
                       {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
@@ -247,7 +250,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                   </div>
                   <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
                     <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
-                    <StageTrack stage={j.stage} timing={j.timing} />
+                    <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} />
                   </div>
                 </Card>
               </Link>

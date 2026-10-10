@@ -270,7 +270,7 @@ const quickSchema = z
     plate_emirate: z.string().trim(),
     plate_code: z.string().trim().toUpperCase(),
     plate_number: z.string().trim().toUpperCase(),
-    vin: z.string().trim().toUpperCase().min(1, "Enter the VIN."),
+    vin: z.string().trim().toUpperCase().min(1, "Enter the VIN.").regex(/^[A-HJ-NPR-Z0-9]{17}$/, "A VIN is 17 letters and digits; it never has I, O or Q."),
     make_id: z.string().trim(),
     make_text: z.string().trim(),
     model_id: z.string().trim(),

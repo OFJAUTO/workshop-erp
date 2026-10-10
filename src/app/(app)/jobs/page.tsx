@@ -28,7 +28,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)",
+      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)",
     )
     .eq("is_open", !closed)
     .order(closed ? "gated_out_at" : "gated_in_at", { ascending: false })
@@ -54,6 +54,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
               {closed ? "Show open" : "Show closed"}
             </LinkButton>
             {can(role, "gateIn") ? <LinkButton href="/gate-in">Gate in a car</LinkButton> : null}
+            {can(role, "gateIn") ? <LinkButton href="/gate-in/loose" tone="secondary">Loose items</LinkButton> : null}
           </>
         }
       />
@@ -70,6 +71,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                   <div className="flex-1 min-w-0 flex flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
+                      {j.job_kind === "loose" ? <Badge tone="ink">Loose items</Badge> : null}
                       <PriorityBadge priority={j.priority} />
                       <TimingBadge timing={timing} />
                       {!j.is_open ? <Badge>Closed</Badge> : null}
@@ -82,7 +84,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                   </div>
                   <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
                     <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
-                    <StageTrack stage={j.stage} timing={timing} />
+                    <StageTrack stage={j.stage} timing={timing} skip={j.job_kind === "loose" ? ["inspection", "wash"] : undefined} />
                   </div>
                 </Card>
               </Link>

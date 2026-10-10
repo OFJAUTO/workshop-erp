@@ -11,7 +11,7 @@ export default async function NewEstimatePage({ searchParams }: { searchParams: 
   const supabase = await createClient();
   const [{ data: customers }, { data: vehicles }] = await Promise.all([
     supabase.from("customers").select("id, full_name, company_name, phone").eq("is_active", true).order("full_name"),
-    supabase.from("vehicles").select("id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("is_active", true),
+    supabase.from("vehicles").select("kind, id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("is_active", true),
   ]);
   type V = { id: string; customer_id: string; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null };
   return (
