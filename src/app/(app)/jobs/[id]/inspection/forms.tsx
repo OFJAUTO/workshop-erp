@@ -4,10 +4,29 @@ import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { useState } from "react";
 import { Input, Textarea } from "@/components/ui";
 
-/** The workshop manager approves with a note and agrees the estimated hours. Without a pre-scan attached it asks first. */
-export function ApproveForm({ action, hasPrescan, techHours = null }: { action: FormAction; hasPrescan: boolean; techHours?: number | null }) {
+const SAFE_TO_DRIVE = /safe to drive/i;
+
+/**
+ * The workshop manager approves with a note (one-tap presets, most used first, combinable and editable; a
+ * "safe to drive" note asks for a second tap), an optional internal note for the advisor, and agrees the
+ * estimated hours. Without a pre-scan attached it asks first.
+ */
+export function ApproveForm({ action, hasPrescan, techHours = null, presets = [], partsCount = 0 }: { action: FormAction; hasPrescan: boolean; techHours?: number | null; presets?: string[]; partsCount?: number }) {
   const [hours, setHours] = useState(techHours === null ? "" : String(techHours));
+  const [partsOk, setPartsOk] = useState(false);
+  const [note, setNote] = useState("");
+  const [used, setUsed] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const changed = techHours !== null && hours.trim() !== "" && Number(hours.replace(",", ".")) !== techHours;
+  function tap(p: string) {
+    if (SAFE_TO_DRIVE.test(p) && confirming !== p) {
+      setConfirming(p);
+      return;
+    }
+    setConfirming(null);
+    setNote((n) => (n.trim() ? `${n.trim()} ${p}` : p));
+    setUsed((u) => [...u, p]);
+  }
   return (
     <div
       onSubmitCapture={(e) => {
@@ -17,9 +36,23 @@ export function ApproveForm({ action, hasPrescan, techHours = null }: { action: 
       <ActionForm action={action} className="flex flex-col gap-3">
         {(v) => (
           <>
+            {presets.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {presets.map((p) => (
+                  <button key={p} type="button" onClick={() => tap(p)} className={`min-h-10 rounded-control border px-2.5 text-left text-xs font-semibold ${confirming === p ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                    {confirming === p ? `Tap again to confirm: ${p}` : p}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <label className="flex flex-col gap-1">
-              <span className="text-sm font-semibold">Your note (required)</span>
-              <Textarea name="manager_note" defaultValue={v.manager_note} rows={3} required />
+              <span className="text-sm font-semibold">Your note to the customer (required)</span>
+              <Textarea name="manager_note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} required placeholder="Tap a note above or write one. It goes on the customer's report." />
+            </label>
+            <input type="hidden" name="presets_used" value={used.join("\n")} />
+            <label className="flex flex-col gap-1">
+              <span className="text-sm font-semibold">Note for the advisor (internal, optional)</span>
+              <Textarea name="manager_note_internal" defaultValue={v.manager_note_internal} rows={2} placeholder="Never shown to the customer." />
             </label>
             {techHours !== null ? (
               <div className="flex flex-col gap-2 rounded-control bg-chip p-3">
@@ -41,6 +74,14 @@ export function ApproveForm({ action, hasPrescan, techHours = null }: { action: 
             ) : (
               <p className="text-xs text-muted">The technician gave no estimated hours.</p>
             )}
+            {partsCount > 0 ? (
+              <button type="button" onClick={() => setPartsOk((v) => !v)} aria-pressed={partsOk} className={`min-h-12 rounded-control border-2 px-4 text-left text-sm font-bold ${partsOk ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                {partsOk ? "✓ Parts list checked" : `Parts list checked (${partsCount} line${partsCount === 1 ? "" : "s"}) · tap once you have looked at it`}
+              </button>
+            ) : (
+              <p className="text-xs text-muted">No parts on this report.</p>
+            )}
+            <input type="hidden" name="parts_list_confirmed" value={partsOk ? "1" : ""} />
             {!hasPrescan ? <p className="text-xs text-amber font-semibold">No pre-scan PDF is attached yet. You can still approve.</p> : null}
             <SubmitButton>Approve report</SubmitButton>
           </>

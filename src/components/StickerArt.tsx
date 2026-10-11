@@ -14,7 +14,7 @@ export function PartSticker({ w, h, logoUrl, d }: { w: number; h: number; logoUr
   return (
     <div style={base(w, h)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={logoUrl} alt="" style={{ height: `${h * 0.16}mm`, maxWidth: `${w * 0.8}mm`, objectFit: "contain" }} />
+      <img src={logoUrl} alt="" style={{ height: `${h * 0.2}mm`, maxWidth: `${w * 0.8}mm`, objectFit: "contain" }} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={d.qr} alt="" style={{ width: `${qr}mm`, height: `${qr}mm` }} />
       <div style={{ fontSize: `${Math.max(1.6, h * 0.09)}mm`, fontWeight: 700, lineHeight: 1.15, textAlign: "center" }}>

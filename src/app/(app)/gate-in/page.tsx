@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
+import { WaitingPanel } from "@/components/WaitingPanel";
 
 type Row = VehicleRow & {
   make: { name: string } | null;
@@ -55,6 +56,7 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
     <>
       <PageHeader title="Gate in a car" subtitle="Find the car by plate or VIN. New car? Add the customer and car in one step." actions={<><LinkButton href="/gate-in/loose" tone="secondary" size="lg">Loose items, no car</LinkButton><LinkButton href="/gate-in/new-car" tone="secondary" size="lg">New customer and car</LinkButton></>} />
 
+      <WaitingPanel staff={staff} />
       {pending.length ? (
         <Card className="flex flex-col gap-3 border-amber-bar">
           <SectionLabel right={`${pending.length}`}>Your gate-ins still waiting for photos or video</SectionLabel>

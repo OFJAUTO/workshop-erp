@@ -84,6 +84,7 @@ export default async function JobReportPage({ params }: { params: Promise<{ id: 
               </li>
             ))}
           </ul>
+          {r.roadTestHours > 0 ? <p className="text-xs text-muted">Of the inspection time, {hoursText(r.roadTestHours)} was waiting for the road test (counted on its own).</p> : null}
           {r.delays.length ? <ul className="list-disc pl-5 text-sm font-semibold text-red">{r.delays.map((d) => <li key={d}>{d}</li>)}</ul> : <p className="text-sm text-muted">No step took longer than its target.</p>}
         </Card>
         <Card className="flex flex-col gap-2">

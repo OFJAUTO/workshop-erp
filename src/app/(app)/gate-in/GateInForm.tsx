@@ -8,6 +8,7 @@ import { GateInAssist } from "@/components/GateInAssist";
 import { ImageCropper } from "@/components/ImageCropper";
 import { MileageInput } from "@/components/MileageInput";
 import { RequestsList } from "@/components/RequestsList";
+import { FormDraft } from "@/components/FormDraft";
 import { Card, ChoiceButtons, Field, Input, SectionLabel, Textarea } from "@/components/ui";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS } from "@/lib/jobs";
 import type { MileageUnit } from "@/lib/mileage";
@@ -32,6 +33,7 @@ export function GateInForm({
   mileageContext = { modelYear: null, lastKm: null, lastVisitAt: null },
   estimates = [],
   comebacks = [],
+  draftKey,
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -51,6 +53,8 @@ export function GateInForm({
   estimates?: { id: string; label: string; hint: string }[];
   /** Jobs of this car gated out within the comeback window. */
   comebacks?: { id: string; label: string; hint: string }[];
+  /** Keeps what was typed in this browser until Save, so a closed tablet loses nothing. */
+  draftKey?: string;
 }) {
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
@@ -60,6 +64,7 @@ export function GateInForm({
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
       {(v) => (
         <>
+          {draftKey ? <FormDraft draftKey={draftKey} skip={["requests"]} /> : null}
           <input type="hidden" name="is_electric" value={isElectric ? "yes" : "no"} />
           {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
 
@@ -148,7 +153,7 @@ export function GateInForm({
               <Card className="flex flex-col gap-5">
                 <SectionLabel>Customer</SectionLabel>
                 <Field label="Customer requests, one line each, in their own words" hint={requestsLocked ? "Locked once the gate-in is complete." : "Enter adds a line. At least one is required."}>
-                  <RequestsList initial={requests} locked={requestsLocked} />
+                  <RequestsList initial={requests} locked={requestsLocked} draftKey={draftKey} />
                 </Field>
                 <Field label="Notes for unusual cases" optional>
                   <Textarea name="notes" defaultValue={v.notes} rows={2} />

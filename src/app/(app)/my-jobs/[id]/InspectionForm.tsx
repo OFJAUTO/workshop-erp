@@ -2,26 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
+import { PartPicker } from "@/components/PartPicker";
+import { batteryEntriesFrom, mergePartsList, newEntryId, partsListLine, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
 import { JumpButton, ProblemsBar, SubmitOutcome, jumpTo } from "@/components/FormAssist";
 import { PrescanToggle } from "@/components/PrescanToggle";
 import { QuickCodeButton } from "@/components/QuickCodeButton";
+import { TyreSizeInput } from "@/components/TyreSizeInput";
 import { Card, Input, Notice, SectionLabel, Select, Textarea } from "@/components/ui";
 import {
-  CHECK_STATUSES,
   DISC_ACTIONS,
   DISC_CONDITIONS,
-  ITEM_STATUSES,
-  ITEM_STATUS_LABELS,
   LEAK_REPAIRS,
   LEAK_SEVERITIES,
   MEASUREMENTS,
   OPTIONAL_SECTION_KEY,
-  PARTS_UNITS,
   ROAD_TEST_SECTION_KEY,
   TYRE_ACTIONS,
   TYRE_CONDITIONS,
   TYRE_POSITIONS,
+  TYRE_REASON_ABOVE_MM,
+  TYRE_REPLACE_REASONS,
   cleanTyreConditions,
   discStatus,
   fluidGradesFor,
@@ -29,23 +30,30 @@ import {
   isDiscItem,
   isFluidItem,
   isLeakItem,
+  itemStatusLabel,
+  itemStatusesFor,
   leakPartFor,
   leakRemark,
   reportProblemsOf,
   reportProgressOf,
   tyreItemStatus,
+  tyreReasonNeeded,
+  tyreSizeComplete,
+  tyreSizeText,
   tyreYearOptions,
   type ChecklistSection,
   type InspectionLimits,
   type ItemStatus,
+  type ItemStyle,
   type PartsRow,
-  tyreSizeText,
 } from "@/lib/inspection";
 
 export type ItemState = {
   key: string;
   label: string;
   sectionKey: string;
+  /** grade: Good / Average / Bad. job: OK / Required. */
+  style: ItemStyle;
   status: ItemStatus | null;
   remarks: string;
   parts_needed: string;
@@ -153,13 +161,13 @@ function useAutosave(inspectionId: string) {
   return { save, state, error, flush };
 }
 
-/** GOOD / AVERAGE / BAD, plus N/A in grey on checklist items. */
-function StatusButtons({ value, onPick, disabled, statuses }: { value: ItemStatus | null; onPick: (s: ItemStatus) => void; disabled: boolean; statuses: readonly ItemStatus[] }) {
+/** Good / Average / Bad (or OK / Required on a job item), plus N/A in grey. */
+function StatusButtons({ value, onPick, disabled, statuses, style = "grade" }: { value: ItemStatus | null; onPick: (s: ItemStatus) => void; disabled: boolean; statuses: readonly ItemStatus[]; style?: ItemStyle }) {
   return (
     <div className={`grid gap-2 ${statuses.length === 4 ? "grid-cols-4" : "grid-cols-3"}`}>
       {statuses.map((s) => (
         <button key={s} type="button" disabled={disabled} onClick={() => onPick(s)} aria-pressed={value === s} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${value === s ? STATUS_CLASS[s] : s === "na" ? "border-line bg-white text-muted" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
-          {ITEM_STATUS_LABELS[s]}
+          {itemStatusLabel(s, style)}
         </button>
       ))}
     </div>
@@ -202,7 +210,13 @@ export function InspectionForm({
   jobId,
   checklist,
   items: initialItems,
-  findings: initialFindings,
+  requests = [],
+  requestsNote: initialRequestsNote = "",
+  complaintKeywords = {},
+  wheelConditions = [],
+  tyreSizeSuggestion = null,
+  catalogue = [],
+  partsList: initialPartsList = [],
   measurements: initialMeasurements,
   files: initialFiles,
   notes: initialNotes,
@@ -227,7 +241,19 @@ export function InspectionForm({
   jobId: string;
   checklist: ChecklistSection[];
   items: ItemState[];
-  findings: FindingState[];
+  /** The customer's requests, read on the report (not answered). */
+  requests?: { id: string; text: string }[];
+  requestsNote?: string;
+  /** Words in a request that tag a section "Customer complaint", by section key (Settings). */
+  complaintKeywords?: Record<string, string[]>;
+  /** What was ticked under each wheel at gate-in, shown next to the wheel item. */
+  wheelConditions?: { label: string; text: string }[];
+  /** The tyre sizes other cars of this model had, offered on an empty box. */
+  tyreSizeSuggestion?: { front: string; rear: string } | null;
+  /** The owner's parts pool for the picker. */
+  catalogue?: CatalogueRow[];
+  /** The parts gathered so far. */
+  partsList?: PartsListEntry[];
   measurements: Record<string, string>;
   files: (InspectionFile & { itemKey: string | null; requestId: string | null })[];
   notes: string;
@@ -254,7 +280,11 @@ export function InspectionForm({
   thisYear?: number;
 }) {
   const [items, setItems] = useState(initialItems);
-  const [findings, setFindings] = useState(initialFindings);
+  const [requestsNote, setRequestsNote] = useState(initialRequestsNote);
+  const [barOpen, setBarOpen] = useState(false);
+  const [partsList, setPartsList] = useState<PartsListEntry[]>(initialPartsList);
+  const partsRef = useRef(initialPartsList);
+  const [pickerFor, setPickerFor] = useState<{ itemKey: string | null; label: string } | null>(null);
   const [measurements, setMeasurements] = useState(initialMeasurements);
   const latestMeasurements = useRef(initialMeasurements);
   const [files, setFiles] = useState(initialFiles);
@@ -296,18 +326,67 @@ export function InspectionForm({
     setItems((prev) => prev.map((i) => (i.sectionKey === sectionKey ? { ...i, status: "na" } : i)));
     save({ sectionAll: { key: sectionKey, status: "na" } });
   }
-  function setFindingStatus(requestId: string, status: ItemStatus) {
-    setFindings((prev) => prev.map((f) => (f.requestId === requestId ? { ...f, status } : f)));
-    save({ finding: { requestId, status } });
+  function setRequestsNoteText(value: string) {
+    setRequestsNote(value);
+    debounced("requests-note", () => ({ inspection: { requests_note: value } }));
   }
-  function setFindingText(requestId: string, field: "found" | "needs", value: string) {
-    setFindings((prev) => prev.map((f) => (f.requestId === requestId ? { ...f, [field]: value } : f)));
-    debounced(`${requestId}.${field}`, () => ({ finding: { requestId, [field]: value } }));
-  }
+  // The place on the page is remembered, so a tablet put down and picked up again opens where the technician was.
+  useEffect(() => {
+    const key = `erp-inspection-pos-${inspectionId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const s = JSON.parse(raw) as { y: number; t: number };
+        if (Date.now() - s.t < 86400000 && s.y > 120 && !location.hash) {
+          const go = () => window.scrollTo({ top: s.y });
+          requestAnimationFrame(go);
+          setTimeout(go, 300);
+        }
+      }
+    } catch {}
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        try {
+          localStorage.setItem(key, JSON.stringify({ y: window.scrollY, t: Date.now() }));
+        } catch {}
+      }, 400);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [inspectionId]);
+  /** The parts list is saved whole on every change; the tyre and battery entries follow their answers. */
+  const setList = (list: PartsListEntry[]) => {
+    partsRef.current = list;
+    setPartsList(list);
+    save({ partsList: list });
+  };
+  const syncAutoParts = (m: Record<string, string>) => {
+    let list = withAutoEntries(partsRef.current, "tyre", tyreEntriesFrom(m, catalogue));
+    list = withAutoEntries(list, "measure", batteryEntriesFrom(m, catalogue));
+    if (list !== partsRef.current) setList(list);
+  };
+  const commitParts = (itemKey: string | null, entries: PartsListEntry[]) => {
+    const kept = partsRef.current.filter((e) => !((e.item_key ?? null) === itemKey && (e.source === "item" || e.source === "custom")));
+    setList([...kept, ...entries]);
+    setPickerFor(null);
+  };
+  const removeEntry = (id: string) => setList(partsRef.current.filter((e) => e.id !== id));
+  const addEntryIfMissing = (itemKey: string, name: string) => {
+    if (partsRef.current.some((e) => e.item_key === itemKey && e.name.toLowerCase() === name.toLowerCase())) return;
+    const row = catalogue.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    setList([...partsRef.current, { id: newEntryId(), catalogue_id: row?.id ?? null, name: row?.name ?? name, qty: 1, positions: [], item_key: itemKey, source: "item", note: null }]);
+  };
   function setMeasurement(key: string, value: string, immediate = false) {
     const next = { ...latestMeasurements.current, [key]: value };
     latestMeasurements.current = next;
     setMeasurements(next);
+    if (/^tyre_|^battery_/.test(key)) syncAutoParts(next);
     if (immediate) save({ measurements: next });
     else debounced("measurements", () => ({ measurements: latestMeasurements.current }));
     // Tyre actions decide the Tyres item on their own.
@@ -337,8 +416,8 @@ export function InspectionForm({
     const auto = leakRemark(next.leak_severity, next.leak_repair);
     const remarks = !it.remarks.trim() || it.remarks === leakRemark(it.leak_severity, it.leak_repair) ? auto : it.remarks;
     const part = leakPartFor(next.leak_repair, it.label);
-    const rows = part && !next.parts_rows.some((r) => r.part.toLowerCase() === part.toLowerCase()) ? [...next.parts_rows, { part, qty: 1, unit: "pc" }] : next.parts_rows;
-    patchItem(it.key, { [field]: next[field], remarks, parts_rows: rows });
+    if (part) addEntryIfMissing(it.key, part);
+    patchItem(it.key, { [field]: next[field], remarks });
   }
   /** Brake discs: the condition and the action set AVERAGE or BAD by themselves; below minimum locks the action to replace. */
   function setDisc(it: ItemState, field: "disc_condition" | "disc_action", value: string) {
@@ -347,14 +426,13 @@ export function InspectionForm({
     const status = discStatus(next.disc_condition, next.disc_action);
     patchItem(it.key, { disc_condition: next.disc_condition, disc_action: next.disc_action, ...(status ? { status } : {}) });
   }
-  const setRows = (it: ItemState, rows: PartsRow[], immediate: boolean) => patchItem(it.key, { parts_rows: rows }, immediate);
 
   const filesFor = (where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }) =>
     files.filter((f) => (where.isPrescan ? f.isPrescan : !f.isPrescan && (f.itemKey ?? null) === (where.itemKey ?? null) && (f.requestId ?? null) === (where.requestId ?? null)));
   const addFile = (where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }) => (f: InspectionFile) =>
     setFiles((prev) => [...prev, { ...f, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan }]);
 
-  const reportState = { items, findings, measurements, estimatedHours: submitAction ? estimate : null, scan: scanState?.gate ? { required: true, read: !!scanState.readAt, approved: !!scanState.approvedAt } : undefined };
+  const reportState = { items, measurements, estimatedHours: submitAction ? estimate : null, scan: scanState?.gate ? { required: true, read: !!scanState.readAt, approved: !!scanState.approvedAt } : undefined };
   const problems = reportProblemsOf(reportState, { limits });
   const progress = reportProgressOf(reportState, { limits });
   const problemKeys = new Set(problems.map((p) => p.key));
@@ -366,9 +444,18 @@ export function InspectionForm({
   const tyreBtn = (on: boolean, danger = false) => `min-h-11 rounded-control border-2 px-2 text-xs font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-white" : "border-ink bg-ink text-white") : "border-line-strong bg-white"} ${locked ? "opacity-60" : ""}`;
   const prescanFiles = filesFor({ isPrescan: true });
   const yearOptions = tyreYearOptions(thisYear, limits.tyre_years);
-  const allPartSuggestions = Array.from(new Set(Object.values(suggestions).flatMap((s) => s.parts ?? []))).sort();
+  const mergedParts = mergePartsList(partsList);
+  const fromLabel = (line: { entries: PartsListEntry[] }) =>
+    Array.from(new Set(line.entries.map((e) => (e.source === "tyre" ? "Tyres" : e.source === "measure" ? "Battery test" : e.item_key ? (items.find((i) => i.key === e.item_key)?.label ?? "") : "added at the end")))).filter(Boolean).join(", ");
   const outOfRange = (key: string) => problems.some((p) => p.key === `m-${key}` && /to |between/.test(p.label));
   const dangerCount = items.filter((i) => i.dangerous).length + TYRE_POSITIONS.filter((p) => measurements[`tyre_${p.key}_danger`] === "1").length;
+  // Sections the customer's words point to.
+  const complaintSections = new Set(
+    Object.entries(complaintKeywords)
+      .filter(([, words]) => Array.isArray(words) && requests.some((r) => words.some((w) => w && r.text.toLowerCase().includes(String(w).toLowerCase()))))
+      .map(([k]) => k),
+  );
+  const complaintTag = (sectionKey: string) => (complaintSections.has(sectionKey) ? <span className="rounded-control border border-ink px-2 py-0.5 text-[11px] font-bold">Customer complaint</span> : null);
 
   return (
     <div className="flex flex-col gap-6 pb-24">
@@ -414,54 +501,49 @@ export function InspectionForm({
       ) : null}
       {!scanGateOpen ? <Notice tone="info">The checklist opens once the scan report is read, or the manager approves that no scan was possible.</Notice> : null}
 
-      <Card className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-2">
-          <SectionLabel right={`${findings.filter((f) => f.status).length} of ${findings.length}`}>Customer requests</SectionLabel>
-          <Dot ok={!problems.some((p) => p.key.startsWith("req-"))} attempted={attempted} />
-        </div>
-        {findings.length === 0 ? <p className="text-sm text-muted">No customer requests were recorded at gate-in.</p> : null}
-        {findings.map((f, i) => (
-          <div key={f.requestId} id={`item-req-${f.requestId}`} className={`rounded-card border p-3 flex flex-col gap-3 ${problemKeys.has(`req-${f.requestId}`) ? "border-line" : "border-green"}`}>
-            <p className="font-bold">
-              {i + 1}. {f.text}
-            </p>
-            <StatusButtons value={f.status} onPick={(s) => setFindingStatus(f.requestId, s)} disabled={locked} statuses={CHECK_STATUSES} />
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">What was found (required)</span>
-              <Textarea value={f.found} onChange={(e) => setFindingText(f.requestId, "found", e.target.value)} rows={2} disabled={locked} textCase="sentence" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">What it needs</span>
-              <Textarea value={f.needs} onChange={(e) => setFindingText(f.requestId, "needs", e.target.value)} rows={2} disabled={locked} textCase="sentence" />
-            </label>
-            <div className="flex flex-wrap items-start gap-3">
-              <InspectionMedia inspectionId={inspectionId} files={filesFor({ requestId: f.requestId })} where={{ requestId: f.requestId }} disabled={locked} onAdded={addFile({ requestId: f.requestId })} />
-              {!locked ? <QuickCodeButton jobId={jobId} target={`req-${f.requestId}`} label="Photo from my phone" compact /> : null}
-            </div>
-          </div>
-        ))}
-      </Card>
+      {requests.length ? (
+        <>
+          <button type="button" onClick={() => setBarOpen((o) => !o)} className="sticky top-1 z-20 flex items-start gap-2 rounded-control border border-line bg-white/95 px-3 py-1.5 text-left text-xs shadow-sm backdrop-blur" aria-expanded={barOpen}>
+            <span className="shrink-0 font-bold">Customer says:</span>
+            <span className={barOpen ? "whitespace-pre-wrap" : "truncate"}>{requests.map((r, i) => `${i + 1}. ${r.text}`).join(barOpen ? "\n" : " · ")}</span>
+          </button>
+          <Card className="flex flex-col gap-2" id="item-requests">
+            <SectionLabel right={`${requests.length}`}>The customer says</SectionLabel>
+            <ol className="flex flex-col gap-1.5">
+              {requests.map((r, i) => (
+                <li key={r.id} className="flex gap-3 text-base font-semibold leading-snug">
+                  <span className="w-6 shrink-0 text-muted">{i + 1}.</span>
+                  <span>{r.text}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="text-xs text-muted">For your information: nothing to answer here. The sections these words point to are marked &quot;Customer complaint&quot; below.</p>
+          </Card>
+        </>
+      ) : null}
 
       <Card className="flex flex-col gap-2">
         <SectionLabel right={`${marked} of ${total} marked`}>Full inspection</SectionLabel>
-        <p className="text-sm text-muted">Tap GOOD, AVERAGE, BAD or N/A on every item. AVERAGE and BAD need a remark: tap a suggestion or type. List the parts as rows with the quantity. N/A means it does not apply to this car.</p>
+        <p className="text-sm text-muted">Tap Good, Average, Bad or N/A on every part of the car; service items are OK or Required. Average and Bad need a remark: tap a suggestion or type. N/A means it does not apply to this car.</p>
       </Card>
 
       {sections.map((section) => {
         const sectionItems = items.filter((i) => i.sectionKey === section.key);
         const open = sectionItems.filter((i) => !i.status).length;
         const optional = section.key === OPTIONAL_SECTION_KEY;
+        const allJobs = sectionItems.length > 0 && sectionItems.every((i) => i.style === "job");
         return (
           <Card key={section.key} className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-2">
+              <span className="inline-flex flex-wrap items-center gap-2">
                 <Dot ok={sectionOk(section.key)} attempted={attempted} />
                 <SectionLabel right={open ? `${open} to mark${optional ? ", optional" : ""}` : undefined}>{section.title}</SectionLabel>
+                {complaintTag(section.key)}
               </span>
               {!locked && open ? (
                 <span className="flex gap-2">
                   <button type="button" onClick={() => allGood(section.key)} className="min-h-11 rounded-control border border-green bg-green-soft px-4 text-sm font-bold text-green">
-                    All GOOD
+                    {allJobs ? "All OK" : "All good"}
                   </button>
                   <button type="button" onClick={() => allNa(section.key)} className="min-h-11 rounded-control border border-line-strong bg-chip px-4 text-sm font-bold text-muted">
                     All N/A
@@ -470,19 +552,21 @@ export function InspectionForm({
               ) : null}
             </div>
             {sectionItems.map((it) => {
-              const needsDetail = it.status === "average" || it.status === "bad";
+              const isJob = it.style === "job";
+              const needsDetail = !isJob && (it.status === "average" || it.status === "bad");
               const sug = suggestions[it.key] ?? {};
               const disc = isDiscItem(it.label);
               const fluid = isFluidItem(it.label);
               const leak = isLeakItem(it.label);
               return (
-                <div key={it.key} id={`item-${it.key}`} className={`rounded-card border p-3 flex flex-col gap-3 ${it.dangerous ? "border-red-bar border-2" : it.status === "bad" ? "border-red-bar" : it.status === "average" ? "border-amber-bar" : "border-line"}`}>
+                <div key={it.key} id={`item-${it.key}`} className={`rounded-card border p-3 flex flex-col gap-3 ${it.dangerous ? "border-red-bar border-2" : isJob ? (it.status === "bad" ? "border-ink" : "border-line") : it.status === "bad" ? "border-red-bar" : it.status === "average" ? "border-amber-bar" : "border-line"}`}>
                   <p className="font-semibold flex flex-wrap items-center gap-2">
                     {it.label}
                     {it.dangerous ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}
                     {it.editedBy ? <span className="text-xs font-medium text-muted">edited by {it.editedBy}</span> : null}
                   </p>
-                  <StatusButtons value={it.status} onPick={(s) => setItemStatus(it.key, s)} disabled={locked} statuses={ITEM_STATUSES} />
+                  {/wheel condition/i.test(it.label) && wheelConditions.length ? <p className="text-xs text-muted">At gate-in: {wheelConditions.map((w) => `${w.label} ${w.text}`).join(" · ")}</p> : null}
+                  <StatusButtons value={it.status} onPick={(s) => setItemStatus(it.key, s)} disabled={locked} statuses={itemStatusesFor(it.style)} style={it.style} />
                   {disc ? (
                     <div className="flex flex-col gap-2 rounded-control bg-chip p-2">
                       <span className="text-xs font-semibold text-muted">Disc condition</span>
@@ -495,9 +579,9 @@ export function InspectionForm({
                       </div>
                     </div>
                   ) : null}
-                  {needsDetail || it.remarks ? (
+                  {needsDetail || it.remarks || (isJob && it.status === "bad") ? (
                     <div className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold text-muted">Remarks{needsDetail ? " (required)" : ""}</span>
+                      <span className="text-xs font-semibold text-muted">Remarks{needsDetail ? " (required)" : isJob ? " (optional)" : ""}</span>
                       {(quickRemarks.length || sug.remarks?.length) && !locked ? (
                         <div className="flex flex-wrap gap-1.5">
                           {Array.from(new Set([...quickRemarks, ...(sug.remarks ?? [])])).slice(0, 12).map((r) => (
@@ -528,31 +612,18 @@ export function InspectionForm({
                       <Input value={it.fluid_grade} onChange={(e) => patchItem(it.key, { fluid_grade: e.target.value }, false)} disabled={locked} placeholder="Or type the grade" className="max-w-56" />
                     </div>
                   ) : null}
-                  {needsDetail ? (
-                    <div className="flex flex-col gap-2">
-                      <span className="text-xs font-semibold text-muted">Parts needed</span>
-                      {sug.parts?.length && !locked ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {sug.parts.slice(0, 10).map((p) => (
-                            <button key={p} type="button" onClick={() => { if (!it.parts_rows.some((r) => r.part.toLowerCase() === p.toLowerCase())) setRows(it, [...it.parts_rows, { part: p, qty: 1, unit: "pc" }], true); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-semibold">+ {p}</button>
-                          ))}
-                        </div>
-                      ) : null}
-                      {it.parts_rows.map((r, idx) => (
-                        <div key={idx} className="grid grid-cols-[1fr_auto_auto_auto] gap-1.5 items-center">
-                          <Input value={r.part} list="erp-part-suggestions" onChange={(e) => setRows(it, it.parts_rows.map((x, j) => (j === idx ? { ...x, part: e.target.value } : x)), false)} disabled={locked} placeholder="Part name or number" />
-                          <span className="inline-flex items-center rounded-control border border-line-strong bg-white">
-                            <button type="button" disabled={locked} onClick={() => setRows(it, it.parts_rows.map((x, j) => (j === idx ? { ...x, qty: Math.max(1, x.qty - 1) } : x)), true)} className="min-h-11 w-10 text-lg font-bold">−</button>
-                            <span className="w-8 text-center text-sm font-bold">{r.qty}</span>
-                            <button type="button" disabled={locked} onClick={() => setRows(it, it.parts_rows.map((x, j) => (j === idx ? { ...x, qty: x.qty + 1 } : x)), true)} className="min-h-11 w-10 text-lg font-bold">+</button>
+                  {needsDetail || partsList.some((e) => e.item_key === it.key) ? (
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted">Parts</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {partsList.filter((e) => e.item_key === it.key).map((e) => (
+                          <span key={e.id} className="inline-flex items-center gap-1 rounded-control border border-line-strong bg-white px-2 py-1 text-xs font-semibold">
+                            {partsListLine(e)}
+                            {!locked ? <button type="button" aria-label={`Remove ${e.name}`} onClick={() => removeEntry(e.id)} className="min-h-6 px-1 font-bold text-red">×</button> : null}
                           </span>
-                          <Select value={r.unit} onChange={(e) => setRows(it, it.parts_rows.map((x, j) => (j === idx ? { ...x, unit: e.target.value } : x)), true)} disabled={locked} className="w-24">
-                            {PARTS_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                          </Select>
-                          <button type="button" disabled={locked} aria-label="Remove part" onClick={() => setRows(it, it.parts_rows.filter((_, j) => j !== idx), true)} className="min-h-11 w-10 rounded-control border border-line text-sm font-bold text-red">×</button>
-                        </div>
-                      ))}
-                      {!locked ? <button type="button" onClick={() => setRows(it, [...it.parts_rows, { part: "", qty: 1, unit: "pc" }], false)} className="self-start min-h-10 rounded-control border border-dashed border-line-strong px-3 text-xs font-bold">+ Add a part</button> : null}
+                        ))}
+                        {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: it.key, label: it.label })} className="min-h-9 rounded-control border border-dashed border-line-strong px-3 text-xs font-bold">+ Parts</button> : null}
+                      </div>
                     </div>
                   ) : null}
                   {needsDetail || filesFor({ itemKey: it.key }).length ? (
@@ -561,7 +632,7 @@ export function InspectionForm({
                       {!locked ? <QuickCodeButton jobId={jobId} target={it.key} label="Photo from my phone" compact /> : null}
                     </div>
                   ) : null}
-                  {it.status === "bad" ? (
+                  {it.status === "bad" && !isJob ? (
                     <div className={`flex flex-col gap-2 rounded-control p-2 ${it.dangerous ? "bg-red-soft" : "bg-chip"}`}>
                       <div className="flex flex-wrap items-center gap-2">
                         <button type="button" disabled={locked} onClick={() => patchItem(it.key, { dangerous: !it.dangerous })} aria-pressed={it.dangerous} className={`min-h-11 rounded-control border-2 px-3 text-sm font-extrabold ${it.dangerous ? "border-red-bar bg-red-bar text-white" : "border-line-strong bg-white"}`}>
@@ -580,22 +651,30 @@ export function InspectionForm({
       })}
 
       <Card className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-2">
-          <SectionLabel>Tyres (all required)</SectionLabel>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="inline-flex flex-wrap items-center gap-2"><SectionLabel>Tyres (all required)</SectionLabel>{complaintTag("wheels_tyres_and_brakes")}</span>
           <Dot ok={tyresOk} attempted={attempted} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label id="item-m-tyre_size_front" className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Tyre size front (for example 275/40 R20)</span>
-            <Input value={measurements.tyre_size_front ?? ""} onChange={(e) => setMeasurement("tyre_size_front", e.target.value)} onBlur={(e) => setMeasurement("tyre_size_front", tyreSizeText(e.target.value), true)} disabled={locked} placeholder="275/40 R20" autoCapitalize="characters" className={problemKeys.has("m-tyre_size_front") ? "border-red-bar" : ""} />
-          </label>
-          <div id="item-m-tyre_size_rear" className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Tyre size rear</span>
-            <div className="flex gap-1.5">
-              <Input value={measurements.tyre_size_rear ?? ""} onChange={(e) => setMeasurement("tyre_size_rear", e.target.value)} onBlur={(e) => setMeasurement("tyre_size_rear", tyreSizeText(e.target.value), true)} disabled={locked} placeholder="305/35 R20" autoCapitalize="characters" className={`flex-1 ${problemKeys.has("m-tyre_size_rear") ? "border-red-bar" : ""}`} />
-              {measurements.tyre_size_front && !locked ? <button type="button" onClick={() => setMeasurement("tyre_size_rear", tyreSizeText(measurements.tyre_size_front ?? ""), true)} className="min-h-11 rounded-control border border-line-strong bg-white px-3 text-xs font-semibold whitespace-nowrap">Same as front</button> : null}
-            </div>
-          </div>
+          <TyreSizeInput
+            id="item-m-tyre_size_front"
+            label="Tyre size front"
+            value={measurements.tyre_size_front ?? ""}
+            onChange={(v, complete) => setMeasurement("tyre_size_front", v, complete)}
+            disabled={locked}
+            suggestion={tyreSizeSuggestion?.front ?? null}
+            problem={outOfRange("tyre_size_front") || (attempted && problemKeys.has("m-tyre_size_front"))}
+          />
+          <TyreSizeInput
+            id="item-m-tyre_size_rear"
+            label="Tyre size rear"
+            value={measurements.tyre_size_rear ?? ""}
+            onChange={(v, complete) => setMeasurement("tyre_size_rear", v, complete)}
+            disabled={locked}
+            sameAs={tyreSizeComplete(measurements.tyre_size_front) ? { label: "Same as front", value: measurements.tyre_size_front } : null}
+            suggestion={tyreSizeSuggestion?.rear ?? null}
+            problem={outOfRange("tyre_size_rear") || (attempted && problemKeys.has("m-tyre_size_rear"))}
+          />
         </div>
         {[...TYRE_POSITIONS, { key: "spare", label: "Spare (optional)" }].map((p) => {
           const cond = (measurements[`tyre_${p.key}_cond`] ?? "").split(",").filter(Boolean);
@@ -649,6 +728,12 @@ export function InspectionForm({
               </div>
               {action === "replace_now" ? (
                 <div className={`flex flex-col gap-2 rounded-control p-2 ${danger ? "bg-red-soft" : "bg-chip"}`}>
+                  {tyreReasonNeeded(measurements, p.key) ? (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs font-semibold text-muted">More than {TYRE_REASON_ABOVE_MM} mm of tread. Why replace now? (one tap, required)</span>
+                      <Chips options={TYRE_REPLACE_REASONS} value={measurements[`tyre_${p.key}_reason`] ?? ""} onPick={(v) => setMeasurement(`tyre_${p.key}_reason`, v, true)} disabled={locked} small />
+                    </div>
+                  ) : null}
                   <button type="button" disabled={locked} onClick={() => setMeasurement(`tyre_${p.key}_danger`, danger ? "" : "1", true)} aria-pressed={danger} className={`self-start ${tyreBtn(danger, true)}`}>{danger ? "DANGEROUS TO DRIVE: ON" : "Dangerous to drive?"}</button>
                   {danger ? <Input value={measurements[`tyre_${p.key}_danger_reason`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_danger_reason`, e.target.value)} disabled={locked} placeholder="Why it is dangerous (required)" className={!(measurements[`tyre_${p.key}_danger_reason`] ?? "").trim() ? "border-red-bar" : ""} /> : null}
                 </div>
@@ -656,7 +741,7 @@ export function InspectionForm({
             </div>
           );
         })}
-        <p className="text-xs text-muted">Replace soon marks the Tyres item AVERAGE; Replace now marks it BAD.</p>
+        <p className="text-xs text-muted">Replace now goes on the report as needing attention; Replace soon as recommended.</p>
       </Card>
 
       <Card className="flex flex-col gap-4">
@@ -715,6 +800,33 @@ export function InspectionForm({
         </div>
       ) : null}
 
+      <Card className="flex flex-col gap-3" id="item-parts-list">
+        <SectionLabel right={mergedParts.length ? `${mergedParts.length} line${mergedParts.length === 1 ? "" : "s"}` : "none yet"}>Parts list</SectionLabel>
+        <p className="text-xs text-muted">Everything picked above, one line per part. Check it before you submit: the workshop manager confirms it, then Parts price it. Tyres and the battery follow their answers.</p>
+        {mergedParts.length ? (
+          <ul className="divide-y divide-line">
+            {mergedParts.map((line) => {
+              const auto = line.entries.every((e) => e.source === "tyre" || e.source === "measure");
+              const first = line.entries.find((e) => e.source === "item" || e.source === "custom") ?? line.entries[0];
+              return (
+                <li key={line.key} className="py-2 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-semibold">{line.name}</span>
+                  {line.positions.length ? <span className="text-muted">{line.positions.join(", ")}</span> : null}
+                  <span className="text-xs text-muted">· {fromLabel(line)}</span>
+                  <span className="ml-auto inline-flex items-center rounded-control border border-line-strong bg-white">
+                    <button type="button" disabled={locked || auto} aria-label={`One less ${line.name}`} onClick={() => setList(partsRef.current.map((e) => (e.id === first.id ? { ...e, qty: Math.max(1, e.qty - 1) } : e)))} className="min-h-10 w-10 text-lg font-bold disabled:text-faint">−</button>
+                    <span className="w-8 text-center text-sm font-bold">{line.qty}</span>
+                    <button type="button" disabled={locked || auto} aria-label={`One more ${line.name}`} onClick={() => setList(partsRef.current.map((e) => (e.id === first.id ? { ...e, qty: e.qty + 1 } : e)))} className="min-h-10 w-10 text-lg font-bold disabled:text-faint">+</button>
+                  </span>
+                  {!locked && !auto ? <button type="button" aria-label={`Remove ${line.name}`} onClick={() => setList(partsRef.current.filter((e) => !(e.name.toLowerCase() === line.key && (e.source === "item" || e.source === "custom"))))} className="min-h-10 w-10 rounded-control border border-line text-sm font-bold text-red">×</button> : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: null, label: "" })} className="self-start min-h-11 rounded-control border border-dashed border-line-strong px-4 text-sm font-bold">+ Add a part</button> : null}
+      </Card>
+
       <Card className="flex flex-col gap-3" id="item-estimate">
         <div className="flex items-center justify-between gap-2">
           <SectionLabel>Big job? Estimated hours</SectionLabel>
@@ -741,15 +853,29 @@ export function InspectionForm({
         <p className="text-xs text-muted">The workshop manager agrees or changes the hours when approving; the advisor sees them on the quotation as the workshop estimate.</p>
       </Card>
 
+      {requests.length ? (
+        <Card className="flex flex-col gap-2" id="item-requests-note">
+          <SectionLabel right="optional">Anything to tell the advisor about the customer&apos;s requests?</SectionLabel>
+          <Textarea value={requestsNote} onChange={(e) => setRequestsNoteText(e.target.value)} rows={2} disabled={locked} textCase="sentence" placeholder="For example: the noise the customer heard comes from the front left wheel bearing." />
+        </Card>
+      ) : null}
+
       <Card className="flex flex-col gap-3">
         <SectionLabel>Technician&apos;s notes</SectionLabel>
         <Textarea value={notes} onChange={(e) => setNotesText(e.target.value)} rows={4} disabled={locked} placeholder="Anything the workshop manager and advisor should know." />
       </Card>
 
-      {allPartSuggestions.length ? (
-        <datalist id="erp-part-suggestions">
-          {allPartSuggestions.map((p) => <option key={p} value={p} />)}
-        </datalist>
+      {pickerFor ? (
+        <PartPicker
+          title={pickerFor.itemKey ? `Parts · ${pickerFor.label}` : "Add a part"}
+          catalogue={catalogue}
+          selected={partsList.filter((e) => (e.item_key ?? null) === pickerFor.itemKey && (e.source === "item" || e.source === "custom"))}
+          suggested={pickerFor.itemKey ? suggestCatalogue(pickerFor.label, catalogue, suggestions[pickerFor.itemKey]?.parts ?? []) : []}
+          itemKey={pickerFor.itemKey}
+          source={pickerFor.itemKey ? "item" : "custom"}
+          onDone={(entries) => commitParts(pickerFor.itemKey, entries)}
+          onClose={() => setPickerFor(null)}
+        />
       ) : null}
 
       {!disabled ? (

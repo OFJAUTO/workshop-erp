@@ -24,6 +24,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
       <div className="max-w-3xl">
         <GateInForm
           action={updateGateIn.bind(null, id)}
+          draftKey={`gate-in-edit-${id}`}
           isElectric={card.vehicle.fuel_type === "electric"}
           mode="edit"
           requests={card.requests.map((r) => r.text)}

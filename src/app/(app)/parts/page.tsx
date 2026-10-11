@@ -11,6 +11,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { createPurchaseOrder } from "./order-actions";
+import { WaitingPanel } from "@/components/WaitingPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ type JobInfo = { id: string; job_number: string; is_open: boolean; vehicle: { ha
 
 /** The Parts role's desk: price requests from inspections, parts waiting for prices or the technician, and approved parts to order. */
 export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
-  await requirePermission("priceParts");
+  const staff = await requirePermission("priceParts");
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
@@ -61,6 +62,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      <WaitingPanel staff={staff} />
 
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${toPrice.length}`}>To price</SectionLabel>

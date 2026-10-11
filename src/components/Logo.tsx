@@ -9,7 +9,7 @@ export function Logo({
   onDark?: boolean;
 }) {
   const classes = `w-auto select-none ${onDark ? "logo-on-dark" : "logo-on-light"} ${className}`;
-  // The real logo file on white; on the black bar the photo version, inverted by CSS.
+  // The one real logo file everywhere; on the black bar it is inverted by CSS.
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={onDark ? "/logo.jpg" : "/logo.svg"} alt={alt} draggable={false} className={classes} />;
+  return <img src="/logo.svg" alt={alt} draggable={false} className={classes} />;
 }

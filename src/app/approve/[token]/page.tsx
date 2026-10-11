@@ -73,7 +73,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
 
   return (
     <CustomerDocument
-      uppercase={settings.customer_documents_uppercase === true}
+      header="plain"
       company={company}
       title="Job card"
       meta={[{ label: "Job card", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }]}
@@ -84,14 +84,13 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       footer={<>{advisor ? <>Questions? {advisor.phone ? <a href={`tel:${advisor.phone}`} className="font-semibold underline underline-offset-4">Call {advisor.name}</a> : advisor.name}{waDigits ? <> · <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-4">WhatsApp</a></> : null}. </> : null}{company.legalName} · TRN {company.trn}.</>}
       bar={!approved ? (
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-semibold hidden sm:inline">Review, tick the declaration, then approve.</span>
-          <Button type="submit" form="approval-form" size="lg" className="w-full sm:w-auto sm:min-w-56">Approve</Button>
+          <span className="text-sm font-semibold hidden sm:inline">The approval is at the bottom of the page.</span>
+          <a href="#approval" className="inline-flex min-h-14 w-full sm:w-auto sm:min-w-56 items-center justify-center rounded-lg bg-[#111113] px-6 text-base font-extrabold text-white">Approve ↓</a>
         </div>
       ) : null}
     >
       {approved ? <Notice tone="success">Approved by {req.approver_name} on {formatDateTime(req.approved_at)}. Thank you.</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <p className="text-sm leading-relaxed">Dear {customerName}, your {car} ({formatPlate(vehicle)}) was received on {formatDateTime(job.gated_in_at)}{location ? ` at ${location}` : ""}. Please review the videos and details below, then approve so we can begin the inspection.</p>
       {advisor && (advisor.phone || waDigits) ? (
         <div className="grid grid-cols-2 gap-3">
           {advisor.phone ? <a href={`tel:${advisor.phone}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call {advisor.name.split(" ")[0]}</a> : null}
@@ -119,7 +118,8 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
         </p>
       </DocSection>
       {!approved ? (
-        <DocSection title="Your approval">
+        <div id="approval" className="rounded-lg border-2 border-green bg-green-soft p-4 flex flex-col gap-1 scroll-mt-4">
+          <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Your approval</span>
           <form id="approval-form" method="post" action={`/api/approve/${token}`} className="flex flex-col gap-3 py-1">
             <p className="text-xs text-muted">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
             {feeNoticeEn ? (
@@ -138,8 +138,9 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
             <Field label="Your full name">
               <Input name="approver_name" defaultValue={req.sent_to_name ?? ""} required minLength={2} autoComplete="name" />
             </Field>
+            <Button type="submit" size="lg" className="w-full">Approve</Button>
           </form>
-        </DocSection>
+        </div>
       ) : null}
     </CustomerDocument>
   );

@@ -6,7 +6,7 @@ import { HANDOVER_SELECT, type HandoverRow } from "@/lib/handover";
 import { qrDataUrl } from "@/lib/pdf/qr";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { qrUrl, stickerSettings, warrantyMonthsFor, stickerLogoDataUrl } from "@/lib/stickers";
+import { qrUrl, stickerSettings, warrantyMonthsFor, stickerLogoDataUrl, stickerMarkDataUrl } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PrintNow } from "../../../parts/labels/[jobId]/PrintNow";
 
@@ -26,7 +26,7 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   const admin = createAdminClient();
   const settings = await getSettings();
   const ss = stickerSettings(settings);
-  const logo = await stickerLogoDataUrl(ss);
+  const [logo, mark] = await Promise.all([stickerLogoDataUrl(ss), stickerMarkDataUrl()]);
   const { data: raw } = await admin.from("part_handovers").select(HANDOVER_SELECT + ", job:jobs(job_number, vehicle:vehicles(vin))").eq("id", handoverId).maybeSingle();
   if (!raw) notFound();
   const h = raw as unknown as HandoverRow & { job: { job_number: string; vehicle: { vin: string | null } | null } | null };
@@ -47,7 +47,7 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
         until.setUTCMonth(until.getUTCMonth() + months);
         stickers.push(<BatterySticker key={`${partId}-${n}`} size={ss.large} logoUrl={logo} d={{ qr, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid }} />);
       } else {
-        stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, date, vin8: vin.slice(-8) }} />);
+        stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={ss.logoPath ? logo : mark} d={{ qr, date, vin8: vin.slice(-8) }} />);
       }
     }
     void item;

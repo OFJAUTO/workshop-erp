@@ -200,14 +200,12 @@ await section("B1-A5 services and hours", async () => {
   check("service added to the quotation through the save route", r.status === 200, JSON.stringify(r.json ?? r.text).slice(0, 120));
   const { browser, page } = await browserFor("owner");
   await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
-  await page.getByRole("button", { name: "Expand all" }).click().catch(() => null);
   await sleep(500);
   const body = await page.textContent("body");
   check("per-unit service shows price per tyre × usual quantity (B1)", /per tyre × 4/.test(body ?? "") && /AED 200/.test(body ?? ""), (body ?? "").match(/.{0,30}per tyre.{0,40}/)?.[0] ?? "");
   const plus = page.getByRole("button", { name: "One more" }).first();
   if (await plus.count()) { await plus.click(); await sleep(1800); check("the + button raises the quantity and the total (A6, 11 Oct)", /per tyre × 5/.test(await page.textContent("body")) && /AED 250/.test(await page.textContent("body")), (await page.textContent("body") ?? "").match(/per tyre × \d/)?.[0] ?? ""); }
   else check("− and + on the per-unit line (A6, 11 Oct)", false);
-  await page.getByRole("button", { name: "Expand all" }).click().catch(() => null);
   await sleep(300);
   const hours = page.locator("input[aria-label='Hours']").first();
   check("hours box found (A5)", (await hours.count()) >= 1);
@@ -216,15 +214,13 @@ await section("B1-A5 services and hours", async () => {
     const h1 = await sql("select hours from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active order by position limit 1", [quotationId]);
     check("0.5 h saved as 0.5 (A5)", Number(h1[0]?.hours) === 0.5, JSON.stringify(h1));
     await sleep(1500);
-    await page.getByRole("button", { name: "Expand all" }).click().catch(() => null);
-    await sleep(400);
+      await sleep(400);
     const hoursB = page.locator("input[aria-label='Hours']").first();
     await hoursB.fill(".7"); await hoursB.press("Tab"); await sleep(1500);
     const h2 = await sql("select hours from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active order by position limit 1", [quotationId]);
     check("a leading dot works: .7 saved as 0.7 (A5)", Number(h2[0]?.hours) === 0.7, JSON.stringify(h2));
     await sleep(1500);
-    await page.getByRole("button", { name: "Expand all" }).click().catch(() => null);
-    await sleep(400);
+      await sleep(400);
     const hoursC = page.locator("input[aria-label='Hours']").first();
     await hoursC.fill("1,3"); await hoursC.press("Tab"); await sleep(1500);
     const h3 = await sql("select hours from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active order by position limit 1", [quotationId]);

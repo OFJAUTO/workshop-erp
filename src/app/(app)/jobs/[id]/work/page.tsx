@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
+import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { jobPartsState } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
@@ -65,13 +66,15 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
   const unhanded = parts.needed.filter((p) => p.issue_status !== "confirmed");
   const blockers = [...(unhanded.length ? [`${unhanded.length} part${unhanded.length === 1 ? "" : "s"} not handed to the technician`] : []), ...(pending.length ? ["additional work waiting for your decision"] : [])];
   const inPlanning = ["approved", "waiting_parts"].includes(job.status);
+  const inspBundle = await loadInspection(id);
+  const dangers = inspBundle ? inspectionDangerous(inspBundle) : [];
 
   return (
     <>
       <LiveRefresh tables={["work_lines", "work_sessions", "additional_work", "jobs", "job_technicians", "work_pauses"]} jobId={id} pollMs={60000} />
       <PageHeader
         title={`Work order · ${formatPlate(vehicle)}`}
-        subtitle={`${vehicleTitle(vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}`}
+        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>}
         actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{job.status === "pending_qc" ? <LinkButton href={`/qc/${id}`} tone="secondary" size="lg">QC</LinkButton> : null}</>}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}

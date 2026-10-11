@@ -1,0 +1,15 @@
+import "server-only";
+import { createAdminClient } from "./supabase/admin";
+import type { CatalogueRow } from "./parts-list";
+
+/** The owner's parts pool, active rows in their order, for the pickers. */
+export async function loadCatalogue(): Promise<CatalogueRow[]> {
+  const { data } = await createAdminClient().from("part_catalogue").select("id, category, name, needs_position, usage_count").eq("is_active", true).order("position");
+  return ((data ?? []) as { id: string; category: string; name: string; needs_position: boolean | null; usage_count: number | null }[]).map((r) => ({
+    id: r.id,
+    category: r.category,
+    name: r.name,
+    needs_position: !!r.needs_position,
+    usage_count: Number(r.usage_count) || 0,
+  }));
+}

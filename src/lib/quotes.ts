@@ -77,6 +77,8 @@ export type QuoteLine = {
   recovery_provider_kind: "ours" | "external" | "customer" | null;
   /** A markup at or above the confirmation level was confirmed by the advisor, with the selling price spelled out. */
   markup_confirmed: boolean;
+  /** "Front", "Rear", "Front left"...: one job on several positions is one row, with the quantity to match. */
+  positions?: string[] | null;
 };
 
 export type QuoteRow = {
@@ -168,6 +170,8 @@ export type PartItem = {
   answer_text: string | null;
   answered_at: string | null;
   answered_by: string | null;
+  /** "Front left", "Rear"... carried from the technician's parts list. */
+  positions?: string[] | null;
 };
 
 export const PART_TYPE_LABELS: Record<string, string> = { genuine: "Genuine", oem: "OEM", aftermarket: "Aftermarket", used: "Used" };
@@ -192,9 +196,12 @@ export type PartRequest = {
   quantity: number | null;
   unit: string | null;
   closed_reason: string | null;
+  positions?: string[] | null;
+  note?: string | null;
+  catalogue_id?: string | null;
 };
 
-export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean };
+export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
 export type ServiceCategory = { id: string; name: string; position: number; is_active: boolean };
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -366,7 +373,7 @@ export function sendBlockers(
       if (p) {
         if (p.confirm_status === "rejected") out.push({ key: `line-${l.id}`, label: `${short}: rejected, remove the line` });
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
-      } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "Ask Parts for a part"` });
+      } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "+ Add a part"` });
       else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       if (q.kind === "quotation" && !l.parent_line_id) out.push({ key: `line-${l.id}`, label: `${short}: not linked to a job` });
       if (settings.confirmPercent && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
@@ -531,6 +538,16 @@ export function lineQuantityText(l: Pick<QuoteLine, "line_type" | "hours" | "qua
   const q = l.quantity || 1;
   return Number.isInteger(q) ? String(q) : q.toFixed(2);
 }
+
+/** The positions of a job in words after its name: "Brake pads · front and rear". */
+export function withPositions(title: string, positions?: string[] | null): string {
+  if (!positions?.length) return title;
+  const words = positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ");
+  return `${title} · ${words}`;
+}
+export const lineTitleText = (l: Pick<QuoteLine, "title" | "positions">) => withPositions(l.title, l.positions);
+/** The positions a job can take on the quotation. */
+export const JOB_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right", "Front", "Rear", "Left", "Right"] as const;
 
 /** "1,234.00" for the money columns of a document; the currency sits in the heading. */
 export const money = (n: number | null | undefined) => round2(n ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

@@ -7,6 +7,9 @@ import { cleanChecklist } from "@/lib/inspection";
 import { STAGES } from "@/lib/jobs";
 import { isTone } from "@/lib/tones";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { redirect } from "next/navigation";
+import { getSettings } from "@/lib/settings";
 
 const NUMBER_KEYS = [
   "tablet_idle_lock_seconds",
@@ -262,7 +265,6 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   }
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
   updates.push({ key: "advisor_labour_discount", value: formData.get("advisor_labour_discount") === "on" });
-  updates.push({ key: "customer_documents_uppercase", value: formData.get("customer_documents_uppercase") === "on" });
   // The quotation's hidden bank charge assumes the highest rate; the real one is taken at payment.
   updates.push({ key: "bank_charge_fee_percent", value: Math.max(...DECIMAL_KEYS.map((k) => Number(String(formData.get(k) ?? "0").replace(",", ".")) || 0)) });
   updates.push({ key: "wash_board_show_times", value: formData.get("wash_board_show_times") === "on" });
@@ -351,11 +353,114 @@ export async function saveInspectionChecklist(_state: FormState, formData: FormD
   }
   const clean = cleanChecklist(parsed);
   if (typeof clean === "string") return { error: clean };
+  // The customer-complaint words per section, typed comma separated in the editor.
+  let complaints: Record<string, string[]> = {};
+  try {
+    const raw = JSON.parse(String(formData.get("complaint_keywords") ?? "{}")) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(raw ?? {})) {
+      if (!Array.isArray(v)) continue;
+      const words = Array.from(new Set(v.map((w) => String(w).trim().toLowerCase().slice(0, 40)).filter(Boolean))).slice(0, 40);
+      if (words.length) complaints[String(k).slice(0, 80)] = words;
+    }
+  } catch {
+    complaints = {};
+  }
   const supabase = await createClient();
   const { error } = await supabase
     .from("settings")
     .upsert({ key: "inspection_checklist", value: clean, label: "Inspection checklist", description: "Sections and items of the mechanical inspection report." }, { onConflict: "key" });
   if (error) return { error: error.message };
+  const { error: e2 } = await supabase
+    .from("settings")
+    .upsert({ key: "complaint_keywords", value: complaints, label: "Complaint keywords", description: 'Words in a customer request that tag a checklist section with "Customer complaint".' }, { onConflict: "key" });
+  if (e2) return { error: e2.message };
   revalidatePath("/", "layout");
   return { success: "Checklist saved." };
+}
+
+/** The workshop manager's one-tap notes for the report approval, one per line. */
+export async function saveManagerNotePresets(_state: FormState, formData: FormData): Promise<FormState> {
+  await requirePermission("manageSettings");
+  const values = formValues(formData);
+  const lines = Array.from(new Set(String(formData.get("presets") ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 200)).filter(Boolean))).slice(0, 40);
+  if (!lines.length) return { error: "Write at least one note.", values };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("settings")
+    .upsert({ key: "manager_note_presets", value: lines, label: "Manager note presets", description: "One-tap notes on the report approval. Most used come first." }, { onConflict: "key" });
+  if (error) return { error: error.message, values };
+  revalidatePath("/", "layout");
+  return { success: `${lines.length} note${lines.length === 1 ? "" : "s"} saved.` };
+}
+
+/* ---------------------------------------------------------------------------
+   Settings > Parts list: the pool the technicians pick from.
+   --------------------------------------------------------------------------- */
+
+type CatalogueEdit = { id?: string | null; category?: unknown; name?: unknown; needs_position?: unknown; position?: unknown; remove?: unknown };
+
+/** The whole pool in one save: renamed, reordered, added, removed (made inactive). */
+export async function savePartCatalogue(_state: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePermission("manageSettings");
+  let rows: CatalogueEdit[];
+  try {
+    rows = JSON.parse(String(formData.get("rows") ?? "[]")) as CatalogueEdit[];
+  } catch {
+    return { error: "The list could not be read." };
+  }
+  if (!Array.isArray(rows)) return { error: "The list could not be read." };
+  const admin = createAdminClient();
+  const seen = new Set<string>();
+  let added = 0;
+  for (const r of rows) {
+    const name = String(r.name ?? "").trim().slice(0, 120);
+    const category = String(r.category ?? "").trim().slice(0, 80) || "Other";
+    const position = Number(r.position) || 0;
+    if (r.id && r.remove) {
+      await admin.from("part_catalogue").update({ is_active: false, updated_by: staff.id }).eq("id", String(r.id));
+      continue;
+    }
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return { error: `"${name}" is in the list twice.` };
+    seen.add(key);
+    if (r.id) {
+      const { error } = await admin.from("part_catalogue").update({ name, category, needs_position: !!r.needs_position, position, updated_by: staff.id }).eq("id", String(r.id));
+      if (error) return { error: error.message };
+    } else {
+      const { error } = await admin.from("part_catalogue").insert({ name, category, needs_position: !!r.needs_position, position, created_by: staff.id, updated_by: staff.id });
+      if (error) return { error: /unique|duplicate/i.test(error.message) ? `"${name}" is already in the list.` : error.message };
+      added++;
+    }
+  }
+  revalidatePath("/", "layout");
+  return { success: added ? `Saved. ${added} new part${added === 1 ? "" : "s"}.` : "Saved." };
+}
+
+/** A custom part typed on reports joins the pool in the chosen category. */
+export async function adoptCustomPart(name: string, formData: FormData) {
+  const staff = await requirePermission("manageSettings");
+  const admin = createAdminClient();
+  const category = String(formData.get("category") ?? "Other").trim().slice(0, 80) || "Other";
+  const { data: last } = await admin.from("part_catalogue").select("position").order("position", { ascending: false }).limit(1).maybeSingle();
+  const { error } = await admin.from("part_catalogue").insert({ name: name.trim().slice(0, 120), category, needs_position: formData.get("needs_position") === "on", position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
+  if (error && !/unique|duplicate/i.test(error.message)) redirect(`/settings/parts?error=${encodeURIComponent(error.message)}`);
+  await dropCustom(name);
+  revalidatePath("/", "layout");
+  redirect(`/settings/parts?message=${encodeURIComponent(`"${name}" added to the parts list.`)}`);
+}
+
+/** A custom part suggestion the owner does not want. */
+export async function dismissCustomPart(name: string) {
+  await requirePermission("manageSettings");
+  await dropCustom(name);
+  revalidatePath("/settings/parts");
+  redirect("/settings/parts");
+}
+
+async function dropCustom(name: string) {
+  const settings = await getSettings();
+  const pool = { ...((settings.part_pool_custom ?? {}) as Record<string, number>) };
+  delete pool[name];
+  await createAdminClient().from("settings").upsert({ key: "part_pool_custom", value: pool, label: "Custom parts used", description: "Custom part names typed by staff, with counts, offered to the owner to add to the pool." }, { onConflict: "key" });
 }

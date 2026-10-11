@@ -64,19 +64,21 @@ try {
     await browser.close();
   }
   await told("2 assigned with a road test", m, jobId, [{ id: techId, label: "the technician" }, { role: "qc_inspector", label: "the QC inspector" }]);
+  check("car waits in its own step, Pending road test (C2)", (await sql("select status from public.jobs where id = $1", [jobId]))[0]?.status === "pending_road_test");
 
   // 3. The QC inspector does the road test.
   m = await mark();
   {
     const { browser, page } = await browserForId(qc);
     await go(page, `${base}/road-tests/${jobId}`);
-    const goods = page.getByRole("button", { name: /^GOOD$/ });
+    const goods = page.getByRole("button", { name: /^Good$/i });
     for (let i = 0; i < (await goods.count()); i++) await goods.nth(i).click();
     await page.getByRole("button", { name: /Save road test/ }).click();
     await submitted(page);
     await browser.close();
   }
   await told("3 road test done", m, jobId, [{ id: techId, label: "the technician" }]);
+  check("road test done: the car is back in Pending inspection (C2)", (await sql("select status from public.jobs where id = $1", [jobId]))[0]?.status === "pending_inspection");
 
   // 4. The technician fills the report and submits it with one tap.
   m = await mark();
@@ -97,12 +99,13 @@ try {
     const sections = await sql("select distinct section_key from public.inspection_items where inspection_id = $1", [insp.id]);
     for (const s of sections) await save({ sectionAllGood: s.section_key });
     const firstItem = (await sql("select item_key from public.inspection_items where inspection_id = $1 order by position limit 1", [insp.id]))[0];
-    await save({ item: { key: firstItem.item_key, status: "bad", remarks: "Worn out, replace", parts_rows: [{ part: "Front brake pads", qty: "1", unit: "set" }] } });
+    await save({ item: { key: firstItem.item_key, status: "bad", remarks: "Worn out, replace" } });
+    // The technician picks the part from the pool under the finding (E1); the list is saved whole.
+    const pool = (await sql("select id from public.part_catalogue where name ilike 'brake pads' limit 1"))[0];
+    await save({ partsList: [{ id: "e2e-part-1", catalogue_id: pool?.id ?? null, name: "Brake pads", qty: 1, positions: ["Front"], item_key: firstItem.item_key, source: "item", note: null }] });
     const ms = { tyre_size_front: "275/40 R20", tyre_size_rear: "305/35 R20", pad_front: "8", pad_rear: "7", battery_voltage: "12.6", battery_health: "good", vent_temp: "7" };
     for (const p of ["fl", "fr", "rl", "rr"]) Object.assign(ms, { [`tyre_${p}_tread`]: "6", [`tyre_${p}_year`]: "2024", [`tyre_${p}_cond`]: "good", [`tyre_${p}_action`]: "none", [`tyre_${p}_brand`]: "Michelin" });
     await save({ measurements: ms });
-    const reqs = await sql("select id from public.job_requests where job_id = $1 and is_active", [jobId]);
-    for (const q of reqs) await save({ finding: { requestId: q.id, status: "good", found: "Checked, nothing wrong", needs: "" } });
     await save({ inspection: { estimated_hours: 2 } });
     await go(page, `${base}/my-jobs/${jobId}`);
     const submit = page.getByRole("button", { name: "Submit to workshop manager" });
@@ -123,7 +126,12 @@ try {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}/inspection`);
-    await page.locator("textarea[name=manager_note]").fill("Checked, agreed.");
+    const preset = page.getByRole("button", { name: /^Report checked and accurate/ }).first();
+    if (await preset.count()) await preset.click(); else await page.locator("textarea[name=manager_note]").fill("Checked, agreed.");
+    check("one-tap note fills the manager's note (D7)", /Report checked/.test(await page.locator("textarea[name=manager_note]").inputValue()));
+    const plc = page.getByRole("button", { name: /Parts list checked/ }).first();
+    check("the parts list waits for the manager's tick (E3)", (await plc.count()) === 1);
+    if (await plc.count()) await plc.click();
     const hours = page.locator("input[name=estimated_hours_manager]");
     if (await hours.count()) await hours.fill("2");
     await page.getByRole("button", { name: "Approve report" }).click();
@@ -131,22 +139,26 @@ try {
     await browser.close();
   }
   await told("5 report approved", m, jobId, [{ id: advisorId, label: "the advisor" }, { role: "parts", label: "Parts" }]);
+  {
+    const pr = await sql("select label, positions, quantity from public.part_requests where job_id = $1 and is_active", [jobId]);
+    check("the confirmed list made one price request with its position (E4)", pr.some((r) => /brake pads/i.test(r.label) && (r.positions ?? []).includes("Front")), JSON.stringify(pr));
+  }
 
   // 6. Parts price the request.
   m = await mark();
   {
     const { browser, page } = await browserForId(partsId);
     await go(page, `${base}/parts/${jobId}`);
-    const det = page.locator("details:has(summary:has-text('Enter the parts'))").first();
-    check("parts desk shows the request from the report", (await det.count()) === 1, (await page.textContent("body") ?? "").slice(0, 120));
-    if (!(await det.evaluate((d) => d.open))) await det.locator("summary").click();
-    await sleep(300);
-    const form = det.locator("form:has(input[name=cost_aed])").first();
+    const form = page.locator("form:has(input[name=cost_aed])").first();
+    check("parts desk shows the request as one row to fill (E5)", (await form.count()) >= 1, (await page.textContent("body") ?? "").slice(0, 120));
+    const bodyParts = await page.textContent("body");
+    check("no findings on the Parts page (E8)", !/Worn out, replace|Technician wrote/.test(bodyParts ?? ""));
+    check("the request's position is on the row (E4)", /Front/.test(await form.textContent() ?? ""));
     await form.locator("input[name=description]").first().fill("Front brake pads, set");
     await form.locator("input[name=cost_aed]").first().fill("200");
     const supplierName = (await sql("select name from public.suppliers where is_active order by name limit 1"))[0]?.name ?? "e2e Supplier";
     await form.locator("input[name=supplier]").first().fill(supplierName);
-    await form.getByRole("button", { name: "In stock" }).first().click();
+    await form.getByRole("button", { name: "Stock" }).first().click();
     await form.locator("button[type=submit]").first().click();
     await sleep(3000);
     const pi = await sql("select id, cost_aed, availability from public.part_items where job_id = $1", [jobId]);
@@ -181,10 +193,12 @@ try {
     check("Send button after Complete", (await sendBtn.count()) >= 1, (await page.textContent("body") ?? "").match(/Finish the quotation[^.]*\./)?.[0] ?? "");
     if (await sendBtn.count()) {
       await sendBtn.click();
-      await sleep(1500);
-      const round = page.getByRole("button", { name: /Round/ }).first();
-      if (await round.count()) { await round.click(); await sleep(1500); }
+      // The send action takes a second or two: wait for the rounding choice or the message window instead of a fixed pause.
+      await page.getByRole("button", { name: /^AED |Copy/ }).first().waitFor({ timeout: 20000 }).catch(() => null);
+      const round = page.getByRole("button", { name: /^AED .*down/ }).first();
+      if (await round.count()) await round.click();
       const copy = page.getByRole("button", { name: /Copy/ }).first();
+      await copy.waitFor({ timeout: 20000 }).catch(() => null);
       if (await copy.count()) { await copy.click(); await sleep(2500); }
     }
     const q = (await sql("select status, token from public.quotations where id = $1", [quotationId]))[0];

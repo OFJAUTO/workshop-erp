@@ -7,7 +7,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { feeNotice } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { aed, blockOf, isHidden, isUnchosen, lineQuantityText, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals } from "@/lib/quotes";
+import { aed, blockOf, isHidden, isUnchosen, lineQuantityText, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { dubaiDate } from "@/lib/jobs";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -72,12 +72,14 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     n++;
     const part = l.part_item_id ? bundle.parts.find((p) => p.id === l.part_item_id) : null;
     const details = [l.line_type === "part" ? partTypeText(l) : null, part?.part_number ?? null, l.line_type === "part" ? partAvailabilityText(part, today) : null, l.details].filter(Boolean).join(" · ") || null;
-    return { n, description: l.line_type === "part" && part?.part_number && l.title.endsWith(`(${part.part_number})`) ? l.title.slice(0, -(part.part_number.length + 2)).trim() : l.title, details, tag: !isEstimate && l.urgency === "urgent" ? "Urgent" : null, qty: lineQuantityText(l), rate: money(lineUnitPrice(l)), amount: lineTotal(l) === 0 ? "Complimentary" : money(lineTotal(l)), amountNum: lineTotal(l) };
+    return { n, description: l.line_type === "part" && part?.part_number && l.title.endsWith(`(${part.part_number})`) ? l.title.slice(0, -(part.part_number.length + 2)).trim() : withPositions(l.title, l.positions), details, tag: !isEstimate && l.urgency === "urgent" ? "Urgent" : null, qty: lineQuantityText(l), rate: money(lineUnitPrice(l)), amount: lineTotal(l) === 0 ? "Complimentary" : money(lineTotal(l)), amountNum: lineTotal(l) };
   };
   const labour = lines.filter((l) => blockOf(l) === "labour").map(rowOf);
   const parts = lines.filter((l) => blockOf(l) === "parts").map(rowOf);
   const other = lines.filter((l) => blockOf(l) === "other").map(rowOf);
   const open = q.status === "sent" || q.status === "opened";
+  const { data: reportLink } = job ? await admin.from("report_links").select("token").eq("job_id", job.id).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
+  const reportHref = reportLink?.token ? `/report/${reportLink.token}` : null;
 
   return (
     <CustomerDocument
@@ -94,11 +96,11 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items", rows: [] } : { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), rows: [["", vehicle?.variant ?? null], ["VIN", vehicle?.vin ?? null]] },
       ]}
       pdfHref={`/api/pdf/quote/${token}`}
-      uppercase={settings.customer_documents_uppercase === true}
       bar={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} feeNotice={feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed)} feeNoticeAr={feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed)} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} dangerText={dangerous ? settings.dangerous_acknowledgement_text : null} /> : null}
       footer={<>{isEstimate ? "The final price is confirmed once the vehicle is with us." : `Prices in UAE dirhams; VAT at ${q.vat_percent}% shown separately.`} {!isEstimate ? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed) : ""}</>}
     >
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {reportHref ? <a href={reportHref} className="self-start text-xs font-semibold text-[#5F6368] underline underline-offset-4">See your inspection report</a> : null}
       {q.status === "approved" ? (
         <div className="rounded-card border-2 border-ink p-4 text-center">
           <div className="text-xl font-extrabold">Thank you</div>

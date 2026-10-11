@@ -8,6 +8,7 @@ import { CONDITIONS, labelOf } from "@/lib/jobs";
 import { ROAD_TEST_SELECT, ROAD_TEST_STATUS_LABELS, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
+import { WaitingPanel } from "@/components/WaitingPanel";
 
 type Row = {
   id: string;
@@ -19,7 +20,7 @@ type Row = {
 
 /** The QC inspector's list: cars the workshop manager wants road tested, then the ones already done. Approved reports open from here too. */
 export default async function RoadTestsPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
-  await requirePermission("roadTest");
+  const staff = await requirePermission("roadTest");
   const { message } = await searchParams;
   const supabase = await createClient();
   const [{ data: insp }, { data: tests }] = await Promise.all([
@@ -85,6 +86,7 @@ export default async function RoadTestsPage({ searchParams }: { searchParams: Pr
       <LiveRefresh tables={["inspections", "road_tests", "jobs"]} pollMs={60000} />
       <PageHeader title="Road tests" subtitle="Cars the workshop manager wants road tested. The technician's inspection opens once you submit the road test." />
       {message ? <Notice tone="success">{message}</Notice> : null}
+      <WaitingPanel staff={staff} />
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-extrabold tracking-[0.08em] uppercase">To do · {pending.length}</h2>
         {pending.length ? list(pending) : <Empty title="No road tests waiting" />}

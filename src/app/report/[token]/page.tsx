@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { CustomerDocument, DocSection } from "@/components/CustomerDocument";
+import { CustomerMedia, type CustomerMediaItem } from "@/components/CustomerMedia";
 import { Badge, Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
-import { formatDate, formatDateTime } from "@/lib/format";
-import { ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, type ItemStatus } from "@/lib/inspection";
+import { formatDate } from "@/lib/format";
+import { ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel, type ItemStatus } from "@/lib/inspection";
 import { loadInspection, type InspectionMediaRow } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
+import { feeNotice } from "@/lib/jobs";
 import { notifyStaff } from "@/lib/notifications";
 import { ROAD_TEST_ITEMS, ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
@@ -22,24 +24,11 @@ export async function generateMetadata(): Promise<Metadata> {
 
 const TONE: Record<ItemStatus, "green" | "amber" | "red" | "neutral"> = { good: "green", average: "amber", bad: "red", na: "neutral" };
 
-function Photos({ rows, urls }: { rows: InspectionMediaRow[]; urls: Record<string, string> }) {
-  const shown = rows.filter((m) => m.kind !== "pdf");
-  if (!shown.length) return null;
-  return (
-    <div className="flex flex-wrap gap-2 py-1">
-      {shown.map((m) =>
-        m.kind === "video" ? (
-          <video key={m.id} src={urls[m.storage_path]} controls playsInline preload="metadata" className="h-32 w-48 rounded-control bg-black object-cover" />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <a key={m.id} href={urls[m.storage_path] ?? "#"} target="_blank" rel="noreferrer"><img src={urls[m.storage_path] ?? ""} alt="Photo" className="h-32 w-32 rounded-control object-cover bg-chip" /></a>
-        ),
-      )}
-    </div>
-  );
-}
-
-/** The customer's inspection report in the same document look as the quotation and the invoice. Parts and anything about cost are never shown. */
+/**
+ * The customer's inspection report: the car, anything dangerous in red, what needs attention (Bad, then
+ * Average), what passed folded away, the workshop's note, the inspection fee note and the advisor's Call and
+ * WhatsApp buttons. No staff names besides the advisor's first name on the buttons, no parts, no prices.
+ */
 export default async function CustomerReportPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const admin = createAdminClient();
@@ -54,143 +43,194 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
     await admin.from("report_links").update({ opened_at: new Date().toISOString(), status: "opened" }).eq("id", link.id);
     await notifyStaff([link.created_by, card.job.gated_in_by].filter((x): x is string => !!x), { type: "report_opened", title: `Customer opened the inspection report · ${card.job.job_number}`, body: formatPlate(card.vehicle), jobId: card.job.id, href: `/jobs/${card.job.id}` });
   }
+  // The advisor's buttons: whoever sent the link, else whoever gated the car in.
+  const advisorId = link.created_by ?? card.job.gated_in_by ?? null;
+  let advisor: { name: string; phone: string | null } | null = null;
+  if (advisorId) {
+    const [{ data: s }, { data: p }] = await Promise.all([admin.from("staff").select("display_name").eq("id", advisorId).maybeSingle(), admin.from("staff_private").select("phone").eq("staff_id", advisorId).maybeSingle()]);
+    if (s) advisor = { name: s.display_name, phone: p?.phone ?? null };
+  }
+  const waDigits = advisor?.phone ? advisor.phone.replace(/[^\d]/g, "") : "";
+
   const insp = bundle.inspection;
   const roadTest = (rt as RoadTestRow | null) ?? null;
   const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY && i.status !== "na");
-  const flagged = items.filter((i) => i.status === "bad" || i.status === "average").sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
+  const attention = items.filter((i) => i.status === "bad" || (i.status === "average" && i.style !== "job")).sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
+  const passed = items.filter((i) => i.status === "good");
   const sections = Array.from(new Map(items.map((i) => [i.section_key, i.section_title])).entries());
-  const m = insp.measurements ?? {};
-  const customerName = card.customer?.full_name ?? "Customer";
+  const m = (insp.measurements ?? {}) as Record<string, string | number>;
+  const text = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+  const tyres = TYRE_POSITIONS.filter((p) => ["replace_now", "replace_soon"].includes(text(m[`tyre_${p.key}_action`]))).map((p) => ({
+    ...p,
+    now: text(m[`tyre_${p.key}_action`]) === "replace_now",
+    tread: text(m[`tyre_${p.key}_tread`]),
+    year: text(m[`tyre_${p.key}_year`]),
+    reason: TYRE_REPLACE_REASONS.find((r) => r.value === text(m[`tyre_${p.key}_reason`]))?.label ?? null,
+    danger: text(m[`tyre_${p.key}_danger`]) === "1",
+    dangerReason: text(m[`tyre_${p.key}_danger_reason`]),
+    cond: text(m[`tyre_${p.key}_cond`]).split(",").filter(Boolean).map((c) => TYRE_CONDITIONS.find((x) => x.value === c)?.label ?? c).join(", "),
+  }));
+  const batteryReplace = text(m.battery_health) === "replace";
+  const dangers = [
+    ...attention.filter((i) => i.dangerous).map((i) => ({ key: i.id, label: i.item_label, reason: i.dangerous_reason })),
+    ...tyres.filter((t) => t.danger).map((t) => ({ key: `tyre-${t.key}`, label: `${t.label} tyre`, reason: t.dangerReason || null })),
+  ];
+  const attentionCount = attention.length + tyres.length + (batteryReplace ? 1 : 0);
   const prescans = insp.show_prescan_to_customer ? bundle.media.filter((x) => x.is_prescan) : [];
   const { vehicle } = card;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
+  const customerName = card.customer?.full_name ?? "Customer";
+  const mediaOf = (rows: InspectionMediaRow[]): CustomerMediaItem[] => rows.filter((x) => !x.is_prescan).map((x) => ({ id: x.id, kind: x.kind, url: bundle.mediaUrls[x.storage_path] ?? null, label: x.caption }));
+  const fee = feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed);
+  const feeAr = feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed);
+  const measures = MEASUREMENTS.filter((x) => !x.key.startsWith("tyre_") && m[x.key] != null && String(m[x.key]) !== "");
+  const tyreRows = [...TYRE_POSITIONS, { key: "spare", label: "Spare" }].filter((p) => m[`tyre_${p.key}_tread`] || m[`tyre_${p.key}_action`]);
+  const roadFlagged = roadTest?.status === "done" ? ROAD_TEST_ITEMS.filter((it) => roadTest.items[it.key]?.status && roadTest.items[it.key]?.status !== "good") : [];
+
+  const contact =
+    advisor && (advisor.phone || waDigits) ? (
+      <div className="grid grid-cols-2 gap-3">
+        {advisor.phone ? <a href={`tel:${advisor.phone}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call {advisor.name.split(" ")[0]}</a> : null}
+        {waDigits ? <a href={`https://wa.me/${waDigits}`} className="flex min-h-14 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-base font-extrabold">WhatsApp</a> : null}
+      </div>
+    ) : null;
 
   return (
     <CustomerDocument
-      uppercase={settings.customer_documents_uppercase === true}
+      header="plain"
       company={company}
       title="Inspection report"
       meta={[{ label: "Job card", value: card.job.job_number }, { label: "Inspected", value: formatDate(insp.submitted_at) }, { label: "Approved", value: formatDate(insp.approved_at) }]}
       boxes={[
-        { title: "Customer", strong: card.customer?.company_name ?? customerName, rows: [["Name", card.customer?.company_name ? customerName : null], ["Mobile", card.customer?.phone ?? null]] },
         { title: "Vehicle", strong: car || vehicleTitle(vehicle), rows: [["Variant", vehicle.variant], ["Plate", formatPlate(vehicle)], ["VIN", vehicle.vin]] },
+        { title: "Customer", strong: card.customer?.company_name ?? customerName, rows: [["Name", card.customer?.company_name ? customerName : null], ["Mobile", card.customer?.phone ?? null]] },
       ]}
       pdfHref={`/api/pdf/report/${token}`}
-      footer={<>{company.legalName} · TRN {company.trn}. This report describes the condition found at inspection. A quotation follows separately.</>}
+      footer={<>This report describes the condition found at inspection. A quotation follows separately.</>}
     >
-      <p className="text-sm leading-relaxed">Dear {customerName}, here is the inspection report for your {vehicleTitle(vehicle)} ({formatPlate(vehicle)}), inspected on {formatDateTime(insp.submitted_at)} and approved by our workshop manager on {formatDateTime(insp.approved_at)}.</p>
+      {dangers.length ? (
+        <div className="rounded-lg border-2 border-red-bar bg-red-soft p-4 flex flex-col gap-2">
+          <span className="text-[11px] font-extrabold tracking-[0.14em] uppercase text-red">Dangerous to drive</span>
+          <ul className="flex flex-col gap-1 text-sm font-semibold">
+            {dangers.map((d) => (
+              <li key={d.key}>{d.label}{d.reason ? <span className="font-normal">: {d.reason}</span> : null}</li>
+            ))}
+          </ul>
+          <p className="text-sm whitespace-pre-wrap">{settings.dangerous_customer_text}</p>
+          {settings.dangerous_customer_text_ar ? <p className="text-sm whitespace-pre-wrap" dir="rtl" lang="ar">{settings.dangerous_customer_text_ar}</p> : null}
+        </div>
+      ) : null}
 
-      <DocSection title="Your requests">
+      <DocSection title={`Needs attention · ${attentionCount}`}>
+        {attentionCount === 0 ? <p className="text-sm text-muted py-1">Nothing needs attention. The items checked are listed below.</p> : null}
         <div className="flex flex-col gap-2 py-1">
-          {card.requests.map((r, i) => {
-            const f = bundle.findings.find((x) => x.job_request_id === r.id);
+          {attention.map((i) => (
+            <div key={i.id} className={`rounded-lg border p-3 flex flex-col gap-1.5 ${i.status === "bad" ? "border-red-bar" : "border-amber-bar"}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={i.style === "job" ? "ink" : TONE[i.status as ItemStatus]}>{itemStatusLabel(i.status, i.style)}</Badge>
+                <span className="font-semibold text-sm">{i.item_label}</span>
+                <span className="text-xs text-muted">· {i.section_title}</span>
+                {i.dangerous ? <Badge tone="red">Dangerous</Badge> : null}
+              </div>
+              {i.remarks ? <p className="text-sm whitespace-pre-wrap">{i.remarks}</p> : null}
+              <CustomerMedia items={mediaOf(bundle.media.filter((x) => x.item_key === i.item_key))} />
+            </div>
+          ))}
+          {tyres.map((t) => (
+            <div key={t.key} className={`rounded-lg border p-3 flex flex-col gap-1 ${t.now ? "border-red-bar" : "border-amber-bar"}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={t.now ? "red" : "amber"}>{t.now ? "Replace now" : "Replace soon"}</Badge>
+                <span className="font-semibold text-sm">{t.label} tyre</span>
+                <span className="text-xs text-muted">· Tyres</span>
+                {t.danger ? <Badge tone="red">Dangerous</Badge> : null}
+              </div>
+              <p className="text-sm">{[t.tread ? `${t.tread} mm tread` : "", t.year ? `year ${t.year}` : "", t.cond, t.reason ? `reason: ${t.reason.toLowerCase()}` : ""].filter(Boolean).join(" · ")}</p>
+            </div>
+          ))}
+          {batteryReplace ? (
+            <div className="rounded-lg border border-red-bar p-3 flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="red">Replace</Badge>
+                <span className="font-semibold text-sm">Battery</span>
+                <span className="text-xs text-muted">· Battery test</span>
+              </div>
+              {m.battery_voltage ? <p className="text-sm">{text(m.battery_voltage)} V measured.</p> : null}
+              <CustomerMedia items={mediaOf(bundle.media.filter((x) => x.item_key === "measure.battery"))} />
+            </div>
+          ) : null}
+          {roadFlagged.length && roadTest ? (
+            <div className="rounded-lg border border-amber-bar p-3 flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="amber">Road test</Badge>
+                <span className="font-semibold text-sm">Noted on the road test</span>
+              </div>
+              <ul className="text-sm flex flex-col gap-0.5">
+                {roadFlagged.map((it) => {
+                  const v = roadTest.items[it.key];
+                  return <li key={it.key}><span className="font-semibold">{it.label}</span>{v?.status ? ` · ${ITEM_STATUS_LABELS[v.status]}` : ""}{v?.remarks ? ` · ${v.remarks}` : ""}</li>;
+                })}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </DocSection>
+
+      <ToggleBlock title={`Checked and passed · ${passed.length}`} defaultOpen={false}>
+        <div className="flex flex-col gap-3">
+          {sections.map(([key, title]) => {
+            const ok = passed.filter((i) => i.section_key === key);
+            if (!ok.length) return null;
             return (
-              <div key={r.id} className="rounded-control border border-line p-3 flex flex-col gap-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-bold text-sm">{i + 1}. {r.text}</span>
-                  {f?.status ? <Badge tone={TONE[f.status]}>{ITEM_STATUS_LABELS[f.status]}</Badge> : null}
-                </div>
-                {f?.found ? <p className="text-sm"><span className="text-muted">Found:</span> {f.found}</p> : null}
-                <Photos rows={bundle.media.filter((x) => x.job_request_id === r.id)} urls={bundle.mediaUrls} />
+              <div key={key} className="flex flex-col gap-1">
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{title}</span>
+                <p className="text-sm">{ok.map((i) => i.item_label).join(" · ")}</p>
               </div>
             );
           })}
+          {roadTest?.status === "done" && !roadFlagged.length ? <p className="text-sm"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Road test</span><br />Nothing noted on the road test.</p> : null}
         </div>
-      </DocSection>
+      </ToggleBlock>
 
-      <DocSection title={`Items needing attention · ${flagged.length}`}>
-        {flagged.length === 0 ? <p className="text-sm text-muted py-1">Nothing was marked average or bad.</p> : null}
-        <div className="flex flex-col gap-2 py-1">
-          {flagged.map((i) => (
-            <div key={i.id} className={`rounded-control border p-3 flex flex-col gap-1.5 ${i.status === "bad" ? "border-red-bar" : "border-amber-bar"}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={TONE[i.status as ItemStatus]}>{ITEM_STATUS_LABELS[i.status as ItemStatus]}</Badge>
-                <span className="font-semibold text-sm">{i.item_label}</span>
-                <span className="text-xs text-muted">· {i.section_title}</span>
-              </div>
-              {i.remarks ? <p className="text-sm whitespace-pre-wrap">{i.remarks}</p> : null}
-              <Photos rows={bundle.media.filter((x) => x.item_key === i.item_key)} urls={bundle.mediaUrls} />
-            </div>
-          ))}
-        </div>
-      </DocSection>
-
-      <DocSection title="Full checklist">
-        <div className="flex flex-col gap-3 py-1">
-          {sections.map(([key, title]) => (
-            <div key={key} className="flex flex-col gap-1">
-              <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{title}</span>
-              <ul className="divide-y divide-line">
-                {items.filter((i) => i.section_key === key).map((i) => (
-                  <li key={i.id} className="py-1.5 flex items-center gap-2 text-sm">
-                    {i.status ? <Badge tone={TONE[i.status]}>{ITEM_STATUS_LABELS[i.status]}</Badge> : null}
-                    <span>{i.item_label}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </DocSection>
-
-      <DocSection title="Tyres and brakes">
-        <ul className="divide-y divide-line text-sm">
-          {m.tyre_size_front || m.tyre_size_rear ? <li className="py-1.5 flex flex-wrap gap-x-3"><span className="font-semibold w-28">Tyre size</span><span>Front {String(m.tyre_size_front ?? "") || "—"} · Rear {String(m.tyre_size_rear ?? "") || "—"}</span></li> : null}
-          {[...TYRE_POSITIONS, { key: "spare", label: "Spare" }].filter((p) => m[`tyre_${p.key}_tread`] || m[`tyre_${p.key}_action`]).map((p) => (
-            <li key={p.key} className="py-1.5 flex flex-wrap gap-x-3">
-              <span className="font-semibold w-28">{p.label}</span>
-              <span>{m[`tyre_${p.key}_tread`] ? `${m[`tyre_${p.key}_tread`]} mm` : ""}{m[`tyre_${p.key}_year`] ? ` · ${m[`tyre_${p.key}_year`]}` : ""}</span>
-              <span className="text-muted">{String(m[`tyre_${p.key}_cond`] ?? "").split(",").filter(Boolean).map((c) => TYRE_CONDITIONS.find((x) => x.value === c)?.label ?? c).join(", ")}</span>
-              <span className="font-semibold">{TYRE_ACTIONS.find((a) => a.value === m[`tyre_${p.key}_action`])?.label ?? ""}</span>
-            </li>
-          ))}
-          {MEASUREMENTS.filter((x) => !x.key.startsWith("tyre_") && m[x.key] != null && String(m[x.key]) !== "").map((x) => (
-            <li key={x.key} className="py-1.5 flex gap-3">
-              <span className="font-semibold w-44">{x.label}</span>
-              <span>{x.kind === "choice" ? (x.choices?.find((c) => c.value === String(m[x.key]))?.label ?? m[x.key]) : m[x.key]}{x.unit ? ` ${x.unit}` : ""}</span>
-            </li>
-          ))}
-        </ul>
-      </DocSection>
-
-      {roadTest && roadTest.status !== "not_started" && roadTest.decision !== "not_needed" ? (
-        <DocSection title="Road test">
-          {roadTest.status === "not_possible" ? (
-            <p className="text-sm py-1">Road test not possible: {roadTest.not_possible_reason}</p>
-          ) : (
-            <ul className="divide-y divide-line text-sm">
-              {ROAD_TEST_ITEMS.map((it) => {
-                const v = roadTest.items[it.key];
-                return (
-                  <li key={it.key} className="py-1.5 flex flex-wrap items-center gap-2">
-                    {v?.status ? <Badge tone={TONE[v.status]}>{ITEM_STATUS_LABELS[v.status]}</Badge> : null}
-                    <span className="font-semibold">{it.label}</span>
-                    {v?.remarks ? <span className="text-muted">· {v.remarks}</span> : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </DocSection>
+      {tyreRows.length || measures.length ? (
+        <ToggleBlock title="Measurements" defaultOpen={false}>
+          <ul className="divide-y divide-line text-sm">
+            {m.tyre_size_front || m.tyre_size_rear ? <li className="py-1.5 flex flex-wrap gap-x-3"><span className="font-semibold w-28">Tyre size</span><span>Front {text(m.tyre_size_front) || "—"} · Rear {text(m.tyre_size_rear) || "—"}</span></li> : null}
+            {tyreRows.map((p) => (
+              <li key={p.key} className="py-1.5 flex flex-wrap gap-x-3">
+                <span className="font-semibold w-28">{p.label}</span>
+                <span>{m[`tyre_${p.key}_tread`] ? `${text(m[`tyre_${p.key}_tread`])} mm` : ""}{m[`tyre_${p.key}_year`] ? ` · ${text(m[`tyre_${p.key}_year`])}` : ""}</span>
+                <span className="text-muted">{text(m[`tyre_${p.key}_cond`]).split(",").filter(Boolean).map((c) => TYRE_CONDITIONS.find((x) => x.value === c)?.label ?? c).join(", ")}</span>
+                <span className="font-semibold">{TYRE_ACTIONS.find((a) => a.value === text(m[`tyre_${p.key}_action`]))?.label ?? ""}</span>
+              </li>
+            ))}
+            {measures.map((x) => (
+              <li key={x.key} className="py-1.5 flex gap-3">
+                <span className="font-semibold w-44">{x.label}</span>
+                <span>{x.kind === "choice" ? (x.choices?.find((c) => c.value === text(m[x.key]))?.label ?? text(m[x.key])) : text(m[x.key])}{x.unit ? ` ${x.unit}` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </ToggleBlock>
       ) : null}
 
       {insp.manager_note ? (
-        <ToggleBlock title="Workshop manager's note">
-          <p className="text-sm whitespace-pre-wrap">{insp.manager_note}</p>
-        </ToggleBlock>
+        <DocSection title="Workshop note">
+          <p className="text-sm whitespace-pre-wrap py-1">{insp.manager_note}</p>
+        </DocSection>
       ) : null}
-      {insp.technician_notes ? (
-        <ToggleBlock title="Workshop notes">
-          <p className="text-sm whitespace-pre-wrap">{insp.technician_notes}</p>
-        </ToggleBlock>
+
+      {fee ? (
+        <div className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-1">
+          <span className="text-sm font-bold">{fee}</span>
+          {feeAr ? <span className="text-sm font-bold" dir="rtl" lang="ar">{feeAr}</span> : null}
+        </div>
       ) : null}
+
+      {contact}
+
       {prescans.length ? (
         <ToggleBlock title="Fault code scan report" defaultOpen={false}>
-          <div className="flex flex-wrap gap-2">
-            {prescans.map((p) => (
-              <a key={p.id} href={bundle.mediaUrls[p.storage_path] ?? "#"} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-3 text-sm font-semibold">PDF · {p.caption ?? "scan report"}</a>
-            ))}
-          </div>
+          <CustomerMedia items={prescans.map((p) => ({ id: p.id, kind: "pdf" as const, url: bundle.mediaUrls[p.storage_path] ?? null, label: p.caption ?? "scan report" }))} />
         </ToggleBlock>
       ) : null}
     </CustomerDocument>

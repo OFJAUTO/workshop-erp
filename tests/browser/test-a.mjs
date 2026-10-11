@@ -32,14 +32,23 @@ await section("A1-A2 inspection", async () => {
   check("technician page opens with the checklist", /Tyres/i.test(text ?? ""), (text ?? "").slice(0, 60));
   check("scan gate step shown (B1)", /Scan report/i.test(text ?? ""));
   const front = page.locator("#item-m-tyre_size_front input");
-  check("tyre size front box (B4)", (await front.count()) === 1);
-  await front.fill("275/40r20");
-  await front.press("Tab");
-  await sleep(400);
-  check("tyre size tidied to 275/40 R20 (B4)", (await front.inputValue()) === "275/40 R20", await front.inputValue());
+  check("tyre size front in three boxes (D5)", (await front.count()) === 3, String(await front.count()));
+  await front.nth(0).click();
+  await page.keyboard.type("27540");
+  await sleep(200);
+  check("the cursor moves to the next box by itself (D5)", (await front.nth(1).inputValue()) === "40", `${await front.nth(0).inputValue()}/${await front.nth(1).inputValue()}`);
+  await front.nth(2).fill("20");
+  await sleep(1200);
+  const savedSize = await sql("select measurements->>'tyre_size_front' as s from public.inspections where id = $1", [inspectionId]);
+  check("tyre size saved as 275/40 R20 (D5)", savedSize[0]?.s === "275/40 R20", JSON.stringify(savedSize));
   const same = page.getByRole("button", { name: "Same as front" });
-  check("Same as front button (B4)", (await same.count()) === 1);
-  if (await same.count()) { await same.click(); await sleep(300); check("rear = front (B4)", (await page.locator("#item-m-tyre_size_rear input").inputValue()) === "275/40 R20"); }
+  check("Same as front button (D5)", (await same.count()) === 1);
+  if (await same.count()) { await same.click(); await sleep(300); const rear = page.locator("#item-m-tyre_size_rear input"); check("rear = front (D5)", (await rear.nth(0).inputValue()) === "275" && (await rear.nth(2).inputValue()) === "20"); }
+  const ov = page.locator("#item-m-tyre_size_rear input").nth(0);
+  await ov.fill("999");
+  await sleep(300);
+  check("a width outside 135 to 355 turns red (D5)", /border-red/.test((await ov.getAttribute("class")) ?? ""));
+  await ov.fill("275");
   const items = page.locator("[id^='item-'] button:has-text('BAD')");
   const n = await items.count();
   check("status buttons present", n > 5, String(n));
@@ -130,36 +139,36 @@ await section("A3-A4 quotation", async () => {
   // 11 October rule: the quotation is a plain labour list and a parts list; nothing from the report follows it.
   check("no request headings on the quotation (main rule, 11 Oct)", !/Request:/.test(body ?? ""), (body ?? "").match(/Request:[^·"]{0,40}/)?.[0] ?? "");
   check("no findings list or ratings on the quotation (main rule, 11 Oct)", !/not quoted|\bBAD\b|\bAVG\b/.test(body ?? "") && (await page.getByRole("button", { name: "Add to quotation" }).count()) === 0);
-  const askBtn = page.getByRole("button", { name: "Ask Parts for a part" }).first();
+  const askBtn = page.getByRole("button", { name: "+ Add a part" }).first();
   await askBtn.scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 200));
   await sleep(300);
   const y0 = await page.evaluate(() => window.scrollY);
   await askBtn.click();
-  await page.getByPlaceholder(/Part name or nu/).fill("Rear brake discs set");
-  const sendBtn = page.getByRole("button", { name: "Send to Parts" }).first();
+  await page.getByPlaceholder(/Type to find a part/).fill("Rear brake discs set");
+  await page.getByRole("button", { name: /as a custom part/ }).first().click();
+  const sendBtn = page.getByRole("button", { name: "Done" }).first();
   await sendBtn.dblclick();
   await sleep(3000);
   const y1 = await page.evaluate(() => window.scrollY);
   check("page stays put after Ask Parts (A3)", Math.abs(y1 - y0) < 150, `${y0} → ${y1}`);
   const q = await sql("select count(*)::int as n from public.part_requests where job_id = $1 and label ilike 'Rear brake discs set'", [jobId]);
   check("double tap made exactly one part request (A4)", q[0]?.n === 1, JSON.stringify(q[0]));
-  await page.getByRole("button", { name: "Expand all" }).click();
-  await sleep(300);
   const hours = page.locator("input[aria-label='Hours']").first();
   check("hours box found (C1)", (await hours.count()) >= 1);
   if (await hours.count()) {
     await hours.fill("1.3");
     await hours.press("Tab");
     await sleep(1500);
-    const hoursText = await page.locator("[id^='item-line-']").allTextContents();
-    check("hours accept 0.1 steps (C1)", hoursText.some((t) => /1.3 h/.test(t)), hoursText.map((t) => t.match(/d+.d h/)?.[0]).filter(Boolean).join(","));
+    const hrs = await sql("select hours from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active order by position limit 1", [quotationId]);
+    check("hours accept 0.1 steps (C1)", Number(hrs[0]?.hours) === 1.3, JSON.stringify(hrs));
   }
-  // Rows fold again after an autosave: open them before reaching for the remove button.
-  await page.getByRole("button", { name: "Expand all" }).click().catch(() => null);
-  await sleep(400);
-  const remove = page.locator("button[aria-label='Remove line']").last();
-  await remove.scrollIntoViewIfNeeded();
+  // Remove sits behind the row's three-dot menu (F2).
+  const more = page.locator("button[aria-label='More for this line']").last();
+  await more.scrollIntoViewIfNeeded();
+  await more.click();
+  await sleep(300);
+  const remove = page.getByRole("button", { name: "Remove" }).last();
   const y4 = await page.evaluate(() => window.scrollY);
   await remove.click();
   await sleep(3000);
@@ -169,6 +178,9 @@ await section("A3-A4 quotation", async () => {
   const { browser: b2, page: p2 } = await browserFor("parts");
   await go(p2, `${base}/parts/${jobId}`);
   check("VIN with Copy on the Parts screen (D1)", (await p2.getByRole("button", { name: "Copy the VIN" }).count()) >= 1);
+  // "Not available" sits behind "Cannot supply this one?" on the request's row (E5).
+  const cannot = p2.locator("summary:has-text('Cannot supply this one?')").first();
+  if (await cannot.count()) { await cannot.click(); await sleep(300); }
   const na = p2.getByRole("button", { name: "Not available" }).first();
   check("Not available button (D2)", (await na.count()) >= 1);
   if (await na.count()) {
@@ -184,7 +196,7 @@ await section("A3-A4 quotation", async () => {
   check("editor flags the part not available (D2)", /Not available from Parts/.test(await p3.textContent("body")));
   await go(p3, `${base}/jobs/${jobId}/inspection`);
   const rb = await p3.textContent("body");
-  check("review page shows one compact checklist (B5)", /One line per item, BAD first/.test(rb ?? "") && /tap to see them/.test(rb ?? ""));
+  check("review page shows one compact checklist (B5)", /One line per item, Bad and Required first/.test(rb ?? "") && /tap to see them/.test(rb ?? ""));
   await b3.close();
 });
 
@@ -308,7 +320,7 @@ await section("D3-D4-G suppliers and text", async () => {
   const { browser: b3, page: p3 } = await browserFor("owner");
   await go(p3, `${base}/settings`);
   const st = await p3.textContent("body");
-  check("settings show quick remarks, advisor discount, capitals, known words, four bank charges", /Quick remarks/.test(st ?? "") && /Advisors can discount labour/.test(st ?? "") && /CAPITALS/.test(st ?? "") && /Known words/.test(st ?? "") && /Bank charge, cheque/.test(st ?? ""));
+  check("settings show quick remarks, advisor discount, known words, four bank charges, and no CAPITALS switch (A8, 11 Oct)", /Quick remarks/.test(st ?? "") && /Advisors can discount labour/.test(st ?? "") && !/CAPITALS/.test(st ?? "") && /Known words/.test(st ?? "") && /Bank charge, cheque/.test(st ?? ""));
   await b3.close();
 });
 

@@ -31,6 +31,9 @@ type LinePatch = {
   dangerous?: boolean;
   source_type?: string | null;
   source_key?: string | null;
+  positions?: unknown;
+  service_id?: string | null;
+  price_per?: string | null;
 };
 type Body = {
   quotationId?: string;
@@ -38,11 +41,12 @@ type Body = {
   opId?: string;
   addLine?: LinePatch & { service_id?: string | null };
   patchLine?: { id: string } & LinePatch;
-  removeLine?: { id: string };
+  /** keepParts: the job goes but its parts stay on the quotation, unlinked. */
+  removeLine?: { id: string; keepParts?: boolean };
   reorder?: { ids: string[] };
   header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean };
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
-  requestPart?: { description: string; quantity?: number | string; source_type?: string | null; source_key?: string | null };
+  requestPart?: { description: string; quantity?: number | string; source_type?: string | null; source_key?: string | null; positions?: unknown; catalogue_id?: string | null };
   /** A finding the advisor is not quoting, with the reason; a null reason takes the mark off again. */
   notQuoted?: { key: string; reason: string | null };
 };
@@ -167,6 +171,12 @@ export async function POST(request: NextRequest) {
       out.chosen = !!p.chosen;
     }
     if (p.parent_line_id !== undefined) out.parent_line_id = p.parent_line_id ? String(p.parent_line_id) : null;
+    if (p.positions !== undefined) out.positions = Array.isArray(p.positions) ? Array.from(new Set(p.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8) : null;
+    if (p.service_id !== undefined) {
+      if (current?.part_item_id) return "A listed part is not a service.";
+      out.service_id = p.service_id ? String(p.service_id) : null;
+    }
+    if (p.price_per !== undefined) out.price_per = p.price_per ? String(p.price_per).trim().slice(0, 30) : null;
     if (p.recovery_trips !== undefined) {
       const t = n(p.recovery_trips);
       out.recovery_trips = t;
@@ -219,6 +229,8 @@ export async function POST(request: NextRequest) {
     const description = String(body.requestPart.description ?? "").trim().slice(0, 200);
     if (!description) return NextResponse.json({ error: "Describe the part." }, { status: 400 });
     const qty = Math.max(0.01, n(body.requestPart.quantity) ?? 1);
+    const reqPositions = Array.isArray(body.requestPart.positions) ? Array.from(new Set(body.requestPart.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8) : null;
+    const reqCatalogue = typeof body.requestPart.catalogue_id === "string" && /^[0-9a-f-]{36}$/i.test(body.requestPart.catalogue_id) ? body.requestPart.catalogue_id : null;
     // A part asked from under a finding keeps that finding, so it lands under the right labour line once priced.
     const srcType = body.requestPart.source_type && ["request", "item", "tyre"].includes(body.requestPart.source_type) ? body.requestPart.source_type : "manual";
     const srcKey = srcType === "manual" ? `${q.id}:${Date.now()}` : `${String(body.requestPart.source_key ?? "")}#q${Date.now()}`;
@@ -227,7 +239,7 @@ export async function POST(request: NextRequest) {
       const { data: same } = await admin.from("part_requests").select("id").eq("client_key", opKey).maybeSingle();
       if (same) return NextResponse.json({ ok: true });
     }
-    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp });
+    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, positions: reqPositions, catalogue_id: reqCatalogue, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp });
     if (error) return NextResponse.json({ ok: !!/client_key/.test(error.message), error: /client_key/.test(error.message) ? undefined : error.message }, { status: /client_key/.test(error.message) ? 200 : 500 });
     await notifyRoles(["parts"], { type: "parts_request", title: `Part to price · ${job?.job_number ?? ""}`, body: `${description} × ${qty}, asked by ${staff.display_name} on ${q.number}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     await refreshed();
@@ -238,7 +250,7 @@ export async function POST(request: NextRequest) {
     const a = body.addLine;
     let type = ((a.line_type as LineType | undefined) ?? "labour") as LineType;
     if (type === "fee") return NextResponse.json({ error: "The bank charge is automatic; there is no Fee line to add." }, { status: 400 });
-    if (type === "part" && q.kind === "quotation") return NextResponse.json({ error: "Parts come through the Parts desk. Use \"Ask Parts for a part\"." }, { status: 400 });
+    if (type === "part" && q.kind === "quotation") return NextResponse.json({ error: "Parts come through the Parts desk. Use \"+ Add a part\"." }, { status: 400 });
     if (body.opId) {
       const { data: same } = await admin.from("quotation_lines").select("id").eq("client_key", String(body.opId).slice(0, 80)).maybeSingle();
       if (same) return NextResponse.json({ ok: true, id: same.id });
@@ -251,6 +263,9 @@ export async function POST(request: NextRequest) {
       if (!svc) return NextResponse.json({ error: "Service not found." }, { status: 404 });
       type = svc.price_aed !== null ? "package" : "labour";
       Object.assign(row, { quantity: type === "package" ? Math.max(1, Math.round(Number(svc.usual_quantity) || 1)) : 1, price_per: type === "package" ? (svc.price_per ?? "job") : null, line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
+      // A job added for a finding keeps that finding, so its parts land under it.
+      if (a.source_type && a.source_key && ["item", "tyre", "request"].includes(a.source_type)) Object.assign(row, { source_type: a.source_type, source_key: String(a.source_key).slice(0, 120) });
+      if (Array.isArray(a.positions)) row.positions = Array.from(new Set(a.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8);
       if (q.job_id && Array.isArray(svc.parts_requests) && svc.parts_requests.length) {
         linked = { name: svc.name, rows: (svc.parts_requests as string[]).map((label, i) => ({ job_id: q.job_id, source_type: "manual", source_key: `${svc.id}:${Date.now()}:${i}`, label, requested_text: `For ${svc.name}, added by ${staff.display_name} on ${q.number}`, created_by: staff.id, ...stamp })) };
       }
@@ -323,8 +338,8 @@ export async function POST(request: NextRequest) {
     if (cur.fee_kind) return NextResponse.json({ error: "The bank charge line is automatic; it cannot be removed." }, { status: 400 });
     const { error } = await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    // Removing a job removes its parts with it.
-    if (cur.line_type === "labour" || cur.line_type === "package") await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
+    // Removing a job removes its parts with it, unless the advisor chose to keep them (they stay, unlinked, to be linked to another job).
+    if (cur.line_type === "labour" || cur.line_type === "package") await admin.from("quotation_lines").update(body.removeLine.keepParts ? { parent_line_id: null, ...stamp } : { is_active: false, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
     await refreshed();
     return NextResponse.json({ ok: true });
   }

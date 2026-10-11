@@ -4,7 +4,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { feeNotice } from "@/lib/jobs";
 import { amountInWords, round2 } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals } from "@/lib/quotes";
+import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { dubaiDate } from "@/lib/jobs";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -31,7 +31,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     const number = part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null);
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
-      description: title,
+      description: withPositions(title, l.positions),
       details: [l.line_type === "part" ? partTypeText(l) : null, l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.details].filter(Boolean).join(" · ") || null,
       partNumber: number,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),

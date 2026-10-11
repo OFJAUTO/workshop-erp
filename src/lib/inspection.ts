@@ -6,7 +6,21 @@ export type ItemStatus = (typeof ITEM_STATUSES)[number];
 /** Customer requests and the road test have no N/A. */
 export const CHECK_STATUSES = ["good", "average", "bad"] as const;
 export type CheckStatus = (typeof CHECK_STATUSES)[number];
-export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = { good: "GOOD", average: "AVERAGE", bad: "BAD", na: "N/A" };
+export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = { good: "Good", average: "Average", bad: "Bad", na: "N/A" };
+
+/** Two answer styles: a component is graded Good / Average / Bad; a service item is a job, OK or Required. */
+export type ItemStyle = "grade" | "job";
+export const ITEM_STYLE_LABELS: Record<ItemStyle, string> = { grade: "Good / Average / Bad", job: "OK / Required" };
+export const JOB_ITEM_STATUSES = ["good", "bad", "na"] as const;
+export function itemStatusesFor(style?: ItemStyle | string | null): readonly ItemStatus[] {
+  return style === "job" ? JOB_ITEM_STATUSES : ITEM_STATUSES;
+}
+/** The word on the button and on the report for one answer, by style. */
+export function itemStatusLabel(status: ItemStatus | null | undefined, style?: ItemStyle | string | null): string {
+  if (!status) return "";
+  if (style === "job") return status === "good" ? "OK" : status === "bad" ? "Required" : status === "na" ? "N/A" : "Average";
+  return ITEM_STATUS_LABELS[status];
+}
 
 /** The "Other" section is optional: an unmarked item there does not block the report. */
 export const OPTIONAL_SECTION_KEY = "other";
@@ -21,7 +35,7 @@ export const INSPECTION_STATUS_LABELS: Record<InspectionStatus, string> = {
   approved: "Approved by the workshop manager",
 };
 
-export type ChecklistItem = { key: string; label: string };
+export type ChecklistItem = { key: string; label: string; style?: ItemStyle };
 export type ChecklistSection = { key: string; title: string; items: ChecklistItem[] };
 
 /** The road test used to be a checklist section; it now belongs to the QC inspector. Old reports hide it. */
@@ -56,17 +70,17 @@ export function slugKey(label: string) {
     .slice(0, 48);
 }
 
-function section(title: string, labels: string[]): ChecklistSection {
+function section(title: string, labels: string[], jobLabels: string[] = []): ChecklistSection {
   const key = slugKey(title);
   const seen = new Set<string>();
   return {
     key,
     title,
-    items: labels.map((label) => {
+    items: [...labels, ...jobLabels].map((label) => {
       let k = slugKey(label);
       while (seen.has(k)) k += "_x";
       seen.add(k);
-      return { key: `${key}.${k}`, label };
+      return jobLabels.includes(label) ? { key: `${key}.${k}`, label, style: "job" as const } : { key: `${key}.${k}`, label };
     }),
   };
 }
@@ -115,19 +129,9 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Height level sensor",
     "Rear suspension arms/bushes",
     "Rear shock absorbers",
-    "Wheel alignment",
   ]),
   section("Underbody", ["Undercovers + bolts/fasteners/clips", "Exhaust + O2 sensor + catalyst", "Fuel tank + cover", "Fender liner"]),
-  section("Wheels, tyres and brakes", [
-    "Wheel bearing",
-    "Wheel bolts",
-    "Wheel condition + centre cap",
-    "Tyres + valve + valve cover",
-    "Brake discs",
-    "Brake pads",
-    "Brake fluid pipes / caliper leak / piston jam",
-    "Brake dust cover",
-  ]),
+  section("Wheels and brakes", ["Wheel bearing", "Wheel bolts or nuts (with locking nut and key)", "Wheel condition + centre cap", "Brake discs", "Brake pads", "Brake fluid pipes / caliper leak / piston jam", "Brake dust cover"], ["Wheel alignment", "Wheel balancing"]),
   section("Electrical", [
     "Battery + aux battery",
     "Front headlights",
@@ -147,6 +151,7 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Interior lights",
   ]),
   section("Air conditioning", ["A/C compressor / expansion valve / condenser / evaporator / pipes", "Cabin filter"]),
+  section("Service items", [], ["Engine oil service due", "Brake fluid change due", "Coolant change due", "Transmission oil service due", "A/C gas recharge", "Software update / service reset"]),
   section("Other", ["Other"]),
 ];
 
@@ -170,6 +175,19 @@ export const TYRE_ACTIONS = [
   { value: "replace_soon", label: "Replace soon" },
   { value: "replace_now", label: "Replace now" },
 ] as const;
+/** Replace now on a tyre with plenty of tread needs one of these reasons (one tap). */
+export const TYRE_REPLACE_REASONS = [
+  { value: "age", label: "Age" },
+  { value: "damage", label: "Damage" },
+  { value: "uneven_wear", label: "Uneven wear" },
+  { value: "customer_request", label: "Customer request" },
+] as const;
+export const TYRE_REASON_ABOVE_MM = 5;
+export function tyreReasonNeeded(m: Record<string, string | number | null | undefined>, pos: string) {
+  if (m[`tyre_${pos}_action`] !== "replace_now") return false;
+  const tread = Number(String(m[`tyre_${pos}_tread`] ?? "").replace(",", "."));
+  return Number.isFinite(tread) && tread > TYRE_REASON_ABOVE_MM;
+}
 
 /** "Good" stands alone; the other conditions combine. Stored as a comma-separated list. */
 export function cleanTyreConditions(values: string[]) {
@@ -182,9 +200,10 @@ export function cleanTyreConditions(values: string[]) {
 /** Cleans one saved measurement value: tyre conditions and actions must be known choices; everything else is free text. Returns null when the key is not allowed. */
 export function cleanMeasurementValue(key: string, raw: string): string | null {
   const value = raw.trim().slice(0, key.endsWith("_reason") ? 200 : 40);
-  const tyre = /^tyre_(fl|fr|rl|rr|spare)_(cond|action|danger|danger_reason)$/.exec(key);
+  const tyre = /^tyre_(fl|fr|rl|rr|spare)_(cond|action|danger|danger_reason|reason)$/.exec(key);
   if (tyre) {
     if (tyre[2] === "cond") return cleanTyreConditions(value.split(",")).join(",");
+    if (tyre[2] === "reason") return TYRE_REPLACE_REASONS.some((r) => r.value === value) ? value : "";
     if (tyre[2] === "danger") return value === "1" ? "1" : "";
     if (tyre[2] === "danger_reason") return value;
     return TYRE_ACTIONS.some((a) => a.value === value) ? value : "";
@@ -201,6 +220,33 @@ export function tyreSizeText(raw: string): string {
   const t = raw.trim().toUpperCase().slice(0, 20);
   const m = /^(\d{3})\s*[\/ ]?\s*(\d{2})\s*[\/ ]?\s*(?:Z?R)?\s*(\d{2})$/.exec(t);
   return m ? `${m[1]}/${m[2]} R${m[3]}` : t;
+}
+
+/** The three boxes of a tyre size and their sensible ranges. */
+export const TYRE_SIZE_LIMITS = { width: [135, 355], profile: [20, 85], rim: [13, 24] } as const;
+export type TyreSizeParts = { width: string; profile: string; rim: string };
+/** "275/40 R20" (or a half-typed "275/4 R") into its three boxes. */
+export function tyreSizeParts(text: string): TyreSizeParts {
+  const m = /^(\d{0,3})\/(\d{0,2}) R(\d{0,2})$/.exec(tyreSizeText(text));
+  return m ? { width: m[1], profile: m[2], rim: m[3] } : { width: "", profile: "", rim: "" };
+}
+export function tyreSizeFromParts(p: TyreSizeParts): string {
+  return p.width || p.profile || p.rim ? `${p.width}/${p.profile} R${p.rim}` : "";
+}
+export function tyreSizeComplete(text: string | null | undefined): boolean {
+  return /^\d{3}\/\d{2} R\d{2}$/.test(tyreSizeText(String(text ?? "")));
+}
+/** Which boxes of a tyre size are outside the sensible range, as "width 135 to 355" lines. */
+export function tyreSizeRangeProblems(text: string | null | undefined): string[] {
+  const p = tyreSizeParts(String(text ?? ""));
+  const out: string[] = [];
+  for (const k of ["width", "profile", "rim"] as const) {
+    if (p[k].length < (k === "width" ? 3 : 2)) continue;
+    const n = Number(p[k]);
+    const [lo, hi] = TYRE_SIZE_LIMITS[k];
+    if (n < lo || n > hi) out.push(`${k} ${lo} to ${hi}`);
+  }
+  return out;
 }
 
 export const MEASUREMENTS: MeasurementField[] = [
@@ -223,7 +269,7 @@ export const MEASUREMENTS: MeasurementField[] = [
     kind: "choice",
     choices: [
       { value: "good", label: "Good" },
-      { value: "weak", label: "Weak" },
+      { value: "weak", label: "Weak, recharge and retest" },
       { value: "replace", label: "Replace" },
     ],
     group: "Battery test",
@@ -262,7 +308,7 @@ export function cleanChecklist(input: unknown): ChecklistSection[] | string {
       let ikey = String((i as { key?: unknown }).key ?? "").trim() || `${key}.${slugKey(label)}`;
       while (keys.has(ikey)) ikey += "_x";
       keys.add(ikey);
-      items.push({ key: ikey, label });
+      items.push((i as { style?: unknown }).style === "job" ? { key: ikey, label, style: "job" } : { key: ikey, label });
     }
     if (items.length === 0) return `The section "${title}" has no items.`;
     out.push({ key, title, items });
@@ -287,8 +333,9 @@ export function formatMinutes(min: number) {
 export type ReportProblem = { key: string; label: string };
 
 export type ReportState = {
-  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string; dangerous?: boolean; dangerous_reason?: string }[];
-  findings: { requestId: string; text: string; status: ItemStatus | null; found: string }[];
+  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string; dangerous?: boolean; dangerous_reason?: string; style?: ItemStyle | string | null }[];
+  /** Customer requests are read on the report, not answered. Kept optional for old callers. */
+  findings?: { requestId: string; text: string; status: ItemStatus | null; found: string }[];
   measurements: Record<string, string>;
   /** The technician's estimated hours; null or undefined when the screen does not ask for them. */
   estimatedHours?: string | null;
@@ -299,17 +346,12 @@ export type ReportState = {
 export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimits } = {}): ReportProblem[] {
   const out: ReportProblem[] = [];
   if (s.scan?.required && !s.scan.read && !s.scan.approved) out.push({ key: "prescan", label: "Scan report: read it, or get Scan not possible approved" });
-  for (const f of s.findings) {
-    const short = f.text.length > 28 ? f.text.slice(0, 26) + "…" : f.text;
-    if (!f.status) out.push({ key: `req-${f.requestId}`, label: `${short}: not marked` });
-    else if (!f.found.trim()) out.push({ key: `req-${f.requestId}`, label: `${short}: what was found` });
-  }
   for (const i of s.items) {
     if (i.sectionKey === ROAD_TEST_SECTION_KEY) continue;
     const short = i.label.length > 28 ? i.label.slice(0, 26) + "…" : i.label;
     if (!i.status) {
       if (i.sectionKey !== OPTIONAL_SECTION_KEY) out.push({ key: i.key, label: `${short}: not marked` });
-    } else if ((i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
+    } else if (i.style !== "job" && (i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
     if (i.dangerous && !(i.dangerous_reason ?? "").trim()) out.push({ key: i.key, label: `${short}: why is it dangerous?` });
   }
   for (const p of TYRE_POSITIONS) {
@@ -322,10 +364,13 @@ export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimi
     if (!cond?.trim()) out.push({ key: `m-tyre_${p.key}_cond`, label: `${p.label} tyre condition: not marked` });
     if (!action?.trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre action: not marked` });
     if (s.measurements[`tyre_${p.key}_danger`] === "1" && !(s.measurements[`tyre_${p.key}_danger_reason`] ?? "").trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre: why is it dangerous?` });
+    if (tyreReasonNeeded(s.measurements, p.key) && !(s.measurements[`tyre_${p.key}_reason`] ?? "").trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre: why replace now?` });
   }
   for (const m of MEASUREMENTS) {
     if (m.optional || (m.key.startsWith("tyre_") && m.kind !== "text")) continue;
-    if (!s.measurements[m.key]?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });
+    const v = s.measurements[m.key];
+    if (!v?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });
+    else if (m.key.startsWith("tyre_size") && !tyreSizeComplete(v)) out.push({ key: `m-${m.key}`, label: `${m.label}: incomplete` });
   }
   if (opts.limits) out.push(...limitProblems(s.measurements, opts.limits));
   if (s.estimatedHours !== undefined && s.estimatedHours !== null && !(Number(String(s.estimatedHours).replace(",", ".")) > 0)) out.push({ key: "estimate", label: "Estimated hours for this job: missing" });
@@ -335,7 +380,6 @@ export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimi
 /** "12 of 99 done": every required answer on the report, for the neutral progress shown before Submit is tapped. */
 export function reportProgressOf(s: ReportState, opts: { limits?: InspectionLimits } = {}): { done: number; total: number } {
   const required =
-    s.findings.length +
     s.items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY && i.sectionKey !== OPTIONAL_SECTION_KEY).length +
     TYRE_POSITIONS.length * 4 +
     MEASUREMENTS.filter((m) => !m.optional && (!m.key.startsWith("tyre_") || m.kind === "text")).length +
@@ -502,15 +546,17 @@ export function limitProblems(m: Record<string, string>, limits: InspectionLimit
   check("pad_rear", "Rear brake pads", 0, limits.pads_max, "mm");
   check("battery_voltage", "Battery voltage", 0, limits.battery_max, "V");
   check("vent_temp", "A/C vent temperature", limits.vent_min, limits.vent_max, "°C");
+  for (const k of ["tyre_size_front", "tyre_size_rear"] as const) for (const p of tyreSizeRangeProblems(m[k])) out.push({ key: `m-${k}`, label: `${k === "tyre_size_front" ? "Tyre size front" : "Tyre size rear"}: ${p}` });
   return out;
 }
 /** The form's state for one checklist item, from a stored row. */
-export function toItemState(i: { item_key: string; item_label: string; section_key: string; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; parts_rows?: unknown }) {
+export function toItemState(i: { item_key: string; item_label: string; section_key: string; style?: string | null; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; parts_rows?: unknown }) {
   const s = (v: number | string | null | undefined) => (v === null || v === undefined ? "" : String(v));
   return {
     key: i.item_key,
     label: i.item_label,
     sectionKey: i.section_key,
+    style: i.style === "job" ? ("job" as ItemStyle) : ("grade" as ItemStyle),
     status: i.status,
     remarks: i.remarks ?? "",
     parts_needed: i.parts_needed ?? "",

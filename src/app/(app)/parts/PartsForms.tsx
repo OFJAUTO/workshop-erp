@@ -7,69 +7,69 @@ import { Button, Input, Textarea } from "@/components/ui";
 const TYPES = [
   { value: "genuine", label: "Genuine" },
   { value: "oem", label: "OEM" },
-  { value: "aftermarket", label: "Aftermarket" },
+  { value: "aftermarket", label: "Afterm." },
   { value: "used", label: "Used" },
 ];
 
 export type RowValues = { part_number: string; description: string; quantity: string; part_type: string; brand: string; cost_aed: string; supplier: string; availability: string; days: string };
 const EMPTY: RowValues = { part_number: "", description: "", quantity: "1", part_type: "", brand: "", cost_aed: "", supplier: "", availability: "in_stock", days: "" };
 
-/** One part on one line: number, description, quantity, type (one tap), brand when not genuine, cost, supplier, in stock or days to arrive. */
-function PartRow({ value, onChange, suppliers, showLabels, onRemove }: { value: RowValues; onChange: (v: RowValues) => void; suppliers: string[]; showLabels: boolean; onRemove?: () => void }) {
+/** The one grid every row of the Parts table uses: part, qty, part number, type, cost, supplier, availability, actions. */
+export const PARTS_GRID = "grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_3.5rem_7rem_8.5rem_6rem_8rem_9rem_minmax(5rem,auto)] gap-x-2 gap-y-1 items-center";
+
+/** One part as one table row: the same fields the server reads, each in its column. */
+function PartRow({ value, onChange, suppliers, info, onRemove }: { value: RowValues; onChange: (v: RowValues) => void; suppliers: string[]; info?: string | null; onRemove?: () => void }) {
   const set = (k: keyof RowValues, v: string) => onChange({ ...value, [k]: v });
-  const label = (t: string) => (showLabels ? <span className="text-xs font-semibold text-muted">{t}</span> : null);
+  const chip = (on: boolean, tone: "ink" | "green" = "ink") => `min-h-9 rounded-control border px-1.5 text-[11px] font-extrabold ${on ? (tone === "green" ? "border-green bg-green text-white" : "border-ink bg-ink text-white") : "border-line-strong bg-white"}`;
   return (
-    <div className="rounded-control border border-line p-2 flex flex-col gap-2">
-      <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-end">
-        <label className="flex flex-col gap-1">{label("Part number")}<Input name="part_number" value={value.part_number} onChange={(e) => set("part_number", e.target.value)} placeholder="Optional" textCase="upper" /></label>
-        <label className="flex flex-col gap-1">{label("Description")}<Input name="description" value={value.description} onChange={(e) => set("description", e.target.value)} placeholder="For example: Front brake pads, set" textCase="sentence" /></label>
-        <label className="flex flex-col gap-1">{label("Qty")}<Input name="quantity" value={value.quantity} onChange={(e) => set("quantity", e.target.value)} inputMode="numeric" className="w-20" /></label>
+    <div className={`${PARTS_GRID} py-1.5`}>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <Input name="description" value={value.description} onChange={(e) => set("description", e.target.value)} placeholder="Part" textCase="sentence" className="min-h-10 font-semibold" aria-label="Part" />
+        {info ? <span className="text-[11px] text-muted">{info}</span> : null}
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      <Input name="quantity" value={value.quantity} onChange={(e) => set("quantity", e.target.value)} inputMode="numeric" className="min-h-10 text-center" aria-label="Quantity" />
+      <Input name="part_number" value={value.part_number} onChange={(e) => set("part_number", e.target.value)} placeholder="Number" textCase="upper" className="min-h-10" aria-label="Part number" />
+      <div className="flex flex-col gap-1">
         <input type="hidden" name="part_type" value={value.part_type} />
-        <div className="flex flex-col gap-1">
-          {label("Type (one tap)")}
-          <div className="flex gap-1">
-            {TYPES.map((t) => (
-              <button key={t.value} type="button" onClick={() => set("part_type", t.value)} aria-pressed={value.part_type === t.value} className={`min-h-11 rounded-control border-2 px-3 text-xs font-extrabold ${value.part_type === t.value ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
+        <div className="grid grid-cols-2 gap-1">
+          {TYPES.map((t) => (
+            <button key={t.value} type="button" onClick={() => set("part_type", t.value)} aria-pressed={value.part_type === t.value} className={chip(value.part_type === t.value)} title={t.value === "aftermarket" ? "Aftermarket" : t.label}>
+              {t.label}
+            </button>
+          ))}
         </div>
-        {value.part_type && value.part_type !== "genuine" ? <label className="flex flex-col gap-1">{label("Brand")}<Input name="brand" value={value.brand} onChange={(e) => set("brand", e.target.value)} placeholder="For example: Bosch" className="w-40" textCase="title" /></label> : <input type="hidden" name="brand" value="" />}
-        <label className="flex flex-col gap-1">{label("Cost (AED, before VAT)")}<Input name="cost_aed" value={value.cost_aed} onChange={(e) => set("cost_aed", e.target.value)} inputMode="decimal" className="w-32" /></label>
-        <label className="flex flex-col gap-1">{label("Supplier")}<Input name="supplier" value={value.supplier} onChange={(e) => set("supplier", e.target.value)} list="suppliers" className="w-44" textCase="title" /></label>
+        {value.part_type && value.part_type !== "genuine" ? <Input name="brand" value={value.brand} onChange={(e) => set("brand", e.target.value)} placeholder="Brand" className="min-h-9 text-xs" textCase="title" aria-label="Brand" /> : <input type="hidden" name="brand" value="" />}
+      </div>
+      <Input name="cost_aed" value={value.cost_aed} onChange={(e) => set("cost_aed", e.target.value)} inputMode="decimal" placeholder="AED" className="min-h-10 text-right" aria-label="Cost before VAT" />
+      <Input name="supplier" value={value.supplier} onChange={(e) => set("supplier", e.target.value)} list="suppliers" placeholder="Supplier" className="min-h-10" textCase="title" aria-label="Supplier" />
+      <div className="flex items-center gap-1">
         <input type="hidden" name="availability" value={value.availability} />
-        <div className="flex flex-col gap-1">
-          {label("Availability")}
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => set("availability", "in_stock")} aria-pressed={value.availability === "in_stock"} className={`min-h-11 rounded-control border-2 px-3 text-xs font-extrabold ${value.availability === "in_stock" ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>In stock</button>
-            <button type="button" onClick={() => set("availability", "to_order")} aria-pressed={value.availability === "to_order"} className={`min-h-11 rounded-control border-2 px-3 text-xs font-extrabold ${value.availability === "to_order" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Days to arrive</button>
-            {value.availability === "to_order" ? <Input name="days" value={value.days} onChange={(e) => set("days", e.target.value)} inputMode="numeric" placeholder="days" className="w-20" /> : <input type="hidden" name="days" value="" />}
-          </div>
-        </div>
-        {onRemove ? <button type="button" aria-label="Remove row" onClick={onRemove} className="min-h-11 min-w-11 rounded-control border border-line text-sm font-bold ml-auto">✕</button> : null}
+        <button type="button" onClick={() => set("availability", "in_stock")} aria-pressed={value.availability === "in_stock"} className={chip(value.availability === "in_stock", "green")}>Stock</button>
+        <button type="button" onClick={() => set("availability", "to_order")} aria-pressed={value.availability === "to_order"} className={chip(value.availability === "to_order")}>Order</button>
+        {value.availability === "to_order" ? <Input name="days" value={value.days} onChange={(e) => set("days", e.target.value)} inputMode="numeric" placeholder="days" className="min-h-9 w-14 text-xs text-center" aria-label="Days until it arrives" /> : <input type="hidden" name="days" value="" />}
+      </div>
+      <div className="flex items-center justify-end gap-1">
+        {onRemove ? <button type="button" aria-label="Remove row" onClick={onRemove} className="min-h-9 min-w-9 rounded-control border border-line text-sm font-bold">✕</button> : null}
       </div>
       <datalist id="suppliers">{suppliers.map((s) => <option key={s} value={s} />)}</datalist>
     </div>
   );
 }
 
-/** Parts answer a request: as many rows as needed, one Save. An optional catalogue diagram goes on the first part. */
-export function PartRowsForm({ action, suppliers, defaultType, submitLabel = "Save parts" }: { action: FormAction; suppliers: string[]; defaultType: string; submitLabel?: string }) {
-  const [rows, setRows] = useState<{ id: number; v: RowValues }[]>([{ id: 0, v: { ...EMPTY, part_type: defaultType } }]);
+/** Parts answer a request in the table itself: the row is the answer, one Save. More rows for more parts; an optional catalogue diagram goes on the first. */
+export function PartRowsForm({ action, suppliers, defaultType, initial, info, submitLabel = "Save" }: { action: FormAction; suppliers: string[]; defaultType: string; initial?: Partial<RowValues>; info?: string | null; submitLabel?: string }) {
+  const [rows, setRows] = useState<{ id: number; v: RowValues }[]>([{ id: 0, v: { ...EMPTY, part_type: defaultType, ...(initial ?? {}) } }]);
   return (
-    <ActionForm action={action} className="flex flex-col gap-2">
+    <ActionForm action={action} className="flex flex-col gap-1">
       {() => (
         <>
           {rows.map((r, i) => (
-            <PartRow key={r.id} value={r.v} showLabels={i === 0} suppliers={suppliers} onChange={(v) => setRows((p) => p.map((x) => (x.id === r.id ? { ...x, v } : x)))} onRemove={rows.length > 1 ? () => setRows((p) => p.filter((x) => x.id !== r.id)) : undefined} />
+            <PartRow key={r.id} value={r.v} info={i === 0 ? info : null} suppliers={suppliers} onChange={(v) => setRows((p) => p.map((x) => (x.id === r.id ? { ...x, v } : x)))} onRemove={rows.length > 1 ? () => setRows((p) => p.filter((x) => x.id !== r.id)) : undefined} />
           ))}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" tone="secondary" size="md" onClick={() => setRows((p) => [...p, { id: Date.now(), v: { ...EMPTY, part_type: defaultType, supplier: p[p.length - 1]?.v.supplier ?? "" } }])}>+ Another part</Button>
-            <label className="flex items-center gap-2 text-sm"><span className="font-semibold">Catalogue diagram</span><input type="file" name="diagram" accept="image/*,application/pdf" className="text-xs" /></label>
+          <div className="flex flex-wrap items-center gap-3 pb-1">
             <SubmitButton size="md">{submitLabel}</SubmitButton>
+            <Button type="button" tone="secondary" size="md" onClick={() => setRows((p) => [...p, { id: Date.now(), v: { ...EMPTY, part_type: defaultType, supplier: p[p.length - 1]?.v.supplier ?? "" } }])}>+ Another part for this</Button>
+            <label className="flex items-center gap-2 text-xs"><span className="font-semibold text-muted">Diagram</span><input type="file" name="diagram" accept="image/*,application/pdf" className="text-xs" /></label>
           </div>
         </>
       )}
@@ -77,15 +77,15 @@ export function PartRowsForm({ action, suppliers, defaultType, submitLabel = "Sa
   );
 }
 
-/** Change one part, or add an option beside it (the same fields). */
+/** Change one part, or add an option beside it (the same row). */
 export function OnePartForm({ action, initial, suppliers, submitLabel }: { action: FormAction; initial: RowValues; suppliers: string[]; submitLabel: string }) {
   const [v, setV] = useState<RowValues>(initial);
   return (
-    <ActionForm action={action} className="flex flex-col gap-2">
+    <ActionForm action={action} className="flex flex-col gap-1">
       {() => (
         <>
-          <PartRow value={v} onChange={setV} suppliers={suppliers} showLabels />
-          <div><SubmitButton size="md">{submitLabel}</SubmitButton></div>
+          <PartRow value={v} onChange={setV} suppliers={suppliers} />
+          <div className="pb-1"><SubmitButton size="md">{submitLabel}</SubmitButton></div>
         </>
       )}
     </ActionForm>

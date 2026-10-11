@@ -38,3 +38,12 @@ export function wheelConditionText(values: string[] | null | undefined) {
   if (!values || values.length === 0) return "";
   return values.map((v) => WHEEL_CONDITION_LABELS[v as WheelCondition] ?? v).join(", ");
 }
+
+/** What was ticked under each wheel photo at gate-in, one line per wheel, for the inspection's wheel item. */
+export function wheelConditionLines(media: { kind: string; wheel_condition?: string[] | null }[]): { label: string; text: string }[] {
+  return WHEEL_KINDS.filter((k) => media.some((m) => m.kind === k)).map((k) => {
+    const row = media.find((m) => m.kind === k);
+    const text = wheelConditionText(row?.wheel_condition);
+    return { label: WHEEL_LABELS[k], text: text && text !== "None" ? text : "no damage noted" };
+  });
+}

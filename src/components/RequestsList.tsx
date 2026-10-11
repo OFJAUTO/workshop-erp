@@ -1,14 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { readDraft } from "./FormDraft";
 import { Button, Input } from "./ui";
 
 /**
  * One short line per customer request. Enter adds a line; lines can be
  * reordered and removed. Submits as repeated `requests` fields in order.
  */
-export function RequestsList({ initial = [], locked = false }: { initial?: string[]; locked?: boolean }) {
+export function RequestsList({ initial = [], locked = false, draftKey }: { initial?: string[]; locked?: boolean; /** The form's draft: request lines typed before are put back. */ draftKey?: string }) {
   const [lines, setLines] = useState<string[]>(initial.length ? initial : [""]);
+  useEffect(() => {
+    if (!draftKey || locked || initial.length) return;
+    const d = readDraft(draftKey);
+    const saved = d?.requests;
+    const list = Array.isArray(saved) ? saved : typeof saved === "string" ? [saved] : [];
+    // After mount, so the server-rendered list is never different from the first client render.
+    const timer = list.some((l) => l.trim()) ? setTimeout(() => setLines(list), 0) : null;
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [draftKey, locked, initial.length]);
 
   function update(i: number, v: string) {
     setLines((l) => l.map((x, idx) => (idx === i ? v : x)));

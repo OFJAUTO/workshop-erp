@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { parseHours } from "@/lib/quotes";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSettings } from "@/lib/settings";
 
 type Table = "service_categories" | "services";
 const DEPARTMENTS = ["mechanical", "bodyshop", "both"];
@@ -63,7 +64,8 @@ function serviceFields(formData: FormData): Record<string, unknown> | string {
   const usual = Math.max(1, Math.round(Number(String(formData.get("usual_quantity") ?? "1").replace(",", ".")) || 1));
   const allowanceRaw = blankToNull(formData.get("time_allowance_hours"));
   const allowance = allowanceRaw === null ? null : parseHours(allowanceRaw);
-  return { name: name.slice(0, 120), department, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
+  const suggestFor = Array.from(new Set(formData.getAll("suggest_for").map((v) => String(v).trim().slice(0, 120)).filter(Boolean))).slice(0, 40);
+  return { position_ask: formData.get("position_ask") === "on", suggest_for: suggestFor, name: name.slice(0, 120), department, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
 }
 
 export async function addCategory(formData: FormData) {
@@ -140,4 +142,30 @@ export async function removeService(id: string) {
   const { data, error } = await admin.from("services").update({ is_active: false, updated_by: staff.id }).eq("id", id).select("name, category_id").maybeSingle();
   if (data?.category_id) await renumber("services", data.category_id);
   back(`"${data?.name ?? "Service"}" removed.`, error?.message);
+}
+
+/** A custom job typed on quotations joins the list as an hourly job in the chosen category. */
+export async function adoptCustomJob(name: string, formData: FormData) {
+  const staff = await requirePermission("manageServices");
+  const admin = createAdminClient();
+  const categoryId = String(formData.get("category_id") ?? "");
+  if (!categoryId) back(null, "Choose the category.");
+  const { data: last } = await admin.from("services").select("position").eq("category_id", categoryId).eq("is_active", true).order("position", { ascending: false }).limit(1).maybeSingle();
+  const { error } = await admin.from("services").insert({ name: name.trim().slice(0, 120), department: "both", price_aed: null, default_hours: null, category_id: categoryId, position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
+  if (error && !/unique|duplicate/i.test(error.message)) back(null, error.message);
+  await dropCustomJob(name);
+  back(`"${name}" added to the list.`);
+}
+
+export async function dismissCustomJob(name: string) {
+  await requirePermission("manageServices");
+  await dropCustomJob(name);
+  back("Suggestion dismissed.");
+}
+
+async function dropCustomJob(name: string) {
+  const settings = await getSettings();
+  const used = { ...((settings.custom_jobs_used ?? {}) as Record<string, number>) };
+  delete used[name];
+  await createAdminClient().from("settings").upsert({ key: "custom_jobs_used", value: used, label: "Custom jobs used", description: "Custom job names typed on quotations, with counts, offered to the owner to add to the list." }, { onConflict: "key" });
 }

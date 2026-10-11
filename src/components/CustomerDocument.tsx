@@ -11,11 +11,16 @@ type Company = { tradingName: string; legalName: string; legalNameAr?: string | 
  * the title with its numbers; two pale boxes; the sections; the footer row and the contact row. On a
  * phone the tables reshape; on a PC it reads like the A4 page. A sticky bar at the bottom can hold buttons.
  */
-export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabel = "Download PDF", bar, footer, uppercase = false, children }: { uppercase?: boolean; company: Company; title: string; meta: DocMeta[]; boxes: DocBox[]; pdfHref?: string | null; pdfLabel?: string; bar?: ReactNode; footer?: ReactNode; children: ReactNode }) {
+export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabel = "Download PDF", bar, footer, uppercase = false, header = "full", children }: { uppercase?: boolean; /** plain: the logo centred on a light grey band (the approval and report links); full: the company block and TRN (quotations, invoices, receipts). */ header?: "full" | "plain"; company: Company; title: string; meta: DocMeta[]; boxes: DocBox[]; pdfHref?: string | null; pdfLabel?: string; bar?: ReactNode; footer?: ReactNode; children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#E9E9EC] text-[#111113]">
       <main className={`mx-auto w-full max-w-[794px] px-0 py-0 sm:px-4 sm:py-6 ${bar ? "pb-32" : "pb-10"}`}>
         <div className="bg-white sm:shadow-sm px-4 sm:px-11 flex flex-col">
+          {header === "plain" ? (
+            <header className="-mx-4 sm:-mx-11 flex items-center justify-center bg-[#F4F4F5] border-b-[3px] border-[#111113] py-5 sm:py-7">
+              <Logo className="h-14 sm:h-20 w-auto" alt={company.tradingName} />
+            </header>
+          ) : (
           <header className="flex items-center justify-between gap-4 border-b-[3px] border-[#111113] pt-6 pb-4 sm:pt-[30px] sm:pb-[18px]">
             <Logo className="h-12 sm:h-20 w-auto" alt={company.tradingName} />
             <div className="flex items-stretch gap-3 sm:gap-[22px] text-[10px] sm:text-[10.5px] leading-[1.6]">
@@ -29,6 +34,7 @@ export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabe
               </div>
             </div>
           </header>
+          )}
           <div className={`flex flex-col gap-[18px] pt-[26px] pb-6 flex-1 ${uppercase ? "uppercase" : ""}`}>
             <section className="flex flex-wrap items-end justify-between gap-4">
               <h1 className="text-[26px] sm:text-[30px] font-extrabold tracking-[0.02em] leading-none uppercase">{title}</h1>

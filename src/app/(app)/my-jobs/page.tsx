@@ -5,6 +5,7 @@ import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
 import { Badge, Button, Card, Empty, Notice, PageHeader } from "@/components/ui";
+import { WaitingPanel } from "@/components/WaitingPanel";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { clockIn, clockOut } from "../jobs/work-actions";
@@ -95,6 +96,7 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
         }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
+      <WaitingPanel staff={staff} />
       {pendingHandovers.map((h) => (
         <Link key={h.id} href={`/my-jobs/${h.job_id}#handover`} className="block rounded-card border-2 border-ink bg-white px-4 py-3 text-[15px] font-semibold">{h.giverName} is handing you {h.items.length} part{h.items.length === 1 ? "" : "s"} for {h.plate}: tap to enter your PIN.</Link>
       ))}

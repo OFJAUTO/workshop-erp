@@ -84,7 +84,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                   </div>
                   <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
                     <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
-                    <StageTrack stage={j.stage} timing={timing} skip={j.job_kind === "loose" ? ["inspection", "wash"] : undefined} />
+                    <StageTrack stage={j.stage} timing={timing} skip={j.job_kind === "loose" ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
                   </div>
                 </Card>
               </Link>

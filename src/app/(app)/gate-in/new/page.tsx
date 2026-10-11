@@ -82,6 +82,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
         <div className="2xl:col-span-3">
           <GateInForm
             action={createGateIn.bind(null, v.id)}
+            draftKey={`gate-in-${v.id}`}
             isElectric={v.fuel_type === "electric"}
             branches={settings.branches}
             requests={appointment ? [appointment.reason] : []}

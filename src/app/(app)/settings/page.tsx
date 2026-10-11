@@ -79,6 +79,9 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/inspection" tone="secondary">
               Inspection checklist
             </LinkButton>
+            <LinkButton href="/settings/parts" tone="secondary">
+              Parts list
+            </LinkButton>
             <LinkButton href="/settings/catalog" tone="secondary">
               Makes and models{pendingReview ? ` · ${pendingReview} to review` : ""}
             </LinkButton>

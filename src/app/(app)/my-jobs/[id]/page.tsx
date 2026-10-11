@@ -8,7 +8,10 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } fro
 import { requireStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus, inspectionLimitsOf, toItemState } from "@/lib/inspection";
-import { inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
+import { inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous, tyreSizeSuggestionFor } from "@/lib/inspection-data";
+import { wheelConditionLines } from "@/lib/wheels";
+import { loadCatalogue } from "@/lib/parts-catalogue";
+import { cleanPartsList } from "@/lib/parts-list";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { loadJobItems } from "@/lib/loose-items";
 import { CONDITIONS, STATUS_LABELS, formatPromised, labelOf, workingTimeOf } from "@/lib/jobs";
@@ -79,7 +82,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const target = insp?.target_minutes ?? (Number(settings.inspection_target_minutes) || 90);
   const over = !!insp?.started_at && workingMin > target;
   const locked = insp ? inspectionLocked(insp) : false;
-  const waitingRoadTest = roadTestWaiting(roadTest) && role !== "owner";
+  const waitingRoadTest = (roadTestWaiting(roadTest) || job.status === "pending_road_test") && role !== "owner";
   const inWork = job.status === "in_work";
   const loose = job.job_kind === "loose";
   const looseItems = loose ? await loadJobItems(id) : [];
@@ -115,14 +118,18 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const myTech = techs.find((t) => t.staff_id === staff.id);
   const canWork = mine && (role === "technician" || role === "owner") && !staff.viewingAs;
 
+  const [tyreSizeSuggestion, catalogue] = insp ? await Promise.all([tyreSizeSuggestionFor(vehicle.id), loadCatalogue()]) : [null, []];
   const formProps = insp && bundle
     ? {
         checklist: insp.checklist as ChecklistSection[],
         items: bundle.items.map(toItemState),
-        findings: requests.map((r) => {
-          const f = bundle.findings.find((x) => x.job_request_id === r.id);
-          return { requestId: r.id, text: r.text, found: f?.found ?? "", needs: f?.needs ?? "", status: (f?.status as ItemStatus | null) ?? null };
-        }),
+        requests: requests.map((r) => ({ id: r.id, text: r.text })),
+        requestsNote: insp.requests_note ?? "",
+        complaintKeywords: (settings.complaint_keywords ?? {}) as Record<string, string[]>,
+        wheelConditions: wheelConditionLines(media),
+        tyreSizeSuggestion,
+        catalogue,
+        partsList: cleanPartsList(insp.parts_list),
         measurements: Object.fromEntries(Object.entries(insp.measurements ?? {}).map(([k, v]) => [k, String(v)])),
         files: bundle.media.filter((m) => !m.item_key?.startsWith("road.")).map((m) => ({ id: m.id, kind: m.kind, url: bundle.mediaUrls[m.storage_path] ?? null, caption: m.caption, isPrescan: m.is_prescan, itemKey: m.item_key, requestId: m.job_request_id })),
         notes: insp.technician_notes ?? "",
@@ -283,7 +290,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
           {["approved", "waiting_parts"].includes(job.status) ? <Notice tone="info">The customer approved the work. Parts and the workshop manager are planning it; the car opens for you when it is released.</Notice> : null}
 
           {!loose ? (
-          <Card className={`flex flex-col gap-4 ${over && insp?.status === "in_progress" ? "border-red-bar" : ""}`}>
+          <Card className={`flex flex-col gap-4 ${over && insp?.status === "in_progress" ? "border-red-bar" : ""} ${waitingRoadTest ? "opacity-60" : ""}`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <SectionLabel>Inspection</SectionLabel>
               {insp ? <Badge tone={insp.status === "approved" ? "green" : insp.status === "returned" ? "red" : insp.status === "submitted" ? "amber" : "outline"}>{INSPECTION_STATUS_LABELS[insp.status]}</Badge> : null}

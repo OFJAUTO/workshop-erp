@@ -81,7 +81,7 @@ export async function assignJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("assignJobs");
   const technicianIds = formData.getAll("technician").map(String).filter(Boolean);
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at, department").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
   const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
   const choice = readRoadTestChoice(formData);
@@ -96,7 +96,9 @@ export async function assignJob(jobId: string, formData: FormData) {
   const tech = techs[0];
   if (!tech) redirect(`${back}?error=` + encodeURIComponent("Tick at least one technician."));
 
-  const toStatus: JobStatus = job.status === "gate_in_pending" || job.status === "pending_approval" ? "pending_inspection" : (job.status as JobStatus);
+  // A road test the manager asks for holds the car in its own step, Pending road test, until the QC inspector has done it.
+  const baseStatus: JobStatus = job.status === "gate_in_pending" || job.status === "pending_approval" || job.status === "pending_road_test" ? "pending_inspection" : (job.status as JobStatus);
+  const toStatus: JobStatus = baseStatus === "pending_inspection" && choice.decision === "needed" && job.department !== "bodyshop" ? "pending_road_test" : baseStatus;
   const { error } = await supabase
     .from("jobs")
     .update({ assigned_to: tech.id, assigned_at: new Date().toISOString(), status: toStatus, stage: STATUS_STAGE[toStatus] })

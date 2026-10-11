@@ -82,9 +82,14 @@ export async function decideRoadTest(jobId: string, formData: FormData) {
   else if (before?.status === "not_possible") Object.assign(row, { status: "not_started", not_possible_reason: null, done_at: null });
   const { error } = await admin.from("road_tests").upsert(row, { onConflict: "job_id" });
   if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "road_test_decision", note: `${ROAD_TEST_DECISION_LABELS[decision]} (${staff.display_name}): ${note}`, created_by: staff.id });
 
   const nowWaiting = roadTestWaiting({ status: decision === "not_possible" ? "not_possible" : (before?.status === "not_possible" ? "not_started" : (before?.status ?? "not_started")), decision });
+  // The waiting car sits in its own step: Pending road test while the QC inspector is needed, Pending inspection otherwise.
+  let statusChange: { from_status: string; to_status: string } | null = null;
+  if (nowWaiting && job.status === "pending_inspection" && job.assigned_to) statusChange = { from_status: "pending_inspection", to_status: "pending_road_test" };
+  else if (!nowWaiting && job.status === "pending_road_test") statusChange = { from_status: "pending_road_test", to_status: "pending_inspection" };
+  if (statusChange) await admin.from("jobs").update({ status: statusChange.to_status, stage: "inspection", stage_entered_at: now, updated_by: staff.id }).eq("id", jobId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "road_test_decision", ...(statusChange ?? {}), note: `${ROAD_TEST_DECISION_LABELS[decision]} (${staff.display_name}): ${note}`, created_by: staff.id });
   if (nowWaiting && !roadTestWaiting(before)) {
     await notifyRoles(["qc_inspector"], { type: "road_test_assigned", title: `Road test needed · ${job.job_number}`, body: `${staff.display_name}: ${note}`, jobId, href: `/road-tests/${jobId}` });
   }

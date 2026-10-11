@@ -54,6 +54,8 @@ export type OwnerReport = {
   };
   /** Working hours spent on each step, in track order; steps never entered are left out. */
   stages: { stage: Stage; label: string; hours: number; targetHours: number | null; over: boolean }[];
+  /** Working hours the car spent waiting for the QC road test, inside the Inspection step. */
+  roadTestHours: number;
   people: {
     advisor: string | null;
     manager: string | null;
@@ -113,6 +115,8 @@ export async function buildOwnerReport(jobId: string, settings: Settings): Promi
     const to = i + 1 < trail.length ? trail[i + 1].at : endAt;
     perStage.set(stage, (perStage.get(stage) ?? 0) + workingHoursBetween(trail[i].at, to, wt));
   }
+  let roadTestHours = 0;
+  for (let i = 0; i < trail.length; i++) if (trail[i].status === "pending_road_test") roadTestHours += workingHoursBetween(trail[i].at, i + 1 < trail.length ? trail[i + 1].at : endAt, wt);
   const targets = (settings.stage_target_hours ?? {}) as Record<string, number>;
   const stages = STAGES.filter((s) => perStage.has(s)).map((s) => {
     const hours = round2(perStage.get(s) ?? 0);
@@ -180,6 +184,7 @@ export async function buildOwnerReport(jobId: string, settings: Settings): Promi
     },
     time: { gatedInAt: job.gated_in_at, promisedAt: job.promised_at, gatedOutAt: job.gated_out_at, days, workingHours: round2(workingHoursBetween(job.gated_in_at, endAt, wt)), hoursCharged: summary.hoursCharged, minutesUsed: summary.minutesUsed, daysLate: summary.daysLate },
     stages,
+    roadTestHours: round2(roadTestHours),
     people: {
       advisor: nameOf(approvals?.[0]?.sent_by) ?? nameOf(job.gated_in_by),
       manager: nameOf(insp?.approved_by) ?? nameOf(job.plan_released_by),

@@ -3,8 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus, DISC_ACTIONS, DISC_CONDITIONS, LEAK_REPAIRS, LEAK_SEVERITIES, cleanPartsRows, inspectionLimitsOf, toItemState } from "@/lib/inspection";
-import { inspectionLocked, inspectionWorkingMinutes, loadInspection, type InspectionMediaRow, inspectionDangerous, type InspectionItemRow } from "@/lib/inspection-data";
+import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, MEASUREMENTS, TYRE_REPLACE_REASONS, itemStatusLabel, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus, DISC_ACTIONS, DISC_CONDITIONS, LEAK_REPAIRS, LEAK_SEVERITIES, cleanPartsRows, inspectionLimitsOf, toItemState } from "@/lib/inspection";
+import { inspectionLocked, inspectionWorkingMinutes, loadInspection, tyreSizeSuggestionFor, type InspectionMediaRow, inspectionDangerous, type InspectionItemRow } from "@/lib/inspection-data";
+import { wheelConditionLines } from "@/lib/wheels";
+import { loadCatalogue } from "@/lib/parts-catalogue";
+import { cleanPartsList, mergePartsList } from "@/lib/parts-list";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { PrescanToggle } from "@/components/PrescanToggle";
@@ -50,7 +53,7 @@ function ItemLine({ item: i, media, urls }: { item: InspectionItemRow; media: In
     <li>
       <details>
         <summary className="list-none cursor-pointer min-h-11 flex flex-wrap items-center gap-2 py-1.5 text-sm">
-          {i.status ? <Badge tone={TONE[i.status]}>{ITEM_STATUS_LABELS[i.status]}</Badge> : <Badge tone="neutral">Not marked</Badge>}
+          {i.status ? <Badge tone={i.style === "job" && i.status === "bad" ? "ink" : TONE[i.status]}>{itemStatusLabel(i.status, i.style)}</Badge> : <Badge tone="neutral">Not marked</Badge>}
           <span className="font-semibold">{i.item_label}</span>
           <span className="text-xs text-muted">{i.section_title}</span>
           {i.dangerous ? <Badge tone="red">Dangerous</Badge> : null}
@@ -153,14 +156,22 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const unlockHours = Number(settings.inspection_unlock_hours) || 1;
   const dangers = inspectionDangerous(bundle);
   const scanGate = !!settings.prescan_gate_enabled;
+  const noteUsage = (settings.manager_note_usage ?? {}) as Record<string, number>;
+  const notePresets = [...((settings.manager_note_presets ?? []) as string[])].sort((a, b) => (noteUsage[b] ?? 0) - (noteUsage[a] ?? 0));
+  const [tyreSizeSuggestion, catalogue] = await Promise.all([tyreSizeSuggestionFor(vehicle.id), loadCatalogue()]);
+  const partsList = cleanPartsList(insp.parts_list);
+  const partLines = mergePartsList(partsList);
 
   const formProps = {
     checklist: insp.checklist as ChecklistSection[],
     items: bundle.items.map(toItemState),
-    findings: requests.map((r) => {
-      const f = bundle.findings.find((x) => x.job_request_id === r.id);
-      return { requestId: r.id, text: r.text, found: f?.found ?? "", needs: f?.needs ?? "", status: (f?.status as ItemStatus | null) ?? null };
-    }),
+    requests: requests.map((r) => ({ id: r.id, text: r.text })),
+    requestsNote: insp.requests_note ?? "",
+    complaintKeywords: (settings.complaint_keywords ?? {}) as Record<string, string[]>,
+    wheelConditions: wheelConditionLines(card.media),
+    tyreSizeSuggestion,
+    catalogue,
+    partsList,
     measurements: Object.fromEntries(Object.entries(m).map(([k, v]) => [k, String(v)])),
     files: bundle.media.filter((x) => !x.item_key?.startsWith("road.")).map((x) => ({ id: x.id, kind: x.kind, url: bundle.mediaUrls[x.storage_path] ?? null, caption: x.caption, isPrescan: x.is_prescan, itemKey: x.item_key, requestId: x.job_request_id })),
     notes: insp.technician_notes ?? "",
@@ -222,6 +233,9 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 ...(scanGate ? [{ label: "Scan report", value: (insp.scan_read_at ? `Read by the technician ${formatDateTime(insp.scan_read_at)}` : insp.scan_approved_at ? `Scan not possible, approved ${formatDateTime(insp.scan_approved_at)}` : insp.scan_not_possible_reason ? `Scan not possible: ${insp.scan_not_possible_reason} (waiting for approval)` : "Not read yet") }] : []),
                 ...(insp.approved_at ? [{ label: "Approved", value: `${formatDateTime(insp.approved_at)} by ${bundle.approver?.display_name ?? ""}` }] : []),
                 ...(insp.manager_note ? [{ label: "Workshop manager's note", value: <span className="whitespace-pre-wrap">{insp.manager_note}</span> }] : []),
+                ...(insp.manager_note_internal && role !== "technician" ? [{ label: "Note for the advisor (internal)", value: <span className="whitespace-pre-wrap">{insp.manager_note_internal}</span> }] : []),
+                ...(insp.requests_note ? [{ label: "Technician on the requests", value: <span className="whitespace-pre-wrap">{insp.requests_note}</span> }] : []),
+                ...(String(m.battery_health ?? "") === "replace" ? [{ label: "Battery", value: <span className="font-bold text-red">Replace</span> }] : []),
                 ...(insp.return_reason && insp.status === "returned" ? [{ label: "Sent back because", value: insp.return_reason }] : []),
               ]}
             />
@@ -231,47 +245,43 @@ export default async function InspectionReportPage({ params }: { params: Promise
             <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} />
           ) : (
             <>
-              <Card className="flex flex-col gap-3">
-                <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
-                {requests.map((r, i) => {
-                  const f = bundle.findings.find((x) => x.job_request_id === r.id);
-                  return (
-                    <div key={r.id} className="rounded-card border border-line p-3 flex flex-col gap-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-bold">
-                          {i + 1}. {r.text}
-                        </span>
-                        {f?.status ? <Badge tone={TONE[f.status]}>{ITEM_STATUS_LABELS[f.status]}</Badge> : <Badge tone="neutral">Not answered</Badge>}
-                        {f?.edited_by_name ? <span className="text-xs text-muted">Edited by {f.edited_by_name}, {formatDateTime(f.edited_at)}</span> : null}
-                      </div>
-                      {f?.found ? <p className="text-sm"><span className="text-muted">Found:</span> {f.found}</p> : null}
-                      {f?.needs ? <p className="text-sm"><span className="text-muted">Needs:</span> {f.needs}</p> : null}
-                      <Original original={f?.original as Record<string, unknown> | null} />
-                      <Files rows={bundle.media.filter((x) => x.job_request_id === r.id)} urls={bundle.mediaUrls} />
-                    </div>
-                  );
-                })}
+              <Card className="flex flex-col gap-2">
+                <SectionLabel right={`${requests.length}`}>The customer says</SectionLabel>
+                <ol className="flex flex-col gap-1.5">
+                  {requests.map((r, i) => (
+                    <li key={r.id} className="flex gap-3 text-base font-semibold leading-snug">
+                      <span className="w-6 shrink-0 text-muted">{i + 1}.</span>
+                      <span>{r.text}</span>
+                    </li>
+                  ))}
+                </ol>
+                {insp.requests_note ? <p className="text-sm"><span className="text-muted">Technician to the advisor:</span> {insp.requests_note}</p> : null}
+                <Files rows={bundle.media.filter((x) => x.job_request_id)} urls={bundle.mediaUrls} />
               </Card>
 
-              {flagged.length ? (
-                <Card className="flex flex-col gap-3 border-ink">
-                  <SectionLabel right={`${flagged.length}`}>Suggested quote lines</SectionLabel>
-                  <p className="text-xs text-muted">From every AVERAGE and BAD item: the parts the technician listed.</p>
-                  <ul className="flex flex-col divide-y divide-line">
-                    {flagged.map((i) => (
-                      <li key={i.id} className="py-2 flex flex-wrap items-start gap-x-4 gap-y-1 text-sm">
-                        <Badge tone={TONE[i.status as ItemStatus]}>{ITEM_STATUS_LABELS[i.status as ItemStatus]}</Badge>
-                        <span className="font-semibold flex-1 min-w-48">{i.item_label}</span>
-                        <span className="text-muted whitespace-pre-wrap">{i.parts_needed ?? "No parts listed"}</span>
+              <Card className="flex flex-col gap-2">
+                <SectionLabel right={partLines.length ? `${partLines.length} line${partLines.length === 1 ? "" : "s"}` : "none"}>Parts list</SectionLabel>
+                {partLines.length ? (
+                  <ul className="divide-y divide-line text-sm">
+                    {partLines.map((l) => (
+                      <li key={l.key} className="py-1.5 flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{l.name}</span>
+                        <span className="text-muted">× {l.qty}</span>
+                        {l.positions.length ? <span className="text-muted">{l.positions.join(", ")}</span> : null}
+                        {l.note ? <span className="text-xs text-muted">{l.note}</span> : null}
                       </li>
                     ))}
                   </ul>
-                </Card>
-              ) : null}
+                ) : (
+                  <p className="text-sm text-muted">No parts on this report.</p>
+                )}
+                {insp.parts_list_confirmed_at ? <p className="text-xs text-green font-semibold">Confirmed by the workshop manager, {formatDateTime(insp.parts_list_confirmed_at)}. Sent to Parts for pricing.</p> : partLines.length ? <p className="text-xs text-muted">The workshop manager confirms the list when approving the report.</p> : null}
+              </Card>
+
 
               <Card className="flex flex-col gap-2">
-                <SectionLabel right={`${items.filter((i) => i.status === "bad").length} bad · ${items.filter((i) => i.status === "average").length} average · ${items.filter((i) => i.status === "good").length} good${items.some((i) => i.status === "na") ? ` · ${items.filter((i) => i.status === "na").length} n/a` : ""}${items.some((i) => !i.status) ? ` · ${items.filter((i) => !i.status).length} not marked` : ""}`}>Checklist</SectionLabel>
-                <p className="text-xs text-muted">One line per item, BAD first. Tap a line to open it.</p>
+                <SectionLabel right={`${items.filter((i) => i.status === "bad" && i.style !== "job").length} bad · ${items.filter((i) => i.status === "bad" && i.style === "job").length} required · ${items.filter((i) => i.status === "average").length} average · ${items.filter((i) => i.status === "good").length} good${items.some((i) => i.status === "na") ? ` · ${items.filter((i) => i.status === "na").length} n/a` : ""}${items.some((i) => !i.status) ? ` · ${items.filter((i) => !i.status).length} not marked` : ""}`}>Checklist</SectionLabel>
+                <p className="text-xs text-muted">One line per item, Bad and Required first. Tap a line to open it.</p>
                 <ul className="divide-y divide-line">
                   {[...items.filter((i) => i.status === "bad"), ...items.filter((i) => i.status === "average"), ...items.filter((i) => !i.status)].map((i) => (
                     <ItemLine key={i.id} item={i} media={bundle.media.filter((x) => x.item_key === i.item_key)} urls={bundle.mediaUrls} />
@@ -300,7 +310,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                         <span className="font-semibold w-28">{p.label}</span>
                         <span>{m[`tyre_${p.key}_tread`] ? `${m[`tyre_${p.key}_tread`]} mm` : ""}{m[`tyre_${p.key}_year`] ? ` · ${m[`tyre_${p.key}_year`]}` : ""}</span>
                         <span className="text-muted">{String(m[`tyre_${p.key}_cond`] ?? "").split(",").filter(Boolean).map((c) => TYRE_CONDITIONS.find((x) => x.value === c)?.label ?? c).join(", ")}</span>
-                        <span className="font-semibold">{TYRE_ACTIONS.find((a) => a.value === m[`tyre_${p.key}_action`])?.label ?? ""}</span>
+                        <span className="font-semibold">{TYRE_ACTIONS.find((a) => a.value === m[`tyre_${p.key}_action`])?.label ?? ""}{m[`tyre_${p.key}_reason`] ? ` (${TYRE_REPLACE_REASONS.find((r) => r.value === m[`tyre_${p.key}_reason`])?.label ?? ""})` : ""}</span>
                       </li>
                     ))}
                 </ul>
@@ -364,7 +374,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           {canApprove && insp.status === "submitted" ? (
             <Card className="flex flex-col gap-4 border-ink">
               <SectionLabel>Workshop manager&apos;s decision</SectionLabel>
-              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} />
+              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} presets={notePresets} partsCount={partLines.length} />
               <ReturnForm action={returnInspection.bind(null, id)} />
             </Card>
           ) : null}

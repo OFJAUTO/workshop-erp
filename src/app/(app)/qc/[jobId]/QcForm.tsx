@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { FormDraft } from "@/components/FormDraft";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { QC_KIND_LABELS, type QcItem } from "@/lib/qc-items";
@@ -8,6 +9,23 @@ import { QC_KIND_LABELS, type QcItem } from "@/lib/qc-items";
 /** The QC checklist: every item Pass or Fail with a remark on Fail, the mileage, and the post-scan PDF or a reason. */
 export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, waivedReason, notes, readOnly, loose = false, action }: { /** Loose items: no mileage, no Autel scan. */ loose?: boolean; jobId: string; items: QcItem[]; initialMileage: number | null; mileageUnit: string; postscan: JobFile | null; waivedReason: string | null; notes: string | null; readOnly: boolean; action: (formData: FormData) => void }) {
   const [results, setResults] = useState<Record<string, "pass" | "fail" | null>>(Object.fromEntries(items.map((i) => [i.key, i.result])));
+  // Pass and Fail taps are kept in this browser until the check is finished, so a closed tablet loses nothing.
+  const draftKey = `erp-qc-results-${jobId}`;
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const d = JSON.parse(raw) as { t: number; r: Record<string, "pass" | "fail" | null> };
+      if (Date.now() - d.t > 86400000) return;
+      // After mount, so the first client render matches the server.
+      setTimeout(() => setResults((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, v ?? d.r[k] ?? null]))), 0);
+    } catch {}
+  }, [draftKey]);
+  useEffect(() => {
+    try {
+      if (Object.values(results).some(Boolean)) localStorage.setItem(draftKey, JSON.stringify({ t: Date.now(), r: results }));
+    } catch {}
+  }, [draftKey, results]);
   const [scan, setScan] = useState<JobFile | null>(postscan);
   const [attempted, setAttempted] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -33,12 +51,16 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
     }
     setProblem(null);
     (form.querySelector("#qc-finish") as HTMLInputElement).value = "yes";
+    try {
+      localStorage.removeItem(draftKey);
+    } catch {}
     form.requestSubmit();
   }
 
   return (
     <form action={action} className="flex flex-col gap-4" noValidate>
       <input type="hidden" name="finish" value="no" id="qc-finish" />
+      <FormDraft draftKey={`qc-${jobId}`} />
       {kinds.map((kind) => (
         <Card key={kind} className="flex flex-col gap-3">
           <SectionLabel right={`${items.filter((i) => i.kind === kind && results[i.key]).length} of ${items.filter((i) => i.kind === kind).length}`}>{QC_KIND_LABELS[kind]}</SectionLabel>

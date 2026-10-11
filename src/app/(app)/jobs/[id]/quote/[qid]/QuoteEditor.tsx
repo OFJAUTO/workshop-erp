@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { PartPicker } from "@/components/PartPicker";
 import { ServicePicker } from "@/components/ServicePicker";
+import type { CatalogueRow } from "@/lib/parts-list";
+import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Select, Textarea } from "@/components/ui";
 import { formatDayTime } from "@/lib/format";
-import { AVAILABILITY_LABELS, aed, blockOf, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { AVAILABILITY_LABELS, JOB_POSITIONS, aed, blockOf, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -122,9 +125,7 @@ const TRIPS = [
   { value: "1b", label: "One way to the customer", trips: 1 },
   { value: "2", label: "Two ways", trips: 2 },
 ];
-const POSITIONS = ["Front", "Rear", "Front and rear", "Left", "Right"];
 const finishedLine = (l: QuoteLine) => (l.line_type === "labour" ? !!l.title.trim() && (l.hours ?? 0) > 0 : l.line_type === "package" ? !!l.title.trim() && (l.unit_price ?? 0) > 0 : !!l.title.trim());
-const stripPosition = (t: string) => t.replace(/,\s*(front and rear|front|rear|left|right)$/i, "");
 
 /**
  * The quotation in three blocks on one page: labour and services grouped by inspection finding,
@@ -148,8 +149,10 @@ export function QuoteEditor({
   messageTemplate,
   phoneDigits,
   fromEstimate,
-  labourJobs = {},
   candidates = [],
+  reference = null,
+  catalogue = [],
+  canEditList = false,
   labourActions = [],
   labourPositions = [],
   components = [],
@@ -177,8 +180,12 @@ export function QuoteEditor({
   messageTemplate: string;
   phoneDigits: string;
   fromEstimate: boolean;
-  labourJobs?: Record<string, string[]>;
   candidates?: string[];
+  /** The approved report, folded: requests, findings, the manager's notes. */
+  reference?: QuoteReference | null;
+  /** The parts pool behind "+ Add a part". */
+  catalogue?: CatalogueRow[];
+  canEditList?: boolean;
   labourActions?: string[];
   labourPositions?: string[];
   components?: string[];
@@ -194,10 +201,11 @@ export function QuoteEditor({
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
   const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "" });
   const [attempted, setAttempted] = useState(false);
-  const [picker, setPicker] = useState(false);
-  const [partAsk, setPartAsk] = useState<null | { description: string; quantity: string }>(null);
+  const [picker, setPicker] = useState<null | { sourceType?: "item" | "tyre" | "request" | null; sourceKey?: string | null; label?: string; replace?: string }>(null);
+  const [partPicker, setPartPicker] = useState(false);
+  const [skippedPositions, setSkippedPositions] = useState<Set<string>>(() => new Set());
   const [builderFor, setBuilderFor] = useState<string | null>(null);
-  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set(initialLines.filter((l) => blockOf(l) === "labour" && !finishedLine(l)).map((l) => l.id)));
+  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
   const [confirming, setConfirming] = useState<null | { op: Op; message: string }>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -233,8 +241,11 @@ export function QuoteEditor({
   };
   const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null }) => save({ addLine: fields });
   const removeLine = (id: string) => {
-    setLines((prev) => prev.filter((l) => l.id !== id && l.parent_line_id !== id));
-    save({ removeLine: { id } });
+    // A job with parts under it asks whether the parts go too (they came from the report with it).
+    const kids = lines.filter((l) => l.is_active && l.parent_line_id === id);
+    const keepParts = kids.length > 0 && !window.confirm(`Remove its ${kids.length} part${kids.length === 1 ? "" : "s"} too? Cancel keeps the parts on the quotation.`);
+    setLines((prev) => (keepParts ? prev.filter((l) => l.id !== id).map((l) => (l.parent_line_id === id ? { ...l, parent_line_id: null } : l)) : prev.filter((l) => l.id !== id && l.parent_line_id !== id)));
+    save({ removeLine: { id, keepParts } });
   };
   const setHeaderField = (fields: Partial<typeof header>, immediate = false) => {
     setHeader((h) => ({ ...h, ...fields }));
@@ -273,13 +284,42 @@ export function QuoteEditor({
     return p ? lineName(p) : null;
   };
   const highMarkups = partLines.filter((l) => !isUnchosen(l) && (l.markup_percent ?? 0) >= settings.markupWarn);
-  const jobList = useMemo(() => Object.entries(labourJobs).flatMap(([group, items]) => items.map((t) => ({ group, title: t }))), [labourJobs]);
+  const jobList = useMemo(() => services.filter((s) => s.price_aed === null).map((s) => ({ group: categories.find((c) => c.id === s.category_id)?.name ?? "", title: s.name })), [services, categories]);
   const allJobs = useMemo(() => [...candidates.map((t) => ({ group: "Used before", title: t })), ...jobList], [candidates, jobList]);
+  // The Suggested tab: services whose suggest_for keys match the report's findings.
+  const referenceKeys = useMemo(() => (reference?.findings ?? []).flatMap((f) => f.keys), [reference]);
+  const suggestedFor = (keys: string[]) => (keys.length ? services.filter((s) => (s.suggest_for ?? []).some((k) => keys.includes(k))) : []);
+  const quotedKeys = new Set(labourLines.map((l) => `${l.source_type}:${l.source_key}`));
+  const unquoted = (reference?.findings ?? []).filter((f) => !quotedKeys.has(`${f.sourceType}:${f.sourceKey}`));
   const canKeepUrgent = isRevision && !sent && !disabled && labourLines.some((l) => l.urgency === "urgent") && labourLines.some((l) => l.urgency !== "urgent");
 
   const pick = (s: Service) => {
-    setPicker(false);
-    addLine({ service_id: s.id });
+    const ctx = picker;
+    setPicker(null);
+    if (ctx?.replace) {
+      // "Change job": the row keeps its place and position; the name and pricing follow the new service.
+      const fixed = s.price_aed !== null;
+      patch(ctx.replace, { title: s.name, service_id: s.id, line_type: fixed ? "package" : "labour", unit_price: fixed ? s.price_aed : null, price_per: fixed ? (s.price_per ?? "job") : null, ...(!fixed && s.default_hours !== null ? { hours: s.default_hours } : {}) }, true);
+      return;
+    }
+    addLine({ service_id: s.id, ...(ctx?.sourceType && ctx.sourceKey ? { source_type: ctx.sourceType, source_key: ctx.sourceKey } : {}) });
+  };
+  const customJob = (title: string) => {
+    const ctx = picker;
+    setPicker(null);
+    if (ctx?.replace) {
+      patch(ctx.replace, { title, service_id: null }, true);
+      return;
+    }
+    addLine({ line_type: "labour", title, ...(ctx?.sourceType && ctx.sourceKey ? { source_type: ctx.sourceType, source_key: ctx.sourceKey } : {}) });
+  };
+  /** One job on several positions is one row: the quantity follows for per-unit services, the hours for hourly ones with default hours. */
+  const setPositions = (l: QuoteLine, positions: string[]) => {
+    const svc = l.service_id ? services.find((s) => s.id === l.service_id) ?? null : null;
+    const fields: Partial<QuoteLine> = { positions };
+    if (l.line_type === "package" && l.price_per && l.price_per !== "job") fields.quantity = Math.max(1, positions.length);
+    if (l.line_type === "labour" && svc?.default_hours && positions.length) fields.hours = Math.round(svc.default_hours * positions.length * 10) / 10;
+    patch(l.id, fields, true);
   };
   const applyTitle = (id: string, title: string) => {
     const remembered = hoursMemory[title.toLowerCase()];
@@ -294,81 +334,117 @@ export function QuoteEditor({
     if (l.title.trim() && h > 0) setOpenRows((s) => { const n = new Set(s); n.delete(l.id); return n; });
   };
 
-  /* ----- one labour row: thin like a spreadsheet; collapsed with a tick when finished ----- */
+  /* ----- one labour row: thin and flat (name, hours or quantity, total) with everything else behind a three-dot menu ----- */
   const labourRow = (l: QuoteLine) => {
-    const open = openRows.has(l.id);
     const done = finishedLine(l);
     const total = lineTotal(l);
     const blocked = attempted && blockers.some((b) => b.key === `line-${l.id}`);
-    if (!open && done) {
-      return (
-        <div key={l.id} id={`item-line-${l.id}`} className={`flex items-center gap-2 py-1.5 px-2 text-sm ${blocked ? "bg-red-soft" : ""}`}>
-          <button type="button" onClick={() => toggleKey(l.id)} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green text-white text-xs font-bold" aria-label="Open this line">✓</button>
-          <button type="button" onClick={() => toggleKey(l.id)} className="flex-1 min-w-0 text-left font-semibold truncate">{l.title}</button>
-          {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
-          <span className="w-16 text-right text-muted">{l.line_type === "labour" ? hoursText(l.hours) : `× ${l.quantity}`}</span>
-          <span className="w-14 text-right text-muted hidden sm:inline">{l.line_type === "labour" ? num(l.labour_rate) : ""}</span>
-          <span className="w-28 text-right font-bold">{aed(total)}</span>
-        </div>
-      );
-    }
     const needsTitle = !l.title.trim() && l.line_type === "labour";
+    const menu = openRows.has(`menu-${l.id}`);
+    const svc = l.service_id ? services.find((s) => s.id === l.service_id) ?? null : null;
+    const perUnit = l.line_type === "package" && !!l.price_per && l.price_per !== "job";
+    const askPosition = !disabled && !!svc?.position_ask && !(l.positions?.length) && !skippedPositions.has(l.id);
+    const positions = l.positions ?? [];
     const detailsOpen = openRows.has(`details-${l.id}`);
+    const rateOpen = openRows.has(`rate-${l.id}`);
     const discOpen = openRows.has(`disc-${l.id}`);
+    const chip = (on: boolean) => `min-h-8 rounded-control border px-2 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
     return (
-      <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-1.5 py-2 px-2 border-l-4 ${blocked ? "border-red-bar bg-red-soft" : done ? "border-green" : "border-amber-bar"}`}>
-        <div className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_4.5rem_4.5rem_7rem_auto] gap-2 items-center">
-          {needsTitle && !disabled ? (
-            <JobPicker jobs={allJobs} onPick={(t) => applyTitle(l.id, t)} onBuild={() => setBuilderFor(l.id)} />
-          ) : (
-            <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} className="font-semibold min-h-10" placeholder="What are we doing?" aria-label="Description" textCase="sentence" />
-          )}
-          {l.line_type === "labour" ? (
-            <>
-              <Input value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} inputMode="decimal" disabled={disabled} placeholder="h" aria-label="Hours" className="text-right min-h-10" />
-              <Input value={num(l.labour_rate)} onChange={(e) => patch(l.id, { labour_rate: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} aria-label="Rate per hour" className={`text-right min-h-10 hidden sm:block ${(l.labour_rate ?? 0) + 0.005 < settings.labourRate ? "border-red-bar" : ""}`} />
-            </>
-          ) : (
-            <>
-              {l.line_type === "package" && (!l.price_per || l.price_per === "job") ? <span className="text-right text-sm text-muted min-h-10 inline-flex items-center justify-end">per job</span> : l.line_type === "package" ? (
-                <span className="inline-flex items-center justify-end gap-1">
-                  <button type="button" disabled={disabled || (l.quantity || 1) <= 1} onClick={() => patch(l.id, { quantity: Math.max(1, (l.quantity || 1) - 1) }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One less">−</button>
-                  <span className="w-8 text-center font-extrabold" aria-label="Quantity">{l.quantity || 1}</span>
-                  <button type="button" disabled={disabled} onClick={() => patch(l.id, { quantity: (l.quantity || 1) + 1 }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One more">+</button>
-                </span>
-              ) : <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Math.max(1, Math.round(Number(e.target.value) || 1)) })} inputMode="numeric" disabled={disabled} aria-label="Quantity" className="text-right min-h-10" />}
-              <Input value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} aria-label="Price" className="text-right min-h-10 hidden sm:block" />
-            </>
-          )}
-          <span className="text-right font-bold hidden sm:block">{aed(total)}</span>
-          {!disabled ? <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 rounded-control px-2 text-xs font-bold text-red" aria-label="Remove line">×</button> : null}
-        </div>
-        {builderFor === l.id ? <LabourBuilder actions={labourActions} positions={labourPositions} components={components} onUse={(t) => applyTitle(l.id, t)} onClose={() => setBuilderFor(null)} /> : null}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {!disabled && l.title.trim() && l.line_type === "labour" ? <button type="button" onClick={() => patch(l.id, { title: "" }, true)} className="font-semibold underline underline-offset-4 text-muted">Pick another job</button> : null}
-          {l.line_type === "labour" && !disabled && l.title.trim() ? (
-            <span className="flex gap-1">
-              {POSITIONS.map((p) => (
-                <button key={p} type="button" onClick={() => patch(l.id, { title: `${stripPosition(l.title)}, ${p.toLowerCase()}` }, true)} className="min-h-7 rounded-control border border-line px-1.5 font-semibold">{p}</button>
-              ))}
-            </span>
-          ) : null}
-          {isQuotation && !isHidden(l) ? (
-            l.dangerous ? (
-              <span className="inline-flex items-center gap-1 text-red font-bold">Dangerous: safety warning shown to the customer{isOwner && !disabled ? <button type="button" onClick={() => patch(l.id, { dangerous: false, urgency: "urgent" }, true)} className="underline underline-offset-4 font-semibold text-muted">owner: switch off</button> : null}</span>
+      <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col ${blocked ? "bg-red-soft" : ""}`}>
+        <div className="flex items-center gap-2 py-1.5 px-2 text-sm">
+          <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${done ? "bg-green text-white" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
+          <div className="flex-1 min-w-0 flex flex-col">
+            {needsTitle && !disabled ? (
+              <JobPicker jobs={allJobs} onPick={(t) => applyTitle(l.id, t)} onBuild={() => setBuilderFor(l.id)} />
             ) : (
-              <button type="button" disabled={disabled} onClick={() => patch(l.id, { urgency: l.urgency === "urgent" ? null : "urgent" }, true)} aria-pressed={l.urgency === "urgent"} className={`min-h-7 rounded-control border px-2 font-bold ${l.urgency === "urgent" ? "border-red-bar bg-red-bar text-white" : "border-line text-muted"}`}>Urgent</button>
-            )
+              <span className="font-semibold truncate">
+                {l.title || <span className="text-muted">Line without a description</span>}
+                {positions.length ? <span className="font-normal text-muted"> · {positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}
+              </span>
+            )}
+            {l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || (l.line_type === "labour" && (l.labour_rate ?? 0) !== settings.labourRate) ? (
+              <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+                {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
+                {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
+                {l.details ? <span className="truncate max-w-[24rem]">{l.details}</span> : null}
+                {(l.discount_percent ?? 0) > 0 ? <span>Discount {l.discount_percent}%</span> : null}
+                {l.line_type === "labour" && (l.labour_rate ?? 0) !== settings.labourRate ? <span className={(l.labour_rate ?? 0) + 0.005 < settings.labourRate ? "font-semibold text-red" : ""}>Rate {num(l.labour_rate)}</span> : null}
+              </span>
+            ) : null}
+          </div>
+          {l.line_type === "labour" ? (
+            <Input value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="h" className={`w-16 text-right min-h-10 ${blocked && !(l.hours && l.hours > 0) ? "border-red-bar" : ""}`} />
+          ) : perUnit ? (
+            <span className="inline-flex items-center justify-end gap-1">
+              <button type="button" disabled={disabled || (l.quantity || 1) <= 1} onClick={() => patch(l.id, { quantity: Math.max(1, (l.quantity || 1) - 1) }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One less">−</button>
+              <span className="w-8 text-center font-extrabold" aria-label="Quantity">{l.quantity || 1}</span>
+              <button type="button" disabled={disabled} onClick={() => patch(l.id, { quantity: (l.quantity || 1) + 1 }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One more">+</button>
+            </span>
+          ) : (
+            <span className="w-16 text-right text-xs text-muted">per job</span>
+          )}
+          <span className="w-24 text-right font-bold">{aed(total)}</span>
+          {!disabled ? (
+            <button type="button" onClick={() => toggleKey(`menu-${l.id}`)} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
+              ⋯
+            </button>
           ) : null}
-          <button type="button" onClick={() => toggleKey(`details-${l.id}`)} className="font-semibold underline underline-offset-4 text-muted">{l.details ? "Details shown to the customer" : "Add details for the customer"}</button>
-          {(isOwner || settings.advisorDiscount) && !disabled ? <button type="button" onClick={() => toggleKey(`disc-${l.id}`)} className="font-semibold underline underline-offset-4 text-muted">{isOwner ? "Owner discount" : "Discount"}{(l.discount_percent ?? 0) > 0 ? ` ${l.discount_percent}%` : ""}</button> : (l.discount_percent ?? 0) > 0 ? <span className="text-muted">Discount {l.discount_percent}%</span> : null}
-          {done && !disabled ? <button type="button" onClick={() => toggleKey(l.id)} className="ml-auto font-semibold underline underline-offset-4 text-green">Done, collapse</button> : null}
-          <span className="sm:hidden ml-auto font-bold text-ink">{aed(total)}</span>
         </div>
-        {detailsOpen ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} placeholder="Shown to the customer under the line (optional)" textCase="sentence" /> : null}
-        {l.line_type === "package" && l.price_per && l.price_per !== "job" ? <span className="text-xs text-muted">{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1} = {aed(total)}</span> : null}
-        {discOpen ? <label className="flex items-center gap-2 text-xs"><span className="font-semibold text-muted">Discount %</span><Input value={num(l.discount_percent)} onChange={(e) => patch(l.id, { discount_percent: Number(e.target.value) || 0 })} inputMode="decimal" className="w-20 text-right min-h-9" /></label> : null}
-        {(l.labour_rate ?? 0) + 0.005 < settings.labourRate && l.line_type === "labour" ? <span className="text-xs font-semibold text-red">Rate below the standard AED {settings.labourRate}.</span> : null}
+        {builderFor === l.id ? <div className="px-2 pb-2"><LabourBuilder actions={labourActions} positions={labourPositions} components={components} onUse={(t) => applyTitle(l.id, t)} onClose={() => setBuilderFor(null)} /></div> : null}
+        {askPosition ? (
+          <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 text-xs">
+            <span className="font-semibold">Front, rear or both?</span>
+            {([["Front"], ["Rear"], ["Front", "Rear"], ["Left"], ["Right"]] as string[][]).map((ps) => (
+              <button key={ps.join("+")} type="button" onClick={() => setPositions(l, ps)} className={chip(false)}>
+                {ps.length === 2 ? "Front and rear" : ps[0]}
+              </button>
+            ))}
+            <button type="button" onClick={() => setSkippedPositions((s) => new Set(s).add(l.id))} className="min-h-8 px-2 text-xs font-semibold text-muted underline underline-offset-4">Skip</button>
+          </div>
+        ) : null}
+        {menu && !disabled ? (
+          <div className="flex flex-col gap-2 border-t border-line px-2 pb-2 pt-2 text-xs">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="w-16 font-semibold text-muted">Position</span>
+              {JOB_POSITIONS.map((p) => (
+                <button key={p} type="button" onClick={() => setPositions(l, positions.includes(p) ? positions.filter((x) => x !== p) : [...positions, p])} aria-pressed={positions.includes(p)} className={chip(positions.includes(p))}>
+                  {p}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {isQuotation && !isHidden(l) ? (
+                l.dangerous ? (
+                  <span className="inline-flex items-center gap-1 font-bold text-red">
+                    Dangerous: safety warning shown to the customer
+                    {isOwner ? <button type="button" onClick={() => patch(l.id, { dangerous: false, urgency: "urgent" }, true)} className="underline underline-offset-4">switch off</button> : null}
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => patch(l.id, { urgency: l.urgency === "urgent" ? null : "urgent" }, true)} aria-pressed={l.urgency === "urgent"} className={chip(l.urgency === "urgent")}>Urgent</button>
+                )
+              ) : null}
+              <button type="button" onClick={() => toggleKey(`details-${l.id}`)} className={chip(detailsOpen)}>{l.details ? "Details" : "Add details for the customer"}</button>
+              <button type="button" onClick={() => setPicker({ replace: l.id })} className={chip(false)}>Change job</button>
+              {l.line_type === "labour" ? <button type="button" onClick={() => toggleKey(`rate-${l.id}`)} className={chip(rateOpen)}>{isOwner ? "Change rate" : "Raise rate"}</button> : null}
+              {isOwner || settings.advisorDiscount ? <button type="button" onClick={() => toggleKey(`disc-${l.id}`)} className={chip(discOpen)}>{isOwner ? "Owner discount" : "Discount"}{(l.discount_percent ?? 0) > 0 ? ` ${l.discount_percent}%` : ""}</button> : null}
+              <button type="button" onClick={() => removeLine(l.id)} className="ml-auto min-h-8 rounded-control border border-line px-2 text-xs font-bold text-red">Remove</button>
+            </div>
+            {detailsOpen ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} placeholder="Shown to the customer under the line (optional)" textCase="sentence" /> : null}
+            {rateOpen && l.line_type === "labour" ? (
+              <label className="flex items-center gap-2">
+                <span className="font-semibold text-muted">Rate per hour (standard AED {settings.labourRate})</span>
+                <Input value={num(l.labour_rate)} onChange={(e) => patch(l.id, { labour_rate: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" aria-label="Rate per hour" className="w-28 text-right min-h-9" />
+              </label>
+            ) : null}
+            {discOpen ? (
+              <label className="flex items-center gap-2">
+                <span className="font-semibold text-muted">Discount %</span>
+                <Input value={num(l.discount_percent)} onChange={(e) => patch(l.id, { discount_percent: Number(e.target.value) || 0 })} inputMode="decimal" className="w-20 min-h-9" aria-label="Discount percent" />
+              </label>
+            ) : null}
+            {l.line_type === "package" && perUnit ? <span className="text-muted">{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1} = {aed(total)}</span> : null}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -383,32 +459,57 @@ export function QuoteEditor({
         {error ? <Notice tone="error">{error}</Notice> : null}
         {actionError ? <Notice tone="error">{actionError}</Notice> : null}
 
-        {/* Block 1: labour and services, grouped by finding */}
+        {/* The report, folded: never a blocker, always one tap away */}
+        {reference && isQuotation ? (
+          <details className="rounded-card border border-line bg-white px-4 py-1">
+            <summary className="cursor-pointer min-h-11 flex flex-wrap items-center gap-2 text-sm font-semibold list-none">
+              <span>From the report</span>
+              <span className="text-xs font-medium text-muted">
+                {reference.requests.length} request{reference.requests.length === 1 ? "" : "s"} · {reference.findings.length} finding{reference.findings.length === 1 ? "" : "s"}{reference.managerNote ? " · manager's note" : ""}
+              </span>
+              {unquoted.length && !sent ? <span className="ml-auto rounded-control bg-amber-soft px-2 py-0.5 text-[11px] font-semibold text-amber">Nothing quoted yet for: {unquoted.slice(0, 3).map((f) => f.label.split(" · ").pop()).join(", ")}{unquoted.length > 3 ? ` +${unquoted.length - 3}` : ""}</span> : null}
+            </summary>
+            <div className="flex flex-col gap-3 pb-3 pt-1 text-sm">
+              {reference.requests.length ? (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">The customer says</span>
+                  <ol className="list-decimal pl-5">{reference.requests.map((r, i) => <li key={i}>{r}</li>)}</ol>
+                  {reference.requestsNote ? <p className="text-xs text-muted">Technician: {reference.requestsNote}</p> : null}
+                </div>
+              ) : null}
+              {reference.findings.length ? (
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Findings</span>
+                  {reference.findings.map((f) => {
+                    const quoted = quotedKeys.has(`${f.sourceType}:${f.sourceKey}`);
+                    return (
+                      <div key={f.sourceKey} className="flex flex-wrap items-center gap-2 border-t border-line py-1.5">
+                        <Badge tone={f.dangerous || f.status === "bad" ? "red" : "amber"}>{f.statusLabel}</Badge>
+                        <span className="font-semibold">{f.label}</span>
+                        {f.remark ? <span className="text-muted">{f.remark}</span> : null}
+                        {quoted ? <span className="ml-auto text-xs font-semibold text-green">Quoted</span> : !disabled ? <button type="button" onClick={() => setPicker({ sourceType: f.sourceType, sourceKey: f.sourceKey, label: f.label })} className="ml-auto min-h-8 rounded-control border border-line-strong px-2 text-xs font-bold">+ Add job</button> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {reference.managerNote ? <p><span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Workshop manager&apos;s note</span><br />{reference.managerNote}</p> : null}
+              {reference.internalNote ? <p className="text-muted"><span className="font-semibold">For you, not the customer:</span> {reference.internalNote}</p> : null}
+            </div>
+          </details>
+        ) : null}
+
+        {/* Block 1: labour and services */}
         <Card className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <SectionLabel right={`${labourDone} of ${labourLines.length} lines done`}>Labour and services</SectionLabel>
-            <span className="flex gap-1 text-xs">
-              <button type="button" onClick={() => setOpenRows(new Set())} className="min-h-8 rounded-control border border-line px-2 font-semibold">Collapse all</button>
-              <button type="button" onClick={() => setOpenRows(new Set(labourLines.map((l) => l.id)))} className="min-h-8 rounded-control border border-line px-2 font-semibold">Expand all</button>
-            </span>
-          </div>
+          <SectionLabel right={`${labourDone} of ${labourLines.length} lines done`}>Labour and services</SectionLabel>
           <div className="rounded-control border border-line">
             <div className="divide-y divide-line">{labourLines.map(labourRow)}</div>
-            {labourLines.length === 0 ? <p className="px-2 py-2 text-sm text-muted">No labour lines yet. Add a service or a labour line.</p> : null}
+            {labourLines.length === 0 ? <p className="px-2 py-2 text-sm text-muted">No jobs yet. Tap + Add.</p> : null}
           </div>
           {!disabled ? (
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-              <Button type="button" size="md" onClick={() => setPicker(true)}>Add service</Button>
-              <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "labour", title: "" })}>+ Labour</Button>
-              <Button type="button" tone="secondary" size="md" onClick={() => setPartAsk({ description: "", quantity: "1" })}>Ask Parts for a part</Button>
-            </div>
-          ) : null}
-          {partAsk ? (
-            <div className="rounded-control border border-ink p-3 flex flex-wrap items-end gap-2">
-              <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="text-xs font-semibold text-muted">Part needed</span><Input value={partAsk.description} onChange={(e) => setPartAsk({ ...partAsk, description: e.target.value })} placeholder="Part name or number" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Quantity</span><Input value={partAsk.quantity} onChange={(e) => setPartAsk({ ...partAsk, quantity: e.target.value })} inputMode="decimal" className="w-20" /></label>
-              <Button type="button" size="md" onClick={() => { if (partAsk.description.trim()) { save({ requestPart: { description: partAsk.description, quantity: partAsk.quantity, source_type: null, source_key: null } }); setPartAsk(null); } }}>Send to Parts</Button>
-              <Button type="button" tone="ghost" size="md" onClick={() => setPartAsk(null)}>Cancel</Button>
+              <Button type="button" size="md" onClick={() => setPicker({})}>+ Add</Button>
+              {isQuotation ? <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)}>+ Add a part</Button> : null}
             </div>
           ) : null}
           {workshopEstimate && workshopEstimate.hours !== null ? (
@@ -458,6 +559,7 @@ export function QuoteEditor({
                           <div className="flex flex-wrap items-center gap-1.5">
                             {l.option_group ? <input type="radio" name={`opt-${l.option_group}`} checked={!unchosen} onChange={() => choose(l.option_group!, l.id)} disabled={disabled} className="h-4 w-4 accent-ink" aria-label="Use this option" /> : null}
                             <span className="font-semibold">{l.title}</span>
+                            {l.positions?.length ? <span className="text-xs text-muted">{l.positions.join(", ")}</span> : null}
                             {partTypeText(l) ? <Badge tone="outline">{partTypeText(l)}</Badge> : null}
                             {part?.cost_aed === null ? <Badge tone="amber">Waiting for the price</Badge> : null}
                             {high ? <Badge tone={markup >= settings.markupConfirm ? "red" : "amber"}>{markup >= settings.markupConfirm ? (l.markup_confirmed ? "Very high markup, confirmed" : "Confirm the markup") : "High markup, check before sending"}</Badge> : null}
@@ -682,7 +784,34 @@ export function QuoteEditor({
         </Card>
       </div>
 
-      {picker ? <ServicePicker categories={categories} services={services} usage={usage} department={department} onPick={pick} onClose={() => setPicker(false)} /> : null}
+      {picker ? (
+        <ServicePicker
+          title={picker.replace ? "Change job" : picker.label ? `Add a job for: ${picker.label}` : "Add a job or service"}
+          categories={categories}
+          services={services}
+          usage={usage}
+          department={department}
+          suggested={suggestedFor(picker.sourceKey ? (reference?.findings.find((f) => f.sourceKey === picker.sourceKey)?.keys ?? []) : referenceKeys)}
+          onPick={pick}
+          onCustom={customJob}
+          editHref={canEditList ? "/settings/services" : null}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
+      {partPicker ? (
+        <PartPicker
+          title="Add a part"
+          catalogue={catalogue}
+          selected={[]}
+          itemKey={null}
+          source="custom"
+          onDone={(entries) => {
+            for (const e of entries) save({ requestPart: { description: e.name, quantity: e.qty, positions: e.positions, catalogue_id: e.catalogue_id, source_type: null, source_key: null } });
+            setPartPicker(false);
+          }}
+          onClose={() => setPartPicker(false)}
+        />
+      ) : null}
       {confirming ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">

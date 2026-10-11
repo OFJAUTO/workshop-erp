@@ -14,7 +14,7 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
   const nameBox = (
     <label className="flex flex-col gap-1">
       <span className="text-sm font-semibold">Your full name</span>
-      <input name="approver_name" defaultValue={customerName} required minLength={2} className="min-h-12 rounded-control border border-line-strong px-3.5 text-base" autoComplete="name" />
+      <input name="approver_name" defaultValue={customerName} required minLength={2} spellCheck lang="en" autoCapitalize="words" className="min-h-12 rounded-control border border-line-strong px-3.5 text-base" autoComplete="name" />
     </label>
   );
   return (
@@ -61,7 +61,7 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
                 ) : null}
                 <label className="flex flex-col gap-1">
                   <span className="text-sm font-semibold">Tell us why <span className="font-medium text-muted">(optional)</span></span>
-                  <textarea name="note" rows={2} className="rounded-control border border-line-strong px-3.5 py-2 text-base" />
+                  <textarea name="note" rows={2} spellCheck lang="en" className="rounded-control border border-line-strong px-3.5 py-2 text-base" />
                 </label>
                 {nameBox}
                 <button type="submit" name="action" value="decline" className="min-h-14 w-full rounded-control bg-ink text-base font-extrabold text-white">Yes, decline</button>

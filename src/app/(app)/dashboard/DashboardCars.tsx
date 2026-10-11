@@ -250,7 +250,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                   </div>
                   <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
                     <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
-                    <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} />
+                    <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
                   </div>
                 </Card>
               </Link>

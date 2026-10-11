@@ -1,7 +1,7 @@
 import "server-only";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
-import { isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
+import { isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -274,7 +274,7 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   const cost = l.line_type === "part" ? round2((part?.final_cost_aed ?? part?.cost_aed ?? l.unit_cost ?? 0) * (l.quantity || 1)) : lineCost(l);
   return {
     section: isPart ? "parts" : "services",
-    description: title,
+    description: withPositions(title, l.positions),
     details: l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : l.details,
     part_number: number,
     quantity: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : l.quantity || 1,

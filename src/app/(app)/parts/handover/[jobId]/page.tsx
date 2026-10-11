@@ -5,6 +5,7 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } fro
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { pendingHandoversFor } from "@/lib/handover";
+import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, toPartFull, type JobBrief } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -54,11 +55,13 @@ export default async function HandoverPage({ params, searchParams }: { params: P
   const defaultTech = onCar[0]?.staff_id ?? j.assigned_to ?? null;
   const canHand = can(role, "managePurchaseOrders") && !staff.viewingAs && j.is_open;
   const canSignFor = role === "owner" || can(role, "manageWork");
+  const inspBundle = await loadInspection(jobId);
+  const dangers = inspBundle ? inspectionDangerous(inspBundle) : [];
 
   return (
     <>
       <LiveRefresh tables={["part_handovers", "part_items"]} jobId={jobId} pollMs={30000} />
-      <PageHeader title={`Hand over · ${plate}`} subtitle={`${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}`} actions={<><CopyVin vin={j.vehicle?.vin} /><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts of this car</LinkButton></>} />
+      <PageHeader title={`Hand over · ${plate}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>} actions={<><CopyVin vin={j.vehicle?.vin} /><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts of this car</LinkButton></>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 

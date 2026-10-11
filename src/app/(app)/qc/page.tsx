@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { QC_SELECT, type QcCheckRow } from "@/lib/work-data";
+import { WaitingPanel } from "@/components/WaitingPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function QcListPage({ searchParams }: { searchParams: Promi
       <PageHeader title="Cars for QC" subtitle={`${rows.length} waiting. Each item Pass or Fail; a Fail sends the car back to Work.`} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      <WaitingPanel staff={staff} />
       {rows.length === 0 ? <Empty title="Nothing waiting for QC" /> : null}
       <div className="flex flex-col gap-3">
         {rows.map((j) => (

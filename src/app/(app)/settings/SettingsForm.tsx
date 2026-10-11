@@ -508,7 +508,6 @@ export function SettingsForm({
               </Field>
             </div>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="advisor_labour_discount" defaultChecked={!!flags.advisor_labour_discount} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Advisors can discount labour</span><span className="text-xs text-muted">On: a small discount column on labour and service lines for advisors. Off: only the owner discounts. Parts are never discounted by advisors.</span></span></label>
-            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="customer_documents_uppercase" defaultChecked={!!flags.customer_documents_uppercase} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Print customer documents in CAPITALS</span><span className="text-xs text-muted">Every line on quotations, estimates, invoices and reports the customer sees, in capitals.</span></span></label>
             <Field label="Known words" hint="Words that keep their capitals when the system tidies names and descriptions as people type: BMW, AMG, A/C. Separate with commas.">
               <Textarea name="known_words" defaultValue={v.known_words ?? listTexts.known_words} rows={4} required />
             </Field>

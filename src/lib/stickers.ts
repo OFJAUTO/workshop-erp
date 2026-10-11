@@ -129,6 +129,16 @@ export async function jobHasOilChange(jobId: string): Promise<boolean> {
   return (lines ?? []).some((l) => (l.line_type === "labour" || l.line_type === "package") && /\boil\b.*\b(change|service)\b|\b(change|service)\b.*\boil\b/i.test(l.title ?? ""));
 }
 
+/** The emblem alone (public/logo-mark.svg) for the 20 mm part sticker, where the full logo would be unreadable. */
+export async function stickerMarkDataUrl(): Promise<string> {
+  try {
+    const svg = await readFile(path.join(process.cwd(), "public", "logo-mark.svg"));
+    return `data:image/svg+xml;base64,${svg.toString("base64")}`;
+  } catch {
+    return "/logo-mark.svg";
+  }
+}
+
 /** The sticker logo as a data address, so a print page or a preview needs no second request: the uploaded file, else the standard logo. */
 export async function stickerLogoDataUrl(ss: StickerSettings): Promise<string> {
   if (ss.logoPath) {

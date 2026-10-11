@@ -64,7 +64,7 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
   if (j.status === "pending_inspection" && !j.assigned_to) {
     return { done: { label: "Customer approved the job card", by: j.approval?.approver_name ?? null }, next: `${j.managerLabel} assigns a technician.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Assign", href: "/assign" }, since: j.first_approval_at ?? j.stage_entered_at, line: `Waiting on ${j.managerLabel} to assign a technician` };
   }
-  if (j.status === "pending_inspection" && roadTestWaiting(road)) {
+  if (j.status === "pending_road_test" || (j.status === "pending_inspection" && roadTestWaiting(road))) {
     return { done: { label: `Assigned to ${tech}`, by: null }, next: "The QC inspector does the road test. The inspection opens after it.", waitingOn: "the QC inspector", actorRole: "qc_inspector", action: { label: "Road test", href: `/road-tests/${jobId}` }, since: j.stage_entered_at, line: "Waiting for road test" };
   }
   if (j.status === "pending_inspection" || (j.status === "in_inspection" && (!insp || insp.status === "not_started"))) {

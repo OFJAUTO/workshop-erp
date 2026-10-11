@@ -39,6 +39,14 @@ export type InspectionRow = {
   estimated_hours_manager: number | null;
   estimate_reason: string | null;
   big_job_tags: string[];
+  /** The technician's optional word to the advisor about the customer's requests. */
+  requests_note: string | null;
+  /** The workshop manager's note for the advisor only (never on the customer's report). */
+  manager_note_internal: string | null;
+  /** The parts the technician gathered during the inspection, confirmed by the manager at approval. */
+  parts_list: unknown;
+  parts_list_confirmed_at: string | null;
+  parts_list_confirmed_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -72,6 +80,8 @@ export type InspectionItemRow = {
   disc_thickness: number | null;
   disc_minimum: number | null;
   parts_rows: unknown;
+  /** grade: Good / Average / Bad. job: OK / Required. */
+  style: "grade" | "job" | null;
 };
 
 export type InspectionFindingRow = { id: string; inspection_id: string; job_request_id: string; found: string | null; needs: string | null; status: ItemStatus | null; edited_by: string | null; edited_at: string | null; original: Record<string, unknown> | null; edited_by_name?: string | null };
@@ -116,7 +126,7 @@ export type InspectionBundle = {
 };
 
 const INSPECTION_SELECT =
-  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, scan_read_at, scan_not_possible_reason, scan_approved_by, scan_approved_at, estimated_hours, estimated_hours_manager, estimate_reason, big_job_tags, created_at, updated_at";
+  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, scan_read_at, scan_not_possible_reason, scan_approved_by, scan_approved_at, estimated_hours, estimated_hours_manager, estimate_reason, big_job_tags, created_at, updated_at, requests_note, manager_note_internal, parts_list, parts_list_confirmed_at, parts_list_confirmed_by";
 
 /** The mechanical inspection of a job with everything attached, or null when none exists yet. */
 export async function loadInspection(jobId: string, path: "mechanical" | "bodyshop" = "mechanical"): Promise<InspectionBundle | null> {
@@ -126,7 +136,7 @@ export async function loadInspection(jobId: string, path: "mechanical" | "bodysh
   const inspection = insp as unknown as InspectionRow;
   for (const k of ["estimated_hours", "estimated_hours_manager"] as const) if (inspection[k] !== null && inspection[k] !== undefined) inspection[k] = Number(inspection[k]);
   const [{ data: items }, { data: findings }, { data: media }, { data: changes }, { data: tech }, { data: approver }] = await Promise.all([
-    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original, dangerous, dangerous_reason, leak_severity, leak_repair, fluid_qty, fluid_unit, fluid_grade, fluid_spec, disc_condition, disc_action, disc_thickness, disc_minimum, parts_rows").eq("inspection_id", inspection.id).order("position"),
+    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original, dangerous, dangerous_reason, leak_severity, leak_repair, fluid_qty, fluid_unit, fluid_grade, fluid_spec, disc_condition, disc_action, disc_thickness, disc_minimum, parts_rows, style").eq("inspection_id", inspection.id).order("position"),
     admin.from("inspection_findings").select("id, inspection_id, job_request_id, found, needs, status, edited_by, edited_at, original").eq("inspection_id", inspection.id),
     admin.from("inspection_media").select("id, inspection_id, item_key, job_request_id, kind, is_prescan, storage_path, caption, duration_s, taken_at, uploaded_by").eq("inspection_id", inspection.id).order("taken_at"),
     admin
@@ -176,9 +186,15 @@ export async function ensureInspection(jobId: string, technicianId: string, chec
     }
     return existing.id as string;
   }
+  // The car's tyre sizes from its last visit are filled in already.
+  const { data: jobRow } = await admin.from("jobs").select("vehicle:vehicles(tyre_size_front, tyre_size_rear)").eq("id", jobId).maybeSingle();
+  const veh = (jobRow as unknown as { vehicle: { tyre_size_front: string | null; tyre_size_rear: string | null } | null } | null)?.vehicle ?? null;
+  const measurements: Record<string, string> = {};
+  if (veh?.tyre_size_front) measurements.tyre_size_front = veh.tyre_size_front;
+  if (veh?.tyre_size_rear) measurements.tyre_size_rear = veh.tyre_size_rear;
   const { data: created, error } = await admin
     .from("inspections")
-    .insert({ job_id: jobId, path: "mechanical", technician_id: technicianId, status: "not_started", checklist, target_minutes: targetMinutes, created_by: by, updated_by: by })
+    .insert({ job_id: jobId, path: "mechanical", technician_id: technicianId, status: "not_started", checklist, measurements, target_minutes: targetMinutes, created_by: by, updated_by: by })
     .select("id")
     .single();
   if (error || !created) throw new Error(error?.message ?? "Could not create the inspection.");
@@ -188,6 +204,7 @@ export async function ensureInspection(jobId: string, technicianId: string, chec
     section_title: i.sectionTitle,
     item_key: i.key,
     item_label: i.label,
+    style: i.style === "job" ? "job" : "grade",
     position,
     created_by: by,
     updated_by: by,
@@ -215,17 +232,25 @@ export function inspectionLocked(insp: Pick<InspectionRow, "status" | "unlocked_
 }
 
 /** What still has to be done before the report can go to the manager (same rules as the technician's screen). */
-export function reportProblems(b: InspectionBundle, requests: { id: string; text: string }[], opts: { limits?: InspectionLimits; prescanGate?: boolean } = {}): string[] {
+export function reportProblems(b: InspectionBundle, _requests: { id: string; text: string }[], opts: { limits?: InspectionLimits; prescanGate?: boolean } = {}): string[] {
   return reportProblemsOf({
     estimatedHours: String(b.inspection.estimated_hours ?? ""),
     scan: opts.prescanGate ? { required: true, read: !!b.inspection.scan_read_at, approved: !!b.inspection.scan_approved_at } : undefined,
-    items: b.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, status: i.status, remarks: i.remarks ?? "", dangerous: !!i.dangerous, dangerous_reason: i.dangerous_reason ?? "" })),
-    findings: requests.map((r) => {
-      const f = b.findings.find((x) => x.job_request_id === r.id);
-      return { requestId: r.id, text: r.text, status: f?.status ?? null, found: f?.found ?? "" };
-    }),
+    items: b.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, style: i.style, status: i.status, remarks: i.remarks ?? "", dangerous: !!i.dangerous, dangerous_reason: i.dangerous_reason ?? "" })),
     measurements: Object.fromEntries(Object.entries(b.inspection.measurements ?? {}).map(([k, v]) => [k, String(v)])),
   }, { limits: opts.limits }).map((p) => p.label);
+}
+
+/** The tyre sizes to offer: the car's own from its last visit, else the most recent car of the same model. */
+export async function tyreSizeSuggestionFor(vehicleId: string | null | undefined): Promise<{ front: string; rear: string } | null> {
+  if (!vehicleId) return null;
+  const admin = createAdminClient();
+  const { data: v } = await admin.from("vehicles").select("model_id, tyre_size_front, tyre_size_rear").eq("id", vehicleId).maybeSingle();
+  if (!v) return null;
+  if (v.tyre_size_front) return { front: v.tyre_size_front, rear: v.tyre_size_rear ?? v.tyre_size_front };
+  if (!v.model_id) return null;
+  const { data: other } = await admin.from("vehicles").select("tyre_size_front, tyre_size_rear").eq("model_id", v.model_id).neq("id", vehicleId).not("tyre_size_front", "is", null).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  return other?.tyre_size_front ? { front: other.tyre_size_front, rear: other.tyre_size_rear ?? other.tyre_size_front } : null;
 }
 
 /** Any finding marked dangerous to drive, on an item or a tyre. */

@@ -5,8 +5,9 @@ import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
+import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { LINE_SELECT, PART_SELECT, ensurePartRequests, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { ownerApprovalReasons, quoteTotals, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -74,7 +75,7 @@ async function syncPartLines(quotationId: string, jobId: string, by: string, min
   if (rows.length) await admin.from("quotation_lines").insert(rows);
 }
 
-const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer, urgency: l.urgency, advisor_added: l.advisor_added, part_type: l.part_type, brand: l.brand, option_group: l.option_group, chosen: l.chosen, recovery_trips: l.recovery_trips, recovery_provider: l.recovery_provider, dangerous: l.dangerous, recovery_provider_kind: l.recovery_provider_kind, markup_confirmed: l.markup_confirmed });
+const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, positions: l.positions ?? null, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer, urgency: l.urgency, advisor_added: l.advisor_added, part_type: l.part_type, brand: l.brand, option_group: l.option_group, chosen: l.chosen, recovery_trips: l.recovery_trips, recovery_provider: l.recovery_provider, dangerous: l.dangerous, recovery_provider_kind: l.recovery_provider_kind, markup_confirmed: l.markup_confirmed });
 
 /** "Start quotation": suggested lines from the approved report (or the estimate), one part line per listed part. */
 export async function startQuotation(jobId: string) {
@@ -90,7 +91,7 @@ export async function startQuotation(jobId: string) {
   if (!loose && staff!.role_id !== "owner" && (!bundle || bundle.inspection.status !== "approved")) err("The quotation opens once the workshop manager has approved the inspection report.");
   if (!loose && staff!.role_id === "owner" && (!bundle || bundle.inspection.status !== "approved")) {
     // The owner may go ahead of the gate; it is written down.
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Quotation started by ${staff!.display_name} before the inspection report was approved (owner override)`, created_by: staff!.id });
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Quotation started by ${staff!.display_name} before the inspection report was approved. Reason: owner's decision.`, created_by: staff!.id });
   }
   const { data: existing } = await admin.from("quotations").select("id, status").eq("job_id", jobId).eq("is_active", true).in("status", ["draft", "pending_owner", "sent", "opened", "urgent_requested"]).limit(1).maybeSingle();
   if (existing) redirect(`/jobs/${jobId}/quote/${existing.id}`);
@@ -115,6 +116,23 @@ export async function startQuotation(jobId: string) {
     lines = [];
   }
   if (lines.length) await admin.from("quotation_lines").insert(lines);
+  // Tyres marked Replace on the report: one row, the count as the quantity, the positions on it. The advisor only checks it.
+  if (bundle && !job!.estimate_id) {
+    const m = (bundle.inspection.measurements ?? {}) as Record<string, string | number>;
+    const replaced = TYRE_POSITIONS.filter((p) => ["replace_now", "replace_soon"].includes(String(m[`tyre_${p.key}_action`] ?? "")));
+    if (replaced.length) {
+      const { data: svcRows } = await admin.from("services").select(SERVICE_SELECT).eq("is_active", true);
+      const svc = ((svcRows ?? []) as { id: string; name: string; price_aed: number | string | null; default_hours: number | string | null; price_per: string | null }[]).find((s) => /tyre/i.test(s.name) && /(fit|replac|chang)/i.test(s.name)) ?? null;
+      const urgent = replaced.some((p) => String(m[`tyre_${p.key}_action`]) === "replace_now");
+      const base = { quotation_id: created!.id, position: lines.length + 1, source_type: "tyre", source_key: "tyres", positions: replaced.map((p) => p.label), urgency: urgent ? "urgent" : null, created_by: staff!.id, updated_by: staff!.id };
+      if (svc && svc.price_aed !== null) {
+        await admin.from("quotation_lines").insert({ ...base, line_type: "package", title: svc.name, service_id: svc.id, unit_price: Number(svc.price_aed), price_per: svc.price_per ?? "tyre", quantity: replaced.length });
+      } else {
+        const hours = svc?.default_hours ? Math.round(Number(svc.default_hours) * replaced.length * 10) / 10 : null;
+        await admin.from("quotation_lines").insert({ ...base, line_type: "labour", title: svc?.name ?? "Replace tyres (fitting and balancing)", service_id: svc?.id ?? null, hours, labour_rate: labourRateFor(settings, job!.department ?? null, makeName), quantity: 1 });
+      }
+    }
+  }
   // A car that came on our recovery truck: the recovery line is suggested, the advisor fills in the price or hides it.
   const { data: gateIn } = await admin.from("gate_ins").select("arrived_by").eq("job_id", jobId).maybeSingle();
   if (gateIn?.arrived_by === "our_recovery" && !lines.some((l) => l.line_type === "recovery")) {
@@ -357,19 +375,20 @@ export async function completeQuotation(quotationId: string): Promise<{ error?: 
   if (blockers.length) return { error: `Not complete yet: ${blockers.map((b) => b.label).join(" · ")}` };
   const active = bundle.lines.filter((l) => l.is_active);
   const workLines = active.filter((l) => l.line_type !== "part" && !l.fee_kind);
-  // Descriptions typed by hand: after the second use they are offered again; the owner adds them to the permanent list.
-  const known = new Set(Object.values((settings.labour_jobs ?? {}) as Record<string, string[]>).flat().map((t) => t.toLowerCase()));
-  const cand = { ...((settings.labour_job_candidates ?? {}) as Record<string, number>) };
+  // Custom jobs typed by hand are counted; the owner sees them in Settings > Jobs and services and adds them to the list with one tap.
+  const { data: svcNames } = await admin.from("services").select("name").eq("is_active", true);
+  const known = new Set((svcNames ?? []).map((s) => String(s.name).toLowerCase()));
+  const cand = { ...((settings.custom_jobs_used ?? {}) as Record<string, number>) };
   let candChanged = false;
   for (const l of workLines) {
-    if (l.line_type !== "labour" || !l.title.trim()) continue;
+    if (l.line_type !== "labour" || l.service_id || !l.title.trim()) continue;
     const t = l.title.trim().replace(/,\s*(front and rear|front|rear|left|right)$/i, "");
     if (known.has(t.toLowerCase())) continue;
     const k = Object.keys(cand).find((x) => x.toLowerCase() === t.toLowerCase()) ?? t;
     cand[k] = (cand[k] ?? 0) + 1;
     candChanged = true;
   }
-  if (candChanged) await admin.from("settings").update({ value: cand }).eq("key", "labour_job_candidates");
+  if (candChanged) await admin.from("settings").upsert({ key: "custom_jobs_used", value: cand, label: "Custom jobs used", description: "Custom job names typed on quotations, with counts, offered to the owner to add to the list." }, { onConflict: "key" });
   const memory = { ...((settings.labour_hours_memory ?? {}) as Record<string, number>) };
   const model = [bundle.vehicle?.make?.name, bundle.vehicle?.model?.name].filter(Boolean).join(" ").toLowerCase();
   let remembered = false;

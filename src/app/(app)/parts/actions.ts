@@ -43,7 +43,7 @@ export async function syncLineForPart(jobId: string, partId: string, by: string)
   if (!pRaw) return;
   const p = toPart(pRaw as Record<string, unknown>);
   const title = p.part_number ? `${p.description} (${p.part_number})` : p.description;
-  const shared = { title, quantity: p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, updated_by: by };
+  const shared = { title, quantity: p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, positions: p.positions ?? null, updated_by: by };
   if (p.confirm_status === "rejected" || !p.is_active) {
     if (line) await admin.from("quotation_lines").update({ is_active: false, updated_by: by }).eq("id", line.id);
   } else if (line) {
@@ -143,6 +143,10 @@ export async function savePartRows(jobId: string, requestId: string | null, _sta
   }
   if (!rows.length) return { error: "Enter at least one part with a description.", values };
   const admin = createAdminClient();
+  if (requestId) {
+    const { data: req } = await admin.from("part_requests").select("positions").eq("id", requestId).maybeSingle();
+    if (req?.positions?.length) for (const r of rows) r.positions = req.positions;
+  }
   const file = formData.get("diagram");
   if (file instanceof File && file.size > 0) {
     if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type)) return { error: "The diagram must be a JPG, PNG, WebP or PDF.", values };

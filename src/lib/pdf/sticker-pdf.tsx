@@ -1,7 +1,7 @@
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import "server-only";
 import { Document, Image, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
-import { loadLogo } from "./images";
+import { loadLogo, loadLogoMark } from "./images";
 import { qrPng } from "./qr";
 
 const MM = 72 / 25.4;
@@ -16,7 +16,7 @@ export type PdfSticker =
 
 /** The same stickers as the print pages, as a PDF for the printers that want one. One sticker per page. */
 export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer> {
-  const logo = await loadLogo();
+  const [logo, mark] = await Promise.all([loadLogo(), loadLogoMark()]);
   const qrs = await Promise.all(stickers.map((s) => qrPng(s.qr, 300)));
   const doc = (
     <Document title="Stickers">
@@ -26,7 +26,7 @@ export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer>
           const pad = Math.min(s.w, s.h) * 0.05 * MM;
           return (
             <Page key={i} size={[s.w * MM, s.h * MM]} style={[styles.page, { padding: pad }]}>
-              {logo ? <Image src={{ data: logo, format: "png" }} style={{ height: s.h * 0.16 * MM, width: s.w * 0.8 * MM, objectFit: "contain" }} /> : null}
+              {mark ?? logo ? <Image src={{ data: (mark ?? logo) as Buffer, format: "png" }} style={{ height: s.h * 0.2 * MM, width: s.w * 0.8 * MM, objectFit: "contain" }} /> : null}
               <Image src={{ data: qr, format: "png" }} style={{ width: Math.min(s.w, s.h) * 0.5 * MM, height: Math.min(s.w, s.h) * 0.5 * MM }} />
               <View style={{ alignItems: "center" }}>
                 <Text style={{ fontSize: Math.max(4.5, s.h * 0.09 * MM), fontFamily: "Helvetica-Bold" }}>{s.date}</Text>

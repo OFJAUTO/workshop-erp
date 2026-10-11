@@ -14,6 +14,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { confirmEstimateUnchanged, decideQuoteApproval, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
+import { loadCatalogue } from "@/lib/parts-catalogue";
+import { quoteReferenceOf } from "@/lib/quote-reference";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const canSend = !staff.viewingAs;
   const services = await loadServices(staff.id);
   const [checks, partsWait] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id)]);
-  const candidateMap = (settings.labour_job_candidates ?? {}) as Record<string, number>;
+  const candidateMap = (settings.custom_jobs_used ?? {}) as Record<string, number>;
   const candidates = Object.entries(candidateMap).filter(([, n]) => Number(n) >= 2).map(([t]) => t);
   const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
   const countedParts = bundle.parts.filter((p) => p.confirm_status !== "rejected");
@@ -59,6 +61,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   for (const [k, v] of Object.entries(memory)) if (!k.includes("|")) hoursMemory[k] = Number(v);
   for (const [k, v] of Object.entries(memory)) if (modelKey && k.startsWith(modelKey + "|")) hoursMemory[k.slice(modelKey.length + 1)] = Number(v);
   const components = Array.from(new Set(checklistItems((settings.inspection_checklist ?? []) as ChecklistSection[]).map((i) => i.label)));
+  const [catalogue, { data: jobRequests }] = await Promise.all([loadCatalogue(), createAdminClient().from("job_requests").select("text").eq("job_id", id).eq("is_active", true).order("position")]);
+  const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string)) : null;
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_quote_template
@@ -165,8 +169,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         wait={wait}
         workshopEstimate={checks.workshopEstimate}
         completedAt={q.completed_at}
-        labourJobs={(settings.labour_jobs ?? {}) as Record<string, string[]>}
         candidates={candidates}
+        reference={reference}
+        catalogue={catalogue}
+        canEditList={can(role, "manageServices")}
         recoveryProviders={(settings.recovery_providers ?? []) as string[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}

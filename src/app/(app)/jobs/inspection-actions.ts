@@ -6,7 +6,8 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { ensureInspection, inspectionDangerous, inspectionLocked, loadInspection, reportProblems } from "@/lib/inspection-data";
-import { cleanPartsRows, inspectionLimitsOf } from "@/lib/inspection";
+import { cleanPartsList, mergePartsList } from "@/lib/parts-list";
+import { cleanPartsRows, inspectionLimitsOf, tyreSizeComplete } from "@/lib/inspection";
 import { ensurePartRequests } from "@/lib/quote-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -91,6 +92,14 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
     .update({ status: "submitted", submitted_at: now.toISOString(), elapsed_minutes: elapsed, overrun_minutes: Math.max(0, elapsed - target), updated_by: staff.id })
     .eq("id", insp.id);
   await logEvent(jobId, staff.id, "inspection_submitted", `Inspection report submitted by ${staff.display_name} after ${elapsed} min of working time`);
+  // The car remembers its tyre sizes for the next visit.
+  const sizes = insp.measurements ?? {};
+  const front = tyreSizeComplete(String(sizes.tyre_size_front ?? "")) ? String(sizes.tyre_size_front) : null;
+  const rear = tyreSizeComplete(String(sizes.tyre_size_rear ?? "")) ? String(sizes.tyre_size_rear) : null;
+  if (front || rear) {
+    const { data: jv } = await admin.from("jobs").select("vehicle_id").eq("id", jobId).maybeSingle();
+    if (jv?.vehicle_id) await admin.from("vehicles").update({ ...(front ? { tyre_size_front: front } : {}), ...(rear ? { tyre_size_rear: rear } : {}), updated_by: staff.id }).eq("id", jv.vehicle_id);
+  }
   const job = await jobOf(jobId);
   await notifyManagers(job?.department ?? null, {
     type: "inspection_submitted",
@@ -113,7 +122,9 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   const staff = await requirePermission("approveInspections");
   const values = formValues(formData);
   const note = blankToNull(formData.get("manager_note"));
-  if (!note || note.length < 3) return { error: "Write the workshop manager's note before approving.", values };
+  if (!note || note.length < 3) return { error: "Tap a note or write one before approving.", values };
+  const internalNote = blankToNull(formData.get("manager_note_internal"));
+  const presetsUsed = String(formData.get("presets_used") ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
   const bundle = await loadInspection(jobId);
   if (!bundle || bundle.inspection.status !== "submitted") return { error: "There is no submitted report to approve.", values };
   const admin = createAdminClient();
@@ -125,7 +136,11 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   const hoursReason = blankToNull(formData.get("hours_reason"));
   if (techHours !== null && (managerHours === null || !Number.isFinite(managerHours) || managerHours <= 0)) return { error: "Agree or change the technician's estimated hours.", values };
   if (techHours !== null && managerHours !== null && managerHours !== techHours && !hoursReason) return { error: "Say why you changed the estimated hours.", values };
-  await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, estimated_hours_manager: techHours !== null ? managerHours : null, updated_by: staff.id }).eq("id", bundle.inspection.id);
+  // The parts list goes to Parts only once the manager has looked at it.
+  const partsList = cleanPartsList(bundle.inspection.parts_list);
+  const partLines = mergePartsList(partsList);
+  if (partLines.length && String(formData.get("parts_list_confirmed") ?? "") !== "1") return { error: "Look at the parts list, then tap Parts list checked.", values };
+  await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, manager_note_internal: internalNote, estimated_hours_manager: techHours !== null ? managerHours : null, ...(partLines.length ? { parts_list_confirmed_at: now, parts_list_confirmed_by: staff.id } : {}), updated_by: staff.id }).eq("id", bundle.inspection.id);
   if (techHours !== null && managerHours !== null && managerHours !== techHours) await logEvent(jobId, staff.id, "estimate_hours", `${staff.display_name} changed the estimated hours from ${techHours} h to ${managerHours} h: ${hoursReason}`);
   // The tap-first suggestions learn from every approved report: remarks and parts per checklist item.
   const settingsNow = await getSettings();
@@ -140,11 +155,33 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
       const p = r.part.trim();
       if (p && !entry.parts.some((x) => x.toLowerCase() === p.toLowerCase())) { entry.parts.unshift(p); learnedAny = true; }
     }
+    for (const e of partsList.filter((e) => e.item_key === i.item_key)) {
+      if (!entry.parts.some((x) => x.toLowerCase() === e.name.toLowerCase())) { entry.parts.unshift(e.name); learnedAny = true; }
+    }
     learned[i.item_key] = { parts: entry.parts.slice(0, 10), remarks: entry.remarks.slice(0, 8) };
   }
   if (learnedAny) await admin.from("settings").update({ value: learned }).eq("key", "item_suggestions");
+  // The pool counts what was picked; custom parts are offered to the owner in Settings > Parts list.
+  const customPool = { ...((settingsNow.part_pool_custom ?? {}) as Record<string, number>) };
+  let customAny = false;
+  for (const e of partsList) {
+    if (e.catalogue_id) {
+      const { data: row } = await admin.from("part_catalogue").select("usage_count").eq("id", e.catalogue_id).maybeSingle();
+      if (row) await admin.from("part_catalogue").update({ usage_count: (Number(row.usage_count) || 0) + 1 }).eq("id", e.catalogue_id);
+    } else if (e.source === "item" || e.source === "custom") {
+      customPool[e.name] = (Number(customPool[e.name]) || 0) + 1;
+      customAny = true;
+    }
+  }
+  if (customAny) await admin.from("settings").upsert({ key: "part_pool_custom", value: customPool, label: "Custom parts used", description: "Custom part names typed by staff, with counts, offered to the owner to add to the pool." }, { onConflict: "key" });
+  // The one-tap notes learn their order: most used first.
+  if (presetsUsed.length) {
+    const usage = { ...((settingsNow.manager_note_usage ?? {}) as Record<string, number>) };
+    for (const p of presetsUsed) usage[p] = (Number(usage[p]) || 0) + 1;
+    await admin.from("settings").upsert({ key: "manager_note_usage", value: usage, label: "Manager note usage", description: "How often each preset was tapped." }, { onConflict: "key" });
+  }
   const job = await jobOf(jobId);
-  if (job && (job.status === "in_inspection" || job.status === "pending_inspection")) {
+  if (job && (job.status === "in_inspection" || job.status === "pending_inspection" || job.status === "pending_road_test")) {
     await admin.from("jobs").update({ status: "pending_quote", stage: "quote" }).eq("id", jobId);
   }
   await logEvent(jobId, staff.id, "inspection_approved", `Inspection report approved by ${staff.display_name}`, { from_status: job?.status ?? null, to_status: "pending_quote" });
@@ -159,7 +196,7 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   await notifyStaff(advisors, {
     type: "inspection_approved",
     title: `Inspection report approved · ${job?.job_number ?? ""}`,
-    body: `Ready for the quote. Open the report for the technician's findings and suggested lines.${techHours !== null ? ` Workshop estimate: ${managerHours} h.` : ""}`,
+    body: `Ready for the quote. Open the report for the findings and the confirmed parts list.${techHours !== null ? ` Workshop estimate: ${managerHours} h.` : ""}`,
     jobId,
     href: `/jobs/${jobId}/inspection`,
   });

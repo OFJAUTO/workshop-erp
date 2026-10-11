@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { CHECK_STATUSES, DISC_ACTIONS, DISC_CONDITIONS, ITEM_STATUSES, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanMeasurementValue, cleanPartsRows, partsRowsText } from "@/lib/inspection";
 import { inspectionLocked, type InspectionRow } from "@/lib/inspection-data";
+import { cleanPartsList } from "@/lib/parts-list";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -36,9 +37,11 @@ type Body = {
   finding?: { requestId: string; found?: string; needs?: string; status?: string | null };
   measurements?: Record<string, string>;
   technicianNotes?: string;
+  /** The whole parts list gathered during the inspection (replaced on every change). */
+  partsList?: unknown;
   prescanVisible?: boolean;
   /** Report-level answers: the estimated hours, the big-job tags, the scan step. */
-  inspection?: { estimated_hours?: string | number | null; estimate_reason?: string | null; big_job_tags?: unknown; scan_read?: boolean; scan_not_possible_reason?: string | null };
+  inspection?: { estimated_hours?: string | number | null; estimate_reason?: string | null; big_job_tags?: unknown; scan_read?: boolean; scan_not_possible_reason?: string | null; requests_note?: string | null };
 };
 
 const num = (v: unknown, max: number): number | null => {
@@ -171,6 +174,10 @@ export async function POST(request: NextRequest) {
       if (String(next[`tyre_${p.key}_danger`] ?? "") === "1" && String(before[`tyre_${p.key}_danger`] ?? "") !== "1") await alertDanger(`${p.label} tyre`, String(next[`tyre_${p.key}_danger_reason`] ?? "") || null);
     }
   }
+  if (body.partsList !== undefined) {
+    const { error } = await admin.from("inspections").update({ parts_list: cleanPartsList(body.partsList), ...stamp }).eq("id", insp.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   if (body.technicianNotes !== undefined) {
     const { error } = await admin.from("inspections").update({ technician_notes: text(body.technicianNotes, 4000), ...stamp }).eq("id", insp.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -183,6 +190,7 @@ export async function POST(request: NextRequest) {
       patch.estimated_hours = n === null ? null : Math.round(n * 10) / 10;
     }
     if ("estimate_reason" in i) patch.estimate_reason = text(i.estimate_reason, 300);
+    if ("requests_note" in i) patch.requests_note = text(i.requests_note, 2000);
     if ("big_job_tags" in i) patch.big_job_tags = Array.isArray(i.big_job_tags) ? Array.from(new Set(i.big_job_tags.map((t) => String(t).trim().slice(0, 40)).filter(Boolean))).slice(0, 12) : [];
     if (i.scan_read) patch.scan_read_at = new Date().toISOString();
     if ("scan_not_possible_reason" in i) patch.scan_not_possible_reason = text(i.scan_not_possible_reason, 300);

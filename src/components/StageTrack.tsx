@@ -7,8 +7,11 @@ const BAR: Record<Timing["tone"], string> = {
   neutral: "bg-ink",
 };
 
-/** The nine-step track from the dashboard design. Done steps are black, the current step takes the timing colour. */
-export function StageTrack({ stage, timing, compact = false, skip }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[] }) {
+/**
+ * The nine-step track from the dashboard design. Done steps are black, the current step takes the timing colour.
+ * When a road test comes before the inspection, the Inspection step shows two halves: the road test, then the inspection.
+ */
+export function StageTrack({ stage, timing, compact = false, skip, roadTest = null }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null }) {
   const stages = skip?.length ? STAGES.filter((s) => !skip.includes(s)) : STAGES;
   const current = stages.indexOf(stage);
   return (
@@ -17,9 +20,17 @@ export function StageTrack({ stage, timing, compact = false, skip }: { stage: St
         {stages.map((s, i) => {
           const done = i < current;
           const now = i === current;
+          const split = s === "inspection" && roadTest;
           return (
             <div key={s} className="flex flex-col gap-1.5">
-              <span className={`h-1.5 rounded-full ${done ? "bg-green/50" : now ? BAR[timing.tone] : "bg-track"}`} />
+              {split ? (
+                <span className="flex gap-0.5">
+                  <span className={`h-1.5 flex-1 rounded-full ${done || roadTest === "done" ? "bg-green/50" : now ? BAR[timing.tone] : "bg-track"}`} title="Road test" />
+                  <span className={`h-1.5 flex-1 rounded-full ${done ? "bg-green/50" : now && roadTest === "done" ? BAR[timing.tone] : "bg-track"}`} title="Inspection" />
+                </span>
+              ) : (
+                <span className={`h-1.5 rounded-full ${done ? "bg-green/50" : now ? BAR[timing.tone] : "bg-track"}`} />
+              )}
               {!compact ? (
                 <span className={`text-[11px] ${now ? "font-bold text-ink" : done ? "font-medium text-muted" : "font-medium text-faint"}`}>
                   {STAGE_LABELS[s]}

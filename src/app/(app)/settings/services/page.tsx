@@ -3,13 +3,17 @@ import { Badge, Button, Card, Empty, Field, Input, LinkButton, Notice, PageHeade
 import { requirePermission } from "@/lib/auth";
 import { loadServices } from "@/lib/quote-data";
 import { aed, hoursText, type Service, type ServiceCategory } from "@/lib/quotes";
-import { addCategory, addService, moveCategory, moveService, removeCategory, removeService, renameCategory, saveService } from "./actions";
+import { addCategory, addService, adoptCustomJob, dismissCustomJob, moveCategory, moveService, removeCategory, removeService, renameCategory, saveService } from "./actions";
+import { getSettings } from "@/lib/settings";
+import { TYRE_POSITIONS, checklistItems, type ChecklistSection } from "@/lib/inspection";
 
 export const dynamic = "force-dynamic";
 
 const DEPT_LABELS: Record<string, string> = { mechanical: "Mechanical", bodyshop: "Bodyshop", both: "Both" };
 
-function ServiceFields({ s, categories }: { s: Service | null; categories: ServiceCategory[] }) {
+type SuggestOption = { value: string; label: string };
+
+function ServiceFields({ s, categories, suggestOptions }: { s: Service | null; categories: ServiceCategory[]; suggestOptions: SuggestOption[] }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <Field label="Name">
@@ -39,6 +43,14 @@ function ServiceFields({ s, categories }: { s: Service | null; categories: Servi
       <Field label="Parts to ask for" optional hint="One per line. Sent to the Parts desk as price requests when the service is added to a quotation.">
         <Textarea name="parts_requests" defaultValue={(s?.parts_requests ?? []).join("\n")} rows={2} />
       </Field>
+      <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="position_ask" defaultChecked={!!s?.position_ask} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Asks the position</span><span className="block text-xs text-muted">When added to a quotation it asks &quot;Front, rear or both?&quot;; one row carries all the positions.</span></span></label>
+      <Field label="Suggested for" optional hint="The report findings this job answers. It comes first under Suggested on the quotation. Hold Ctrl (or Cmd) to pick several.">
+        <Select name="suggest_for" multiple defaultValue={s?.suggest_for ?? []} className="min-h-32 py-2">
+          {suggestOptions.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </Select>
+      </Field>
     </div>
   );
 }
@@ -47,13 +59,39 @@ function ServiceFields({ s, categories }: { s: Service | null; categories: Servi
 export default async function ServicesPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   await requirePermission("manageServices");
   const { message, error } = await searchParams;
-  const { categories, services } = await loadServices(null);
+  const [{ categories, services }, settings] = await Promise.all([loadServices(null), getSettings()]);
+  const suggestOptions: SuggestOption[] = [
+    ...checklistItems((settings.inspection_checklist ?? []) as ChecklistSection[]).map((i) => ({ value: i.key, label: `${i.sectionTitle} · ${i.label}` })),
+    ...TYRE_POSITIONS.map((p) => ({ value: `tyre:${p.key}`, label: `Tyre replace · ${p.label}` })),
+    { value: "measure:battery_health", label: "Battery test · Replace" },
+  ];
+  const customJobs = Object.entries((settings.custom_jobs_used ?? {}) as Record<string, number>).sort((a, b) => b[1] - a[1]);
 
   return (
     <>
-      <PageHeader title="Services" subtitle='The list behind "Add service" on quotations and estimates: categories, services, a fixed price or default hours, and the parts to ask for.' actions={<LinkButton href="/settings" tone="secondary">Back to settings</LinkButton>} />
+      <PageHeader title="Jobs and services" subtitle='The one list behind "+ Add" on quotations and estimates: categories, jobs by hours or at a fixed price per unit, usual quantity, time allowance, the parts to ask for, and which report findings each job answers.' actions={<LinkButton href="/settings" tone="secondary">Back to settings</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {customJobs.length ? (
+        <Card className="flex flex-col gap-3 border-ink">
+          <SectionLabel right={`${customJobs.length}`}>Suggestions: custom jobs typed on quotations</SectionLabel>
+          <ul className="divide-y divide-line">
+            {customJobs.map(([name, n]) => (
+              <li key={name} className="py-2 flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-semibold">{name}</span>
+                <span className="text-xs text-muted">typed {n} time{n === 1 ? "" : "s"}</span>
+                <form action={adoptCustomJob.bind(null, name)} className="ml-auto flex items-center gap-2">
+                  <Select name="category_id" className="w-56">
+                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </Select>
+                  <Button type="submit" size="md">Add to list</Button>
+                </form>
+                <form action={dismissCustomJob.bind(null, name)}><Button type="submit" tone="ghost" size="md">Dismiss</Button></form>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       <Card className="flex flex-col gap-2 max-w-xl">
         <SectionLabel>New category</SectionLabel>
         <form action={addCategory} className="flex gap-2">
@@ -96,7 +134,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
                     </summary>
                     <div className="mt-3 mb-2 flex flex-col gap-3 rounded-control border border-line p-3">
                       <form action={saveService.bind(null, s.id)} className="flex flex-col gap-3">
-                        <ServiceFields s={s} categories={categories} />
+                        <ServiceFields s={s} categories={categories} suggestOptions={suggestOptions} />
                         <div>
                           <Button type="submit" size="md">Save</Button>
                         </div>
@@ -120,7 +158,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
             <details className="rounded-control border border-dashed border-line-strong p-3">
               <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">+ Add a service to {c.name}</summary>
               <form action={addService.bind(null, c.id)} className="mt-3 flex flex-col gap-3">
-                <ServiceFields s={null} categories={categories} />
+                <ServiceFields s={null} categories={categories} suggestOptions={suggestOptions} />
                 <div>
                   <Button type="submit" size="md">Add service</Button>
                 </div>

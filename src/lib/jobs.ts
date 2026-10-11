@@ -21,6 +21,7 @@ export const STATUSES = [
   "gate_in_pending",
   "pending_approval",
   "pending_inspection",
+  "pending_road_test",
   "in_inspection",
   "pending_quote",
   "pending_customer_approval",
@@ -40,6 +41,7 @@ export const STATUS_LABELS: Record<JobStatus, string> = {
   gate_in_pending: "Gate-in incomplete, video pending",
   pending_approval: "Waiting for customer to approve the job card",
   pending_inspection: "Pending inspection",
+  pending_road_test: "Pending road test",
   in_inspection: "In inspection",
   pending_quote: "Pending quote",
   pending_customer_approval: "Waiting for customer approval",
@@ -59,6 +61,7 @@ export const STATUS_STAGE: Record<JobStatus, Stage> = {
   gate_in_pending: "gate_in",
   pending_approval: "gate_in",
   pending_inspection: "inspection",
+  pending_road_test: "inspection",
   in_inspection: "inspection",
   pending_quote: "quote",
   pending_customer_approval: "approval",
@@ -76,6 +79,7 @@ export const STATUS_STAGE: Record<JobStatus, Stage> = {
 /** The Pending row on the dashboard: which statuses count under each heading. */
 export const PENDING_GROUPS: { key: string; label: string; statuses: JobStatus[] }[] = [
   { key: "video", label: "Video pending", statuses: ["gate_in_pending"] },
+  { key: "road_test", label: "Road test", statuses: ["pending_road_test"] },
   { key: "inspection", label: "Inspection", statuses: ["pending_inspection", "in_inspection"] },
   { key: "quote", label: "Quote", statuses: ["pending_quote"] },
   { key: "approval", label: "Customer approval", statuses: ["pending_approval", "pending_customer_approval"] },
@@ -91,6 +95,7 @@ export const PENDING_GROUPS: { key: string; label: string; statuses: JobStatus[]
 /** Manual moves the workshop manager can make until later phases automate them. */
 export const MANUAL_STATUS_OPTIONS: JobStatus[] = [
   "pending_inspection",
+  "pending_road_test",
   "in_inspection",
   "pending_quote",
   "pending_customer_approval",

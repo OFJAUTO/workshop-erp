@@ -115,7 +115,6 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         labourActions={(settings.labour_actions ?? []) as string[]}
         labourPositions={(settings.labour_positions ?? []) as string[]}
         completedAt={q.completed_at}
-        labourJobs={(settings.labour_jobs ?? {}) as Record<string, string[]>}
         recoveryProviders={(settings.recovery_providers ?? []) as string[]}
       />
       {!staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (

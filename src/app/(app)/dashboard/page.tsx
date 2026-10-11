@@ -2,11 +2,11 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
-import { formatMinutes, jobConcernsSide, sideOfDepartment, type InspectionStatus } from "@/lib/inspection";
+import { formatMinutes, type InspectionStatus } from "@/lib/inspection";
 import { nextStepOf } from "@/lib/next-step";
 import { inspectionOverTarget, inspectionWorkingMinutes } from "@/lib/inspection-data";
 import { STATUS_LABELS, clockOf, formatPromised, hoursInStage, jobTiming, urgencyRank, workingTimeOf, type JobStatus, type Priority, type Stage } from "@/lib/jobs";
-import { roadTestWaiting, type RoadTestRow } from "@/lib/road-test";
+import { type RoadTestRow } from "@/lib/road-test";
 import { loadQuoteSummaries } from "@/lib/quote-data";
 import { quoteState } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -18,6 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
+import { WaitingPanel } from "@/components/WaitingPanel";
 
 type Row = JobRow & {
   vehicle: {
@@ -143,6 +144,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         actions={can(role, "gateIn") ? <LinkButton href="/gate-in" size="lg">Gate in a car</LinkButton> : undefined}
       />
 
+      <WaitingPanel staff={staff} />
+
       {can(role, "viewProfitPanel") && profit ? (
         <ProfitPanel
           targetAed={profit.target}
@@ -178,37 +181,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       ) : null}
 
-      {can(role, "approveInspections") ? (
-        (() => {
-          const side = role === "owner" ? null : sideOfDepartment(staff.department_id);
-          const toApprove = all.filter((j) => jobConcernsSide(j.department, side) && j.inspection?.some((i) => i.status === "submitted"));
-          return (
-            <Card className={`flex flex-col gap-3 ${toApprove.length ? "border-ink" : ""}`}>
-              <SectionLabel right={`${toApprove.length}`}>Inspections to approve</SectionLabel>
-              {toApprove.length === 0 ? (
-                <p className="text-sm text-muted">Nothing waiting for your review.</p>
-              ) : (
-                <ul className="flex flex-col divide-y divide-line">
-                  {toApprove.map((j) => {
-                    const r = rows.find((x) => x.id === j.id)!;
-                    return (
-                      <li key={j.id} className="py-2 flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-semibold">
-                          {r.plate} · {r.title}
-                          <span className="text-muted font-normal"> · {r.assignee ?? ""}{roadTestWaiting(j.road_test?.[0] ?? null) ? " · road test pending" : ""}</span>
-                        </span>
-                        <LinkButton href={`/jobs/${j.id}/inspection`} size="md">
-                          Review
-                        </LinkButton>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Card>
-          );
-        })()
-      ) : null}
 
       <DashboardCars rows={rows} initialPending={pending} />
 

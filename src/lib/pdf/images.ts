@@ -22,6 +22,19 @@ export async function loadLogo(): Promise<Buffer | null> {
   }
 }
 
+let markCache: Buffer | null = null;
+/** The emblem alone (public/logo-mark.svg) for the small part sticker. */
+export async function loadLogoMark(): Promise<Buffer | null> {
+  if (markCache) return markCache;
+  try {
+    const svg = await fs.readFile(path.join(process.cwd(), "public", "logo-mark.svg"));
+    markCache = await sharp(svg, { density: 300 }).resize({ height: 240, fit: "inside" }).png().toBuffer();
+    return markCache;
+  } catch {
+    return null;
+  }
+}
+
 /** A photo fetched from storage and shrunk for the PDF (phones take 3 to 5 MB each); null when it cannot be read. */
 export async function fetchPhoto(url: string | undefined): Promise<Buffer | null> {
   if (!url) return null;

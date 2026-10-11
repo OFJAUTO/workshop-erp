@@ -2,6 +2,7 @@ import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
 import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
+import { cleanPartsList, mergePartsList } from "./parts-list";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
 import { highestBankCharge, type Settings } from "./settings";
 import { newToken } from "./media";
@@ -10,10 +11,10 @@ export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
   "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per";
-export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active";
-export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by";
-export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per, positions";
+export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active, position_ask, suggest_for";
+export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
+export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason, positions, note, catalogue_id";
 
 /** Numbers come back from Postgres as strings; the maths wants numbers. */
 function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
@@ -186,6 +187,33 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
   const { data: existing } = await admin.from("part_requests").select("source_type, source_key").eq("job_id", jobId);
   const have = new Set((existing ?? []).map((e) => `${e.source_type}:${e.source_key}`));
   const rows: Record<string, unknown>[] = [];
+  // The gathered parts list (from the rework of 11 October): one request per merged line, with the quantity and the positions.
+  const listed = mergePartsList(cleanPartsList(bundle.inspection.parts_list));
+  if (listed.length) {
+    for (const line of listed) {
+      const slug = line.key.replace(/[^a-z0-9]+/g, "_").slice(0, 60);
+      const srcType = line.source === "tyre" ? "tyre" : "item";
+      const srcKey = line.source === "tyre" ? `tyres#${slug}` : `${line.item_key ?? "list"}#${slug}`;
+      if (have.has(`${srcType}:${srcKey}`)) continue;
+      rows.push({
+        job_id: jobId,
+        inspection_id: bundle.inspection.id,
+        source_type: srcType,
+        source_key: srcKey,
+        label: line.name,
+        requested_text: [`× ${line.qty}`, line.positions.join(", "), line.note ?? ""].filter(Boolean).join(" · "),
+        quantity: line.qty,
+        unit: "pc",
+        positions: line.positions,
+        note: line.note,
+        catalogue_id: line.catalogue_id,
+        created_by: by,
+        updated_by: by,
+      });
+    }
+    if (rows.length) await admin.from("part_requests").insert(rows);
+    return rows.length;
+  }
   for (const i of bundle.items) {
     const partRows = cleanPartsRows(i.parts_rows).filter((r) => r.part.trim());
     if (partRows.length) {

@@ -246,10 +246,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             ) : null}
             {canGateOut ? (
               <span className="flex flex-col items-end gap-1">
-                <LinkButton href={`/jobs/${id}/gate-out`} tone="secondary" size="lg">
+                <LinkButton href={`/jobs/${id}/gate-out`} tone="secondary" size={gateOutReason ? "md" : "lg"}>
                   Gate out
                 </LinkButton>
-                {gateOutReason ? <span className="text-xs font-semibold text-amber-bar">Owner override: {gateOutReason.toLowerCase()} (logged)</span> : null}
+                {gateOutReason ? <span className="text-xs text-muted">Normally {gateOutReason.toLowerCase()}</span> : null}
               </span>
             ) : can(role, "gateOut") && job.is_open && gateOutReason ? (
               <span className="flex flex-col items-end gap-1">
@@ -286,7 +286,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
               </span>
             </div>
-            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} />
+            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
@@ -413,8 +413,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (loose || inspection?.inspection.status === "approved" || role === "owner") ? (
               <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
-                <Button type="submit" size="md">Start quotation</Button>
-                {!loose && inspection?.inspection.status !== "approved" ? <span className="text-xs font-semibold text-amber-bar">Owner override: the inspection report is not approved yet (logged)</span> : null}
+                <Button type="submit" size="md" tone={!loose && inspection?.inspection.status !== "approved" ? "secondary" : "primary"}>Start quotation</Button>
+                {!loose && inspection?.inspection.status !== "approved" ? <span className="text-xs text-muted">{inspection ? "Normally after the workshop manager approves the report" : "Normally after the inspection"}</span> : null}
               </form>
             ) : !latestQuote && canQuote ? (
               <span className="flex flex-col gap-1">
@@ -716,7 +716,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                     ))}
                   </Select>
                   <Textarea name="reason" rows={1} required placeholder="Reason (stays on the job card)" />
-                  <Button type="submit" tone="secondary">
+                  <Button type="submit" tone="secondary" size="md">
                     Move
                   </Button>
                   <p className="text-xs text-muted">Owner only. The step opens properly: to QC opens the round, to Work builds the work order.</p>
