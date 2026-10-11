@@ -4,6 +4,7 @@ import { Logo } from "./Logo";
 import { Avatar } from "./ui";
 import { SidebarNav, type NavItem } from "./SidebarNav";
 import { NotificationBell } from "./NotificationBell";
+import { ModeExit } from "./ModeExit";
 
 /**
  * Black menu bar down the left, content using the full width.
@@ -53,21 +54,17 @@ export function Shell({
         {viewingAs && user ? (
           <div className="bg-amber-soft border-b-2 border-amber-bar px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="font-bold">
-              Viewing as {user.name} ({user.role}). View only: nothing can be changed.
+              Viewing as {user.name} ({user.role}) in this tab only. View only: nothing can be changed.
             </span>
-            <a href="/api/view-as/exit" className="inline-flex min-h-10 items-center rounded-control bg-ink px-4 text-sm font-bold text-white">
-              Exit
-            </a>
+            <ModeExit />
           </div>
         ) : null}
         {actingAs && user ? (
-          <div className="bg-ink text-white px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <div className="bg-red-bar text-white px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="font-bold">
-              Acting as {actingAs.forName} ({user.role}). Everything you do is saved and logged as {actingAs.realName}, on behalf of {actingAs.forName}.
+              Acting as {actingAs.forName} ({user.role}) in this tab only. Everything you do is saved and logged as {actingAs.realName}, on behalf of {actingAs.forName}.
             </span>
-            <a href="/api/view-as/exit" className="inline-flex min-h-10 items-center rounded-control bg-white px-4 text-sm font-bold text-ink">
-              Exit
-            </a>
+            <ModeExit dark />
           </div>
         ) : null}
         {/* Bell at the top right of the page area, level with the page title; below the bar when viewing or acting as someone. */}

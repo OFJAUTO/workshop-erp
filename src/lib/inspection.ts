@@ -209,9 +209,11 @@ export const MEASUREMENTS: MeasurementField[] = [
   ...TYRE_POSITIONS.flatMap((p) => [
     { key: `tyre_${p.key}_tread`, label: `${p.label} tread`, unit: "mm", kind: "number" as const, group: "Tyres" },
     { key: `tyre_${p.key}_year`, label: `${p.label} tyre year`, kind: "year" as const, group: "Tyres" },
+    { key: `tyre_${p.key}_brand`, label: `${p.label} tyre brand`, kind: "text" as const, group: "Tyres", optional: true },
   ]),
   { key: "tyre_spare_tread", label: "Spare tread", unit: "mm", kind: "number", group: "Spare tyre", optional: true },
   { key: "tyre_spare_year", label: "Spare tyre year", kind: "year", group: "Spare tyre", optional: true },
+  { key: "tyre_spare_brand", label: "Spare tyre brand", kind: "text", group: "Spare tyre", optional: true },
   { key: "pad_front", label: "Front brake pads", unit: "mm", kind: "number", group: "Brake pads" },
   { key: "pad_rear", label: "Rear brake pads", unit: "mm", kind: "number", group: "Brake pads" },
   { key: "battery_voltage", label: "Battery voltage", unit: "V", kind: "number", group: "Battery test" },

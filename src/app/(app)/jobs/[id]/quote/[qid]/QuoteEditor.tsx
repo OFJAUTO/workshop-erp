@@ -12,8 +12,6 @@ import { SendQuoteControl } from "./SendQuoteControl";
 
 type Op = Record<string, unknown>;
 
-/** A finding of the approved report: the heading of a group of labour lines. Same shape as the server's QuoteFinding. */
-export type EditorFinding = { key: string; source_type: "request" | "item" | "tyre"; source_key: string; status: "bad" | "average" | "good" | null; label: string; section: string | null; remark: string | null; parts: string | null; photos: string[]; dangerous: boolean };
 
 /** Every change goes to the server at once, through a queue kept in the browser so nothing typed is lost. A 409 asks the person to confirm first. */
 function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (op: Op, message: string) => void) {
@@ -137,7 +135,6 @@ export function QuoteEditor({
   quotation,
   lines: initialLines,
   parts,
-  findings = [],
   categories,
   services,
   usage,
@@ -167,7 +164,6 @@ export function QuoteEditor({
   quotation: QuoteRow;
   lines: QuoteLine[];
   parts: PartItem[];
-  findings?: EditorFinding[];
   categories: ServiceCategory[];
   services: Service[];
   usage: Record<string, number>;
@@ -196,15 +192,12 @@ export function QuoteEditor({
 }) {
   const router = useRouter();
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
-  const [notQuoted, setNotQuoted] = useState<Record<string, string>>(quotation.not_quoted ?? {});
   const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "" });
   const [attempted, setAttempted] = useState(false);
-  const [picker, setPicker] = useState<null | { source?: EditorFinding }>(null);
-  const [partAsk, setPartAsk] = useState<null | { description: string; quantity: string; source?: EditorFinding }>(null);
+  const [picker, setPicker] = useState(false);
+  const [partAsk, setPartAsk] = useState<null | { description: string; quantity: string }>(null);
   const [builderFor, setBuilderFor] = useState<string | null>(null);
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set(initialLines.filter((l) => blockOf(l) === "labour" && !finishedLine(l)).map((l) => l.id)));
-  const [openFindings, setOpenFindings] = useState<Set<string>>(new Set());
-  const [reasonFor, setReasonFor] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<null | { op: Op; message: string }>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -226,7 +219,6 @@ export function QuoteEditor({
         return k ? { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title } : l;
       });
     });
-    setNotQuoted(quotation.not_quoted ?? {});
   }
 
   const debounced = (key: string, op: () => Op) => {
@@ -254,16 +246,6 @@ export function QuoteEditor({
     setLines((prev) => prev.map((l) => (l.option_group === groupId ? { ...l, chosen: l.id === lineId } : l)));
     save({ patchLine: { id: lineId, chosen: true } });
   };
-  const markNotQuoted = (key: string, reason: string | null) => {
-    setNotQuoted((m) => {
-      const next = { ...m };
-      if (reason === null) delete next[key];
-      else next[key] = reason;
-      return next;
-    });
-    save({ notQuoted: { key, reason } });
-    setReasonFor(null);
-  };
   const toggleKey = (id: string) => setOpenRows((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const run = (fn: () => Promise<{ error?: string; ok?: boolean }>) =>
     start(async () => {
@@ -279,23 +261,13 @@ export function QuoteEditor({
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
   const feeLine = otherLines.find((l) => l.fee_kind === "bank_charge") ?? null;
-  const findingOf = (l: QuoteLine) => findings.find((f) => f.source_type === l.source_type && f.source_key === l.source_key) ?? null;
-  const linesOf = (f: EditorFinding) => labourLines.filter((l) => l.source_type === f.source_type && l.source_key === f.source_key);
-  const looseLabour = labourLines.filter((l) => !findingOf(l));
-  // Customer requests are always headings; report findings become headings once they have a line, else they sit in the reference list.
-  const requestFindings = isQuotation ? findings.filter((f) => f.source_type === "request") : [];
-  const reportFindings = isQuotation ? findings.filter((f) => f.source_type !== "request") : [];
-  const rank = (f: EditorFinding) => (f.status === "bad" ? 0 : f.status === "average" ? 1 : 2);
-  const quotedReport = reportFindings.filter((f) => linesOf(f).length > 0);
-  const unquoted = reportFindings.filter((f) => linesOf(f).length === 0).sort((a, b) => rank(a) - rank(b));
-  const headings = [...requestFindings, ...quotedReport];
   const labourDone = labourLines.filter(finishedLine).length;
   const blockers = sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm });
   const reasons = ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove });
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
   const completed = !!completedAt;
-  const lineName = (l: QuoteLine) => l.title.trim() || findingOf(l)?.label || "Line without a description";
+  const lineName = (l: QuoteLine) => l.title.trim() || "Line without a description";
   const parentName = (l: QuoteLine) => {
     const p = l.parent_line_id ? lines.find((x) => x.id === l.parent_line_id && x.is_active) : null;
     return p ? lineName(p) : null;
@@ -306,9 +278,8 @@ export function QuoteEditor({
   const canKeepUrgent = isRevision && !sent && !disabled && labourLines.some((l) => l.urgency === "urgent") && labourLines.some((l) => l.urgency !== "urgent");
 
   const pick = (s: Service) => {
-    const src = picker?.source;
-    setPicker(null);
-    addLine({ service_id: s.id, source_type: src?.source_type ?? null, source_key: src?.source_key ?? null, group_label: src?.label ?? null });
+    setPicker(false);
+    addLine({ service_id: s.id });
   };
   const applyTitle = (id: string, title: string) => {
     const remembered = hoursMemory[title.toLowerCase()];
@@ -359,7 +330,13 @@ export function QuoteEditor({
             </>
           ) : (
             <>
-              {l.line_type === "package" && (!l.price_per || l.price_per === "job") ? <span className="text-right text-sm text-muted min-h-10 inline-flex items-center justify-end">per job</span> : <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Math.max(1, Math.round(Number(e.target.value) || 1)) })} inputMode="numeric" disabled={disabled} aria-label="Quantity" className="text-right min-h-10" />}
+              {l.line_type === "package" && (!l.price_per || l.price_per === "job") ? <span className="text-right text-sm text-muted min-h-10 inline-flex items-center justify-end">per job</span> : l.line_type === "package" ? (
+                <span className="inline-flex items-center justify-end gap-1">
+                  <button type="button" disabled={disabled || (l.quantity || 1) <= 1} onClick={() => patch(l.id, { quantity: Math.max(1, (l.quantity || 1) - 1) }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One less">−</button>
+                  <span className="w-8 text-center font-extrabold" aria-label="Quantity">{l.quantity || 1}</span>
+                  <button type="button" disabled={disabled} onClick={() => patch(l.id, { quantity: (l.quantity || 1) + 1 }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One more">+</button>
+                </span>
+              ) : <Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Math.max(1, Math.round(Number(e.target.value) || 1)) })} inputMode="numeric" disabled={disabled} aria-label="Quantity" className="text-right min-h-10" />}
               <Input value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} aria-label="Price" className="text-right min-h-10 hidden sm:block" />
             </>
           )}
@@ -396,51 +373,6 @@ export function QuoteEditor({
     );
   };
 
-  const statusBadge = (f: EditorFinding) => (f.status === "bad" ? <Badge tone="red">BAD</Badge> : f.status === "average" ? <Badge tone="amber">AVG</Badge> : f.status === "good" ? <Badge tone="green">GOOD</Badge> : <Badge tone="neutral">Not checked</Badge>);
-  const findingBlock = (f: EditorFinding) => {
-    const ls = linesOf(f);
-    const skipped = notQuoted[f.key];
-    const open = openFindings.has(f.key);
-    const state: "quoted" | "unquoted" | "skipped" = ls.length ? "quoted" : skipped ? "skipped" : "unquoted";
-    const needsWork = f.status === "bad" || f.status === "average";
-    return (
-      <div key={f.key} id={`item-finding-${f.key}`} className={`rounded-control border ${state === "unquoted" && needsWork ? "border-amber-bar" : "border-line"}`}>
-        <div className="flex flex-wrap items-center gap-2 bg-chip px-2 py-1.5 text-xs">
-          {statusBadge(f)}
-          <button type="button" onClick={() => setOpenFindings((s) => { const n = new Set(s); if (n.has(f.key)) n.delete(f.key); else n.add(f.key); return n; })} className="flex-1 min-w-0 text-left">
-            <span className="font-bold">{f.label}</span>
-            {f.remark ? <span className="text-muted"> · {open ? f.remark : f.remark.length > 70 ? f.remark.slice(0, 68) + "…" : f.remark}</span> : null}
-            {f.parts ? <span className="text-muted"> · Parts: {f.parts}</span> : null}
-            {f.dangerous ? <span className="font-bold text-red"> · DANGEROUS</span> : null}
-          </button>
-          {state === "unquoted" && needsWork ? <span className="font-extrabold text-amber">NOT QUOTED</span> : state === "skipped" ? <span className="text-muted">Not quoting: {skipped}{!disabled ? <button type="button" onClick={() => markNotQuoted(f.key, null)} className="ml-1 underline underline-offset-4 font-semibold">undo</button> : null}</span> : <span className="text-muted">{ls.length} line{ls.length === 1 ? "" : "s"}</span>}
-        </div>
-        {open && f.photos.length ? (
-          <div className="flex flex-wrap gap-2 px-2 py-2">
-            {f.photos.map((u) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <a key={u} href={u} target="_blank" rel="noreferrer"><img src={u} alt="Photo" className="h-20 w-20 rounded-control object-cover bg-chip" /></a>
-            ))}
-          </div>
-        ) : null}
-        <div className="divide-y divide-line">{ls.map(labourRow)}</div>
-        {!disabled && state !== "skipped" ? (
-          <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
-            <button type="button" onClick={() => addLine({ line_type: "labour", title: "", source_type: f.source_type, source_key: f.source_key, group_label: f.label })} className="min-h-8 rounded-control border border-line-strong bg-white px-2 text-xs font-bold">+ Add labour</button>
-            <button type="button" onClick={() => setPicker({ source: f })} className="min-h-8 rounded-control border border-line px-2 text-xs font-semibold">Add service</button>
-            <button type="button" onClick={() => setPartAsk({ description: "", quantity: "1", source: f })} className="min-h-8 rounded-control border border-line px-2 text-xs font-semibold">Ask Parts for a part</button>
-            {state === "unquoted" && needsWork && f.source_type !== "request" ? (reasonFor === f.key ? (
-              <span className="flex items-center gap-1">
-                <Input placeholder="Why not?" className="w-48 min-h-8" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); markNotQuoted(f.key, (e.target as HTMLInputElement).value); } }} id={`reason-${f.key}`} />
-                <button type="button" onClick={() => markNotQuoted(f.key, (document.getElementById(`reason-${f.key}`) as HTMLInputElement | null)?.value ?? "")} className="min-h-8 rounded-control bg-ink px-2 text-xs font-bold text-white">Save</button>
-              </span>
-            ) : <button type="button" onClick={() => setReasonFor(f.key)} className="min-h-8 rounded-control px-2 text-xs font-semibold text-muted underline underline-offset-4">Not quoting this</button>) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
   const showHide = (l: QuoteLine, hidden: boolean) => (
     <button type="button" disabled={disabled} onClick={() => patch(l.id, { visible_to_customer: hidden }, true)} className={`min-h-9 rounded-control border px-2 text-xs font-bold ${hidden ? "border-line text-muted" : "border-ink bg-ink text-white"}`}>{hidden ? "Internal cost" : "Shown to customer"}</button>
   );
@@ -460,44 +392,22 @@ export function QuoteEditor({
               <button type="button" onClick={() => setOpenRows(new Set(labourLines.map((l) => l.id)))} className="min-h-8 rounded-control border border-line px-2 font-semibold">Expand all</button>
             </span>
           </div>
-          {isQuotation && headings.length ? <div className="flex flex-col gap-2">{headings.map(findingBlock)}</div> : null}
-          {looseLabour.length || !headings.length ? (
-            <div className="rounded-control border border-line">
-              {headings.length ? <div className="bg-chip px-2 py-1.5 text-xs font-bold">Other labour and services</div> : null}
-              <div className="divide-y divide-line">{looseLabour.map(labourRow)}</div>
-              {looseLabour.length === 0 ? <p className="px-2 py-2 text-sm text-muted">No labour lines yet.</p> : null}
-            </div>
-          ) : null}
+          <div className="rounded-control border border-line">
+            <div className="divide-y divide-line">{labourLines.map(labourRow)}</div>
+            {labourLines.length === 0 ? <p className="px-2 py-2 text-sm text-muted">No labour lines yet. Add a service or a labour line.</p> : null}
+          </div>
           {!disabled ? (
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-              <Button type="button" size="md" onClick={() => setPicker({})}>Add service</Button>
+              <Button type="button" size="md" onClick={() => setPicker(true)}>Add service</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "labour", title: "" })}>+ Labour</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => setPartAsk({ description: "", quantity: "1" })}>Ask Parts for a part</Button>
             </div>
           ) : null}
-          {isQuotation && unquoted.length ? (
-            <div className="rounded-control border border-amber-bar">
-              <div className="flex flex-wrap items-center gap-2 bg-amber-soft px-2 py-1.5 text-xs">
-                <span className="font-extrabold text-amber">{unquoted.filter((f) => f.status === "bad" || f.status === "average").length} finding{unquoted.filter((f) => f.status === "bad" || f.status === "average").length === 1 ? "" : "s"} from the report not quoted</span>
-                <span className="text-muted">Reference only: nothing here stops the quotation. Add the ones the customer should be offered.</span>
-              </div>
-              <div className="divide-y divide-line">
-                {unquoted.map((f) => (
-                  <div key={f.key} id={`item-finding-${f.key}`} className="flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs">
-                    {statusBadge(f)}
-                    <span className="flex-1 min-w-48"><span className="font-bold">{f.label}</span>{f.remark ? <span className="text-muted"> · {f.remark.length > 90 ? f.remark.slice(0, 88) + "…" : f.remark}</span> : null}{f.parts ? <span className="text-muted"> · Parts: {f.parts}</span> : null}{f.dangerous ? <span className="font-bold text-red"> · DANGEROUS</span> : null}</span>
-                    {!disabled ? <button type="button" onClick={() => addLine({ line_type: "labour", title: "", source_type: f.source_type, source_key: f.source_key, group_label: f.label })} className="min-h-9 rounded-control bg-ink px-3 font-bold text-white">Add to quotation</button> : null}
-                    {!disabled ? <button type="button" onClick={() => setPartAsk({ description: "", quantity: "1", source: f })} className="min-h-9 rounded-control border border-line px-2 font-semibold">Ask Parts</button> : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
           {partAsk ? (
             <div className="rounded-control border border-ink p-3 flex flex-wrap items-end gap-2">
-              <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="text-xs font-semibold text-muted">Part needed{partAsk.source ? ` for: ${partAsk.source.label}` : ""}</span><Input value={partAsk.description} onChange={(e) => setPartAsk({ ...partAsk, description: e.target.value })} placeholder="Part name or number" /></label>
+              <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="text-xs font-semibold text-muted">Part needed</span><Input value={partAsk.description} onChange={(e) => setPartAsk({ ...partAsk, description: e.target.value })} placeholder="Part name or number" /></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Quantity</span><Input value={partAsk.quantity} onChange={(e) => setPartAsk({ ...partAsk, quantity: e.target.value })} inputMode="decimal" className="w-20" /></label>
-              <Button type="button" size="md" onClick={() => { if (partAsk.description.trim()) { save({ requestPart: { description: partAsk.description, quantity: partAsk.quantity, source_type: partAsk.source?.source_type ?? null, source_key: partAsk.source?.source_key ?? null } }); setPartAsk(null); } }}>Send to Parts</Button>
+              <Button type="button" size="md" onClick={() => { if (partAsk.description.trim()) { save({ requestPart: { description: partAsk.description, quantity: partAsk.quantity, source_type: null, source_key: null } }); setPartAsk(null); } }}>Send to Parts</Button>
               <Button type="button" tone="ghost" size="md" onClick={() => setPartAsk(null)}>Cancel</Button>
             </div>
           ) : null}
@@ -741,7 +651,7 @@ export function QuoteEditor({
               {quotation.status === "sent" ? `Sent ${formatDayTime(quotation.sent_at)}, not yet opened.` : quotation.status === "opened" ? `Opened by the customer ${formatDayTime(quotation.opened_at)}.` : quotation.status === "approved" ? `Approved by ${quotation.approver_name} ${formatDayTime(quotation.responded_at)}.` : quotation.status === "declined" ? `Declined by ${quotation.approver_name} ${formatDayTime(quotation.responded_at)}.${quotation.declined_note ? ` "${quotation.declined_note}"` : ""}` : quotation.status === "expired" ? "Expired. Re-send it or revise it." : quotation.status === "superseded" ? "Replaced by a newer version." : ""}
             </p>
           ) : null}
-          {!sent ? <p className="text-xs font-semibold">{labourDone} of {labourLines.length} lines done{unquoted.length ? ` · ${unquoted.length} finding${unquoted.length === 1 ? "" : "s"} not quoted` : ""}{wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}</p> : null}
+          {!sent ? <p className="text-xs font-semibold">{labourDone} of {labourLines.length} lines done{wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}</p> : null}
           {!sent && !completed && blockers.length ? (
             <ul className="flex flex-col gap-1">
               {blockers.map((b, i) => (
@@ -772,7 +682,7 @@ export function QuoteEditor({
         </Card>
       </div>
 
-      {picker ? <ServicePicker categories={categories} services={services} usage={usage} department={department} onPick={pick} onClose={() => setPicker(null)} /> : null}
+      {picker ? <ServicePicker categories={categories} services={services} usage={usage} department={department} onPick={pick} onClose={() => setPicker(false)} /> : null}
       {confirming ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">

@@ -4,7 +4,7 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Text
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, loadQuoteFindings } from "@/lib/quote-data";
+import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor } from "@/lib/quote-data";
 import { checklistItems, type ChecklistSection } from "@/lib/inspection";
 import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -34,7 +34,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
   const canSend = !staff.viewingAs;
   const services = await loadServices(staff.id);
-  const [checks, partsWait, findings] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id), loadQuoteFindings(id)]);
+  const [checks, partsWait] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id)]);
   const candidateMap = (settings.labour_job_candidates ?? {}) as Record<string, number>;
   const candidates = Object.entries(candidateMap).filter(([, n]) => Number(n) >= 2).map(([t]) => t);
   const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
@@ -165,7 +165,6 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         wait={wait}
         workshopEstimate={checks.workshopEstimate}
         completedAt={q.completed_at}
-        findings={findings}
         labourJobs={(settings.labour_jobs ?? {}) as Record<string, string[]>}
         candidates={candidates}
         recoveryProviders={(settings.recovery_providers ?? []) as string[]}

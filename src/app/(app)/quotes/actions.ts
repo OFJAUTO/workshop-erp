@@ -6,7 +6,7 @@ import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { LINE_SELECT, PART_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, suggestedLines, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, ensurePartRequests, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { ownerApprovalReasons, quoteTotals, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -98,7 +98,6 @@ export async function startQuotation(jobId: string) {
   const settings = await getSettings();
   const { data: vehicle } = await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", job!.vehicle_id).maybeSingle();
   const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;
-  const rate = labourRateFor(settings, job!.department, makeName);
   const minMarkup = minMarkupFor(settings, makeName);
   const { data: created, error } = await admin
     .from("quotations")
@@ -112,7 +111,8 @@ export async function startQuotation(jobId: string) {
     const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", job!.estimate_id).eq("is_active", true).order("position");
     lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !l.fee_kind).map((l) => ({ quotation_id: created!.id, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: staff!.id, updated_by: staff!.id }));
   } else {
-    lines = (await suggestedLines(jobId, rate)).map((l) => ({ ...l, quotation_id: created!.id, created_by: staff!.id, updated_by: staff!.id }));
+    // The labour list is the advisor's own: nothing from the report is pre-filled. The parts list comes from the approved report through the part requests below.
+    lines = [];
   }
   if (lines.length) await admin.from("quotation_lines").insert(lines);
   // A car that came on our recovery truck: the recovery line is suggested, the advisor fills in the price or hides it.

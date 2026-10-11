@@ -44,7 +44,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2">
-          <MediaChecklist jobId={id} check={check} />
+          <MediaChecklist jobId={id} check={check} carPictureUrl={card.vehiclePhotoUrl} />
         </div>
 
         <div className="flex flex-col gap-6">

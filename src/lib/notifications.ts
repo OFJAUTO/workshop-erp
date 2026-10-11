@@ -95,6 +95,9 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "wash", label: "Car ready for the wash, or wash done", locked: true },
 ];
 
+/** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */
+export const HANDOVER_TYPES = new Set(["job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
+
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
 
 /** Sends a notification to specific people, respecting their preferences. */
@@ -102,7 +105,7 @@ export async function notifyStaff(staffIds: string[], n: NotificationInput) {
   const ids = Array.from(new Set(staffIds.filter(Boolean)));
   if (ids.length === 0) return;
   const admin = createAdminClient();
-  const locked = NOTIFICATION_TYPES.find((t) => t.type === n.type)?.locked ?? false;
+  const locked = HANDOVER_TYPES.has(n.type) || (NOTIFICATION_TYPES.find((t) => t.type === n.type)?.locked ?? false);
   let recipients = ids;
   if (!locked) {
     const { data: prefs } = await admin

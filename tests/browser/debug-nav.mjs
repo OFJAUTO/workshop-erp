@@ -1,0 +1,12 @@
+import { MANAGER_MECH, base, browserForId, sleep } from "./pw-lib.mjs";
+const path = process.argv[2] ?? "/assign";
+const who = process.argv[3] ?? MANAGER_MECH;
+const { browser, page } = await browserForId(who);
+let n = 0;
+page.on("framenavigated", (f) => { if (f === page.mainFrame()) console.log("nav", ++n, f.url()); });
+page.on("console", (m) => { if (!/DevTools|HMR|Fast Refresh/.test(m.text())) console.log("console", m.type(), m.text().slice(0, 200)); });
+page.on("request", (r) => { if (/\/api\//.test(r.url())) console.log("api", r.method(), r.url().replace(base, "")); });
+await page.goto(`${base}${path}`, { waitUntil: "load" }).catch((e) => console.log("goto", e.message.slice(0, 120)));
+await sleep(7000);
+console.log("navigations:", n);
+await browser.close();

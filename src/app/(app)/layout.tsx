@@ -1,14 +1,24 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { Shell } from "@/components/Shell";
 import type { NavItem } from "@/components/SidebarNav";
-import { requireStaff } from "@/lib/auth";
+import { getCurrentStaff, requireStaff } from "@/lib/auth";
 import { can, ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { FormGuard } from "@/components/FormGuard";
 import { IdleLock } from "./IdleLock";
+import { ModeGuard, type TabMode } from "./ModeGuard";
 import { getCurrentDevice } from "@/lib/devices";
+
+/** The browser tab says whose screens these are while the owner views or acts as someone. */
+export async function generateMetadata(): Promise<Metadata> {
+  const staff = await getCurrentStaff();
+  if (staff?.viewingAs) return { title: `Viewing as ${staff.display_name} · OFJ Automotive · Workshop ERP` };
+  if (staff?.actingAs) return { title: `Acting as ${staff.actingAs.forName} · OFJ Automotive · Workshop ERP` };
+  return {};
+}
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const staff = await requireStaff();
@@ -70,10 +80,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/overrides", label: "Overrides", show: can(role, "viewOverrides") },
   ];
   const nav: NavItem[] = entries.filter((n) => n.show).map(({ href, label, badge }) => ({ href, label, badge }));
+  const tabMode: TabMode | null = staff.viewingAs ? { kind: "view", id: staff.id, name: staff.display_name } : staff.actingAs ? { kind: "act", id: staff.id, name: staff.actingAs.forName } : null;
 
   return (
     <>
       <Suspense fallback={null}><FormGuard /></Suspense>
+      <Suspense fallback={null}><ModeGuard serverMode={tabMode} /></Suspense>
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell

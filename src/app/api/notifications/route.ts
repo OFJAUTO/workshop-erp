@@ -1,12 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+
+/** The bell shows the person on screen: the owner's own login, or whoever the owner is viewing or acting as in this tab. */
+async function clientFor(staff: { viewingAs: unknown; actingAs: unknown }) {
+  return staff.viewingAs || staff.actingAs ? createAdminClient() : await createClient();
+}
 
 /** The current person's latest notifications and unread count. */
 export async function GET() {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
-  const supabase = await createClient();
+  const supabase = await clientFor(staff);
   const [{ data: items }, { count }] = await Promise.all([
     supabase
       .from("notifications")
@@ -24,7 +30,7 @@ export async function POST(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   const body = (await request.json().catch(() => ({}))) as { ids?: number[]; all?: boolean };
-  const supabase = await createClient();
+  const supabase = await clientFor(staff);
   let q = supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("staff_id", staff.id).is("read_at", null);
   if (!body.all) {
     const ids = (body.ids ?? []).filter((n) => Number.isInteger(n));

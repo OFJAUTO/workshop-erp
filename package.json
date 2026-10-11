@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:notify": "node --env-file=.env.local tests/browser/test-notify.mjs",
+    "test:day1": "node --env-file=.env.local tests/browser/test-a.mjs",
+    "test:overnight": "node --env-file=.env.local tests/browser/test-b.mjs",
+    "test:cleanup": "node --env-file=.env.local scripts/db-sql.mjs tests/e2e-cleanup.sql"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",
@@ -28,7 +32,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "mupdf": "^1.28.1",
     "pg": "^8.23.1",
+    "playwright-core": "^1.56.1",
     "supabase": "^2.120.0",
     "tailwindcss": "^4",
     "typescript": "^5"

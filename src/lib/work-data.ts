@@ -175,17 +175,15 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
   return rows.length;
 }
 
-/** The QC checklist built from the job: complaints, work done, parts fitted, then the general checks from Settings. */
+/** The QC checklist built from the job: the work done (the labour list), the parts fitted, then the general checks from Settings. */
 export async function buildQcItems(jobId: string, settings: Settings, previous: QcCheckRow | null): Promise<QcItem[]> {
   if (previous && previous.status === "failed") return previous.items.filter((i) => i.result === "fail").map((i) => ({ ...i, result: null, remark: null }));
   const admin = createAdminClient();
-  const [{ data: requests }, { data: lines }, { data: parts }] = await Promise.all([
-    admin.from("job_requests").select("id, text").eq("job_id", jobId).eq("is_active", true).order("position"),
+  const [{ data: lines }, { data: parts }] = await Promise.all([
     admin.from("work_lines").select("id, title").eq("job_id", jobId).eq("is_active", true).order("position"),
     admin.from("part_items").select("id, description, part_number, issue_status, return_status").eq("job_id", jobId).eq("is_active", true).neq("issue_status", "none").neq("return_status", "returned"),
   ]);
   const items: QcItem[] = [];
-  for (const r of requests ?? []) items.push({ key: `complaint:${r.id}`, kind: "complaint", label: `${r.text}: resolved?`, result: null, remark: null });
   for (const l of lines ?? []) items.push({ key: `work:${l.id}`, kind: "work", label: l.title, result: null, remark: null });
   for (const p of parts ?? []) items.push({ key: `part:${p.id}`, kind: "part", label: `${p.description}${p.part_number ? ` (${p.part_number})` : ""}: fitted?`, result: null, remark: null });
   const general = Array.isArray(settings.qc_general_checks) ? (settings.qc_general_checks as string[]) : [];

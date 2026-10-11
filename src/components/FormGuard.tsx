@@ -38,7 +38,13 @@ export function FormGuard() {
       if (submitter) {
         submitter.style.opacity = "0.5";
         submitter.style.pointerEvents = "none";
+        // An immediate reaction on every button: it pulses and shows "…" until the page moves on (buttons that already say "Saving…" keep their own word).
+        const busy = setTimeout(() => {
+          if (!/…$/.test(submitter.textContent ?? "")) submitter.dataset.busy = "1";
+        }, 150);
         setTimeout(() => {
+          clearTimeout(busy);
+          delete submitter.dataset.busy;
           submitter.style.opacity = "";
           submitter.style.pointerEvents = "";
         }, LOCK_MS);

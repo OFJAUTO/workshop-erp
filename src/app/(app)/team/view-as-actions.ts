@@ -16,7 +16,7 @@ export async function startViewAs(staffId: string) {
   const jar = await cookies();
   jar.set(ACT_AS_COOKIE, "", { path: "/", maxAge: 0 });
   jar.set(VIEW_AS_COOKIE, person.id, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 4 });
-  redirect("/home");
+  redirect("/home?as=1");
 }
 
 /** The owner does another person's work from their screen. Everything is saved and logged as "Omar, on behalf of <name>". */
@@ -30,5 +30,5 @@ export async function startActAs(staffId: string) {
   const jar = await cookies();
   jar.set(VIEW_AS_COOKIE, "", { path: "/", maxAge: 0 });
   jar.set(ACT_AS_COOKIE, person.id, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 4 });
-  redirect("/home");
+  redirect("/home?as=1");
 }

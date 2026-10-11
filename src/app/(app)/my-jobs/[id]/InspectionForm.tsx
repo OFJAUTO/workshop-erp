@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
 import { ActionForm, type FormAction } from "@/components/forms";
-import { JumpButton, ProblemsBar, jumpTo } from "@/components/FormAssist";
+import { JumpButton, ProblemsBar, SubmitOutcome, jumpTo } from "@/components/FormAssist";
 import { PrescanToggle } from "@/components/PrescanToggle";
 import { QuickCodeButton } from "@/components/QuickCodeButton";
 import { Card, Input, Notice, SectionLabel, Select, Textarea } from "@/components/ui";
@@ -150,7 +150,7 @@ function useAutosave(inspectionId: string) {
     };
   }, [storageKey, flush]);
 
-  return { save, state, error };
+  return { save, state, error, flush };
 }
 
 /** GOOD / AVERAGE / BAD, plus N/A in grey on checklist items. */
@@ -265,8 +265,10 @@ export function InspectionForm({
   const [scanState, setScanState] = useState<ScanState | null>(scan);
   const [scanReason, setScanReason] = useState("");
   const [attempted, setAttempted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const { save, state, error } = useAutosave(inspectionId);
+  const { save, state, error, flush } = useAutosave(inspectionId);
   const disabled = readOnly;
   const sections = checklist.filter((s) => s.key !== ROAD_TEST_SECTION_KEY);
   const scanGateOpen = !scanState?.gate || !!scanState.readAt || !!scanState.approvedAt;
@@ -604,7 +606,7 @@ export function InspectionForm({
           return (
             <div key={p.key} className={`rounded-card border p-3 flex flex-col gap-3 ${danger ? "border-red-bar border-2" : "border-line"}`}>
               <p className="font-semibold flex flex-wrap items-center gap-2">{p.label}{danger ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <label id={`item-m-tyre_${p.key}_tread`} className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">Tread depth (mm, 0 to {limits.tread_max})</span>
                   <Input value={measurements[`tyre_${p.key}_tread`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_tread`, e.target.value)} inputMode="decimal" disabled={locked} className={outOfRange(`tyre_${p.key}_tread`) ? "border-red-bar" : ""} />
@@ -616,10 +618,14 @@ export function InspectionForm({
                       <option value="">Choose…</option>
                       {yearOptions.map((y) => <option key={y.value} value={y.value}>{y.label}</option>)}
                     </Select>
-                    {p.key !== "fl" && measurements.tyre_fl_year && !locked ? <button type="button" onClick={() => setMeasurement(`tyre_${p.key}_year`, measurements.tyre_fl_year ?? "", true)} className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-xs font-bold whitespace-nowrap">Same as front left</button> : null}
+                    {p.key !== "fl" && measurements.tyre_fl_year && !locked ? <button type="button" onClick={() => { for (const f of ["year", "tread", "brand"]) setMeasurement(`tyre_${p.key}_${f}`, measurements[`tyre_fl_${f}`] ?? "", true); if ((p.key === "rl" || p.key === "rr") && measurements.tyre_size_front) setMeasurement("tyre_size_rear", tyreSizeText(measurements.tyre_size_front ?? ""), true); }} className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-xs font-bold whitespace-nowrap" title="Copies the year, size, brand and tread">Same as front left</button> : null}
                   </div>
                   {age !== null && age > limits.tyre_years ? <span className="text-xs font-bold text-red">Older than {limits.tyre_years} years</span> : age !== null && age >= 6 ? <span className="text-xs font-bold text-amber">{age} years old</span> : null}
                 </div>
+                <label id={`item-m-tyre_${p.key}_brand`} className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-muted">Brand</span>
+                  <Input value={measurements[`tyre_${p.key}_brand`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_brand`, e.target.value)} onBlur={(e) => setMeasurement(`tyre_${p.key}_brand`, e.target.value.trim(), true)} disabled={locked} placeholder="Michelin" textCase="title" />
+                </label>
               </div>
               <div id={`item-m-tyre_${p.key}_cond`} className="flex flex-col gap-1">
                 <span className="text-xs font-semibold text-muted">Condition (tap all that apply)</span>
@@ -753,7 +759,7 @@ export function InspectionForm({
           </div>
           {submitAction ? (
             <ActionForm action={submitAction} className="hidden">
-              {() => <button type="submit" id="inspection-submit" />}
+              {(_v, s) => <><button type="submit" id="inspection-submit" /><SubmitOutcome error={s.error ?? null} onError={(e) => { setSubmitting(false); setSubmitError(e); }} /></>}
             </ActionForm>
           ) : null}
           <ProblemsBar
@@ -762,6 +768,8 @@ export function InspectionForm({
             progress={progress}
             onJump={jumpTo}
             submitLabel={submitLabel}
+            submitting={submitting}
+            error={submitError}
             onSubmit={
               submitAction
                 ? () => {
@@ -770,7 +778,11 @@ export function InspectionForm({
                       jumpTo(problems[0].key);
                       return;
                     }
-                    (document.getElementById("inspection-submit") as HTMLButtonElement | null)?.click();
+                    if (submitting) return;
+                    setSubmitting(true);
+                    setSubmitError(null);
+                    // Everything typed so far is saved first, so the server checks the same report the screen shows.
+                    void flush().finally(() => (document.getElementById("inspection-submit") as HTMLButtonElement | null)?.click());
                   }
                 : undefined
             }

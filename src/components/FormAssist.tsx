@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type Problem = { key: string; label: string };
 
@@ -18,6 +18,7 @@ export function ProblemsBar({
   submitLabel,
   onSubmit,
   submitting = false,
+  error = null,
 }: {
   problems: Problem[];
   /** True once Submit was tapped with something missing: from then on the problems show in red. */
@@ -28,6 +29,8 @@ export function ProblemsBar({
   submitLabel: string;
   onSubmit?: () => void;
   submitting?: boolean;
+  /** The server's answer to the last submit, shown in red next to the button. */
+  error?: string | null;
 }) {
   const shown = problems.slice(0, 4);
   const more = problems.length - shown.length;
@@ -53,9 +56,10 @@ export function ProblemsBar({
       ) : (
         <span className="text-xs font-bold text-muted mr-1">{problems.length} still to do</span>
       )}
+      {error ? <span className="basis-full text-sm font-bold text-red">{error}</span> : null}
       {onSubmit ? (
-        <button type="button" onClick={onSubmit} disabled={submitting} className={`ml-auto min-h-12 rounded-control px-5 text-sm font-bold text-white ${showRed ? "bg-ink/40" : "bg-ink"}`}>
-          {submitting ? "Sending…" : submitLabel}
+        <button type="button" onClick={onSubmit} disabled={submitting} aria-busy={submitting} className={`ml-auto min-h-12 rounded-control px-5 text-sm font-bold text-white ${showRed ? "bg-ink/40" : submitting ? "bg-ink/70" : "bg-ink"}`}>
+          {submitting ? "Submitting…" : submitLabel}
         </button>
       ) : null}
     </div>
@@ -126,4 +130,16 @@ export function formFields(form: HTMLFormElement): { key: string; label: string;
     out.push({ key: el.name, label, valid });
   }
   return out;
+}
+
+/** Lifts a hidden form's result into the bar: the error text, and the signal that the submit has finished. */
+export function SubmitOutcome({ error, onError }: { error: string | null; onError: (error: string) => void }) {
+  const cb = useRef(onError);
+  useEffect(() => {
+    cb.current = onError;
+  });
+  useEffect(() => {
+    if (error) cb.current(error);
+  }, [error]);
+  return null;
 }

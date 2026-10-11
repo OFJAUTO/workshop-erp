@@ -1,3 +1,4 @@
+import { CarPictureCrop } from "./CarPictureCrop";
 import { DamageNote } from "./DamageNote";
 import { MediaCapture } from "./MediaCapture";
 import { VideoCapture } from "./VideoCapture";
@@ -41,14 +42,14 @@ export function ChecklistSummary({ check }: { check: Checklist }) {
 }
 
 /** The full set of gate-in capture controls, used on the PC/tablet media step and on the phone page. */
-export function MediaChecklist({ jobId, check, token }: { jobId: string; check: Checklist; token?: string }) {
+export function MediaChecklist({ jobId, check, token, carPictureUrl = null }: { jobId: string; check: Checklist; token?: string; /** The current car picture, so "Tap to replace" opens the crop with it. */ carPictureUrl?: string | null }) {
   // Wheels are taken in order: each one unlocks once the previous photo is in.
   const wheelSteps = check.wheelsRequired ? check.wheels.length : 0;
   const damageStep = 7 + wheelSteps;
   return (
     <div className="flex flex-col gap-4">
       <ChecklistSummary check={check} />
-      <MediaCapture jobId={jobId} kind="car_picture" label="1. Car picture (for our dashboard)" hint="Front three-quarter view. Internal only; a returning car keeps its picture." done={check.carPicture} token={token} />
+      <CarPictureCrop jobId={jobId} token={token} done={check.carPicture} currentUrl={carPictureUrl} />
       <VideoCapture jobId={jobId} kind="video_exterior" label="2. Exterior video" hint="Walk around the outside of the car." token={token} done={check.videoExterior} />
       <VideoCapture jobId={jobId} kind="video_interior" label="3. Interior video" hint="Seats, dashboard, boot and controls." token={token} done={check.videoInterior} />
       <MediaCapture jobId={jobId} kind="dashboard_photo" label="4. Dashboard photo (mileage)" done={check.dashboard} token={token} />

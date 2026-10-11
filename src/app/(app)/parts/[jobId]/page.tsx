@@ -44,6 +44,11 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const nameOf = new Map((names ?? []).map((n) => [n.id, n.display_name]));
   // Planning inside the Parts step: the approved parts, in stock or to order with the date.
   const inPlanning = ["approved", "waiting_parts"].includes(job.status) && job.is_open;
+  const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
+  const defaultType = types[0] ?? "genuine";
+  // Declared before planParts, which reads the days from it.
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const toValues = (p: PartItem) => ({ part_number: p.part_number ?? "", description: p.description, quantity: String(p.quantity), part_type: p.part_type ?? defaultType, brand: p.brand ?? "", cost_aed: p.cost_aed === null ? "" : String(p.cost_aed), supplier: p.supplier ?? "", availability: p.availability ?? "in_stock", days: p.delivery_date ? String(Math.max(1, Math.round((Date.parse(p.delivery_date) - Date.now()) / 86400000))) : "" });
   const planParts: PlanPart[] = parts.filter((p) => p.order_status !== "none" && String(rawById.get(p.id)?.return_status ?? "none") !== "returned").map((p) => {
     const raw = rawById.get(p.id) ?? {};
     return { id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, availability: p.availability, delivery_date: p.delivery_date, order_status: p.order_status, expected_date: (raw.expected_date as string | null) ?? null, received: p.order_status === "received" || Number(raw.received_qty ?? 0) > 0, days: toValues(p).days };
@@ -52,11 +57,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const urls = await signPaths(PARTS_BUCKET, parts.map((p) => p.diagram_path).filter((x): x is string => !!x));
   const suppliers = Array.from(new Set([...(supplierRows ?? []).map((s) => s.name as string), ...parts.map((p) => p.supplier).filter((x): x is string => !!x)])).sort();
   const canPrice = can(role, "priceParts") && !staff.viewingAs && job.is_open;
-  const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
-  const defaultType = types[0] ?? "genuine";
   const loose = parts.filter((p) => !p.part_request_id);
-  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
-  const toValues = (p: PartItem) => ({ part_number: p.part_number ?? "", description: p.description, quantity: String(p.quantity), part_type: p.part_type ?? defaultType, brand: p.brand ?? "", cost_aed: p.cost_aed === null ? "" : String(p.cost_aed), supplier: p.supplier ?? "", availability: p.availability ?? "in_stock", days: p.delivery_date ? String(Math.max(1, Math.round((Date.parse(p.delivery_date) - Date.now()) / 86400000))) : "" });
 
   const partRow = (p: PartItem) => (
     <li key={p.id} className="py-2 flex flex-col gap-1">

@@ -152,6 +152,7 @@ export async function GET(request: NextRequest) {
       const minutes = Math.round(workingHoursBetween((j.first_approval_at ?? j.stage_entered_at) as string, new Date(), wt) * 60);
       if (minutes <= target) continue;
       await notifyRoles(["owner"], { type: "assignment_overdue", title: `Still not assigned · ${j.job_number}`, body: `${minutes} working minutes since the customer approved, against a target of ${target}. The ${j.department === "bodyshop" ? "bodyshop" : "workshop"} manager has not assigned a technician.`, jobId: j.id as string, href: `/jobs/${j.id}` });
+      await notifyManagers(j.department ?? null, { type: "assignment_overdue", title: `Car waiting for a technician · ${j.job_number}`, body: `${minutes} working minutes since the customer approved, against a target of ${target}. Assign a technician.`, jobId: j.id as string, href: "/assign" });
       await admin.from("jobs").update({ assignment_overdue_notified_at: new Date().toISOString() }).eq("id", j.id);
       report.assignmentWarnings++;
     }

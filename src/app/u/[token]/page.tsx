@@ -51,6 +51,9 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
   const job = link.job as unknown as JobInfo | null;
   const [media, flags] = await Promise.all([loadMedia(link.job_id), loadGateInFlags(link.job_id)]);
   const check = mediaChecklist(media, flags);
+  const { data: veh } = await admin.from("jobs").select("vehicle:vehicles(photo_path)").eq("id", link.job_id).maybeSingle();
+  const photoPath = (veh?.vehicle as unknown as { photo_path: string | null } | null)?.photo_path ?? null;
+  const carPictureUrl = photoPath ? ((await admin.storage.from("vehicle-photos").createSignedUrl(photoPath, 1800)).data?.signedUrl ?? null) : null;
 
   return (
     <PublicShell note="Phone upload">
@@ -62,7 +65,7 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
             {[job?.vehicle?.make?.name, job?.vehicle?.model?.name].filter(Boolean).join(" ")} · {job?.job_number}
           </p>
         </div>
-        <MediaChecklist jobId={link.job_id} check={check} token={token} />
+        <MediaChecklist jobId={link.job_id} check={check} token={token} carPictureUrl={carPictureUrl} />
         <p className="text-xs text-muted">This link works for 30 minutes. Uploads are recorded under the person who opened it.</p>
       </div>
     </PublicShell>
