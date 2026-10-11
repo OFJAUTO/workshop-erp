@@ -12,6 +12,7 @@ import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPay
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { convertProformaIfPaid, ensureProforma } from "@/lib/invoice-flow";
+import { replacePaymentLink } from "@/lib/payment-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 function refresh(jobId: string | null, invoiceId?: string) {
@@ -145,12 +146,12 @@ export async function setPaymentLink(invoiceId: string, formData: FormData) {
   if (!can(role, "issueInvoices")) redirect(`/invoices/${invoiceId}`);
   const url = blankToNull(formData.get("payment_link_url"));
   if (url && !/^https:\/\/\S+$/.test(url)) redirect(`/invoices/${invoiceId}?error=${encodeURIComponent("Paste the full https:// link.")}`);
-  const admin = createAdminClient();
-  await admin.from("invoices").update({ payment_link_url: url, updated_by: staff.id }).eq("id", invoiceId);
-  const { data: inv } = await admin.from("invoices").select("job_id, number").eq("id", invoiceId).maybeSingle();
-  if (inv?.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "payment_link", note: url ? `Payment link added to ${inv.number} by ${staff.display_name}` : `Payment link removed from ${inv.number} by ${staff.display_name}`, created_by: staff.id });
+  // The address is stored as text and never requested by the system: it works once, for the customer.
+  const res = await replacePaymentLink(invoiceId, url, staff);
+  if (res.error) redirect(`/invoices/${invoiceId}?error=${encodeURIComponent(res.error)}`);
+  const { data: inv } = await createAdminClient().from("invoices").select("job_id").eq("id", invoiceId).maybeSingle();
   refresh(inv?.job_id ?? null, invoiceId);
-  redirect(`/invoices/${invoiceId}?message=${encodeURIComponent(url ? "Payment link saved. The customer sees Pay now on the invoice page." : "Payment link removed.")}`);
+  redirect(`/invoices/${invoiceId}?message=${encodeURIComponent(url ? "Payment link saved. The customer sees Pay now; it opens once." : "Payment link removed.")}`);
 }
 
 /** A cheque clears, or bounces (which reverses the payment). */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
 import { PartPicker } from "@/components/PartPicker";
 import { batteryEntriesFrom, mergePartsList, newEntryId, partsListLine, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
@@ -217,6 +217,8 @@ export function InspectionForm({
   tyreSizeSuggestion = null,
   catalogue = [],
   partsList: initialPartsList = [],
+  noPartItems: initialNoPart = [],
+  partsListFooter = null,
   measurements: initialMeasurements,
   files: initialFiles,
   notes: initialNotes,
@@ -254,6 +256,10 @@ export function InspectionForm({
   catalogue?: CatalogueRow[];
   /** The parts gathered so far. */
   partsList?: PartsListEntry[];
+  /** Bad items the technician said need no part. */
+  noPartItems?: string[];
+  /** Shown under the parts list (the manager's tick on the review). */
+  partsListFooter?: ReactNode;
   measurements: Record<string, string>;
   files: (InspectionFile & { itemKey: string | null; requestId: string | null })[];
   notes: string;
@@ -285,6 +291,13 @@ export function InspectionForm({
   const [partsList, setPartsList] = useState<PartsListEntry[]>(initialPartsList);
   const partsRef = useRef(initialPartsList);
   const [pickerFor, setPickerFor] = useState<{ itemKey: string | null; label: string } | null>(null);
+  const [noPartItems, setNoPartItems] = useState<string[]>(initialNoPart);
+  const [showAverage, setShowAverage] = useState(false);
+  const toggleNoPart = (key: string) => {
+    const next = noPartItems.includes(key) ? noPartItems.filter((k) => k !== key) : [...noPartItems, key];
+    setNoPartItems(next);
+    save({ noPartItems: next });
+  };
   const [measurements, setMeasurements] = useState(initialMeasurements);
   const latestMeasurements = useRef(initialMeasurements);
   const [files, setFiles] = useState(initialFiles);
@@ -380,7 +393,7 @@ export function InspectionForm({
   const addEntryIfMissing = (itemKey: string, name: string) => {
     if (partsRef.current.some((e) => e.item_key === itemKey && e.name.toLowerCase() === name.toLowerCase())) return;
     const row = catalogue.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    setList([...partsRef.current, { id: newEntryId(), catalogue_id: row?.id ?? null, name: row?.name ?? name, qty: 1, positions: [], item_key: itemKey, source: "item", note: null }]);
+    setList([...partsRef.current, { id: newEntryId(), catalogue_id: row?.id ?? null, name: row?.name ?? name, qty: 1, positions: [], item_key: itemKey, source: "item", note: null, unit: "pc" }]);
   };
   function setMeasurement(key: string, value: string, immediate = false) {
     const next = { ...latestMeasurements.current, [key]: value };
@@ -441,12 +454,12 @@ export function InspectionForm({
   const total = items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY).length;
   const tyresOk = !problems.some((p) => p.key.startsWith("m-tyre"));
   const numbersOk = !problems.some((p) => p.key.startsWith("m-") && !p.key.startsWith("m-tyre"));
-  const tyreBtn = (on: boolean, danger = false) => `min-h-11 rounded-control border-2 px-2 text-xs font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-white" : "border-ink bg-ink text-white") : "border-line-strong bg-white"} ${locked ? "opacity-60" : ""}`;
+  const tyreBtn = (on: boolean, danger = false) => `min-h-11 rounded-control border-2 px-2 text-xs font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-white" : "border-green bg-green-soft text-green") : "border-line-strong bg-white"} ${locked ? "opacity-60" : ""}`;
   const prescanFiles = filesFor({ isPrescan: true });
   const yearOptions = tyreYearOptions(thisYear, limits.tyre_years);
   const mergedParts = mergePartsList(partsList);
   const fromLabel = (line: { entries: PartsListEntry[] }) =>
-    Array.from(new Set(line.entries.map((e) => (e.source === "tyre" ? "Tyres" : e.source === "measure" ? "Battery test" : e.item_key ? (items.find((i) => i.key === e.item_key)?.label ?? "") : "added at the end")))).filter(Boolean).join(", ");
+    Array.from(new Set(line.entries.map((e) => (e.source === "tyre" ? "Tyres" : e.source === "measure" ? "Battery test" : e.item_key ? (items.find((i) => i.key === e.item_key)?.label ?? "") : "")))).filter(Boolean).join(", ");
   const outOfRange = (key: string) => problems.some((p) => p.key === `m-${key}` && /to |between/.test(p.label));
   const dangerCount = items.filter((i) => i.dangerous).length + TYRE_POSITIONS.filter((p) => measurements[`tyre_${p.key}_danger`] === "1").length;
   // Sections the customer's words point to.
@@ -585,7 +598,7 @@ export function InspectionForm({
                       {(quickRemarks.length || sug.remarks?.length) && !locked ? (
                         <div className="flex flex-wrap gap-1.5">
                           {Array.from(new Set([...quickRemarks, ...(sug.remarks ?? [])])).slice(0, 12).map((r) => (
-                            <button key={r} type="button" onClick={() => patchItem(it.key, { remarks: it.remarks.trim() ? `${it.remarks.trim()} · ${r}` : r })} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-semibold">{r}</button>
+                            <button key={r} type="button" aria-pressed={it.remarks.includes(r)} onClick={() => patchItem(it.key, { remarks: it.remarks.includes(r) ? it.remarks.split(" · ").filter((x) => x.trim() !== r).join(" · ").trim() : it.remarks.trim() ? `${it.remarks.trim()} · ${r}` : r })} className={`min-h-9 rounded-control border px-2 text-xs font-semibold ${it.remarks.includes(r) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{it.remarks.includes(r) ? "✓ " : ""}{r}</button>
                           ))}
                         </div>
                       ) : null}
@@ -800,6 +813,7 @@ export function InspectionForm({
         </div>
       ) : null}
 
+      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6 items-start">
       <Card className="flex flex-col gap-3" id="item-parts-list">
         <SectionLabel right={mergedParts.length ? `${mergedParts.length} line${mergedParts.length === 1 ? "" : "s"}` : "none yet"}>Parts list</SectionLabel>
         <p className="text-xs text-muted">Everything picked above, one line per part. Check it before you submit: the workshop manager confirms it, then Parts price it. Tyres and the battery follow their answers.</p>
@@ -825,7 +839,45 @@ export function InspectionForm({
           </ul>
         ) : null}
         {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: null, label: "" })} className="self-start min-h-11 rounded-control border border-dashed border-line-strong px-4 text-sm font-bold">+ Add a part</button> : null}
+        {partsListFooter}
       </Card>
+      <Card className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <SectionLabel right={`${items.filter((i) => i.status === "bad" && i.style !== "job").length}`}>Marked Bad</SectionLabel>
+          <button type="button" onClick={() => setShowAverage((s) => !s)} aria-pressed={showAverage} className={`min-h-8 rounded-control border px-2 text-xs font-semibold ${showAverage ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{showAverage ? "✓ " : ""}Show Average</button>
+        </div>
+        {items.filter((i) => i.style !== "job" && (i.status === "bad" || (showAverage && i.status === "average"))).length === 0 ? (
+          <p className="text-xs text-muted">Nothing marked Bad{showAverage ? " or Average" : ""} yet.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {items.filter((i) => i.style !== "job" && (i.status === "bad" || (showAverage && i.status === "average"))).map((i) => {
+              const has = partsList.some((e) => e.item_key === i.key);
+              const none = noPartItems.includes(i.key);
+              return (
+                <li key={i.key} className="py-2 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="flex-1 min-w-[10rem]">
+                    <span className="font-semibold">{i.label}</span>
+                    {i.status === "average" ? <span className="ml-1 text-xs text-muted">Average</span> : null}
+                    {i.remarks ? <span className="block text-xs text-muted truncate">{i.remarks}</span> : null}
+                  </span>
+                  {has ? (
+                    <span className="inline-flex items-center gap-1 rounded-control border border-green bg-green-soft px-2 py-1 text-xs font-bold text-green">✓ Part listed</span>
+                  ) : none ? (
+                    <button type="button" disabled={locked} onClick={() => toggleNoPart(i.key)} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-semibold text-muted">No part needed · undo</button>
+                  ) : (
+                    <>
+                      <span className="rounded-control bg-amber-soft px-2 py-1 text-xs font-bold text-amber">No part listed</span>
+                      {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: i.key, label: i.label })} className="min-h-9 rounded-control border border-dashed border-line-strong px-2 text-xs font-bold">+ Add part</button> : null}
+                      {!locked ? <button type="button" onClick={() => toggleNoPart(i.key)} className="min-h-9 rounded-control px-2 text-xs font-semibold text-muted underline underline-offset-4">No part needed</button> : null}
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+      </div>
 
       <Card className="flex flex-col gap-3" id="item-estimate">
         <div className="flex items-center justify-between gap-2">
@@ -836,7 +888,7 @@ export function InspectionForm({
         {bigJobTags.length ? (
           <div className="flex flex-wrap gap-1.5">
             {bigJobTags.map((t) => (
-              <button key={t} type="button" disabled={locked} onClick={() => toggleTag(t)} aria-pressed={tags.includes(t)} className={`min-h-11 rounded-control border-2 px-3 text-sm font-bold ${tags.includes(t) ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{t}</button>
+              <button key={t} type="button" disabled={locked} onClick={() => toggleTag(t)} aria-pressed={tags.includes(t)} className={`min-h-11 rounded-control border-2 px-3 text-sm font-bold ${tags.includes(t) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{tags.includes(t) ? "✓ " : ""}{t}</button>
             ))}
           </div>
         ) : null}

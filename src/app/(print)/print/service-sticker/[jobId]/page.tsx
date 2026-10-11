@@ -12,12 +12,12 @@ import { PrintNow } from "../../../parts/labels/[jobId]/PrintNow";
 export const dynamic = "force-dynamic";
 
 /** The oil service sticker of one job at its exact size. Opening it counts as printing; the next service lands on the car's record. */
-export default async function ServiceStickerPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ back?: string }> }) {
+export default async function ServiceStickerPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ back?: string; serviced_on?: string; mileage?: string; next_date?: string; next_mileage?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   if (!(["owner", "gate_in", "parts", "service_advisor"].includes(role) || can(role, "manageWork"))) notFound();
   const { jobId } = await params;
-  const { back } = await searchParams;
+  const { back, serviced_on, mileage, next_date, next_mileage } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const ss = stickerSettings(settings);
@@ -29,7 +29,10 @@ export default async function ServiceStickerPage({ params, searchParams }: { par
   if (!job) notFound();
   const j = job as unknown as { id: string; job_number: string; vehicle_id: string; work_started_at: string | null; plan_released_at: string | null; gated_in_at: string; service_sticker: ServiceStickerData | null; vehicle: { vin: string | null; mileage_unit: string } | null };
   const today = new Date().toISOString().slice(0, 10);
-  const data = serviceStickerDefaults(ss, j, gateIn, today);
+  // The details as typed on the job card arrive with the link (the card saves them at the same time).
+  const isDate = (s: string | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const numOrNull = (s: string | undefined) => (s === undefined || s === "" ? undefined : Number(s.replace(/[^\d]/g, "")) || null);
+  const data = { ...serviceStickerDefaults(ss, j, gateIn, today), ...(isDate(serviced_on) ? { serviced_on } : {}), ...(isDate(next_date) ? { next_date } : {}), ...(numOrNull(mileage) !== undefined ? { mileage: numOrNull(mileage) ?? null } : {}), ...(numOrNull(next_mileage) !== undefined ? { next_mileage: numOrNull(next_mileage) ?? null } : {}) };
   const code = data.qr_code ?? (await ensureQrLink("service", { jobId, vehicleId: j.vehicle_id, refId: j.vehicle_id }, staff.id));
   const first = !data.printed_at;
   const saved: ServiceStickerData = { ...data, qr_code: code, printed_at: data.printed_at ?? new Date().toISOString(), printed_by: data.printed_by ?? staff.id };

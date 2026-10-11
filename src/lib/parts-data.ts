@@ -60,7 +60,7 @@ export type PoLineRow = {
 export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status, notes, total_cost_aed, approved_by, approved_at, deposit_override_by, deposit_override_reason, ordered_at, ordered_by, received_at, supplier_invoice_status, supplier_invoice_number, supplier_invoice_path, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_by, created_at, created_by";
 export const PO_LINE_SELECT = "id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, expected_date, received_qty, received_at, flag, flag_note, invoice_unit_cost";
 /** The part columns the Parts desk needs after approval, on top of the quotation ones. */
-export const PART_FULL_SELECT = PART_SELECT + ", stickers_printed, po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed";
+export const PART_FULL_SELECT = PART_SELECT + ", stickers_printed, po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed, tech_received_qty, not_received_at, exchange_status, exchange_reason, exchange_note, exchange_at, replacement_part_id, replaced_part_id, not_needed_at, not_needed_by, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, credit_note_path, goodwill_cost_aed";
 
 export type PartFull = PartItem & {
   stickers_printed: number;
@@ -79,6 +79,23 @@ export type PartFull = PartItem & {
   return_note: string | null;
   label_code: string | null;
   final_cost_aed: number | null;
+  tech_received_qty: number | null;
+  not_received_at: string | null;
+  exchange_status: "none" | "needed" | "ordered" | "done" | null;
+  exchange_reason: string | null;
+  exchange_note: string | null;
+  exchange_at: string | null;
+  replacement_part_id: string | null;
+  replaced_part_id: string | null;
+  not_needed_at: string | null;
+  not_needed_by: string | null;
+  not_needed_reason: string | null;
+  disposition: "returned" | "stock" | "fit_pending" | "fit_approved" | null;
+  disposition_at: string | null;
+  disposition_by: string | null;
+  disposition_note: string | null;
+  credit_note_path: string | null;
+  goodwill_cost_aed: number | null;
 };
 
 function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
@@ -136,7 +153,8 @@ export async function jobPartsState(jobId: string) {
   const toOrder = approved.filter((p) => p.order_status === "to_order");
   const ordered = approved.filter((p) => p.order_status === "ordered" || p.order_status === "partly_received");
   const received = approved.filter((p) => p.order_status === "received");
-  const needed = approved.filter((p) => p.return_status !== "returned");
+  // A part that came back for good (returned to the supplier, to stock, wrong part being exchanged) is no longer needed on the car.
+  const needed = approved.filter((p) => p.return_status !== "returned" && !(p.not_needed_at && p.disposition !== "fit_approved") && p.exchange_status !== "needed" && p.exchange_status !== "ordered");
   const issued = needed.filter((p) => p.issue_status !== "none");
   const confirmed = needed.filter((p) => p.issue_status === "confirmed");
   const today = new Date().toISOString().slice(0, 10);

@@ -16,6 +16,17 @@ const fmtHm = (min: number) => {
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
 };
 
+/** The time since a moment, ticking once a second. */
+function Since({ from }: { from: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!from) return null;
+  return <>{fmtHm((now - Date.parse(from)) / 60000)}</>;
+}
+
 /**
  * The one big countdown on the technician's tablet: the hours charged to the customer minus every
  * technician's clocked time on this car. Green, amber under a fifth left, red once over.
@@ -43,7 +54,7 @@ export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakW
 }
 
 /** Timer, Working and Pause, Leave this job. Sits at the top of the technician's screen. */
-export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, reminders, pauseReasons, canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakWindow | null; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
+export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, minePause = null, reminders, pauseReasons, canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; /** The technician's own open pause on this car, if any. */ minePause?: { reason: string; since: string } | null; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakWindow | null; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
   const [pausing, setPausing] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [brk, setBrk] = useState(() => breakNow(breakWindow));
@@ -115,8 +126,22 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, rem
               </form>
             ) : (
               <div className="grid grid-cols-2 gap-2">
-                <form action={startAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg" disabled={mineRunning} tone={mineRunning ? "secondary" : "primary"}>{mineRunning ? "Working…" : "Working"}</Button></form>
-                <Button type="button" size="lg" tone="secondary" className="min-h-16 text-lg" disabled={!mineRunning} onClick={() => setPausing(true)}>Pause</Button>
+                {mineRunning ? (
+                  <>
+                    <div className="min-h-16 rounded-control bg-green text-white flex flex-col items-center justify-center text-lg font-bold" aria-live="polite"><span>Working</span><span className="text-sm font-semibold"><Since from={running.find((r) => r.mine)?.since ?? null} /></span></div>
+                    <Button type="button" size="lg" tone="secondary" className="min-h-16 text-lg" onClick={() => setPausing(true)}>Pause</Button>
+                  </>
+                ) : minePause ? (
+                  <>
+                    <div className="min-h-16 rounded-control border border-amber-bar bg-amber-soft text-amber flex flex-col items-center justify-center text-lg font-bold text-center"><span>Paused · {minePause.reason}</span><span className="text-sm font-semibold"><Since from={minePause.since} /></span></div>
+                    <form action={startAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg">{minePause.reason === "Break" || minePause.reason === "End of shift" ? "Resume work" : "Resume"}</Button></form>
+                  </>
+                ) : (
+                  <>
+                    <form action={startAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg">Start work</Button></form>
+                    <Button type="button" size="lg" tone="secondary" className="min-h-16 text-lg" disabled onClick={() => setPausing(true)}>Pause</Button>
+                  </>
+                )}
               </div>
             )}
             {!pausing && !leaving ? <button type="button" onClick={() => setLeaving(true)} className="self-end text-xs font-semibold text-muted underline underline-offset-4">Leave this job</button> : null}

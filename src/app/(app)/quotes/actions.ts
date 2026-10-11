@@ -9,7 +9,7 @@ import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { ownerApprovalReasons, quoteTotals, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
+import { ownerApprovalReasons, quoteTotals, recoveryTitle, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -134,9 +134,11 @@ export async function startQuotation(jobId: string) {
     }
   }
   // A car that came on our recovery truck: the recovery line is suggested, the advisor fills in the price or hides it.
-  const { data: gateIn } = await admin.from("gate_ins").select("arrived_by").eq("job_id", jobId).maybeSingle();
+  const { data: gateIn } = await admin.from("gate_ins").select("arrived_by, recovery_type").eq("job_id", jobId).maybeSingle();
   if (gateIn?.arrived_by === "our_recovery" && !lines.some((l) => l.line_type === "recovery")) {
-    await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: lines.length + 1, line_type: "recovery", title: "Recovery", details: "One way to the workshop", source_type: "manual", quantity: 1, recovery_trips: 1, markup_percent: minMarkup, visible_to_customer: true, created_by: staff!.id, updated_by: staff!.id });
+    const types = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
+    const rt = types.find((t) => t.key === gateIn.recovery_type) ?? types[0] ?? null;
+    await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: lines.length + 1, line_type: "recovery", title: recoveryTitle(rt?.label ?? null, 1), details: null, source_type: "manual", quantity: 1, recovery_trips: 1, recovery_type: rt?.key ?? null, unit_cost: rt ? Number(rt.cost) || 0 : null, unit_price: rt ? Number(rt.price) || 0 : null, recovery_provider_kind: "ours", markup_percent: minMarkup, visible_to_customer: true, created_by: staff!.id, updated_by: staff!.id });
   }
   await ensurePartRequests(jobId, staff!.id);
   await syncPartLines(created!.id, jobId, staff!.id, minMarkup);
@@ -407,6 +409,22 @@ export async function completeQuotation(quotationId: string): Promise<{ error?: 
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name}`);
   refresh(q.job_id, q.id);
   return { ok: true };
+}
+
+/** The advisor marks a quotation declined after talking to the customer, with an optional reason. The customer's page has no Declined button. */
+export async function declineQuotation(quotationId: string, formData: FormData) {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) redirect("/dashboard");
+  const q = bundle.quotation;
+  const back = q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}`;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) redirect(`${back}?error=${encodeURIComponent("Only the job's advisor or the owner can mark it declined.")}`);
+  if (!["sent", "opened", "expired"].includes(q.status)) redirect(`${back}?error=${encodeURIComponent("Only a sent quotation can be marked declined.")}`);
+  const note = blankToNull(formData.get("reason"));
+  const res = await applyCustomerResponse(q.id, { approve: false, name: staff.display_name, by: staff.id, via: "advisor", note });
+  if (res.error) redirect(`${back}?error=${encodeURIComponent(res.error)}`);
+  refresh(q.job_id, q.id);
+  redirect(`${back}?message=${encodeURIComponent("Marked as declined.")}`);
 }
 
 /** Back to editing after "Quotation complete". */

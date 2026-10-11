@@ -16,9 +16,11 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
-import { approveInspection, approveScanNotPossible, decideInspectionChange, requestInspectionChange, returnInspection } from "../../inspection-actions";
+import { approveInspection, approveScanNotPossible, confirmPartsList, decideInspectionChange, requestInspectionChange, returnInspection } from "../../inspection-actions";
 import { InspectionForm, type Suggestions } from "@/app/(app)/my-jobs/[id]/InspectionForm";
-import { ApproveForm, RequestChangeForm, ReturnForm } from "./forms";
+import { ApproveForm, RequestChangeForm, ReturnForm, ReviewBar } from "./forms";
+import { PartsListTick } from "@/components/PartsListTick";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -157,7 +159,9 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const dangers = inspectionDangerous(bundle);
   const scanGate = !!settings.prescan_gate_enabled;
   const noteUsage = (settings.manager_note_usage ?? {}) as Record<string, number>;
-  const notePresets = [...((settings.manager_note_presets ?? []) as string[])].sort((a, b) => (noteUsage[b] ?? 0) - (noteUsage[a] ?? 0));
+  const noteGroupsRaw = (settings.manager_note_groups ?? {}) as Record<string, string[]>;
+  const noteGroups = Object.keys(noteGroupsRaw).length ? noteGroupsRaw : { Notes: (settings.manager_note_presets ?? []) as string[] };
+  const tickName = insp.parts_list_confirmed_by ? ((await createAdminClient().from("staff").select("display_name").eq("id", insp.parts_list_confirmed_by).maybeSingle()).data?.display_name ?? null) : null;
   const [tyreSizeSuggestion, catalogue] = await Promise.all([tyreSizeSuggestionFor(vehicle.id), loadCatalogue()]);
   const partsList = cleanPartsList(insp.parts_list);
   const partLines = mergePartsList(partsList);
@@ -172,6 +176,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
     tyreSizeSuggestion,
     catalogue,
     partsList,
+    noPartItems: Array.isArray(insp.no_part_items) ? (insp.no_part_items as string[]) : [],
     measurements: Object.fromEntries(Object.entries(m).map(([k, v]) => [k, String(v)])),
     files: bundle.media.filter((x) => !x.item_key?.startsWith("road.")).map((x) => ({ id: x.id, kind: x.kind, url: bundle.mediaUrls[x.storage_path] ?? null, caption: x.caption, isPrescan: x.is_prescan, itemKey: x.item_key, requestId: x.job_request_id })),
     notes: insp.technician_notes ?? "",
@@ -242,7 +247,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           </Card>
 
           {reviewing ? (
-            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} />
+            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} partsListFooter={<PartsListTick action={confirmPartsList.bind(null, id)} confirmedAt={insp.parts_list_confirmed_at} confirmedByName={tickName} count={partLines.length} canTick={canApprove && insp.status === "submitted"} />} />
           ) : (
             <>
               <Card className="flex flex-col gap-2">
@@ -275,7 +280,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 ) : (
                   <p className="text-sm text-muted">No parts on this report.</p>
                 )}
-                {insp.parts_list_confirmed_at ? <p className="text-xs text-green font-semibold">Confirmed by the workshop manager, {formatDateTime(insp.parts_list_confirmed_at)}. Sent to Parts for pricing.</p> : partLines.length ? <p className="text-xs text-muted">The workshop manager confirms the list when approving the report.</p> : null}
+                {insp.parts_list_confirmed_at ? <p className="text-xs text-green font-semibold">✓ Checked by {tickName ?? "the workshop manager"}, {formatDateTime(insp.parts_list_confirmed_at)}.{insp.status === "approved" ? " Sent to Parts for pricing." : ""}</p> : <p className="text-xs text-muted">The workshop manager ticks the list under it when approving the report.</p>}
               </Card>
 
 
@@ -374,7 +379,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           {canApprove && insp.status === "submitted" ? (
             <Card className="flex flex-col gap-4 border-ink">
               <SectionLabel>Workshop manager&apos;s decision</SectionLabel>
-              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} presets={notePresets} partsCount={partLines.length} />
+              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} groups={noteGroups} usage={noteUsage} />
               <ReturnForm action={returnInspection.bind(null, id)} />
             </Card>
           ) : null}
@@ -428,6 +433,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
             </p>
           ) : null}
         </div>
+        {canApprove && insp.status === "submitted" ? <><div className="h-20" /><ReviewBar /></> : null}
       </div>
     </>
   );

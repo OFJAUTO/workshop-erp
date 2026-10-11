@@ -4,7 +4,13 @@
  * print pages and the live preview in Settings. No styles from the app: these print bare.
  */
 export type PartStickerData = { qr: string; date: string; vin8: string };
-export type BatteryStickerData = { qr: string; installed: string; until: string; vin: string; title: string; valid: string };
+export type BatteryStickerData = { qr: string; installed: string; until: string; vin: string; title: string; valid: string; /** Which battery: "Main battery · Varta AGM 95Ah" or "Auxiliary battery". */ line: string };
+
+/** The line that says which battery the sticker is for, from the part's description, brand and model. */
+export function batteryLine(description: string | null | undefined, brand?: string | null, model?: string | null) {
+  const which = /aux/i.test(description ?? "") ? "Auxiliary battery" : "Main battery";
+  return [which, [brand, model].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
+}
 export type ServiceStickerData = { qr: string; servicedOn: string; mileage: string; nextDate: string; nextMileage: string; vin: string; title: string; band: string; phone: string | null };
 
 const base = (w: number, h: number): React.CSSProperties => ({ width: `${w}mm`, height: `${h}mm`, boxSizing: "border-box", overflow: "hidden", background: "#fff", color: "#000", fontFamily: "Arial, Helvetica, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "1mm", pageBreakAfter: "always", breakAfter: "page" });
@@ -25,23 +31,29 @@ export function PartSticker({ w, h, logoUrl, d }: { w: number; h: number; logoUr
   );
 }
 
+/** Logo, title, which battery, installed date beside the QR, "Warranty until" in a black band, the VIN large with "Valid for this vehicle only" under it. Even gaps, nothing large. */
 export function BatterySticker({ size, logoUrl, d }: { size: number; logoUrl: string; d: BatteryStickerData }) {
   const fs = size / 60;
   return (
-    <div style={{ ...base(size, size), padding: `${2 * fs}mm`, justifyContent: "flex-start", gap: `${1.2 * fs}mm` }}>
+    <div style={{ ...base(size, size), padding: `${2 * fs}mm`, justifyContent: "space-between", gap: `${0.8 * fs}mm` }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={logoUrl} alt="" style={{ height: `${8 * fs}mm`, maxWidth: `${44 * fs}mm`, objectFit: "contain" }} />
-      <div style={{ fontSize: `${4.2 * fs}mm`, fontWeight: 800, letterSpacing: "0.4px", textTransform: "uppercase" }}>{d.title}</div>
+      <img src={logoUrl} alt="" style={{ height: `${6 * fs}mm`, maxWidth: `${44 * fs}mm`, objectFit: "contain" }} />
+      <div style={{ fontSize: `${3.4 * fs}mm`, fontWeight: 800, letterSpacing: "0.4px", textTransform: "uppercase", textAlign: "center" }}>{d.title}</div>
+      <div style={{ fontSize: `${2.8 * fs}mm`, fontWeight: 700, textAlign: "center" }}>{d.line}</div>
       <div style={{ display: "flex", width: "100%", gap: `${2 * fs}mm`, alignItems: "center" }}>
-        <div style={{ flex: 1, fontSize: `${3 * fs}mm`, lineHeight: 1.35 }}>
-          <div><span style={{ fontWeight: 400 }}>Installed</span><br /><b>{d.installed}</b></div>
-          <div style={{ marginTop: `${1 * fs}mm` }}><span style={{ fontWeight: 400 }}>Warranty until</span><br /><b>{d.until}</b></div>
+        <div style={{ flex: 1, fontSize: `${2.8 * fs}mm`, lineHeight: 1.35 }}>
+          <div>Installed</div>
+          <div style={{ fontWeight: 700 }}>{d.installed}</div>
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={d.qr} alt="" style={{ width: `${22 * fs}mm`, height: `${22 * fs}mm` }} />
+        <img src={d.qr} alt="" style={{ width: `${16 * fs}mm`, height: `${16 * fs}mm` }} />
       </div>
-      <div style={{ fontSize: `${2.6 * fs}mm`, fontWeight: 700, letterSpacing: "0.3px", wordBreak: "break-all", textAlign: "center" }}>{d.vin}</div>
-      <div style={{ fontSize: `${2.4 * fs}mm`, textAlign: "center", marginTop: "auto" }}>{d.valid}</div>
+      <div style={{ width: "100%", background: "#000", color: "#fff", padding: `${1.2 * fs}mm ${1.5 * fs}mm`, textAlign: "center" }}>
+        <div style={{ fontSize: `${2.4 * fs}mm`, letterSpacing: "0.4px", textTransform: "uppercase" }}>Warranty until</div>
+        <div style={{ fontSize: `${4.6 * fs}mm`, fontWeight: 800, marginTop: `${0.3 * fs}mm` }}>{d.until}</div>
+      </div>
+      <div style={{ fontSize: `${3.4 * fs}mm`, fontWeight: 800, letterSpacing: "0.5px", wordBreak: "break-all", textAlign: "center" }}>{d.vin}</div>
+      <div style={{ fontSize: `${2.4 * fs}mm`, textAlign: "center" }}>{d.valid}</div>
     </div>
   );
 }

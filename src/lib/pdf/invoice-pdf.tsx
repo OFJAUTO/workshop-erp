@@ -71,7 +71,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const isCredit = invoice.kind === "credit_note";
   const rounding = round2(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)));
   const doc = (
-    <PdfDocument title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthis invoice online"} footerLines={[invoice.kind === "proforma" ? "A proforma invoice is a request for payment, not a tax invoice." : `VAT at ${vatPercent}% shown separately. Prices in UAE dirhams.`]}>
+    <PdfDocument title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthis invoice online"} footerLines={[]} computerGenerated={invoice.kind === "tax_invoice"}>
       <TitleRow
         title={TITLES[invoice.kind]}
         meta={[
@@ -97,7 +97,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
             { label: "Gross amount", value: invoice.subtotal_aed },
             ...(invoice.discount_aed ? [{ label: "Discount", value: invoice.discount_aed, bold: true, negative: true }] : []),
             ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed, bold: true, negative: true }] : []),
-            ...(rounding ? [{ label: "Rounding", value: Math.abs(rounding), negative: rounding < 0 }] : []),
+            ...(rounding ? [{ label: rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(rounding), negative: rounding < 0 }] : []),
             { label: "Taxable amount", value: invoice.taxable_aed },
             { label: `VAT ${vatPercent}%`, value: invoice.vat_aed },
           ]}

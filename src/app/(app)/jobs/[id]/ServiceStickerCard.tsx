@@ -1,3 +1,5 @@
+"use client";
+
 import { Badge, Button, Card, Input, SectionLabel } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { ServiceStickerData } from "@/lib/stickers";
@@ -24,7 +26,23 @@ export function ServiceStickerCard({ jobId, data, canPrint, printedBy }: { jobId
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Next service mileage ({unit})<Input name="next_mileage" inputMode="numeric" defaultValue={data.next_mileage === null ? "" : String(data.next_mileage)} /></label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" name="print" value="1" size="md">{data.printed_at ? "Print again" : "Print the sticker"}</Button>
+            <Button
+              type="button"
+              size="md"
+              onClick={(e) => {
+                // The sticker page opens in a new tab with the details as typed; the form saves them in this tab at the same time.
+                const form = e.currentTarget.form;
+                if (!form) return;
+                const fd = new FormData(form);
+                const qs = new URLSearchParams();
+                for (const k of ["serviced_on", "mileage", "next_date", "next_mileage"]) qs.set(k, String(fd.get(k) ?? ""));
+                qs.set("back", `/jobs/${jobId}`);
+                window.open(`/print/service-sticker/${jobId}?${qs.toString()}`, "_blank", "noopener");
+                form.requestSubmit();
+              }}
+            >
+              {data.printed_at ? "Print again (new tab)" : "Print the sticker (new tab)"}
+            </Button>
             <Button type="submit" tone="secondary" size="md">Save the details</Button>
           </div>
           <p className="text-xs text-muted">Next service, whichever comes first: {formatDate(data.next_date)}{data.next_mileage ? ` or ${data.next_mileage.toLocaleString("en-GB")} ${unit}` : ""}. Saved on the car&apos;s record. QC checks the sticker is fitted.</p>

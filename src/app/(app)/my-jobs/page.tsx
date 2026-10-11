@@ -88,11 +88,14 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
       <LiveRefresh tables={["jobs", "inspections", "road_tests", "job_technicians", "part_items"]} pollMs={60000} />
       <PageHeader
         title="My jobs"
-        subtitle={`${rows.length} car${rows.length === 1 ? "" : "s"} for you${shift ? ` · clocked in ${formatDateTime(shift.clock_in)}` : ""}`}
+        subtitle={`${rows.length} car${rows.length === 1 ? "" : "s"} for you`}
         actions={
-          <form action={shift ? clockOut : clockIn}>
-            <Button type="submit" size="lg" tone={shift ? "secondary" : "primary"}>{shift ? "Clock out" : "Clock in"}</Button>
-          </form>
+          <span className="flex flex-wrap items-center gap-2">
+            {shift ? <span className="inline-flex items-center rounded-full bg-green-soft px-3 py-1.5 text-xs font-bold text-green">✓ Clocked in · {formatDateTime(shift.clock_in)}</span> : null}
+            <form action={shift ? clockOut : clockIn}>
+              <Button type="submit" size="lg" tone={shift ? "secondary" : "primary"}>{shift ? "Clock out" : "Clock in"}</Button>
+            </form>
+          </span>
         }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}

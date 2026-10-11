@@ -38,6 +38,7 @@ async function saveCarPicture(vehicleId: string, file: FormDataEntryValue | null
 const gateInSchema = z
   .object({
     arrived_by: z.enum(["our_recovery", "customer_drove", "customer_driver", "outside_recovery"], { message: "Choose how the car arrived." }),
+    recovery_type: z.string().trim(),
     condition: z.enum(["runs_drives", "needs_assistance", "does_not_run"], { message: "Choose the vehicle condition." }),
     fuel_level: z.string(),
     battery_percent: z.string().trim(),
@@ -87,6 +88,7 @@ function parseGateIn(formData: FormData) {
   const get = (k: string) => formData.get(k) ?? "";
   return gateInSchema.safeParse({
     arrived_by: get("arrived_by"),
+    recovery_type: get("recovery_type"),
     department: get("department"),
     condition: get("condition"),
     fuel_level: get("fuel_level"),
@@ -178,6 +180,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const { error: giError } = await supabase.from("gate_ins").insert({
     job_id: job.id,
     arrived_by: d.arrived_by,
+    recovery_type: d.arrived_by === "our_recovery" ? d.recovery_type || null : null,
     condition: d.condition,
     fuel_level: d.is_electric === "yes" ? null : d.fuel_level,
     battery_percent: d.is_electric === "yes" ? Number(d.battery_percent) : null,

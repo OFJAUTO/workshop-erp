@@ -11,11 +11,10 @@ import { markQuoteSent, resendQuotation, roundQuotation, sendQuotation } from "@
  * "Send quotation": the rounding question (to the nearest ten dirhams, down by default), the checks,
  * then the centre window with the message, Open WhatsApp and Copy.
  */
-export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, phoneDigits, blocked, onBlocked, existingToken, status, total, roundedTotal, again = false }: { quotationId: string; kind: "quotation" | "estimate"; siteUrl: string; messageTemplate: string; phoneDigits: string; blocked: boolean; onBlocked: () => void; existingToken: string | null; status: string; total: number; roundedTotal: number | null; again?: boolean }) {
+export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, phoneDigits, blocked, onBlocked, existingToken, status, total, roundedTotal, again = false, compact = false }: { quotationId: string; kind: "quotation" | "estimate"; siteUrl: string; messageTemplate: string; phoneDigits: string; blocked: boolean; onBlocked: () => void; existingToken: string | null; status: string; total: number; roundedTotal: number | null; again?: boolean; /** In the bottom bar: a normal-sized button, the notes beside it. */ compact?: boolean }) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(existingToken);
   const [open, setOpen] = useState(false);
-  const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingOwner, setPendingOwner] = useState<string[] | null>(null);
   const [warranty, setWarranty] = useState(false);
@@ -31,15 +30,14 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
       onBlocked();
       return;
     }
-    // Totals to customers are whole dirhams: ask once, unless it already is or was rounded before.
+    // Totals to customers are whole dirhams: rounded down to the nearest ten by default; up only if the advisor chooses it afterwards.
     if (!roundedTotal && !whole && status !== "expired") {
-      setAsking(true);
+      go(choices.down);
       return;
     }
     go(null);
   }
   function go(rounded: number | null) {
-    setAsking(false);
     start(async () => {
       if (rounded !== null) {
         const r = await roundQuotation(quotationId, rounded);
@@ -76,26 +74,21 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
     });
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={compact ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-2"}>
       {again ? (
-        <button type="button" onClick={() => setOpen(true)} className="self-start text-xs font-bold underline underline-offset-4">
+        <button type="button" onClick={() => setOpen(true)} className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">
           Send again
         </button>
       ) : (
-        <Button type="button" size="lg" disabled={pending || status === "pending_owner"} onClick={send} className={`w-full ${blocked ? "opacity-60" : ""}`}>
+        <Button type="button" size={compact ? "md" : "lg"} disabled={pending || status === "pending_owner"} onClick={send} className={`${compact ? "" : "w-full"} ${blocked ? "opacity-60" : ""}`}>
           {pending ? "Checking…" : status === "pending_owner" ? "Waiting for the owner" : status === "expired" ? "Re-send" : label}
         </Button>
       )}
-      {asking ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
-            <span className="text-lg font-extrabold">Round the total?</span>
-            <p className="text-sm text-muted">The total is {aed(total)}. The customer sees a whole figure; the amount before VAT takes the difference.</p>
-            <button type="button" onClick={() => go(choices.down)} className="min-h-14 rounded-control bg-ink text-white text-base font-extrabold">{aed(choices.down)} <span className="text-xs font-semibold opacity-80">(down)</span></button>
-            <button type="button" onClick={() => go(choices.up)} className="min-h-14 rounded-control border-2 border-ink bg-white text-base font-extrabold">{aed(choices.up)} <span className="text-xs font-semibold text-muted">(up)</span></button>
-            <button type="button" onClick={() => setAsking(false)} className="min-h-10 text-sm font-semibold text-muted">Back</button>
-          </div>
-        </div>
+      {roundedTotal && roundedTotal < total && status === "draft" && !pending ? (
+        <p className="text-xs text-muted">
+          Total rounded down to {aed(roundedTotal)} (from {aed(total)}), shown to the customer as a discount.{" "}
+          <button type="button" onClick={() => start(async () => { const r = await roundQuotation(quotationId, choices.up); if (r.error) setError(r.error); router.refresh(); })} className="font-semibold underline underline-offset-4">Round up to {aed(choices.up)} instead</button>
+        </p>
       ) : null}
       {pendingOwner ? <p className="text-xs font-semibold text-amber">Sent to the owner for approval: {pendingOwner.join("; ")}. You will be told when it is approved.</p> : null}
       {warranty ? <p className="text-xs font-semibold text-green">Warranty repair: approved without the customer. Planning starts.</p> : null}

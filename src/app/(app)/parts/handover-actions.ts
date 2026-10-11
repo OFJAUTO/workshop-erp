@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { getCurrentDevice } from "@/lib/devices";
 import { blankToNull } from "@/lib/format";
-import { cancelHandover, confirmHandover, requestHandover } from "@/lib/handover";
+import { approveGoodwill, cancelHandover, confirmHandover, exchangePart, partNotNeeded, requestHandover, setDisposition } from "@/lib/handover";
+import { PARTS_BUCKET } from "@/lib/quote-data";
 import { PART_FULL_SELECT, toPartFull } from "@/lib/parts-data";
 import { verifyPin } from "@/lib/pin";
 import { can, type RoleId } from "@/lib/roles";
@@ -50,12 +51,12 @@ export async function handoverParts(jobId: string, formData: FormData) {
     const role = staff.role_id as RoleId;
     if (!(role === "owner" || can(role, "manageWork"))) fail(jobId, "Only the workshop manager or the owner can sign for a technician.");
     if (!r.stickerCount) {
-      const c = await confirmHandover(r.handoverId!, { actor: actorOf(staff), signedFor: true, deviceId: (await getCurrentDevice())?.id ?? null }, settings);
+      const c = await confirmHandover(r.handoverId!, { actor: actorOf(staff), signedFor: true, pin: String(formData.get("signer_pin") ?? ""), deviceId: (await getCurrentDevice())?.id ?? null }, settings);
       refresh(jobId);
       redirect(`/parts/handover/${jobId}?${c.error ? "error" : "message"}=${encodeURIComponent(c.error ?? c.message ?? "Done.")}`);
     }
   }
-  if (r.stickerCount) redirect(`/print/stickers/${r.handoverId}?back=${encodeURIComponent(`/parts/handover/${jobId}`)}`);
+  if (r.stickerCount) redirect(`/parts/handover/${jobId}?message=${encodeURIComponent(`Handover started. Print the ${r.stickerCount} sticker${r.stickerCount === 1 ? "" : "s"} from the box below (opens in a new tab); then the technician confirms.`)}`);
   redirect(`/parts/handover/${jobId}?message=${encodeURIComponent(r.message ?? "Waiting for the technician's PIN.")}`);
 }
 
@@ -67,7 +68,8 @@ export async function signHandoverAtCounter(handoverId: string, formData: FormDa
   const settings = await getSettings();
   const jobId = String(formData.get("job_id") ?? "");
   const signFor = formData.get("sign_for") === "on";
-  const r = await confirmHandover(handoverId, { actor: actorOf(staff), pin: signFor ? null : String(formData.get("pin") ?? ""), atCounter: true, signedFor: signFor, deviceId: (await getCurrentDevice())?.id ?? null }, settings);
+  const receivedIds = formData.get("has_ticks") === "1" ? formData.getAll("received").map(String).filter(Boolean) : null;
+  const r = await confirmHandover(handoverId, { actor: actorOf(staff), pin: signFor ? String(formData.get("signer_pin") ?? "") : String(formData.get("pin") ?? ""), atCounter: true, signedFor: signFor, receivedIds, deviceId: (await getCurrentDevice())?.id ?? null }, settings);
   refresh(jobId);
   redirect(`/parts/handover/${jobId}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
 }
@@ -77,7 +79,8 @@ export async function confirmHandoverOnDevice(handoverId: string, formData: Form
   const staff = await requireStaff();
   const settings = await getSettings();
   const jobId = String(formData.get("job_id") ?? "");
-  const r = await confirmHandover(handoverId, { actor: actorOf(staff), pin: String(formData.get("pin") ?? ""), deviceId: (await getCurrentDevice())?.id ?? null }, settings);
+  const receivedIds = formData.get("has_ticks") === "1" ? formData.getAll("received").map(String).filter(Boolean) : null;
+  const r = await confirmHandover(handoverId, { actor: actorOf(staff), pin: String(formData.get("pin") ?? ""), receivedIds, deviceId: (await getCurrentDevice())?.id ?? null }, settings);
   if (jobId) refresh(jobId);
   return r;
 }
@@ -126,4 +129,64 @@ export async function makeLabel(jobId: string, partId: string) {
     await admin.from("part_items").update({ label_code: newLabelCode(), updated_by: staff.id }).eq("id", partId);
   }
   redirect(`/parts/labels/${jobId}?part=${partId}`);
+}
+
+const outcome = (jobId: string, r: { error?: string; message?: string }, to = `/parts/handover/${jobId}`): never => redirect(`${to}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
+const canSettle = (role: RoleId) => role === "owner" || can(role, "managePurchaseOrders") || can(role, "manageWork") || role === "technician";
+
+/** "Wrong or faulty part": back to the supplier, the correct one raised for ordering. Parts, the manager, the technician on the car, or the owner. */
+export async function exchangePartAction(jobId: string, formData: FormData) {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  const to = String(formData.get("back") ?? `/parts/handover/${jobId}`);
+  if (!canSettle(role) || staff.viewingAs) outcome(jobId, { error: "Not allowed." }, to);
+  const r = await exchangePart(jobId, String(formData.get("part") ?? ""), actorOf(staff), { reason: String(formData.get("reason") ?? ""), note: blankToNull(formData.get("note")) });
+  refresh(jobId);
+  outcome(jobId, r, to);
+}
+
+/** "Not needed": the part is not used on this car; Parts decide its ending. */
+export async function notNeededAction(jobId: string, formData: FormData) {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  const to = String(formData.get("back") ?? `/parts/handover/${jobId}`);
+  if (!canSettle(role) || staff.viewingAs) outcome(jobId, { error: "Not allowed." }, to);
+  const r = await partNotNeeded(jobId, String(formData.get("part") ?? ""), actorOf(staff), String(formData.get("reason") ?? ""));
+  refresh(jobId);
+  outcome(jobId, r, to);
+}
+
+/** Where a part without a home ends up. Parts (or the owner); a credit note scan goes to the parts bucket. */
+export async function dispositionAction(jobId: string, formData: FormData) {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  const to = String(formData.get("back") ?? `/parts/handover/${jobId}`);
+  if (!(role === "owner" || can(role, "managePurchaseOrders")) || staff.viewingAs) outcome(jobId, { error: "Only Parts or the owner decide where a part goes." }, to);
+  const partId = String(formData.get("part") ?? "");
+  const disposition = String(formData.get("disposition") ?? "");
+  if (disposition !== "returned" && disposition !== "stock" && disposition !== "fit_pending") outcome(jobId, { error: "Choose where the part goes." }, to);
+  let creditNotePath: string | null = null;
+  const file = formData.get("credit_note");
+  if (file instanceof File && file.size > 0) {
+    if (file.size > 10 * 1024 * 1024) outcome(jobId, { error: "The scan is too big (10 MB at most)." }, to);
+    const ext = (file.name.split(".").pop() ?? "pdf").toLowerCase().replace(/[^a-z0-9]/g, "") || "pdf";
+    creditNotePath = `credit-notes/${partId}/${Date.now()}.${ext}`;
+    const { error: upError } = await createAdminClient().storage.from(PARTS_BUCKET).upload(creditNotePath, file, { contentType: file.type || "application/pdf", upsert: false });
+    if (upError) outcome(jobId, { error: `Could not save the scan: ${upError.message}` }, to);
+  }
+  const r = await setDisposition(jobId, partId, actorOf(staff), { disposition: disposition as "returned" | "stock" | "fit_pending", note: blankToNull(formData.get("note")), creditNotePath });
+  refresh(jobId);
+  revalidatePath("/parts/no-home");
+  outcome(jobId, r, to);
+}
+
+/** The owner approves fitting a not-needed part as goodwill. */
+export async function approveGoodwillAction(jobId: string, formData: FormData) {
+  const staff = await requireStaff();
+  const to = String(formData.get("back") ?? "/parts/no-home");
+  if (staff.role_id !== "owner" || staff.viewingAs) outcome(jobId, { error: "Only the owner approves goodwill." }, to);
+  const r = await approveGoodwill(jobId, String(formData.get("part") ?? ""), actorOf(staff));
+  refresh(jobId);
+  revalidatePath("/parts/no-home");
+  outcome(jobId, r, to);
 }

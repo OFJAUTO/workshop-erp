@@ -11,7 +11,7 @@ const styles = StyleSheet.create({
 
 export type PdfSticker =
   | { kind: "part"; w: number; h: number; date: string; vin8: string; qr: string }
-  | { kind: "battery"; size: number; installed: string; until: string; vin: string; title: string; valid: string; qr: string }
+  | { kind: "battery"; size: number; installed: string; until: string; vin: string; title: string; valid: string; qr: string; line: string }
   | { kind: "service"; size: number; servicedOn: string; mileage: string; nextDate: string; nextMileage: string; vin: string; title: string; band: string; phone: string | null; qr: string };
 
 /** The same stickers as the print pages, as a PDF for the printers that want one. One sticker per page. */
@@ -38,20 +38,23 @@ export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer>
         const f = (s.size / 60) * MM;
         if (s.kind === "battery") {
           return (
-            <Page key={i} size={[s.size * MM, s.size * MM]} style={[styles.page, { padding: 2 * f, justifyContent: "flex-start" }]}>
-              {logo ? <Image src={{ data: logo, format: "png" }} style={{ height: 8 * f, width: 44 * f, objectFit: "contain" }} /> : null}
-              <Text style={{ fontSize: 4.2 * f, fontFamily: "Helvetica-Bold", marginTop: 1.2 * f }}>{s.title.toUpperCase()}</Text>
-              <View style={{ flexDirection: "row", width: "100%", marginTop: 1.5 * f, alignItems: "center" }}>
+            <Page key={i} size={[s.size * MM, s.size * MM]} style={[styles.page, { padding: 2 * f, justifyContent: "space-between" }]}>
+              {logo ? <Image src={{ data: logo, format: "png" }} style={{ height: 6 * f, width: 44 * f, objectFit: "contain" }} /> : null}
+              <Text style={{ fontSize: 3.4 * f, fontFamily: "Helvetica-Bold" }}>{s.title.toUpperCase()}</Text>
+              <Text style={{ fontSize: 2.8 * f, fontFamily: "Helvetica-Bold" }}>{s.line}</Text>
+              <View style={{ flexDirection: "row", width: "100%", alignItems: "center" }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 3 * f }}>Installed</Text>
-                  <Text style={{ fontSize: 3 * f, fontFamily: "Helvetica-Bold" }}>{s.installed}</Text>
-                  <Text style={{ fontSize: 3 * f, marginTop: 1 * f }}>Warranty until</Text>
-                  <Text style={{ fontSize: 3 * f, fontFamily: "Helvetica-Bold" }}>{s.until}</Text>
+                  <Text style={{ fontSize: 2.8 * f }}>Installed</Text>
+                  <Text style={{ fontSize: 2.8 * f, fontFamily: "Helvetica-Bold" }}>{s.installed}</Text>
                 </View>
-                <Image src={{ data: qr, format: "png" }} style={{ width: 22 * f, height: 22 * f }} />
+                <Image src={{ data: qr, format: "png" }} style={{ width: 16 * f, height: 16 * f }} />
               </View>
-              <Text style={{ fontSize: 2.6 * f, fontFamily: "Helvetica-Bold", marginTop: 1.5 * f }}>{s.vin}</Text>
-              <Text style={{ fontSize: 2.4 * f, marginTop: "auto" }}>{s.valid}</Text>
+              <View style={{ width: "100%", backgroundColor: "#000", padding: 1.2 * f, alignItems: "center" }}>
+                <Text style={{ color: "#fff", fontSize: 2.4 * f }}>WARRANTY UNTIL</Text>
+                <Text style={{ color: "#fff", fontSize: 4.6 * f, fontFamily: "Helvetica-Bold", marginTop: 0.3 * f }}>{s.until}</Text>
+              </View>
+              <Text style={{ fontSize: 3.4 * f, fontFamily: "Helvetica-Bold", letterSpacing: 0.5 }}>{s.vin}</Text>
+              <Text style={{ fontSize: 2.4 * f }}>{s.valid}</Text>
             </Page>
           );
         }

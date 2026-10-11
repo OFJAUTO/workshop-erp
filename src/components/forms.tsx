@@ -38,17 +38,20 @@ export function ActionForm({
   action,
   initialValues = {},
   className = "flex flex-col gap-5",
+  id,
   children,
 }: {
   action: FormAction;
   initialValues?: Record<string, string>;
   className?: string;
+  /** Lets a button elsewhere on the page (a fixed bar) submit this form. */
+  id?: string;
   children: (values: Record<string, string>, state: FormState) => React.ReactNode;
 }) {
   const [state, formAction] = useActionState(action, initialFormState);
   const values = { ...initialValues, ...(state.values ?? {}) };
   return (
-    <form action={formAction} className={className}>
+    <form id={id} action={formAction} className={className}>
       {state.error ? <Notice tone="error">{state.error}</Notice> : null}
       {state.success ? <Notice tone="success">{state.success}</Notice> : null}
       {children(values, state)}

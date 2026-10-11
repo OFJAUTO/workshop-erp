@@ -39,6 +39,8 @@ type Body = {
   technicianNotes?: string;
   /** The whole parts list gathered during the inspection (replaced on every change). */
   partsList?: unknown;
+  /** Bad items the technician says need no part. */
+  noPartItems?: unknown;
   prescanVisible?: boolean;
   /** Report-level answers: the estimated hours, the big-job tags, the scan step. */
   inspection?: { estimated_hours?: string | number | null; estimate_reason?: string | null; big_job_tags?: unknown; scan_read?: boolean; scan_not_possible_reason?: string | null; requests_note?: string | null };
@@ -65,9 +67,9 @@ export async function POST(request: NextRequest) {
   if (staff.viewingAs) return NextResponse.json({ error: "View only." }, { status: 403 });
   const role = staff.role_id as RoleId;
   const admin = createAdminClient();
-  const { data } = await admin.from("inspections").select("id, job_id, technician_id, status, unlocked_until, measurements, measurements_original").eq("id", String(body.inspectionId ?? "")).maybeSingle();
+  const { data } = await admin.from("inspections").select("id, job_id, technician_id, status, unlocked_until, measurements, measurements_original, parts_list, parts_list_confirmed_at").eq("id", String(body.inspectionId ?? "")).maybeSingle();
   if (!data) return NextResponse.json({ error: "Inspection not found." }, { status: 404 });
-  const insp = data as unknown as Pick<InspectionRow, "id" | "job_id" | "technician_id" | "status" | "unlocked_until" | "measurements" | "measurements_original">;
+  const insp = data as unknown as Pick<InspectionRow, "id" | "job_id" | "technician_id" | "status" | "unlocked_until" | "measurements" | "measurements_original" | "parts_list" | "parts_list_confirmed_at">;
 
   const isTech = role === "technician" && (insp.technician_id === staff.id || (await technicianOnJob(insp.job_id, staff.id)));
   const isManager = can(role, "approveInspections");
@@ -175,7 +177,15 @@ export async function POST(request: NextRequest) {
     }
   }
   if (body.partsList !== undefined) {
-    const { error } = await admin.from("inspections").update({ parts_list: cleanPartsList(body.partsList), ...stamp }).eq("id", insp.id);
+    const list = cleanPartsList(body.partsList);
+    // A change to the list after the manager ticked it takes the tick off again.
+    const changed = JSON.stringify(cleanPartsList(insp.parts_list)) !== JSON.stringify(list);
+    const { error } = await admin.from("inspections").update({ parts_list: list, ...(changed && insp.parts_list_confirmed_at ? { parts_list_confirmed_at: null, parts_list_confirmed_by: null } : {}), ...stamp }).eq("id", insp.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (body.noPartItems !== undefined) {
+    const keys = Array.isArray(body.noPartItems) ? Array.from(new Set(body.noPartItems.map((k) => String(k).slice(0, 120)).filter(Boolean))).slice(0, 200) : [];
+    const { error } = await admin.from("inspections").update({ no_part_items: keys, ...stamp }).eq("id", insp.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (body.technicianNotes !== undefined) {

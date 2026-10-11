@@ -96,7 +96,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           inspectionFee: Number(settings.inspection_fee_aed) || 0,
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
-          technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
+          technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
+          goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),
           advisorDiscount: settings.advisor_labour_discount === true,
           depositThreshold: Number(settings.deposit_threshold_aed) || 0,
@@ -105,17 +106,16 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           workingTime: workingTimeOf(settings),
         }}
         readOnly={!canEdit}
-        showProfit={isOwner}
+        showProfit
         canSend={!staff.viewingAs}
         isOwner={isOwner}
         siteUrl={site}
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={false}
-        labourActions={(settings.labour_actions ?? []) as string[]}
-        labourPositions={(settings.labour_positions ?? []) as string[]}
         completedAt={q.completed_at}
         recoveryProviders={(settings.recovery_providers ?? []) as string[]}
+        recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
       />
       {!staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
         <Card className="flex flex-col gap-2 max-w-xl">

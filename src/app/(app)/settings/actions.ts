@@ -382,13 +382,23 @@ export async function saveInspectionChecklist(_state: FormState, formData: FormD
 export async function saveManagerNotePresets(_state: FormState, formData: FormData): Promise<FormState> {
   await requirePermission("manageSettings");
   const values = formValues(formData);
-  const lines = Array.from(new Set(String(formData.get("presets") ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 200)).filter(Boolean))).slice(0, 40);
+  const groups: Record<string, string[]> = {};
+  for (const [k, v] of formData.entries()) {
+    if (!k.startsWith("group__") || typeof v !== "string") continue;
+    const list = Array.from(new Set(v.split(/\r?\n/).map((l) => l.trim().slice(0, 200)).filter(Boolean))).slice(0, 40);
+    if (list.length) groups[k.slice(7).slice(0, 60)] = list;
+  }
+  const lines = Array.from(new Set(Object.values(groups).flat()));
   if (!lines.length) return { error: "Write at least one note.", values };
   const supabase = await createClient();
   const { error } = await supabase
     .from("settings")
     .upsert({ key: "manager_note_presets", value: lines, label: "Manager note presets", description: "One-tap notes on the report approval. Most used come first." }, { onConflict: "key" });
   if (error) return { error: error.message, values };
+  const { error: e2 } = await supabase
+    .from("settings")
+    .upsert({ key: "manager_note_groups", value: groups, label: "Manager note groups", description: "The one-tap notes on the report approval, under four small headings." }, { onConflict: "key" });
+  if (e2) return { error: e2.message, values };
   revalidatePath("/", "layout");
   return { success: `${lines.length} note${lines.length === 1 ? "" : "s"} saved.` };
 }

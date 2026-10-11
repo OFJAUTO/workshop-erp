@@ -17,7 +17,7 @@ export default async function InspectionChecklistPage() {
         subtitle="Sections and items of the technician's report. A part of the car is marked Good, Average or Bad; a service item is OK or Required (tap the style on each item). The numbers (tyres, brake pads, battery, vent temperature) and the scan report are always required and are not on this list."
         actions={<LinkButton href="/settings" tone="secondary">Settings</LinkButton>}
       />
-      <ManagerNotesForm action={saveManagerNotePresets} initial={(settings.manager_note_presets ?? []) as string[]} usage={(settings.manager_note_usage ?? {}) as Record<string, number>} />
+      <ManagerNotesForm action={saveManagerNotePresets} groups={Object.keys((settings.manager_note_groups ?? {}) as Record<string, string[]>).length ? ((settings.manager_note_groups ?? {}) as Record<string, string[]>) : { Notes: (settings.manager_note_presets ?? []) as string[] }} usage={(settings.manager_note_usage ?? {}) as Record<string, number>} />
       <ChecklistEditor action={saveInspectionChecklist} initial={settings.inspection_checklist} initialComplaints={(settings.complaint_keywords ?? {}) as Record<string, string[]>} />
     </>
   );

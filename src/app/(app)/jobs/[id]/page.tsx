@@ -408,6 +408,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               {latestQuote.sent_at ? ` · sent ${formatDayTime(latestQuote.sent_at)}` : ""}
               {latestQuote.opened_at ? ` · opened ${formatDayTime(latestQuote.opened_at)}` : ""}
               {latestQuote.responded_at ? ` · ${latestQuote.approver_name} ${formatDayTime(latestQuote.responded_at)}` : ""}
+              {latestQuote.responded_at && latestQuote.status === "approved" ? (latestQuote.viewed_full_at && latestQuote.viewed_full_at <= latestQuote.responded_at ? " · opened the full quotation before approving" : " · approved without opening the full quotation") : ""}
             </span>
           ) : null}
           <div className="flex flex-wrap gap-2 mt-auto">

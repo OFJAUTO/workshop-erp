@@ -8,6 +8,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { qrUrl, serviceStickerDefaults, stickerSettings, warrantyMonthsFor, type ServiceStickerData } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { batteryLine } from "@/components/StickerArt";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,13 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   const h = raw as unknown as HandoverRow & { job: { job_number: string; vehicle: { vin: string | null } | null } | null };
   const vin = h.job?.vehicle?.vin ?? "";
   const date = formatDate(h.confirmed_at ?? h.created_at);
-  for (const s of Object.values(h.stickers ?? {})) {
+  for (const [partId, s] of Object.entries(h.stickers ?? {})) {
+    const item = h.items.find((i) => i.id === partId);
     for (let n = 0; n < s.count; n++) {
       if (s.kind === "battery") {
         const until = new Date(h.confirmed_at ?? h.created_at);
         until.setUTCMonth(until.getUTCMonth() + warrantyMonthsFor(ss, s.brand));
-        out.push({ kind: "battery", size: ss.large, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, qr: qrUrl(s.code) });
+        out.push({ kind: "battery", size: ss.large, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, qr: qrUrl(s.code), line: batteryLine(item?.description, s.brand, s.model) });
       } else out.push({ kind: "part", w: ss.partW, h: ss.partH, date, vin8: vin.slice(-8), qr: qrUrl(s.code) });
     }
   }

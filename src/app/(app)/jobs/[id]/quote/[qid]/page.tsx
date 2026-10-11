@@ -5,14 +5,13 @@ import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor } from "@/lib/quote-data";
-import { checklistItems, type ChecklistSection } from "@/lib/inspection";
 import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { confirmEstimateUnchanged, decideQuoteApproval, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
+import { confirmEstimateUnchanged, decideQuoteApproval, declineQuotation, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { quoteReferenceOf } from "@/lib/quote-reference";
@@ -60,7 +59,6 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const hoursMemory: Record<string, number> = {};
   for (const [k, v] of Object.entries(memory)) if (!k.includes("|")) hoursMemory[k] = Number(v);
   for (const [k, v] of Object.entries(memory)) if (modelKey && k.startsWith(modelKey + "|")) hoursMemory[k.slice(modelKey.length + 1)] = Number(v);
-  const components = Array.from(new Set(checklistItems((settings.inspection_checklist ?? []) as ChecklistSection[]).map((i) => i.label)));
   const [catalogue, { data: jobRequests }] = await Promise.all([loadCatalogue(), createAdminClient().from("job_requests").select("text").eq("job_id", id).eq("is_active", true).order("position")]);
   const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string)) : null;
 
@@ -79,7 +77,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     consumablesDefault: Number(settings.consumables_default_aed) || 0,
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
-    technicianCostRate: isOwner ? Number(settings.technician_cost_rate_aed) || 0 : null,
+    technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
+    goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
     bankChargePercent: highestBankCharge(settings),
     advisorDiscount: settings.advisor_labour_discount === true,
@@ -155,16 +154,13 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         department={job?.department ?? null}
         settings={editorSettings}
         readOnly={!canEdit}
-        showProfit={isOwner}
+        showProfit
         canSend={canSend}
         isOwner={isOwner}
         siteUrl={site}
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={!!q.estimate_id}
-        labourActions={(settings.labour_actions ?? []) as string[]}
-        labourPositions={(settings.labour_positions ?? []) as string[]}
-        components={components}
         hoursMemory={hoursMemory}
         wait={wait}
         workshopEstimate={checks.workshopEstimate}
@@ -174,6 +170,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         catalogue={catalogue}
         canEditList={can(role, "manageServices")}
         recoveryProviders={(settings.recovery_providers ?? []) as string[]}
+        recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}
       />
@@ -199,6 +196,16 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               <p className="text-sm text-muted">If nothing changed since the customer accepted the estimate, confirm it here and the earlier acceptance counts as approval. If anything changed, send the revised quotation instead.</p>
               <form action={confirmEstimateUnchanged.bind(null, q.id)}>
                 <Button type="submit" tone="secondary" size="md">Confirm: nothing changed, treat as approved</Button>
+              </form>
+            </Card>
+          ) : null}
+          {canSend && ["sent", "opened", "expired"].includes(q.status) ? (
+            <Card className="flex flex-col gap-2">
+              <SectionLabel>Declined by the customer?</SectionLabel>
+              <p className="text-sm text-muted">The customer&apos;s page has no Declined button. After talking to the customer, mark it here (or make a revised quotation below).</p>
+              <form action={declineQuotation.bind(null, q.id)} className="flex flex-col gap-2">
+                <Textarea name="reason" rows={1} placeholder="Reason (optional)" />
+                <div><Button type="submit" tone="secondary" size="md">Mark as declined</Button></div>
               </form>
             </Card>
           ) : null}

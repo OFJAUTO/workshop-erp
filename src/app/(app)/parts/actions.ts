@@ -305,3 +305,148 @@ export async function removePart(partId: string) {
   refresh(p.job_id);
   redirect(`/parts/${p.job_id}?message=${encodeURIComponent(`${p.description} removed.`)}`);
 }
+
+
+/* ---------------------------------------------------------------------------
+   Evening of 11 October 2026: the Parts table saves itself row by row.
+   --------------------------------------------------------------------------- */
+
+export type RowSave = { requestId: string | null; partId: string | null; optionOf?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string };
+
+/**
+ * One row of the Parts table as it is filled in: the first save of a request's row makes its part item, every
+ * later save updates it. A row is complete with a type, a cost, a supplier and the availability (days when to
+ * order); a complete row goes on the quotation and the request closes. A price change after the quotation was
+ * sent flags the quotation and tells the advisor.
+ */
+export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ error?: string; partId?: string; complete?: boolean }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  const role = staff.role_id as RoleId;
+  if (!can(role, "priceParts")) return { error: "Not allowed." };
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  const admin = createAdminClient();
+  const settings = await getSettings();
+  const allowed = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
+  const typeRaw = (row.part_type ?? "").toLowerCase();
+  const type = typeRaw && (allowed.includes(typeRaw) || PART_TYPES.includes(typeRaw)) ? typeRaw : null;
+  const costText = (row.cost_aed ?? "").replace(/[^\d.]/g, "");
+  const cost = costText === "" ? null : Number(costText);
+  if (cost !== null && (!Number.isFinite(cost) || cost < 0)) return { error: "The cost must be a number." };
+  const supplier = (row.supplier ?? "").trim().slice(0, 120) || null;
+  const availability = row.availability === "to_order" ? "to_order" : row.availability === "in_stock" ? "in_stock" : null;
+  const days = Math.max(0, Math.round(Number(row.days) || 0));
+  const delivery = availability === "to_order" && days > 0 ? new Date(Date.now() + days * 86400000).toISOString().slice(0, 10) : null;
+  const fields = { part_number: (row.part_number ?? "").trim().slice(0, 80) || null, part_type: type, brand: type && type !== "genuine" ? (row.brand ?? "").trim().slice(0, 80) || null : null, cost_aed: cost, supplier, availability, delivery_date: delivery };
+  const complete = !!(type && cost !== null && supplier && (availability === "in_stock" || (availability === "to_order" && delivery)));
+  const now = new Date().toISOString();
+  let partId = row.partId;
+  let previousCost: number | null = null;
+  let description = (row.name ?? "").trim().slice(0, 200);
+  let requestId = row.requestId;
+  if (partId) {
+    const { data: cur } = await admin.from("part_items").select("id, cost_aed, description, part_request_id").eq("id", partId).eq("job_id", jobId).maybeSingle();
+    if (!cur) return { error: "Part not found." };
+    previousCost = cur.cost_aed === null ? null : Number(cur.cost_aed);
+    description = cur.description;
+    requestId = cur.part_request_id ?? requestId;
+    const { error } = await admin.from("part_items").update({ ...fields, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), updated_by: staff.id }).eq("id", partId);
+    if (error) return { error: error.message };
+  } else {
+    let quantity = 1;
+    let positions: string[] = [];
+    let optionGroup: string | null = null;
+    if (row.optionOf) {
+      const { data: base } = await admin.from("part_items").select("id, part_request_id, option_group, description, quantity, positions").eq("id", row.optionOf).maybeSingle();
+      if (!base) return { error: "Part not found." };
+      optionGroup = base.option_group ?? base.id;
+      if (!base.option_group) await admin.from("part_items").update({ option_group: optionGroup, updated_by: staff.id }).eq("id", base.id);
+      description = description || base.description;
+      quantity = Number(base.quantity) || 1;
+      positions = (base.positions as string[] | null) ?? [];
+      requestId = base.part_request_id;
+    } else if (requestId) {
+      const { data: req } = await admin.from("part_requests").select("label, quantity, positions").eq("id", requestId).maybeSingle();
+      if (!req) return { error: "Request not found." };
+      description = description || req.label;
+      quantity = Number(req.quantity) || 1;
+      positions = (req.positions as string[] | null) ?? [];
+    }
+    if (!description) return { error: "Type the part name." };
+    const { data: created, error } = await admin
+      .from("part_items")
+      .insert({ job_id: jobId, part_request_id: requestId, description, quantity, confirmed_quantity: quantity, positions, option_group: optionGroup, ...fields, confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
+      .select("id")
+      .single();
+    if (error || !created) return { error: error?.message ?? "Could not save the part." };
+    partId = created.id;
+    if (optionGroup && row.optionOf) {
+      const quotationId = await draftQuotation(jobId);
+      if (quotationId) await admin.from("quotation_lines").update({ option_group: optionGroup, updated_by: staff.id }).eq("quotation_id", quotationId).eq("part_item_id", row.optionOf);
+    }
+  }
+  if (requestId) await admin.from("part_requests").update({ status: complete ? "done" : "listed", updated_by: staff.id }).eq("id", requestId).in("status", ["open", "listed", "done"]);
+  if (complete && partId) {
+    await syncLineForPart(jobId, partId, staff.id);
+    await tellAdvisorIfComplete(jobId);
+  }
+  // A price change after the quotation went out is flagged on it and the advisor told.
+  if (previousCost !== null && cost !== null && cost !== previousCost) {
+    const { data: sentQs } = await admin.from("quotations").select("id, number").eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
+    if ((sentQs ?? []).length) {
+      await admin.from("quotations").update({ parts_price_changed_at: now }).in("id", (sentQs ?? []).map((q) => q.id));
+      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
+      const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+      await notifyStaff(ids, { type: "parts_priced", title: `Part price changed after the quotation went out · ${job.job_number}`, body: `${description}: AED ${previousCost} → AED ${cost}. Check ${(sentQs ?? []).map((q) => q.number).join(", ")}.`, jobId, href: `/jobs/${jobId}` });
+      await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_price_changed", note: `${description}: price changed from AED ${previousCost} to AED ${cost} by ${staff.display_name} after the quotation was sent`, created_by: staff.id });
+    }
+  }
+  refresh(jobId);
+  return { partId: partId ?? undefined, complete };
+}
+
+/** "Pricing done": the advisor is told and the next step is his, even if some parts have no price yet (he was asked first). */
+export async function pricingDone(jobId: string, formData: FormData) {
+  const staff = await requirePermission("priceParts");
+  const admin = createAdminClient();
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) redirect(`/parts/${jobId}?error=${encodeURIComponent("This job is closed.")}`);
+  const [{ data: parts }, { data: reqs }] = await Promise.all([
+    admin.from("part_items").select("id, cost_aed, part_type, supplier, availability, part_request_id").eq("job_id", jobId).eq("is_active", true).neq("confirm_status", "rejected"),
+    admin.from("part_requests").select("id, status").eq("job_id", jobId).eq("is_active", true),
+  ]);
+  const priced = new Set((parts ?? []).filter((p) => p.cost_aed !== null && p.part_type && p.supplier && p.availability).map((p) => p.part_request_id).filter((x): x is string => !!x));
+  const openRequests = (reqs ?? []).filter((r) => (r.status === "open" || r.status === "listed") && !priced.has(r.id)).length;
+  const openParts = (parts ?? []).filter((p) => p.cost_aed === null).length;
+  const open = openRequests + openParts;
+  if (open && String(formData.get("force") ?? "") !== "1") redirect(`/parts/${jobId}?error=${encodeURIComponent(`${open} part${open === 1 ? " has" : "s have"} no price yet. Tap Pricing done again and choose Send what I have.`)}`);
+  const now = new Date().toISOString();
+  await admin.from("jobs").update({ parts_pricing_done_at: now, parts_pricing_done_by: staff.id, updated_by: staff.id }).eq("id", jobId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `Pricing done by ${staff.display_name}${open ? ` (${open} part${open === 1 ? "" : "s"} without a price)` : ""}`, created_by: staff.id });
+  const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
+  const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  await notifyStaff(ids, { type: "parts_priced", title: `Parts pricing done · ${job.job_number}`, body: open ? `${staff.display_name} sent what Parts have: ${open} part${open === 1 ? "" : "s"} still without a price. The quotation is yours.` : "Every part has a price or is marked not available. Finish the quotation.", jobId, href: `/jobs/${jobId}` });
+  refresh(jobId);
+  revalidatePath(`/jobs/${jobId}/quote`, "layout");
+  redirect(`/parts/${jobId}?message=${encodeURIComponent("Sent to the advisor.")}`);
+}
+
+/** A catalogue diagram on a priced part, from the row's menu. */
+export async function attachDiagram(partId: string, formData: FormData) {
+  const staff = await requirePermission("priceParts");
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, job_id").eq("id", partId).maybeSingle();
+  if (!p) redirect("/parts");
+  const file = formData.get("diagram");
+  if (!(file instanceof File) || file.size === 0) redirect(`/parts/${p.job_id}?error=${encodeURIComponent("Choose a file.")}`);
+  if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type)) redirect(`/parts/${p.job_id}?error=${encodeURIComponent("The diagram must be a JPG, PNG, WebP or PDF.")}`);
+  if (file.size > 20 * 1024 * 1024) redirect(`/parts/${p.job_id}?error=${encodeURIComponent("The diagram must be under 20 MB.")}`);
+  const ext = file.type === "application/pdf" ? "pdf" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+  const path = `${p.job_id}/${Date.now()}-${randomBytes(3).toString("hex")}.${ext}`;
+  const { error: upError } = await admin.storage.from(PARTS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (upError) redirect(`/parts/${p.job_id}?error=${encodeURIComponent("Diagram upload failed: " + upError.message)}`);
+  await admin.from("part_items").update({ diagram_path: path, updated_by: staff.id }).eq("id", partId);
+  refresh(p.job_id);
+  redirect(`/parts/${p.job_id}?message=${encodeURIComponent("Diagram attached.")}`);
+}

@@ -197,6 +197,7 @@ export async function setPromisedDate(jobId: string, formData: FormData) {
 
 const amendSchema = z.object({
   arrived_by: z.enum(["our_recovery", "customer_drove", "customer_driver", "outside_recovery"]),
+  recovery_type: z.string().trim(),
   condition: z.enum(["runs_drives", "needs_assistance", "does_not_run"]),
   fuel_level: z.string(),
   battery_percent: z.string().trim(),
@@ -220,6 +221,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   const get = (k: string) => formData.get(k) ?? "";
   const parsed = amendSchema.safeParse({
     arrived_by: get("arrived_by"),
+    recovery_type: get("recovery_type"),
     condition: get("condition"),
     fuel_level: get("fuel_level"),
     battery_percent: get("battery_percent"),
@@ -252,6 +254,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     .from("gate_ins")
     .update({
       arrived_by: d.arrived_by,
+      recovery_type: d.arrived_by === "our_recovery" ? d.recovery_type || null : null,
       condition: d.condition,
       fuel_level: d.is_electric === "yes" ? null : d.fuel_level || null,
       battery_percent: d.is_electric === "yes" && d.battery_percent ? Number(d.battery_percent) : null,

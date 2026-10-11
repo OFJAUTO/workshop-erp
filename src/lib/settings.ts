@@ -96,6 +96,13 @@ const DEFAULTS = {
   complaint_keywords: {} as Record<string, string[]>,
   part_pool_custom: {} as Record<string, number>,
   custom_jobs_used: {} as Record<string, number>,
+  supplier_quote_opening_line: "Please quote price and availability:",
+  recovery_types: [
+    { key: "normal", label: "Normal", cost: 150, price: 150 },
+    { key: "full_down", label: "Full down", cost: 250, price: 250 },
+    { key: "closed_box", label: "Closed box", cost: 400, price: 400 },
+  ] as { key: string; label: string; cost: number; price: number }[],
+  manager_note_groups: {} as Record<string, string[]>,
   fluid_grades: ["0W-20", "0W-30", "0W-40", "5W-30", "5W-40", "5W-50", "10W-40", "ATF", "CVT", "DCT", "75W-90", "80W-90", "DOT 4", "DOT 5.1", "G12", "G13", "R134a", "R1234yf"] as string[],
   labour_actions: ["Remove and replace", "Remove and refit", "Remove and clean", "Remove and inspect", "Repair", "Reseal", "Overhaul", "Adjust", "Tighten", "Lubricate", "Skim", "Bleed", "Flush", "Drain and refill", "Top up", "Recharge", "Balance", "Align", "Calibrate", "Program or code", "Reset", "Diagnose", "Test", "Road test"] as string[],
   labour_positions: ["Front", "Rear", "Left", "Right", "Front left", "Front right", "Rear left", "Rear right", "Upper", "Lower", "Inner", "Outer"] as string[],

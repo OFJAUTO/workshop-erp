@@ -139,8 +139,8 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   // The parts list goes to Parts only once the manager has looked at it.
   const partsList = cleanPartsList(bundle.inspection.parts_list);
   const partLines = mergePartsList(partsList);
-  if (partLines.length && String(formData.get("parts_list_confirmed") ?? "") !== "1") return { error: "Look at the parts list, then tap Parts list checked.", values };
-  await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, manager_note_internal: internalNote, estimated_hours_manager: techHours !== null ? managerHours : null, ...(partLines.length ? { parts_list_confirmed_at: now, parts_list_confirmed_by: staff.id } : {}), updated_by: staff.id }).eq("id", bundle.inspection.id);
+  if (!bundle.inspection.parts_list_confirmed_at) return { error: partLines.length ? 'Tick "I have checked the parts list" under the parts list first.' : 'Tick "I confirm no parts are needed" under the parts list first.', values };
+  await admin.from("inspections").update({ status: "approved", approved_at: now, approved_by: staff.id, manager_note: note, manager_note_internal: internalNote, estimated_hours_manager: techHours !== null ? managerHours : null, updated_by: staff.id }).eq("id", bundle.inspection.id);
   if (techHours !== null && managerHours !== null && managerHours !== techHours) await logEvent(jobId, staff.id, "estimate_hours", `${staff.display_name} changed the estimated hours from ${techHours} h to ${managerHours} h: ${hoursReason}`);
   // The tap-first suggestions learn from every approved report: remarks and parts per checklist item.
   const settingsNow = await getSettings();
@@ -202,6 +202,18 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   });
   refresh(jobId);
   return { success: "Approved. The advisor has been told and the car moved to Quote.", values };
+}
+
+/** The tick under the parts list: who looked at it and when. Approving needs it; a change to the list clears it. */
+export async function confirmPartsList(jobId: string) {
+  const staff = await requirePermission("approveInspections");
+  const bundle = await loadInspection(jobId);
+  if (!bundle || bundle.inspection.status !== "submitted") return;
+  const admin = createAdminClient();
+  await admin.from("inspections").update({ parts_list_confirmed_at: new Date().toISOString(), parts_list_confirmed_by: staff.id, updated_by: staff.id }).eq("id", bundle.inspection.id);
+  const count = mergePartsList(cleanPartsList(bundle.inspection.parts_list)).length;
+  await logEvent(jobId, staff.id, "parts_list_checked", count ? `Parts list checked by ${staff.display_name} (${count} line${count === 1 ? "" : "s"})` : `${staff.display_name} confirmed no parts are needed`);
+  refresh(jobId);
 }
 
 /** The manager sends the report back with a reason. */

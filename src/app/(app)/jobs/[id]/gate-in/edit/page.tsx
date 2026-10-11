@@ -3,6 +3,7 @@ import { Notice, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { createClient } from "@/lib/supabase/server";
+import { getSettings } from "@/lib/settings";
 import { formatPlate } from "@/lib/types";
 import { updateGateIn } from "../../../actions";
 import { GateInForm } from "../../../../gate-in/GateInForm";
@@ -14,6 +15,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
   const card = await loadJobCard(supabase, id);
   if (!card || !card.gateIn) notFound();
   const g = card.gateIn;
+  const settings = await getSettings();
 
   return (
     <>
@@ -27,6 +29,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
           draftKey={`gate-in-edit-${id}`}
           isElectric={card.vehicle.fuel_type === "electric"}
           mode="edit"
+          recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string }[]}
           requests={card.requests.map((r) => r.text)}
           requestsLocked={g.is_complete}
           mileageUnit={g.mileage_unit ?? "km"}
@@ -36,6 +39,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
             vip: card.customer?.is_vip ?? card.vip?.is_vip ? "on" : "",
             vip_note: card.customer?.vip_note ?? card.vip?.vip_note ?? "",
             arrived_by: g.arrived_by,
+            recovery_type: ((g as unknown as { recovery_type?: string | null }).recovery_type ?? "") as string,
             condition: g.condition,
             fuel_level: g.fuel_level ?? "",
             battery_percent: g.battery_percent?.toString() ?? "",

@@ -11,11 +11,12 @@ type Company = { tradingName: string; legalName: string; legalNameAr?: string | 
  * the title with its numbers; two pale boxes; the sections; the footer row and the contact row. On a
  * phone the tables reshape; on a PC it reads like the A4 page. A sticky bar at the bottom can hold buttons.
  */
-export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabel = "Download PDF", bar, footer, uppercase = false, header = "full", children }: { uppercase?: boolean; /** plain: the logo centred on a light grey band (the approval and report links); full: the company block and TRN (quotations, invoices, receipts). */ header?: "full" | "plain"; company: Company; title: string; meta: DocMeta[]; boxes: DocBox[]; pdfHref?: string | null; pdfLabel?: string; bar?: ReactNode; footer?: ReactNode; children: ReactNode }) {
+export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabel = "Download PDF", bar, uppercase = false, header = "full", backHref = null, computerGenerated = false, children }: { uppercase?: boolean; /** The short first page this document was opened from. */ backHref?: string | null; /** The tax invoice carries the "computer generated document" line; nothing else does. */ computerGenerated?: boolean; /** plain: the logo centred on a light grey band (the approval and report links); full: the company block and TRN (quotations, invoices, receipts). */ header?: "full" | "plain"; company: Company; title: string; meta: DocMeta[]; boxes: DocBox[]; pdfHref?: string | null; pdfLabel?: string; bar?: ReactNode; children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#E9E9EC] text-[#111113]">
       <main className={`mx-auto w-full max-w-[794px] px-0 py-0 sm:px-4 sm:py-6 ${bar ? "pb-32" : "pb-10"}`}>
         <div className="bg-white sm:shadow-sm px-4 sm:px-11 flex flex-col">
+          {backHref ? <a href={backHref} className="self-start inline-flex min-h-11 items-center pt-2 text-sm font-bold">← Back</a> : null}
           {header === "plain" ? (
             <header className="-mx-4 sm:-mx-11 flex items-center justify-center bg-[#F4F4F5] border-b-[3px] border-[#111113] py-5 sm:py-7">
               <Logo className="h-14 sm:h-20 w-auto" alt={company.tradingName} />
@@ -64,18 +65,14 @@ export function CustomerDocument({ company, title, meta, boxes, pdfHref, pdfLabe
             {children}
             {pdfHref ? <a href={pdfHref} className="self-start inline-flex min-h-11 items-center rounded-lg border-2 border-[#111113] px-4 text-sm font-bold">{pdfLabel}</a> : null}
           </div>
-          <footer className="mt-auto border-t border-[#D4D4D8] pt-3.5 pb-3 flex flex-wrap justify-between gap-4 text-[10px] text-[#5F6368]">
-            <div className="flex flex-col gap-[3px]">
-              <span>This is a computer generated document which requires no stamp and signature.</span>
-              {footer ? <span>{footer}</span> : null}
-              <span>Terms and conditions apply · erp.ofjauto.com/terms</span>
+          <footer className="mt-auto border-t-[3px] border-[#111113] pt-3 pb-5 flex flex-col items-center gap-1.5 text-[10.5px]">
+            {computerGenerated ? <span className="text-[10px] text-[#5F6368]">This is a computer generated document which requires no stamp and signature.</span> : null}
+            <div className="flex flex-col items-center gap-0.5 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-x-[34px]">
+              {company.phone ? <span><span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368] mr-2">Tel</span>{company.phone}</span> : null}
+              {company.website ? <span><span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368] mr-2">Web</span>{company.website}</span> : null}
+              {company.email ? <span><span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368] mr-2">Email</span>{company.email}</span> : null}
             </div>
           </footer>
-          <div className="border-t-[3px] border-[#111113] pt-2.5 pb-5 flex flex-wrap justify-center items-baseline gap-x-[34px] gap-y-1 text-[10.5px]">
-            {company.phone ? <span><span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368] mr-2">Tel</span>{company.phone}</span> : null}
-            {company.website ? <span><span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368] mr-2">Web</span>{company.website}</span> : null}
-            {company.email ? <span><span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368] mr-2">Email</span>{company.email}</span> : null}
-          </div>
         </div>
       </main>
       {bar ? <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#D4D4D8] bg-white/95 backdrop-blur px-3 py-3 sm:px-6"><div className="mx-auto w-full max-w-[794px]">{bar}</div></div> : null}

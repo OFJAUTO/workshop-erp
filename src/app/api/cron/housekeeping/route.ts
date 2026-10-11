@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { addDays, dayStartIso, dubaiTimeOf } from "@/lib/calendar";
-import { dubaiDate, workingTimeOf } from "@/lib/jobs";
+import { dubaiDate, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { workingHoursBetween } from "@/lib/working-time";
 import { getSettings } from "@/lib/settings";
@@ -238,6 +238,21 @@ export async function GET(request: NextRequest) {
       await notifyStaff([job.gated_in_by].filter((x): x is string => !!x), n);
       await notifyRoles(["parts"], { ...n, href: `/parts/${p.job_id}` });
       report.partsDelayed = (report.partsDelayed ?? 0) + 1;
+    }
+  }
+
+  // 14. A part with no home (not needed, wrong or faulty, back with Parts) for three working days: the owner is told once.
+  {
+    const wt = workingTimeOf(settings);
+    const dayMinutes = Math.max(60, (wt.closeHour - wt.openHour) * 60);
+    const { data: homeless } = await admin.from("part_items").select("id, description, job_id, not_needed_at, exchange_at, updated_at, return_status, exchange_status, disposition, job:jobs(job_number)").eq("is_active", true).is("disposition", null).is("no_home_notified_at", null).or("not_needed_at.not.is.null,exchange_status.in.(needed,ordered),return_status.eq.returned").limit(100);
+    for (const p of homeless ?? []) {
+      const since = (p.not_needed_at ?? p.exchange_at ?? p.updated_at) as string | null;
+      if (!since || workingMinutesSince(since, wt) < 3 * dayMinutes) continue;
+      const job = p.job as unknown as { job_number: string } | null;
+      await notifyRoles(["owner"], { type: "parts_no_home", title: `Part with no home · ${job?.job_number ?? ""}`, body: `${p.description} has waited three working days for an ending: back to the supplier, to stock, or fitted with your approval.`, jobId: p.job_id as string, href: "/parts/no-home" });
+      await admin.from("part_items").update({ no_home_notified_at: new Date().toISOString() }).eq("id", p.id);
+      report.partsNoHome = (report.partsNoHome ?? 0) + 1;
     }
   }
 

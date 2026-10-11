@@ -155,9 +155,12 @@ await section("C-D handover and stickers", async () => {
   await page.locator("select[name=technician]").selectOption(techId);
   check("no scanning on the handover page (C1)", !/Scan/i.test(await page.textContent("body")));
   await page.locator("button[type=submit]:has-text('Hand over')").click();
-  await page.waitForURL((u) => /\/print\/stickers\//.test(u.toString()) || /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
+  await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
   await settle(page);
-  check("Hand over opens the sticker print page (D1, D2)", /\/print\/stickers\//.test(page.url()), page.url().slice(-100));
+  // H1: the stickers print from the waiting box, in a new tab; opening the page counts as printing.
+  const printLink = page.locator("a[href*='/print/stickers/']").first();
+  check("Hand over offers the sticker print page in a new tab (D1, H1)", (await printLink.count()) >= 1 && (await printLink.getAttribute("target")) === "_blank", page.url().slice(-100));
+  if (await printLink.count()) { await go(page, `${base}${await printLink.getAttribute("href")}`); }
   const ho = await sql("select id, status, stickers_printed_at, stickers from public.part_handovers where job_id = $1 order by created_at desc limit 1", [jobId]);
   check("handover is pending until the technician confirms (C2)", ho[0]?.status === "pending" && !!ho[0]?.stickers_printed_at, JSON.stringify(ho[0] ?? null).slice(0, 200));
   const notBefore = await sql("select issue_status from public.part_items where id = $1", [PA]);

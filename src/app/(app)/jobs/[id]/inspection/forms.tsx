@@ -1,24 +1,41 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
-import { useState } from "react";
 import { Input, Textarea } from "@/components/ui";
 
 const SAFE_TO_DRIVE = /safe to drive/i;
 
+/** Scrolls to the parts list when the server refused the approval because of its tick. */
+function ScrollOnError({ error }: { error: string | null }) {
+  useEffect(() => {
+    if (error && /parts list|no parts are needed/i.test(error)) document.getElementById("item-parts-list")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [error]);
+  return null;
+}
+
 /**
- * The workshop manager approves with a note (one-tap presets, most used first, combinable and editable; a
- * "safe to drive" note asks for a second tap), an optional internal note for the advisor, and agrees the
- * estimated hours. Without a pre-scan attached it asks first.
+ * The workshop manager's approval: one-tap notes (the five most used in one row, "More notes" for the rest
+ * under small headings; a selected note is green with a tick and a second tap removes its sentence; the
+ * green state follows hand edits), the note box, an internal note for the advisor, the estimated hours.
+ * The buttons live in the bar fixed to the bottom of the page (ReviewBar), nowhere else.
  */
-export function ApproveForm({ action, hasPrescan, techHours = null, presets = [], partsCount = 0 }: { action: FormAction; hasPrescan: boolean; techHours?: number | null; presets?: string[]; partsCount?: number }) {
+export function ApproveForm({ action, hasPrescan, techHours = null, groups = {}, usage = {} }: { action: FormAction; hasPrescan: boolean; techHours?: number | null; groups?: Record<string, string[]>; usage?: Record<string, number> }) {
   const [hours, setHours] = useState(techHours === null ? "" : String(techHours));
-  const [partsOk, setPartsOk] = useState(false);
   const [note, setNote] = useState("");
   const [used, setUsed] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
   const changed = techHours !== null && hours.trim() !== "" && Number(hours.replace(",", ".")) !== techHours;
+  const all = Array.from(new Set(Object.values(groups).flat()));
+  const top = [...all].sort((a, b) => (usage[b] ?? 0) - (usage[a] ?? 0)).slice(0, 5);
+  const selected = (p: string) => note.includes(p);
   function tap(p: string) {
+    if (selected(p)) {
+      setNote((n) => n.replace(p, "").replace(/\s{2,}/g, " ").trim());
+      setConfirming(null);
+      return;
+    }
     if (SAFE_TO_DRIVE.test(p) && confirming !== p) {
       setConfirming(p);
       return;
@@ -27,22 +44,39 @@ export function ApproveForm({ action, hasPrescan, techHours = null, presets = []
     setNote((n) => (n.trim() ? `${n.trim()} ${p}` : p));
     setUsed((u) => [...u, p]);
   }
+  const chip = (p: string) => (
+    <button key={p} type="button" onClick={() => tap(p)} aria-pressed={selected(p)} className={`min-h-10 rounded-control border px-2.5 text-left text-xs font-semibold ${selected(p) ? "border-green bg-green-soft text-green" : confirming === p ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+      {selected(p) ? "✓ " : ""}{confirming === p ? `Tap again to confirm: ${p}` : p}
+    </button>
+  );
+  const rest = Object.entries(groups).map(([g, list]) => [g, list.filter((p) => !top.includes(p))] as const).filter(([, list]) => list.length);
   return (
     <div
       onSubmitCapture={(e) => {
         if (!hasPrescan && !window.confirm("No pre-scan attached. Approve anyway?")) e.preventDefault();
       }}
     >
-      <ActionForm action={action} className="flex flex-col gap-3">
-        {(v) => (
+      <ActionForm id="approve-form" action={action} className="flex flex-col gap-3">
+        {(v, s) => (
           <>
-            {presets.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {presets.map((p) => (
-                  <button key={p} type="button" onClick={() => tap(p)} className={`min-h-10 rounded-control border px-2.5 text-left text-xs font-semibold ${confirming === p ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                    {confirming === p ? `Tap again to confirm: ${p}` : p}
-                  </button>
-                ))}
+            <ScrollOnError error={s.error ?? null} />
+            {all.length ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {top.map(chip)}
+                  {!more ? all.filter((p) => !top.includes(p) && selected(p)).map(chip) : null}
+                  <button type="button" onClick={() => setMore((m) => !m)} className="min-h-10 rounded-control px-2.5 text-xs font-bold text-muted underline underline-offset-4">{more ? "Fewer notes" : "More notes"}</button>
+                </div>
+                {more ? (
+                  <div className="flex flex-col gap-2 rounded-control bg-chip p-2">
+                    {rest.map(([g, list]) => (
+                      <div key={g} className="flex flex-col gap-1">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">{g}</span>
+                        <div className="flex flex-wrap gap-1.5">{list.map(chip)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <label className="flex flex-col gap-1">
@@ -74,16 +108,8 @@ export function ApproveForm({ action, hasPrescan, techHours = null, presets = []
             ) : (
               <p className="text-xs text-muted">The technician gave no estimated hours.</p>
             )}
-            {partsCount > 0 ? (
-              <button type="button" onClick={() => setPartsOk((v) => !v)} aria-pressed={partsOk} className={`min-h-12 rounded-control border-2 px-4 text-left text-sm font-bold ${partsOk ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                {partsOk ? "✓ Parts list checked" : `Parts list checked (${partsCount} line${partsCount === 1 ? "" : "s"}) · tap once you have looked at it`}
-              </button>
-            ) : (
-              <p className="text-xs text-muted">No parts on this report.</p>
-            )}
-            <input type="hidden" name="parts_list_confirmed" value={partsOk ? "1" : ""} />
             {!hasPrescan ? <p className="text-xs text-amber font-semibold">No pre-scan PDF is attached yet. You can still approve.</p> : null}
-            <SubmitButton>Approve report</SubmitButton>
+            <p className="text-xs text-muted">Approve, or send back, from the bar at the bottom of the screen.</p>
           </>
         )}
       </ActionForm>
@@ -91,20 +117,41 @@ export function ApproveForm({ action, hasPrescan, techHours = null, presets = []
   );
 }
 
-/** The workshop manager sends the report back with a reason. */
+/** The reason for sending the report back; the button is in the bar at the bottom. */
 export function ReturnForm({ action }: { action: FormAction }) {
   return (
-    <ActionForm action={action} className="flex flex-col gap-3 border-t border-line pt-4">
+    <ActionForm id="return-form" action={action} className="flex flex-col gap-3 border-t border-line pt-4">
       {(v) => (
-        <>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-semibold">Send back to the technician because</span>
-            <Textarea name="return_reason" defaultValue={v.return_reason} rows={2} required />
-          </label>
-          <SubmitButton tone="secondary">Send back</SubmitButton>
-        </>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-semibold">Send back to the technician because</span>
+          <Textarea name="return_reason" defaultValue={v.return_reason} rows={2} placeholder="Required to send back" />
+        </label>
       )}
     </ActionForm>
+  );
+}
+
+/** The slim bar fixed to the bottom of the review: the two decisions, and nowhere else on the page. */
+export function ReviewBar() {
+  const [back, setBack] = useState(false);
+  const submit = (id: string) => (document.getElementById(id) as HTMLFormElement | null)?.requestSubmit();
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur px-4 py-2.5">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+        {back ? (
+          <>
+            <span className="text-xs font-semibold text-muted">Write the reason in the box, then</span>
+            <button type="button" onClick={() => submit("return-form")} className="min-h-12 rounded-control border-2 border-ink bg-white px-4 text-sm font-bold">Send back now</button>
+            <button type="button" onClick={() => setBack(false)} className="min-h-12 rounded-control px-3 text-sm font-semibold text-muted">Cancel</button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={() => { setBack(true); document.getElementById("return-form")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className="min-h-12 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">Send back to the technician</button>
+            <button type="button" onClick={() => submit("approve-form")} className="ml-auto min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">Approve and send to the advisor</button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

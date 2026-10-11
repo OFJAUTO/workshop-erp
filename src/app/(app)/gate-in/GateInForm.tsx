@@ -34,6 +34,7 @@ export function GateInForm({
   estimates = [],
   comebacks = [],
   draftKey,
+  recoveryTypes = [],
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -55,7 +56,10 @@ export function GateInForm({
   comebacks?: { id: string; label: string; hint: string }[];
   /** Keeps what was typed in this browser until Save, so a closed tablet loses nothing. */
   draftKey?: string;
+  /** Normal / Full down / Closed box (Settings): asked when the car came on our recovery, carried onto the quotation. */
+  recoveryTypes?: { key: string; label: string }[];
 }) {
+  const [arrivedBy, setArrivedBy] = useState(initialValues?.arrived_by ?? "");
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
   const atBranch = branches.some((b) => b.name === location);
@@ -110,9 +114,16 @@ export function GateInForm({
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <Card className="flex flex-col gap-5">
               <SectionLabel>Arrival</SectionLabel>
-              <Field label="Arrived by">
-                <ChoiceButtons name="arrived_by" columns={2} defaultValue={v.arrived_by} options={ARRIVED_BY.map((o) => ({ ...o }))} />
-              </Field>
+              <div className="flex flex-col gap-5" onChange={(e) => { const t = e.target as HTMLInputElement; if (t.name === "arrived_by") setArrivedBy(t.value); }}>
+                <Field label="Arrived by">
+                  <ChoiceButtons name="arrived_by" columns={2} defaultValue={v.arrived_by} options={ARRIVED_BY.map((o) => ({ ...o }))} />
+                </Field>
+                {arrivedBy === "our_recovery" && recoveryTypes.length ? (
+                  <Field label="Recovery type" hint="Goes onto the quotation as the recovery line, with its usual price.">
+                    <ChoiceButtons name="recovery_type" columns={3} defaultValue={v.recovery_type || recoveryTypes[0].key} options={recoveryTypes.map((t) => ({ value: t.key, label: t.label }))} />
+                  </Field>
+                ) : null}
+              </div>
               <Field label="Vehicle condition">
                 <ChoiceButtons name="condition" columns={3} defaultValue={v.condition} options={CONDITIONS.map((o) => ({ ...o }))} />
               </Field>

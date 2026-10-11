@@ -24,7 +24,7 @@ export default async function StickerTestPage({ searchParams }: { searchParams: 
       <style>{stickerPageCss(w, h)}</style>
       <div className="bar"><span>Test sticker · {kind}</span><PrintNow /><a href="/settings/stickers" style={{ marginLeft: "auto" }}>Back to Settings</a></div>
       {kind === "part" ? <PartSticker w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, date: "10 Oct 2026", vin8: "HX266190" }} /> : null}
-      {kind === "battery" ? <BatterySticker size={ss.large} logoUrl={logo} d={{ qr, installed: "10 Oct 2026", until: "10 Oct 2027", vin: "WDCYC7CFXHX266190", title: ss.wording.battery, valid: ss.wording.battery_valid }} /> : null}
+      {kind === "battery" ? <BatterySticker size={ss.large} logoUrl={logo} d={{ qr, line: "Main battery · Varta AGM 95Ah", installed: "10 Oct 2026", until: "10 Oct 2027", vin: "WDCYC7CFXHX266190", title: ss.wording.battery, valid: ss.wording.battery_valid }} /> : null}
       {kind === "service" ? <ServiceSticker size={ss.large} logoUrl={logo} d={{ qr, servicedOn: "10 Oct 2026", mileage: "42,000 km", nextDate: "10 Oct 2027", nextMileage: "52,000 km", vin: "WDCYC7CFXHX266190", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} /> : null}
     </div>
   );

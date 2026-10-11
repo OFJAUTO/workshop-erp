@@ -178,16 +178,15 @@ await section("A3-A4 quotation", async () => {
   const { browser: b2, page: p2 } = await browserFor("parts");
   await go(p2, `${base}/parts/${jobId}`);
   check("VIN with Copy on the Parts screen (D1)", (await p2.getByRole("button", { name: "Copy the VIN" }).count()) >= 1);
-  // "Not available" sits behind "Cannot supply this one?" on the request's row (E5).
-  const cannot = p2.locator("summary:has-text('Cannot supply this one?')").first();
-  if (await cannot.count()) { await cannot.click(); await sleep(300); }
-  const na = p2.getByRole("button", { name: "Not available" }).first();
-  check("Not available button (D2)", (await na.count()) >= 1);
-  if (await na.count()) {
-    await na.click();
-    await p2.getByPlaceholder(/Note for the advisor/).fill("discontinued by the maker");
-    await p2.getByRole("button", { name: "Confirm: not available" }).click();
-    await submitted(p2);
+  // "Not available" sits in the row's three-dot menu (D2); the note is asked in a small prompt.
+  // The prompt for the note is accepted by the shared dialog handler in pw-lib.
+  const rowMenu = p2.getByRole("button", { name: "More for this part" }).first();
+  check("row menu present (D2)", (await rowMenu.count()) >= 1, (await p2.textContent("body") ?? "").slice(0, 120));
+  if (await rowMenu.count()) {
+    await rowMenu.click();
+    const na = p2.getByRole("button", { name: "Not available" }).first();
+    check("Not available in the menu (D2)", (await na.count()) >= 1);
+    if (await na.count()) { await na.click(); await sleep(3500); }
     check("request marked not available (D2)", /Not available/.test(await p2.textContent("body")));
   }
   await b2.close();

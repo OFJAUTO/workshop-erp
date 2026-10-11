@@ -10,8 +10,8 @@ import { newToken } from "./media";
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per, positions";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, created_at, created_by, updated_at";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per, positions, left_off, recovery_type";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active, position_ask, suggest_for";
 export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason, positions, note, catalogue_id";
@@ -127,11 +127,13 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
   const out = new Map<string, QuoteSummary>();
   if (!jobIds.length) return out;
   const admin = createAdminClient();
-  const [{ data: qs }, { data: parts }, { data: requests }] = await Promise.all([
-    admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at, completed_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
+  const [{ data: qs }, { data: parts }, { data: requests }, { data: doneJobs }] = await Promise.all([
+    admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at, completed_at, viewed_full_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
     admin.from("part_items").select("job_id, cost_aed, confirm_status").in("job_id", jobIds).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", jobIds).eq("is_active", true),
+    admin.from("jobs").select("id").in("id", jobIds).not("parts_pricing_done_at", "is", null),
   ]);
+  const pricingDone = new Set((doneJobs ?? []).map((j) => j.id as string));
   for (const id of jobIds) out.set(id, { quotation: null, waitingPrices: 0, waitingConfirm: 0, rejectedParts: 0, openRequests: 0, partsTotal: 0, partsPriced: 0, labourTotal: 0, labourDone: 0 });
   for (const q of (qs ?? []) as ({ job_id: string } & Record<string, unknown>)[]) {
     const s = out.get(q.job_id)!;
@@ -147,7 +149,7 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
       else s.partsPriced!++;
     }
   }
-  for (const r of (requests ?? []) as { job_id: string; status: string }[]) if (r.status === "open") out.get(r.job_id)!.openRequests++;
+  for (const r of (requests ?? []) as { job_id: string; status: string }[]) if (r.status === "open" && !pricingDone.has(r.job_id)) out.get(r.job_id)!.openRequests++;
   // Labour lines with hours on the latest quotation.
   const byQuotation = new Map<string, QuoteSummary>();
   for (const s of out.values()) if (s.quotation) byQuotation.set(s.quotation.id, s);
@@ -203,7 +205,7 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
         label: line.name,
         requested_text: [`× ${line.qty}`, line.positions.join(", "), line.note ?? ""].filter(Boolean).join(" · "),
         quantity: line.qty,
-        unit: "pc",
+        unit: line.unit === "set" ? "set" : "pc",
         positions: line.positions,
         note: line.note,
         catalogue_id: line.catalogue_id,
@@ -354,13 +356,16 @@ export { INSPECTION_BUCKET };
 export async function loadQuoteChecks(jobId: string | null): Promise<{ openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }> {
   if (!jobId) return { openRequests: 0, workshopEstimate: null };
   const admin = createAdminClient();
-  const [{ data: reqs }, { data: insp }] = await Promise.all([
+  const [{ data: reqs }, { data: insp }, { data: jobRow }] = await Promise.all([
     admin.from("part_requests").select("id").eq("job_id", jobId).eq("is_active", true).eq("status", "open"),
     admin.from("inspections").select("estimated_hours, estimated_hours_manager").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    admin.from("jobs").select("parts_pricing_done_at").eq("id", jobId).maybeSingle(),
   ]);
+  // Parts pressed "Pricing done": whatever is still open no longer holds the advisor.
+  const pricingDone = !!jobRow?.parts_pricing_done_at;
   const hours = insp?.estimated_hours === null || insp?.estimated_hours === undefined ? null : Number(insp.estimated_hours);
   const managerHours = insp?.estimated_hours_manager === null || insp?.estimated_hours_manager === undefined ? null : Number(insp.estimated_hours_manager);
-  return { openRequests: (reqs ?? []).length, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null } };
+  return { openRequests: pricingDone ? 0 : (reqs ?? []).length, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null } };
 }
 
 /** How long the advisor has been waiting on Parts: the oldest open request or unpriced part, in minutes, and who the Parts people are. */

@@ -10,8 +10,8 @@ const PER = ["job", "tyre", "wheel", "injector", "cylinder", "axle", "unit"];
  * One tap picks the way, one box takes the number. A fixed price says what it is per (job, tyre,
  * wheel and so on), the usual quantity, and the time allowance that feeds the technician's countdown.
  */
-export function ServicePriceField({ priceAed, defaultHours, pricePer = "job", usualQuantity = 1, timeAllowance = null }: { priceAed: number | null; defaultHours: number | null; pricePer?: string | null; usualQuantity?: number | null; timeAllowance?: number | null }) {
-  const [mode, setMode] = useState<"hours" | "fixed">(priceAed !== null ? "fixed" : "hours");
+export function ServicePriceField({ priceAed, defaultHours, pricePer = "job", usualQuantity = 1, timeAllowance = null, defaultMode = "hours" }: { priceAed: number | null; defaultHours: number | null; pricePer?: string | null; usualQuantity?: number | null; timeAllowance?: number | null; defaultMode?: "hours" | "fixed" }) {
+  const [mode, setMode] = useState<"hours" | "fixed">(priceAed !== null ? "fixed" : defaultHours !== null ? "hours" : defaultMode);
   const [value, setValue] = useState(priceAed !== null ? String(priceAed) : defaultHours !== null ? String(defaultHours) : "");
   const initialPer = (pricePer ?? "job").toLowerCase();
   const [per, setPer] = useState(PER.includes(initialPer) ? initialPer : "other");

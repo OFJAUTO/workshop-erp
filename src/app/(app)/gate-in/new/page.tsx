@@ -85,6 +85,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             draftKey={`gate-in-${v.id}`}
             isElectric={v.fuel_type === "electric"}
             branches={settings.branches}
+            recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string }[]}
             requests={appointment ? [appointment.reason] : []}
             mileageUnit={v.mileage_unit ?? "km"}
             mileageContext={{ modelYear: v.model_year, lastKm: v.last_mileage, lastVisitAt: visits[0]?.gated_in_at ?? null }}

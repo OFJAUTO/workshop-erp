@@ -171,7 +171,7 @@ export function Amount({ value, currency, size = px(12), bold = false, color = I
   );
 }
 
-export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, children }: { uppercase?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; children: ReactNode }) {
+export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, computerGenerated = false, children }: { uppercase?: boolean; /** The tax invoice carries the "computer generated document" line; nothing else does. */ computerGenerated?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; children: ReactNode }) {
   return (
     <Document title={title} author={company.tradingName} creator={company.tradingName} producer={company.tradingName}>
       <Page size="A4" style={styles.page}>
@@ -196,11 +196,10 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
         <View style={styles.footer} fixed>
           <View style={styles.footerMain}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.footerText}>This is a computer generated document which requires no stamp and signature.</Text>
+              {computerGenerated ? <Text style={styles.footerText}>This is a computer generated document which requires no stamp and signature.</Text> : null}
               {footerLines.filter(Boolean).map((l, i) => (
                 <Text key={i} style={styles.footerText}>{l}</Text>
               ))}
-              <Text style={styles.footerText}>Terms and conditions apply · {SITE_HOST}/terms</Text>
               <Text style={styles.footerText} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             </View>
             {qr ? (

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { CustomerDocument, DocSection } from "@/components/CustomerDocument";
 import { CustomerMedia, type CustomerMediaItem } from "@/components/CustomerMedia";
+import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { Badge, Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { formatDate } from "@/lib/format";
@@ -29,8 +30,9 @@ const TONE: Record<ItemStatus, "green" | "amber" | "red" | "neutral"> = { good: 
  * Average), what passed folded away, the workshop's note, the inspection fee note and the advisor's Call and
  * WhatsApp buttons. No staff names besides the advisor's first name on the buttons, no parts, no prices.
  */
-export default async function CustomerReportPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function CustomerReportPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ view?: string }> }) {
   const { token } = await params;
+  const { view } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const company = companyFromSettings(settings);
@@ -95,9 +97,36 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
       </div>
     ) : null;
 
+  const frontBoxes = customerBoxes({ full_name: customerName, company_name: card.customer?.company_name ?? null, phone: card.customer?.phone ?? null }, { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: car || vehicleTitle(vehicle) });
+  if (view !== "1") {
+    return (
+      <CustomerFront
+        company={company}
+        header="plain"
+        title="Inspection report"
+        meta={[{ label: "Job card", value: card.job.job_number }, { label: "Inspected", value: formatDate(insp.submitted_at) }, { label: "Approved", value: formatDate(insp.approved_at) }]}
+        boxes={[frontBoxes[1], frontBoxes[0]].filter(Boolean)}
+        view={{ href: `/report/${token}?view=1`, label: "View report" }}
+        contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
+      >
+        {insp.manager_note ? (
+          <div className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-1">
+            <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Workshop note</span>
+            <p className="text-sm whitespace-pre-wrap">{insp.manager_note}</p>
+          </div>
+        ) : null}
+        <p className={`text-base font-bold ${dangers.length ? "text-red" : ""}`}>
+          {dangers.length ? `${dangers.length} item${dangers.length === 1 ? "" : "s"} dangerous to drive · ` : ""}
+          {attentionCount === 0 ? "Nothing needs attention." : `${attentionCount} item${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} attention`}
+        </p>
+      </CustomerFront>
+    );
+  }
+
   return (
     <CustomerDocument
       header="plain"
+      backHref={`/report/${token}`}
       company={company}
       title="Inspection report"
       meta={[{ label: "Job card", value: card.job.job_number }, { label: "Inspected", value: formatDate(insp.submitted_at) }, { label: "Approved", value: formatDate(insp.approved_at) }]}
@@ -106,7 +135,6 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
         { title: "Customer", strong: card.customer?.company_name ?? customerName, rows: [["Name", card.customer?.company_name ? customerName : null], ["Mobile", card.customer?.phone ?? null]] },
       ]}
       pdfHref={`/api/pdf/report/${token}`}
-      footer={<>This report describes the condition found at inspection. A quotation follows separately.</>}
     >
       {dangers.length ? (
         <div className="rounded-lg border-2 border-red-bar bg-red-soft p-4 flex flex-col gap-2">

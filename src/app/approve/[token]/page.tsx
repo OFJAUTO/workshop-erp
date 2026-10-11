@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CustomerDocument, DocSection } from "@/components/CustomerDocument";
+import { ContactButtons, CustomerFront, advisorContact, customerBoxes } from "@/components/CustomerFront";
 import { Button, Field, Input, Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -19,7 +19,11 @@ export async function generateMetadata(): Promise<Metadata> {
   return customerPageMetadata("OFJ Automotive, Vehicle Check-In", "Review your vehicle's check-in video and job card, then approve to begin");
 }
 
-/** The job card the customer opens from the WhatsApp link: the same document look as every other page, with Approve in the bar at the bottom. No login. */
+/**
+ * The job card the customer opens from the WhatsApp link: the plain logo banner, the number and date, the
+ * customer and the car, the requests, the videos and photos, then one light green box with the terms tick,
+ * the name and the only Approve button, and Call and WhatsApp. No bar, no greeting, no small print.
+ */
 export default async function ApprovalPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
   const { token } = await params;
   const { error } = await searchParams;
@@ -43,11 +47,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     await notifyStaff([req.sent_by, job.gated_in_by].filter((x): x is string => !!x), { type: "approval_opened", title: `${req.sent_to_name ?? "The customer"} opened the approval link`, body: `${formatPlate(vehicle)} · ${job.job_number}`, jobId: job.id, href: `/jobs/${job.id}` });
   }
 
-  let advisor: { name: string; phone: string | null } | null = null;
-  if (req.sent_by) {
-    const [{ data: s }, { data: p }] = await Promise.all([admin.from("staff").select("display_name").eq("id", req.sent_by).maybeSingle(), admin.from("staff_private").select("phone").eq("staff_id", req.sent_by).maybeSingle()]);
-    if (s) advisor = { name: s.display_name, phone: p?.phone ?? null };
-  }
+  const advisor = await advisorContact(admin, [req.sent_by, job.gated_in_by]);
   const dirty = gateIn.cleanliness === "dirty" || gateIn.cleanliness === "very_dirty";
   const approved = !!req.approved_at;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
@@ -57,7 +57,6 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   const declarationAr = req.declaration_text_ar ?? settings.declaration_text_ar;
   const feeNoticeEn = req.inspection_fee_notice ?? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed);
   const feeNoticeAr = req.inspection_fee_notice_ar ?? feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed);
-  const waDigits = advisor?.phone ? advisor.phone.replace(/[^\d]/g, "") : "";
   const details: [string, string | null][] = [
     ["Received at", location || null],
     ["Arrived by", labelOf(ARRIVED_BY, gateIn.arrived_by)],
@@ -72,76 +71,62 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   ];
 
   return (
-    <CustomerDocument
-      header="plain"
+    <CustomerFront
       company={company}
+      header="plain"
       title="Job card"
       meta={[{ label: "Job card", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }]}
-      boxes={[
-        { title: "Customer", strong: card.customer?.company_name ?? customerName, rows: [["Name", card.customer?.company_name ? customerName : null], ["Mobile", card.customer?.phone ?? null]] },
-        { title: "Vehicle", strong: car || "Vehicle", rows: [["Variant", vehicle.variant], ["Plate", formatPlate(vehicle)], ["VIN", vehicle.vin]] },
-      ]}
-      footer={<>{advisor ? <>Questions? {advisor.phone ? <a href={`tel:${advisor.phone}`} className="font-semibold underline underline-offset-4">Call {advisor.name}</a> : advisor.name}{waDigits ? <> · <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-4">WhatsApp</a></> : null}. </> : null}{company.legalName} · TRN {company.trn}.</>}
-      bar={!approved ? (
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-semibold hidden sm:inline">The approval is at the bottom of the page.</span>
-          <a href="#approval" className="inline-flex min-h-14 w-full sm:w-auto sm:min-w-56 items-center justify-center rounded-lg bg-[#111113] px-6 text-base font-extrabold text-white">Approve ↓</a>
-        </div>
-      ) : null}
+      boxes={customerBoxes({ full_name: customerName, company_name: card.customer?.company_name ?? null, phone: card.customer?.phone ?? null }, { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: car || "Vehicle" })}
+      action={
+        !approved ? (
+          <div id="approval" className="rounded-lg border-2 border-green bg-green-soft p-4 flex flex-col gap-1">
+            <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Your approval</span>
+            <form id="approval-form" method="post" action={`/api/approve/${token}`} className="flex flex-col gap-3 py-1">
+              <p className="text-xs text-[#5F6368]">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
+              {feeNoticeEn ? (
+                <div className="rounded-lg bg-white px-3 py-2.5 flex flex-col gap-1.5">
+                  <span className="text-sm font-bold">{feeNoticeEn}</span>
+                  {feeNoticeAr ? <span className="text-sm font-bold" dir="rtl" lang="ar">{feeNoticeAr}</span> : null}
+                </div>
+              ) : null}
+              <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-[#D4D4D8] bg-white p-3 has-[:checked]:border-[#111113]">
+                <input type="checkbox" name="agree" required className="mt-1 h-5 w-5 accent-ink shrink-0" />
+                <span className="flex flex-col gap-2">
+                  <span className="text-sm font-medium">{declaration}</span>
+                  <span className="text-sm font-medium" dir="rtl" lang="ar">{declarationAr}</span>
+                  <Link href={`/terms?t=${encodeURIComponent(token)}`} className="text-xs font-bold underline underline-offset-4">Read the terms and conditions</Link>
+                </span>
+              </label>
+              <Field label="Your full name">
+                <Input name="approver_name" defaultValue={req.sent_to_name ?? ""} required minLength={2} autoComplete="name" className="bg-white" />
+              </Field>
+              <Button type="submit" size="lg" className="w-full">Approve</Button>
+            </form>
+          </div>
+        ) : null
+      }
+      contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
     >
       {approved ? <Notice tone="success">Approved by {req.approver_name} on {formatDateTime(req.approved_at)}. Thank you.</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {advisor && (advisor.phone || waDigits) ? (
-        <div className="grid grid-cols-2 gap-3">
-          {advisor.phone ? <a href={`tel:${advisor.phone}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call {advisor.name.split(" ")[0]}</a> : null}
-          {waDigits ? <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-base font-extrabold">WhatsApp</a> : null}
-        </div>
-      ) : null}
-      <DocSection title="Your requests">
+      <section className="flex flex-col gap-1">
+        <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Your requests</h2>
         <ol className="list-decimal pl-5 text-sm flex flex-col gap-0.5 py-1">
           {requests.length ? requests.map((r) => <li key={r.id}>{r.text}</li>) : <li className="whitespace-pre-wrap list-none -ml-5">{gateIn.customer_requests}</li>}
         </ol>
-      </DocSection>
-      <DocSection title="Check-in videos and photos">
+      </section>
+      <section className="flex flex-col gap-1">
+        <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
         <div className="py-1"><MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} damageNote={gateIn.damage_note} stacked /></div>
         {dirty ? <p className="text-xs font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
-      </DocSection>
-      <DocSection title="Check-in details">
-        <div className="text-sm grid grid-cols-[9rem_1fr] sm:grid-cols-[12rem_1fr] gap-y-1 py-1">
-          {details.filter(([, v]) => v).map(([k, v]) => (<div key={k} className="contents"><span className="text-muted">{k}</span><span className="font-medium">{v}</span></div>))}
-        </div>
         {gateIn.dash_cam ? <p className="text-xs font-semibold">Dash cam fitted: it will be disconnected as per the terms and conditions.</p> : null}
-      </DocSection>
-      <DocSection title="Terms and conditions">
-        <p className="text-sm py-1">The full terms open on their own page, in English and Arabic. A button there brings you back here.{" "}
-          <Link href={`/terms?t=${encodeURIComponent(token)}`} className="font-bold underline underline-offset-4">Read the terms and conditions</Link>
-        </p>
-      </DocSection>
-      {!approved ? (
-        <div id="approval" className="rounded-lg border-2 border-green bg-green-soft p-4 flex flex-col gap-1 scroll-mt-4">
-          <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Your approval</span>
-          <form id="approval-form" method="post" action={`/api/approve/${token}`} className="flex flex-col gap-3 py-1">
-            <p className="text-xs text-muted">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
-            {feeNoticeEn ? (
-              <div className="rounded-control bg-chip px-3 py-2.5 flex flex-col gap-1.5">
-                <span className="text-sm font-bold">{feeNoticeEn}</span>
-                {feeNoticeAr ? <span className="text-sm font-bold" dir="rtl" lang="ar">{feeNoticeAr}</span> : null}
-              </div>
-            ) : null}
-            <label className="flex items-start gap-3 cursor-pointer rounded-control border border-line-strong bg-white p-3 has-[:checked]:border-ink">
-              <input type="checkbox" name="agree" required className="mt-1 h-5 w-5 accent-ink shrink-0" />
-              <span className="flex flex-col gap-2">
-                <span className="text-sm font-medium">{declaration}</span>
-                <span className="text-sm font-medium" dir="rtl" lang="ar">{declarationAr}</span>
-              </span>
-            </label>
-            <Field label="Your full name">
-              <Input name="approver_name" defaultValue={req.sent_to_name ?? ""} required minLength={2} autoComplete="name" />
-            </Field>
-            <Button type="submit" size="lg" className="w-full">Approve</Button>
-          </form>
+      </section>
+      <details className="rounded-lg border border-[#D4D4D8]">
+        <summary className="cursor-pointer min-h-12 flex items-center px-4 text-sm font-bold">Check-in details</summary>
+        <div className="px-4 pb-4 text-sm grid grid-cols-[9rem_1fr] sm:grid-cols-[12rem_1fr] gap-y-1">
+          {details.filter(([, v]) => v).map(([k, v]) => (<div key={k} className="contents"><span className="text-[#5F6368]">{k}</span><span className="font-medium">{v}</span></div>))}
         </div>
-      ) : null}
-    </CustomerDocument>
+      </details>
+    </CustomerFront>
   );
 }

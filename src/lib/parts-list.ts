@@ -17,9 +17,11 @@ export type PartsListEntry = {
   item_key: string | null;
   source: "item" | "tyre" | "measure" | "custom";
   note: string | null;
+  /** "set" for parts sold per axle or per set. */
+  unit?: "pc" | "set";
 };
 
-export type CatalogueRow = { id: string; category: string; name: string; needs_position: boolean; usage_count: number };
+export type CatalogueRow = { id: string; category: string; name: string; needs_position: boolean; usage_count: number; /** Sold per set (brake pads, wiper blades...): the choice is Front / Rear and the quantity counts sets. */ unit?: "each" | "set" };
 
 export const PART_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right", "Front", "Rear", "Left", "Right"] as const;
 
@@ -53,6 +55,7 @@ export function cleanPartsList(raw: unknown): PartsListEntry[] {
       item_key: e.item_key ? String(e.item_key).slice(0, 120) : null,
       source,
       note: e.note ? String(e.note).trim().slice(0, 300) || null : null,
+      unit: e.unit === "set" ? "set" : "pc",
     });
   }
   return out;
@@ -69,6 +72,7 @@ export type MergedPartLine = {
   item_key: string | null;
   source: PartsListEntry["source"];
   note: string | null;
+  unit: "pc" | "set";
   /** The entries behind the line. */
   entries: PartsListEntry[];
 };
@@ -80,7 +84,7 @@ export function mergePartsList(list: PartsListEntry[]): MergedPartLine[] {
     const key = e.name.trim().toLowerCase();
     const cur = map.get(key);
     if (!cur) {
-      map.set(key, { key, name: e.name.trim(), qty: e.qty, positions: [...e.positions], catalogue_id: e.catalogue_id, item_key: e.item_key, source: e.source, note: e.note, entries: [e] });
+      map.set(key, { key, name: e.name.trim(), qty: e.qty, positions: [...e.positions], catalogue_id: e.catalogue_id, item_key: e.item_key, source: e.source, note: e.note, unit: e.unit === "set" ? "set" : "pc", entries: [e] });
       continue;
     }
     cur.qty = Math.round((cur.qty + e.qty) * 100) / 100;
@@ -92,8 +96,9 @@ export function mergePartsList(list: PartsListEntry[]): MergedPartLine[] {
   return Array.from(map.values());
 }
 
-/** "Brake pads × 2 · Front left, Front right". */
-export function partsListLine(e: { name: string; qty: number; positions: string[] }) {
+/** "Brake pads × 2 · Front left, Front right", or for a set "Brake pads · front · 1 set". */
+export function partsListLine(e: { name: string; qty: number; positions: string[]; unit?: "pc" | "set" }) {
+  if (e.unit === "set") return `${e.name}${e.positions.length ? ` · ${e.positions.join(", ").toLowerCase()}` : ""} · ${e.qty} set${e.qty === 1 ? "" : "s"}`;
   return `${e.name} × ${e.qty}${e.positions.length ? ` · ${e.positions.join(", ")}` : ""}`;
 }
 
@@ -126,6 +131,7 @@ export function tyreEntriesFrom(m: Record<string, string | number | null | undef
       item_key: `tyre:${p.key}`,
       source: "tyre",
       note: [brand ? `currently ${brand}` : "", action === "replace_now" ? "replace now" : "replace soon"].filter(Boolean).join(", ") || null,
+      unit: "pc",
     });
   }
   return out;
@@ -135,7 +141,7 @@ export function tyreEntriesFrom(m: Record<string, string | number | null | undef
 export function batteryEntriesFrom(m: Record<string, string | number | null | undefined>, catalogue: CatalogueRow[] = []): PartsListEntry[] {
   if (String(m.battery_health ?? "") !== "replace") return [];
   const row = catalogue.find((c) => /^main battery$/i.test(c.name)) ?? catalogue.find((c) => /battery/i.test(c.name)) ?? null;
-  return [{ id: "measure-battery", catalogue_id: row?.id ?? null, name: row?.name ?? "Main battery", qty: 1, positions: [], item_key: "measure:battery_health", source: "measure", note: m.battery_voltage ? `${m.battery_voltage} V` : null }];
+  return [{ id: "measure-battery", catalogue_id: row?.id ?? null, name: row?.name ?? "Main battery", qty: 1, positions: [], item_key: "measure:battery_health", source: "measure", note: m.battery_voltage ? `${m.battery_voltage} V` : null, unit: "pc" }];
 }
 
 /** Replaces the entries of one automatic source (tyres, battery) with a fresh set; returns the same list when nothing changed. */
@@ -157,7 +163,7 @@ export function suggestCatalogue(label: string, catalogue: CatalogueRow[], learn
   const seen = new Set<string>();
   for (const name of learned) {
     const row = catalogue.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    const r = row ?? { id: `custom:${name}`, category: "Custom", name, needs_position: false, usage_count: 0 };
+    const r = row ?? { id: `custom:${name}`, category: "Custom", name, needs_position: false, usage_count: 0, unit: "each" as const };
     if (!seen.has(r.id)) {
       seen.add(r.id);
       out.push(r);

@@ -47,6 +47,8 @@ export type InspectionRow = {
   parts_list: unknown;
   parts_list_confirmed_at: string | null;
   parts_list_confirmed_by: string | null;
+  /** Bad items the technician said need no part (item keys). */
+  no_part_items: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -126,7 +128,7 @@ export type InspectionBundle = {
 };
 
 const INSPECTION_SELECT =
-  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, scan_read_at, scan_not_possible_reason, scan_approved_by, scan_approved_at, estimated_hours, estimated_hours_manager, estimate_reason, big_job_tags, created_at, updated_at, requests_note, manager_note_internal, parts_list, parts_list_confirmed_at, parts_list_confirmed_by";
+  "id, job_id, path, technician_id, status, started_at, submitted_at, returned_at, return_reason, approved_at, approved_by, technician_notes, manager_note, checklist, measurements, target_minutes, elapsed_minutes, overrun_minutes, overdue_warned_at, show_prescan_to_customer, unlocked_until, measurements_original, measurements_edited_by, measurements_edited_at, scan_read_at, scan_not_possible_reason, scan_approved_by, scan_approved_at, estimated_hours, estimated_hours_manager, estimate_reason, big_job_tags, created_at, updated_at, requests_note, manager_note_internal, parts_list, parts_list_confirmed_at, parts_list_confirmed_by, no_part_items";
 
 /** The mechanical inspection of a job with everything attached, or null when none exists yet. */
 export async function loadInspection(jobId: string, path: "mechanical" | "bodyshop" = "mechanical"): Promise<InspectionBundle | null> {

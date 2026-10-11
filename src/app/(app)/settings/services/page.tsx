@@ -13,7 +13,7 @@ const DEPT_LABELS: Record<string, string> = { mechanical: "Mechanical", bodyshop
 
 type SuggestOption = { value: string; label: string };
 
-function ServiceFields({ s, categories, suggestOptions }: { s: Service | null; categories: ServiceCategory[]; suggestOptions: SuggestOption[] }) {
+function ServiceFields({ s, categories, suggestOptions, defaultMode = "hours" }: { s: Service | null; categories: ServiceCategory[]; suggestOptions: SuggestOption[]; defaultMode?: "hours" | "fixed" }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <Field label="Name">
@@ -26,7 +26,7 @@ function ServiceFields({ s, categories, suggestOptions }: { s: Service | null; c
           ))}
         </Select>
       </Field>
-      <ServicePriceField priceAed={s?.price_aed ?? null} defaultHours={s?.default_hours ?? null} pricePer={s?.price_per ?? "job"} usualQuantity={s?.usual_quantity ?? 1} timeAllowance={s?.time_allowance_hours ?? null} />
+      <ServicePriceField priceAed={s?.price_aed ?? null} defaultHours={s?.default_hours ?? null} pricePer={s?.price_per ?? "job"} usualQuantity={s?.usual_quantity ?? 1} timeAllowance={s?.time_allowance_hours ?? null} defaultMode={defaultMode} />
       <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="includes_oil_change" defaultChecked={!!s?.includes_oil_change} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Includes an oil change</span><span className="block text-xs text-muted">Jobs with this service need the oil service sticker, and QC checks it.</span></span></label>
       {s ? (
         <Field label="Category">
@@ -56,9 +56,12 @@ function ServiceFields({ s, categories, suggestOptions }: { s: Service | null; c
 }
 
 /** The owner's services list: categories and services behind "Add service" on quotations and estimates. */
-export default async function ServicesPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
+export default async function ServicesPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; list?: string }> }) {
   await requirePermission("manageServices");
-  const { message, error } = await searchParams;
+  const { message, error, list } = await searchParams;
+  // Two lists with the same categories: Labour jobs (priced by hours) and Services (a fixed price per unit).
+  const showLabour = list !== "services";
+  const kindWord = showLabour ? "labour job" : "service";
   const [{ categories, services }, settings] = await Promise.all([loadServices(null), getSettings()]);
   const suggestOptions: SuggestOption[] = [
     ...checklistItems((settings.inspection_checklist ?? []) as ChecklistSection[]).map((i) => ({ value: i.key, label: `${i.sectionTitle} · ${i.label}` })),
@@ -69,10 +72,14 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Jobs and services" subtitle='The one list behind "+ Add" on quotations and estimates: categories, jobs by hours or at a fixed price per unit, usual quantity, time allowance, the parts to ask for, and which report findings each job answers.' actions={<LinkButton href="/settings" tone="secondary">Back to settings</LinkButton>} />
+      <PageHeader title="Labour jobs and services" subtitle='Two lists behind "+ Add line" on quotations and estimates: labour jobs priced by hours and services at a fixed price per unit, in the same categories.' actions={<LinkButton href="/settings" tone="secondary">Back to settings</LinkButton>} />
+      <div className="grid grid-cols-2 gap-2 max-w-xl">
+        <LinkButton href="/settings/services?list=labour" tone={showLabour ? "primary" : "secondary"} size="lg">Labour jobs (by hours)</LinkButton>
+        <LinkButton href="/settings/services?list=services" tone={showLabour ? "secondary" : "primary"} size="lg">Services (fixed price)</LinkButton>
+      </div>
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {customJobs.length ? (
+      {customJobs.length && showLabour ? (
         <Card className="flex flex-col gap-3 border-ink">
           <SectionLabel right={`${customJobs.length}`}>Suggestions: custom jobs typed on quotations</SectionLabel>
           <ul className="divide-y divide-line">
@@ -101,7 +108,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
       </Card>
       {categories.length === 0 ? <Empty title="No categories yet" /> : null}
       {categories.map((c, ci) => {
-        const items = services.filter((s) => s.category_id === c.id);
+        const items = services.filter((s) => s.category_id === c.id && (showLabour ? s.price_aed === null : s.price_aed !== null));
         return (
           <Card key={c.id} id={`cat-${c.id}`} className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -109,7 +116,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
                 <Input name="name" defaultValue={c.name} className="font-bold w-64" aria-label="Category name" />
                 <Button type="submit" tone="secondary" size="md">Rename</Button>
               </form>
-              <Badge tone="neutral">{items.length} service{items.length === 1 ? "" : "s"}</Badge>
+              <Badge tone="neutral">{items.length} {kindWord}{items.length === 1 ? "" : "s"}</Badge>
               <span className="ml-auto flex gap-1">
                 <form action={moveCategory.bind(null, c.id, "up")}>
                   <Button type="submit" tone="secondary" size="md" disabled={ci === 0} aria-label="Move the category up">↑</Button>
@@ -156,11 +163,11 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
               ))}
             </ul>
             <details className="rounded-control border border-dashed border-line-strong p-3">
-              <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">+ Add a service to {c.name}</summary>
+              <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">+ Add a {kindWord} to {c.name}</summary>
               <form action={addService.bind(null, c.id)} className="mt-3 flex flex-col gap-3">
-                <ServiceFields s={null} categories={categories} suggestOptions={suggestOptions} />
+                <ServiceFields s={null} categories={categories} suggestOptions={suggestOptions} defaultMode={showLabour ? "hours" : "fixed"} />
                 <div>
-                  <Button type="submit" size="md">Add service</Button>
+                  <Button type="submit" size="md">Add {kindWord}</Button>
                 </div>
               </form>
             </details>

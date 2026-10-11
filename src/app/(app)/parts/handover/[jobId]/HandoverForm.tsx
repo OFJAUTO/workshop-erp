@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { Badge, Button, Input, Select, Textarea } from "@/components/ui";
 
-export type HandoverPart = { id: string; description: string; part_number: string | null; quantity: number; ready: boolean; why: string | null; battery: boolean; defaultStickers: number; brand: string | null; model: string | null; serial: string | null };
+export type HandoverPart = { id: string; description: string; part_number: string | null; quantity: number; ready: boolean; why: string | null; battery: boolean; defaultStickers: number; brand: string | null; model: string | null; serial: string | null; /** The part's one state, in words. */ state?: string; /** The technician left it unticked last time. */ notReceived?: boolean };
 export type HandoverTech = { id: string; display_name: string; personalDevice: boolean };
 
 /**
  * The handover: tick what is going now, a sticker counter per part (locked to the quantity for a
  * battery), the technician, one tap. The technician confirms on his own device or signs at the counter.
  */
-export function HandoverForm({ parts, technicians, defaultTechnician, plate, canSignFor, batteryRequired, action }: { parts: HandoverPart[]; technicians: HandoverTech[]; defaultTechnician: string | null; plate: string; canSignFor: boolean; batteryRequired: boolean; action: (formData: FormData) => void }) {
+export function HandoverForm({ parts, technicians, defaultTechnician, plate, canSignFor, signerNeedsPin = false, batteryRequired, action }: { parts: HandoverPart[]; technicians: HandoverTech[]; defaultTechnician: string | null; plate: string; canSignFor: boolean; /** The workshop manager signs with his own PIN; the owner needs none. */ signerNeedsPin?: boolean; batteryRequired: boolean; action: (formData: FormData) => void }) {
   const [ticked, setTicked] = useState<Record<string, boolean>>(Object.fromEntries(parts.map((p) => [p.id, p.ready])));
   const [stickers, setStickers] = useState<Record<string, number>>(Object.fromEntries(parts.map((p) => [p.id, p.battery && batteryRequired ? p.quantity : Math.min(p.quantity, p.defaultStickers)])));
   const [tech, setTech] = useState(defaultTechnician ?? technicians[0]?.id ?? "");
@@ -35,7 +35,7 @@ export function HandoverForm({ parts, technicians, defaultTechnician, plate, can
                     <span className="block text-xs text-muted">{p.part_number ?? "no part number"} · × {p.quantity}{p.battery ? " · battery" : ""}</span>
                   </span>
                 </label>
-                {!p.ready ? <span className="text-xs font-semibold text-muted">{p.why}</span> : null}
+                {!p.ready ? <span className="text-xs font-semibold text-muted">{p.why}</span> : p.notReceived ? <span className="text-xs font-semibold text-amber">Not received last time</span> : null}
                 {p.ready ? (
                   <span className="inline-flex items-center gap-1 text-xs">
                     <span className="font-semibold text-muted">{p.battery ? "Warranty stickers" : "Stickers"}</span>
@@ -70,6 +70,7 @@ export function HandoverForm({ parts, technicians, defaultTechnician, plate, can
         {canSignFor ? (
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="sign_for" checked={signFor} onChange={(e) => setSignFor(e.target.checked)} className="h-5 w-5 accent-ink" />I sign for {who?.display_name ?? "the technician"} (manager or owner, logged)</label>
         ) : null}
+        {signFor && signerNeedsPin ? <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Your own PIN (never the technician&apos;s)<Input name="signer_pin" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" required autoComplete="off" className="w-32 text-center text-xl tracking-[0.4em]" /></label> : null}
         <Textarea name="note" rows={1} placeholder="Note (optional)" textCase="sentence" />
         <div><Button type="submit" size="lg" disabled={count === 0}>{stickerCount ? `Hand over and print ${stickerCount} sticker${stickerCount === 1 ? "" : "s"}` : `Hand over ${count} part${count === 1 ? "" : "s"}`}</Button></div>
       </div>
@@ -77,21 +78,49 @@ export function HandoverForm({ parts, technicians, defaultTechnician, plate, can
   );
 }
 
-/** "Sign here": a small four-digit box for the technician at the counter; it opens nothing else. */
-export function SignHere({ jobId, takerName, canSignFor, action }: { jobId: string; takerName: string; canSignFor: boolean; action: (formData: FormData) => void }) {
+/**
+ * "Sign here" at the counter: the technician ticks what he receives (everything to start) and types his
+ * PIN; nothing else opens. A manager ticks "I sign instead" and types his own PIN; the owner needs none.
+ */
+export function SignHere({ jobId, takerName, items, canSignFor, signerNeedsPin = false, action }: { jobId: string; takerName: string; items: { id: string; description: string; quantity: number }[]; canSignFor: boolean; signerNeedsPin?: boolean; action: (formData: FormData) => void }) {
   const [open, setOpen] = useState(false);
   const [pin, setPin] = useState("");
+  const [signFor, setSignFor] = useState(false);
+  const [off, setOff] = useState<Set<string>>(() => new Set());
   if (!open) return <Button type="button" size="md" onClick={() => setOpen(true)}>Sign here</Button>;
+  const received = items.filter((i) => !off.has(i.id));
+  const pinOk = signFor ? (!signerNeedsPin || pin.length === 4) : pin.length === 4;
   return (
-    <form action={action} className="rounded-card border-2 border-ink p-4 flex flex-col gap-3 bg-white max-w-sm">
+    <form action={action} className="rounded-card border-2 border-ink p-4 flex flex-col gap-3 bg-white max-w-md">
       <input type="hidden" name="job_id" value={jobId} />
-      <p className="text-base font-bold">{takerName}, type your PIN to confirm you received these parts.</p>
-      <Input name="pin" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" autoFocus className="text-center text-2xl tracking-[0.5em] w-40" aria-label="PIN" />
+      <input type="hidden" name="has_ticks" value="1" />
+      {received.map((i) => <input key={i.id} type="hidden" name="received" value={i.id} />)}
+      <p className="text-base font-bold">{takerName}, tick what you have in your hands, then type your PIN.</p>
+      <ul className="divide-y divide-line">
+        {items.map((i) => {
+          const on = !off.has(i.id);
+          return (
+            <li key={i.id}>
+              <button type="button" onClick={() => setOff((s) => { const n = new Set(s); if (n.has(i.id)) n.delete(i.id); else n.add(i.id); return n; })} aria-pressed={on} className={`flex w-full min-h-11 items-center gap-3 text-left text-sm ${on ? "" : "opacity-60"}`}>
+                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${on ? "bg-green text-white" : "border border-line-strong text-transparent"}`}>✓</span>
+                <span className="flex-1 font-semibold">{i.description}</span>
+                <span className="text-muted">× {i.quantity}</span>
+                {!on ? <span className="text-xs font-semibold text-amber">Not received</span> : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {canSignFor ? <label className="flex items-center gap-2 text-xs"><input type="checkbox" name="sign_for" checked={signFor} onChange={(e) => { setSignFor(e.target.checked); setPin(""); }} className="h-5 w-5 accent-ink" />I sign for {takerName} instead (manager or owner, logged)</label> : null}
+      {!signFor || signerNeedsPin ? (
+        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">{signFor ? "Your own PIN (manager)" : `${takerName}'s PIN`}
+          <Input name={signFor ? "signer_pin" : "pin"} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" autoFocus autoComplete="off" className="text-center text-2xl tracking-[0.5em] w-40" aria-label="PIN" />
+        </label>
+      ) : <span className="text-xs text-muted">The owner signs without a PIN.</span>}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="lg" disabled={pin.length !== 4}>Confirm</Button>
+        <Button type="submit" size="lg" disabled={!pinOk || received.length === 0}>{received.length === items.length ? "Confirm" : `Confirm ${received.length} of ${items.length}`}</Button>
         <Button type="button" tone="ghost" size="lg" onClick={() => { setOpen(false); setPin(""); }}>Cancel</Button>
       </div>
-      {canSignFor ? <label className="flex items-center gap-2 text-xs"><input type="checkbox" name="sign_for" className="h-5 w-5 accent-ink" />I sign for {takerName} instead (manager or owner, logged)</label> : null}
     </form>
   );
 }

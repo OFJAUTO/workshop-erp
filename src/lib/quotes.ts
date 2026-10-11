@@ -79,6 +79,10 @@ export type QuoteLine = {
   markup_confirmed: boolean;
   /** "Front", "Rear", "Front left"...: one job on several positions is one row, with the quantity to match. */
   positions?: string[] | null;
+  /** A part left off this quotation: stays on the car's list, greyed, counts for nothing, is not ordered. */
+  left_off?: boolean;
+  /** Normal / Full down / Closed box, from Settings. */
+  recovery_type?: string | null;
 };
 
 export type QuoteRow = {
@@ -133,6 +137,12 @@ export type QuoteRow = {
   rounded_total_aed: number | null;
   estimated_days: number | null;
   declined_note: string | null;
+  /** When the customer opened the full document; compared with responded_at it says whether it was read before approving. */
+  viewed_full_at: string | null;
+  /** Set when the advisor marked it declined after talking to the customer. */
+  declined_by: string | null;
+  /** Parts changed a price after this version was sent. */
+  parts_price_changed_at: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -227,8 +237,8 @@ export function isHidden(l: Pick<QuoteLine, "line_type" | "visible_to_customer">
   return (l.line_type === "recovery" || l.line_type === "other") && l.visible_to_customer === false;
 }
 /** An option the advisor did not pick: it counts for nothing and the customer never sees it. */
-export function isUnchosen(l: { option_group?: string | null; chosen?: boolean }) {
-  return !!l.option_group && l.chosen === false;
+export function isUnchosen(l: { option_group?: string | null; chosen?: boolean; left_off?: boolean }) {
+  return (!!l.option_group && l.chosen === false) || !!l.left_off;
 }
 /** The quotation-wide discount applies to labour and services only, never to anything with a cost. */
 export function takesTotalDiscount(l: Pick<QuoteLine, "line_type" | "unit_cost" | "visible_to_customer">) {
@@ -295,8 +305,11 @@ export type QuoteTotals = {
   /** What those lines, hidden or shown, cost us. */
   otherCost: number;
   hiddenCost: number;
+  /** What the recovery lines cost us (part of otherCost). */
+  recoveryCost: number;
   bankCharge: number;
   profit: number;
+  labourMargin: number;
   deposit: number;
 };
 
@@ -317,7 +330,7 @@ export function quoteTotals(
   q: { discount_percent: number; vat_percent: number; payment_by_card?: boolean; rounded_total_aed?: number | null },
   opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number } = {},
 ): QuoteTotals {
-  const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && (!opts.onlyApproved || l.customer_approved === true));
+  const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
   const discountBase = round2(counted.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
   const discount = round2(discountBase * ((q.discount_percent ?? 0) / 100));
@@ -343,12 +356,14 @@ export function quoteTotals(
   const otherSell = round2(other.filter((l) => !isHidden(l)).reduce((a, l) => a + lineTotal(l), 0));
   const otherCost = round2(other.reduce((a, l) => a + lineCost(l), 0));
   const feeLine = counted.find((l) => l.fee_kind === "bank_charge");
-  // The bank charge: the automatic hidden Fee line when there is one, else the old estimate from the card tick.
-  const bankCharge = feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? round2(total * ((opts.bankChargePercent ?? 0) / 100)) : 0;
+  const recoveryCost = round2(other.filter((l) => l.line_type === "recovery").reduce((a, l) => a + lineCost(l), 0));
+  // The bank charge: the rate times the total including VAT when a rate is given (live, on the screen); otherwise
+  // the automatic hidden Fee line the server keeps, or the old estimate from the card tick.
+  const bankCharge = opts.bankChargePercent !== undefined && opts.bankChargePercent > 0 ? round2(total * (opts.bankChargePercent / 100)) : feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? 0 : 0;
   const profit = round2(net - partsCost - labourCost - otherCost - bankCharge);
   const threshold = opts.depositThreshold ?? 0;
   const deposit = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
-  return { subtotal, discountBase, discount, rounding, net, vat, total, partsCost, partsSell, partsMargin: round2(partsSell - partsCost), labourSell, labourHours, labourCost, otherSell, otherCost, hiddenCost: otherCost, bankCharge, profit, deposit };
+  return { subtotal, discountBase, discount, rounding, net, vat, total, partsCost, partsSell, partsMargin: round2(partsSell - partsCost), labourSell, labourHours, labourCost, otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, profit, labourMargin: round2(labourSell - labourCost), deposit };
 }
 
 export type SendBlocker = { key: string; label: string };
@@ -375,7 +390,6 @@ export function sendBlockers(
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "+ Add a part"` });
       else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
-      if (q.kind === "quotation" && !l.parent_line_id) out.push({ key: `line-${l.id}`, label: `${short}: not linked to a job` });
       if (settings.confirmPercent && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
     }
     if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });
@@ -389,6 +403,13 @@ export function sendBlockers(
     if (floor) out.push({ key: `line-${l.id}`, label: `${short}: ${floor}` });
   }
   return out;
+}
+
+/** The customer's wording for a recovery line: "Recovery, closed box, two ways". */
+export function recoveryTitle(typeLabel: string | null | undefined, trips: number | null | undefined): string {
+  const t = Math.max(1, Math.round(Number(trips) || 1));
+  const way = t === 1 ? "one way" : t === 2 ? "two ways" : `${t} trips`;
+  return `Recovery${typeLabel ? `, ${typeLabel.toLowerCase()}` : ""}, ${way}`;
 }
 
 /** Whole-dirham totals to offer when sending: the nearest ten below (the default) and above. */
@@ -457,7 +478,7 @@ export function suggestPromisedDate(lines: QuoteLine[], parts: PartItem[], today
 
 /** The plain-word state of a job's quotation for the stage card, the Next step panel and the dashboard. */
 export type QuoteSummary = {
-  quotation: Pick<QuoteRow, "id" | "number" | "version" | "status" | "token" | "sent_at" | "opened_at" | "responded_at" | "approver_name" | "total_aed" | "approved_total_aed" | "valid_until" | "promised_at" | "created_at"> & { completed_at?: string | null } | null;
+  quotation: Pick<QuoteRow, "id" | "number" | "version" | "status" | "token" | "sent_at" | "opened_at" | "responded_at" | "approver_name" | "total_aed" | "approved_total_aed" | "valid_until" | "promised_at" | "created_at"> & { completed_at?: string | null; viewed_full_at?: string | null } | null;
   waitingPrices: number;
   waitingConfirm: number;
   rejectedParts: number;

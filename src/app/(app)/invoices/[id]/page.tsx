@@ -4,6 +4,7 @@ import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHe
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice } from "@/lib/invoice-data";
+import { paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
@@ -28,6 +29,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const [bundle, settings, site] = await Promise.all([loadInvoice(id), getSettings(), getSiteUrl()]);
   if (!bundle) notFound();
   const { invoice, lines, payments, customer, vehicle, job, creditNotes } = bundle;
+  const paymentLinks = invoice.kind === "credit_note" ? [] : await paymentLinksOf(invoice.id);
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
   const canPay = can(role, "recordPayments") && !staff.viewingAs && invoice.kind === "tax_invoice" && invoice.status === "issued";
@@ -191,13 +193,27 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             />
             <p className="text-xs text-muted">An issued invoice is locked. Corrections are by credit note, approved by the owner.</p>
           </Card>
-          {isTax && can(role, "issueInvoices") && !staff.viewingAs ? (
+          {(isTax || invoice.kind === "proforma") && can(role, "issueInvoices") && !staff.viewingAs ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>Payment link</SectionLabel>
+              {invoice.payment_link_url ? (
+                <div className="rounded-control bg-chip px-3 py-2 text-xs flex flex-col gap-1">
+                  <span className="break-all font-mono select-all">{invoice.payment_link_url}</span>
+                  <span className="font-semibold text-red">Don&apos;t open this link. It works once.</span>
+                  {paymentLinks[0]?.opened_at ? <span className="font-semibold">Opened by the customer {formatDateTime(paymentLinks[0].opened_at)}. Paste a new link if they did not complete the payment.</span> : <span className="text-muted">Not opened yet. The customer sees Pay now.</span>}
+                </div>
+              ) : null}
               <form action={setPaymentLink.bind(null, invoice.id)} className="flex flex-col gap-2">
-                <Input name="payment_link_url" defaultValue={invoice.payment_link_url ?? ""} placeholder="https://… from the bank or payment provider" />
-                <Button type="submit" tone="secondary" size="md">{invoice.payment_link_url ? "Save" : "Add Pay now to the customer page"}</Button>
+                <Input name="payment_link_url" placeholder={invoice.payment_link_url ? "Paste a new https:// link to replace it" : "Paste the https:// payment link"} />
+                <div><Button type="submit" tone="secondary" size="md">{invoice.payment_link_url ? "Replace the link" : "Add Pay now to the customer page"}</Button></div>
               </form>
+              {paymentLinks.length > 1 ? (
+                <ul className="divide-y divide-line text-xs text-muted">
+                  {paymentLinks.slice(1).map((l) => (
+                    <li key={l.id} className="py-1">Added {formatDateTime(l.added_at)}{l.opened_at ? ` · opened by the customer ${formatDateTime(l.opened_at)}` : " · not opened"} · replaced</li>
+                  ))}
+                </ul>
+              ) : null}
             </Card>
           ) : null}
           {isTax ? (

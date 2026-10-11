@@ -111,6 +111,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const pendingHandovers = (await pendingHandoversFor(staff.id, id)).map((h) => ({ id: h.id, giverName: h.giverName, plate: h.plate, items: h.items, jobId: h.job_id }));
   const minutesUsed = work ? work.sessions.filter((s) => s.ended_at).reduce((a, s) => a + sessionMinutes(s), 0) : 0;
   const mineThroughBreak = !!work?.sessions.some((s) => !s.ended_at && s.technician_id === staff.id && s.through_break);
+  // The technician's own open pause on this car: the main button shows "Paused · reason" with Resume.
+  const { data: myPause } = inWork ? await createAdminClient().from("work_pauses").select("reason, started_at").eq("job_id", id).eq("technician_id", staff.id).is("ended_at", null).order("started_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
   const reminders = [gateIn?.dash_cam ? "Disconnect the dash cam before you start." : "", gateIn?.old_parts_return ? "Keep the old parts: the customer asked for them." : ""].filter(Boolean);
   // The manager's send-back note stays on top until the job is finished again.
   const sendBack = inWork && !job.work_done_at && sendBackEvent && (!job.plan_released_at || sendBackEvent.created_at > job.plan_released_at) ? sendBackEvent.note.replace(/^Sent back by [^:]+: /, "") : null;
@@ -130,6 +132,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         tyreSizeSuggestion,
         catalogue,
         partsList: cleanPartsList(insp.parts_list),
+        noPartItems: Array.isArray(insp.no_part_items) ? (insp.no_part_items as string[]) : [],
         measurements: Object.fromEntries(Object.entries(insp.measurements ?? {}).map(([k, v]) => [k, String(v)])),
         files: bundle.media.filter((m) => !m.item_key?.startsWith("road.")).map((m) => ({ id: m.id, kind: m.kind, url: bundle.mediaUrls[m.storage_path] ?? null, caption: m.caption, isPrescan: m.is_prescan, itemKey: m.item_key, requestId: m.job_request_id })),
         notes: insp.technician_notes ?? "",
@@ -247,6 +250,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             qcFailed={qcFailed}
             breakWindow={breakWindow}
             mineThroughBreak={mineThroughBreak}
+            minePause={myPause && !running.some((r) => r.mine) ? { reason: String(myPause.reason), since: String(myPause.started_at) } : null}
             keepWorkingAction={keepWorking.bind(null, id)}
             startAction={startWork.bind(null, id)}
             pauseAction={pauseWorkAction.bind(null, id)}

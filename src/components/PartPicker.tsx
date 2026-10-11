@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react";
 import { PART_POSITIONS, newEntryId, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 
+/** A part sold per set is asked Front or Rear; the quantity counts sets. */
+const SET_POSITIONS = ["Front", "Rear"] as const;
+
 /**
  * "+ Parts": a centre window over the owner's parts pool. Several parts are ticked, each with its
  * quantity and, where it matters, the position (Front left, Rear...). Suggested parts for the finding
@@ -51,7 +54,7 @@ export function PartPicker({
     setPicked((prev) => {
       const next = new Map(prev);
       if (next.has(row.id)) next.delete(row.id);
-      else next.set(row.id, { id: newEntryId(), catalogue_id: row.id.startsWith("custom:") ? null : row.id, name: row.name, qty: 1, positions: [], item_key: itemKey, source, note: null });
+      else next.set(row.id, { id: newEntryId(), catalogue_id: row.id.startsWith("custom:") ? null : row.id, name: row.name, qty: 1, positions: [], item_key: itemKey, source, note: null, unit: row.unit === "set" ? "set" : "pc" });
       return next;
     });
   }
@@ -59,7 +62,7 @@ export function PartPicker({
     const name = query.trim().slice(0, 120);
     if (!name) return;
     const key = `custom:${name.toLowerCase()}`;
-    setPicked((prev) => new Map(prev).set(key, { id: newEntryId(), catalogue_id: null, name, qty: 1, positions: [], item_key: itemKey, source, note: null }));
+    setPicked((prev) => new Map(prev).set(key, { id: newEntryId(), catalogue_id: null, name, qty: 1, positions: [], item_key: itemKey, source, note: null, unit: "pc" }));
     setQuery("");
   }
   function update(key: string, patch: Partial<PartsListEntry>) {
@@ -84,10 +87,10 @@ export function PartPicker({
     </button>
   );
 
-  const row = (c: CatalogueRow | { id: string; name: string; needs_position: boolean; category: string }, entry: PartsListEntry | undefined) => (
-    <div key={c.id} className={`rounded-control border ${entry ? "border-ink" : "border-line"} flex flex-col`}>
+  const row = (c: CatalogueRow | { id: string; name: string; needs_position: boolean; category: string; unit?: "each" | "set" }, entry: PartsListEntry | undefined) => (
+    <div key={c.id} className={`rounded-control border ${entry ? "border-green bg-green-soft" : "border-line"} flex flex-col`}>
       <button type="button" onClick={() => toggle(c as CatalogueRow)} aria-pressed={!!entry} className="min-h-12 flex items-center gap-3 px-3 py-2 text-left">
-        <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-extrabold ${entry ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{entry ? "✓" : ""}</span>
+        <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-extrabold ${entry ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>{entry ? "✓" : ""}</span>
         <span className="font-semibold">{c.name}</span>
         <span className="ml-auto text-xs text-muted">{c.category}</span>
       </button>
@@ -95,12 +98,12 @@ export function PartPicker({
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
           <span className="inline-flex items-center rounded-control border border-line-strong bg-white">
             <button type="button" aria-label="One less" onClick={() => update(keyOf(entry), { qty: Math.max(1, entry.qty - 1) })} className="min-h-10 w-10 text-lg font-bold">−</button>
-            <span className="w-8 text-center text-sm font-bold">{entry.qty}</span>
+            <span className="min-w-8 px-1 text-center text-sm font-bold">{entry.qty}{entry.unit === "set" ? ` set${entry.qty === 1 ? "" : "s"}` : ""}</span>
             <button type="button" aria-label="One more" onClick={() => update(keyOf(entry), { qty: entry.qty + 1 })} className="min-h-10 w-10 text-lg font-bold">+</button>
           </span>
           {c.needs_position || entry.positions.length || !entry.catalogue_id ? (
             <span className="flex flex-wrap gap-1">
-              {PART_POSITIONS.map((p) => (
+              {(c.unit === "set" ? SET_POSITIONS : PART_POSITIONS).map((p) => (
                 <button key={p} type="button" onClick={() => togglePosition(keyOf(entry), p)} aria-pressed={entry.positions.includes(p)} className={`min-h-9 rounded-control border px-2 text-xs font-bold ${entry.positions.includes(p) ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
                   {p}
                 </button>

@@ -59,7 +59,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <LiveRefresh tables={["part_requests", "part_items", "jobs"]} pollMs={60000} />
-      <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." />
+      <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." actions={<LinkButton href="/parts/no-home" tone="secondary" size="lg">Parts with no home</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <WaitingPanel staff={staff} />

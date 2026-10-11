@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { BatterySticker, PartSticker, stickerPageCss } from "@/components/StickerArt";
+import { BatterySticker, PartSticker, batteryLine, stickerPageCss } from "@/components/StickerArt";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { HANDOVER_SELECT, type HandoverRow } from "@/lib/handover";
@@ -45,12 +45,11 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
         const months = warrantyMonthsFor(ss, s.brand);
         const until = new Date(h.confirmed_at ?? h.created_at);
         until.setUTCMonth(until.getUTCMonth() + months);
-        stickers.push(<BatterySticker key={`${partId}-${n}`} size={ss.large} logoUrl={logo} d={{ qr, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid }} />);
+        stickers.push(<BatterySticker key={`${partId}-${n}`} size={ss.large} logoUrl={logo} d={{ qr, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, line: batteryLine(item?.description, s.brand, s.model) }} />);
       } else {
         stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={ss.logoPath ? logo : mark} d={{ qr, date, vin8: vin.slice(-8) }} />);
       }
     }
-    void item;
   }
   const battery = plan.some(([, s]) => s.kind === "battery");
   const w = battery ? Math.max(ss.large, ss.partW) : ss.partW;

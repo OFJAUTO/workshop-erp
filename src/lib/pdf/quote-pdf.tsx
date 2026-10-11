@@ -1,7 +1,6 @@
 import "server-only";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { feeNotice } from "@/lib/jobs";
 import { amountInWords, round2 } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
 import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
@@ -50,12 +49,10 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), q.token ? qrPng(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : Promise.resolve(null)]);
   const carName = vehicle ? [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ") : "";
-  const validity = q.valid_until ? `valid until ${formatDate(q.valid_until)}` : `valid for ${q.validity_days} days`;
-  const footer = [isEstimate ? `This estimate is ${validity}. The final price is confirmed once the vehicle is with us.` : `This quotation is ${validity}. Prices in UAE dirhams; VAT at ${vatPct}% shown separately.`, isEstimate ? "" : feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed)];
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
 
   const doc = (
-    <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={footer} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
+    <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={[]} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
       <TitleRow
         title={isEstimate ? "ESTIMATE" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
         meta={[
@@ -81,7 +78,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           rows={[
             { label: "Gross amount", value: totals.subtotal },
             ...(totals.discount ? [{ label: "Discount", value: totals.discount, bold: true, negative: true }] : []),
-            ...(totals.rounding ? [{ label: "Rounding", value: Math.abs(totals.rounding), negative: totals.rounding < 0 }] : []),
+            ...(totals.rounding ? [{ label: totals.rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(totals.rounding), negative: totals.rounding < 0 }] : []),
             { label: "Taxable amount", value: totals.net },
             { label: `VAT ${vatPct}%`, value: totals.vat },
           ]}

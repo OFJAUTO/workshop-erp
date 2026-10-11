@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, round2, type LineType, type QuoteLine } from "@/lib/quotes";
+import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
 import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine } from "@/lib/quote-data";
 import { notifyRoles } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
@@ -34,6 +34,10 @@ type LinePatch = {
   positions?: unknown;
   service_id?: string | null;
   price_per?: string | null;
+  /** A part left off this quotation: stays on the car's list, counts for nothing, is not ordered. */
+  left_off?: boolean;
+  /** Normal / Full down / Closed box (Settings). */
+  recovery_type?: string | null;
 };
 type Body = {
   quotationId?: string;
@@ -56,7 +60,6 @@ const n = (v: unknown): number | null => {
   const x = Number(String(v).replace(",", ".").replace(/[^\d.-]/g, ""));
   return Number.isFinite(x) ? x : null;
 };
-const TRIP_TEXT: Record<string, string> = { "1": "Recovery, one way to the workshop", "1b": "Recovery, one way to the customer", "2": "Recovery, two ways" };
 
 /**
  * Saves one change to a quotation as the advisor types. Every change is kept at once; nothing typed
@@ -95,6 +98,7 @@ export async function POST(request: NextRequest) {
   const confirmAt = Number(settings.markup_confirm_percent) || 100;
   const { data: job } = q.job_id ? await admin.from("jobs").select("department, job_number").eq("id", q.job_id).maybeSingle() : { data: null };
   const labourRate = labourRateFor(settings, job?.department ?? null, makeName);
+  const recoveryTypes = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
   const stamp = { updated_by: staff.id };
   const refreshed = () => refreshQuoteTotals(q.id, settings, staff.id, { reopen: true });
 
@@ -171,6 +175,17 @@ export async function POST(request: NextRequest) {
       out.chosen = !!p.chosen;
     }
     if (p.parent_line_id !== undefined) out.parent_line_id = p.parent_line_id ? String(p.parent_line_id) : null;
+    if (p.left_off !== undefined) {
+      if (type !== "part") return "Only a part can be left off the quotation.";
+      out.left_off = !!p.left_off;
+    }
+    if (p.recovery_type !== undefined) {
+      const rt = recoveryTypes.find((t) => t.key === String(p.recovery_type ?? ""));
+      if (!rt) return "Choose the recovery type.";
+      out.recovery_type = rt.key;
+      if (p.unit_cost === undefined) out.unit_cost = Number(rt.cost) || 0;
+      if (p.unit_price === undefined) out.unit_price = Number(rt.price) || 0;
+    }
     if (p.positions !== undefined) out.positions = Array.isArray(p.positions) ? Array.from(new Set(p.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8) : null;
     if (p.service_id !== undefined) {
       if (current?.part_item_id) return "A listed part is not a service.";
@@ -281,10 +296,16 @@ export async function POST(request: NextRequest) {
       if ((type === "other" || type === "recovery") && row.markup_percent === undefined) row.markup_percent = minMarkup;
       if (type === "recovery") {
         if (row.recovery_trips === undefined) row.recovery_trips = 1;
-        if (row.quantity === undefined) row.quantity = 1;
+        if (row.quantity === undefined) row.quantity = row.recovery_trips;
         if (row.recovery_provider_kind === undefined) row.recovery_provider_kind = "ours";
-        if (!row.title) row.title = TRIP_TEXT["1"];
-        if (!row.details) row.details = "One way to the workshop";
+        const rt = recoveryTypes.find((t) => t.key === row.recovery_type) ?? recoveryTypes[0] ?? null;
+        if (rt) {
+          row.recovery_type = rt.key;
+          if (row.unit_cost === undefined) row.unit_cost = Number(rt.cost) || 0;
+          if (row.unit_price === undefined) row.unit_price = Number(rt.price) || 0;
+        }
+        row.title = recoveryTitle(rt?.label ?? null, Number(row.recovery_trips) || 1);
+        row.details = null;
       }
       if (type === "other" && !row.title) row.title = "";
     }
@@ -310,6 +331,13 @@ export async function POST(request: NextRequest) {
     if (cur.part_item_id && "unit_cost" in patch) delete patch.unit_cost; // The cost of a listed part comes from Parts.
     if (cur.part_item_id && "quantity" in patch) delete patch.quantity; // And its quantity from the technician.
     const merged = { ...cur, ...patch } as QuoteLine;
+    if (cur.line_type === "recovery") {
+      // The customer's wording follows the type and the trips: "Recovery, closed box, two ways".
+      const rt = recoveryTypes.find((t) => t.key === merged.recovery_type) ?? null;
+      patch.title = recoveryTitle(rt?.label ?? null, merged.recovery_trips ?? merged.quantity ?? 1);
+      patch.details = null;
+      merged.title = String(patch.title);
+    }
     const floorError = checkFloor(merged);
     if (floorError) return NextResponse.json({ error: floorError }, { status: 400 });
     if ("labour_rate" in patch && Number(patch.labour_rate) !== Number(cur.labour_rate ?? 0)) {
@@ -338,8 +366,8 @@ export async function POST(request: NextRequest) {
     if (cur.fee_kind) return NextResponse.json({ error: "The bank charge line is automatic; it cannot be removed." }, { status: 400 });
     const { error } = await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    // Removing a job removes its parts with it, unless the advisor chose to keep them (they stay, unlinked, to be linked to another job).
-    if (cur.line_type === "labour" || cur.line_type === "package") await admin.from("quotation_lines").update(body.removeLine.keepParts ? { parent_line_id: null, ...stamp } : { is_active: false, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
+    // Parts stand on their own: removing a job never removes a part (the parts under it are simply unlinked).
+    if (cur.line_type === "labour" || cur.line_type === "package") await admin.from("quotation_lines").update({ parent_line_id: null, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
     await refreshed();
     return NextResponse.json({ ok: true });
   }

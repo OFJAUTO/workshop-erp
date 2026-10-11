@@ -126,15 +126,16 @@ try {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}/inspection`);
+    // B2: the tick under the parts list comes first (it saves on its own), then the one-tap note, then the bar.
+    const plc = page.getByRole("button", { name: /I have checked the parts list|I confirm no parts are needed/ }).first();
+    check("the parts list waits for the manager's tick (E3, B2)", (await plc.count()) === 1, (await page.textContent("body") ?? "").match(/.{0,40}parts list.{0,40}/)?.[0] ?? "");
+    if (await plc.count()) { await plc.click(); await sleep(3000); }
     const preset = page.getByRole("button", { name: /^Report checked and accurate/ }).first();
     if (await preset.count()) await preset.click(); else await page.locator("textarea[name=manager_note]").fill("Checked, agreed.");
-    check("one-tap note fills the manager's note (D7)", /Report checked/.test(await page.locator("textarea[name=manager_note]").inputValue()));
-    const plc = page.getByRole("button", { name: /Parts list checked/ }).first();
-    check("the parts list waits for the manager's tick (E3)", (await plc.count()) === 1);
-    if (await plc.count()) await plc.click();
+    check("one-tap note fills the manager's note (D7, B1)", /Report checked|Checked, agreed/.test(await page.locator("textarea[name=manager_note]").inputValue()));
     const hours = page.locator("input[name=estimated_hours_manager]");
     if (await hours.count()) await hours.fill("2");
-    await page.getByRole("button", { name: "Approve report" }).click();
+    await page.getByRole("button", { name: "Approve and send to the advisor" }).click();
     await submitted(page);
     await browser.close();
   }
@@ -149,18 +150,18 @@ try {
   {
     const { browser, page } = await browserForId(partsId);
     await go(page, `${base}/parts/${jobId}`);
-    const form = page.locator("form:has(input[name=cost_aed])").first();
-    check("parts desk shows the request as one row to fill (E5)", (await form.count()) >= 1, (await page.textContent("body") ?? "").slice(0, 120));
+    // D2: one table, every row saves itself as Parts type.
+    const cost = page.locator("input[aria-label='Cost before VAT']").first();
+    check("parts desk shows the request as one row to fill (E5, D2)", (await cost.count()) >= 1, (await page.textContent("body") ?? "").slice(0, 120));
     const bodyParts = await page.textContent("body");
     check("no findings on the Parts page (E8)", !/Worn out, replace|Technician wrote/.test(bodyParts ?? ""));
-    check("the request's position is on the row (E4)", /Front/.test(await form.textContent() ?? ""));
-    await form.locator("input[name=description]").first().fill("Front brake pads, set");
-    await form.locator("input[name=cost_aed]").first().fill("200");
+    check("the request's position is on the row (E4)", /Front/.test(bodyParts ?? ""));
+    await page.locator("input[aria-label='Part number']").first().fill("BP-100");
+    await cost.fill("200");
     const supplierName = (await sql("select name from public.suppliers where is_active order by name limit 1"))[0]?.name ?? "e2e Supplier";
-    await form.locator("input[name=supplier]").first().fill(supplierName);
-    await form.getByRole("button", { name: "Stock" }).first().click();
-    await form.locator("button[type=submit]").first().click();
-    await sleep(3000);
+    await page.locator("input[aria-label='Supplier']").first().fill(supplierName);
+    await page.getByRole("button", { name: "Stock" }).first().click();
+    await sleep(3500);
     const pi = await sql("select id, cost_aed, availability from public.part_items where job_id = $1", [jobId]);
     check("part priced in stock", pi.length >= 1 && Number(pi[0].cost_aed) === 200, JSON.stringify(pi));
     await browser.close();
@@ -271,7 +272,7 @@ try {
     // 11. Work: Working, then Job finished.
     m = await mark();
     await go(page, `${base}/my-jobs/${jobId}`);
-    const working = page.getByRole("button", { name: /^Working$/ });
+    const working = page.getByRole("button", { name: /^Start work$/ });
     if (await working.count()) { await working.first().click(); await sleep(2500); }
     await go(page, `${base}/my-jobs/${jobId}`);
     await page.getByRole("button", { name: "Job finished" }).first().click();

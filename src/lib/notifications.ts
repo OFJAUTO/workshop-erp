@@ -64,6 +64,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "car_ready", label: "Car ready: send the customer the message", locked: true },
   { type: "ready_to_invoice", label: "Ready to invoice (accounts)", locked: true },
   { type: "invoice_issued", label: "Invoice issued", locked: true },
+  { type: "payment_link_opened", label: "Customer opened the payment link", locked: true },
   { type: "payment_received", label: "Payment received", locked: true },
   { type: "cheque_bounced", label: "A cheque bounced", locked: true },
   { type: "credit_note_approval", label: "A credit note needs the owner's approval", locked: true },
@@ -93,10 +94,13 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "payment_verify", label: "A payment recorded by an advisor to verify (accounts)", locked: true },
   { type: "overpayment_approval", label: "A payment above the balance needs the owner's approval", locked: true },
   { type: "wash", label: "Car ready for the wash, or wash done", locked: true },
+  { type: "parts_not_received", label: "The technician did not receive some parts", locked: true },
+  { type: "parts_exchange", label: "A wrong or faulty part needs exchanging", locked: true },
+  { type: "parts_no_home", label: "A part has no home: not needed, wrong, or back with Parts (owner)", locked: true },
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */
-export const HANDOVER_TYPES = new Set(["job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
+export const HANDOVER_TYPES = new Set(["parts_not_received", "parts_exchange", "job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
 

@@ -76,13 +76,13 @@ export default async function StickersSettingsPage({ searchParams }: { searchPar
             <SectionLabel>Preview (3 times life size)</SectionLabel>
             <div className="flex flex-col gap-4 overflow-x-auto">
               <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><PartSticker w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, date: "10 Oct 2026", vin8: "HX266190" }} /></div>
-              <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><BatterySticker size={ss.large} logoUrl={logo} d={{ qr, installed: "10 Oct 2026", until: "10 Oct 2027", vin: "WDCYC7CFXHX266190", title: ss.wording.battery, valid: ss.wording.battery_valid }} /></div>
+              <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><BatterySticker size={ss.large} logoUrl={logo} d={{ qr, line: "Main battery · Varta AGM 95Ah", installed: "10 Oct 2026", until: "10 Oct 2027", vin: "WDCYC7CFXHX266190", title: ss.wording.battery, valid: ss.wording.battery_valid }} /></div>
               <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><ServiceSticker size={ss.large} logoUrl={logo} d={{ qr, servicedOn: "10 Oct 2026", mileage: "42,000 km", nextDate: "10 Oct 2027", nextMileage: "52,000 km", vin: "WDCYC7CFXHX266190", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} /></div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <LinkButton href="/print/sticker-test?kind=part" tone="secondary" size="md">Print test part sticker</LinkButton>
-              <LinkButton href="/print/sticker-test?kind=battery" tone="secondary" size="md">Print test battery sticker</LinkButton>
-              <LinkButton href="/print/sticker-test?kind=service" tone="secondary" size="md">Print test service sticker</LinkButton>
+              <a href="/print/sticker-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test part sticker (new tab)</a>
+              <a href="/print/sticker-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test battery sticker (new tab)</a>
+              <a href="/print/sticker-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test service sticker (new tab)</a>
             </div>
             <p className="text-xs text-muted">Printing uses the normal browser print dialog on a page sized exactly to the sticker, with a PDF download as the fallback. Tell me the printer model and I will set its paper size.</p>
           </Card>

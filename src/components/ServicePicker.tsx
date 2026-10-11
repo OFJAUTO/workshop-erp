@@ -4,96 +4,122 @@ import { useMemo, useState } from "react";
 import type { Service, ServiceCategory } from "@/lib/quotes";
 import { aed, hoursText } from "@/lib/quotes";
 
+export type PickerKind = "labour" | "service" | "both";
+
 /**
- * "+ Add": one centre window for every job and service. Suggested (from the report's findings) comes
- * first, then Most used, then the categories; a search box finds anything; a job not on the list is
- * added as a custom job. Each line shows its pricing. "Edit the list" opens Settings.
+ * The two pickers behind the quotation's name boxes, with the same look: Labour jobs (priced by
+ * hours) and Services (a fixed price per unit). One centre window: a search box, the categories on
+ * the left (Suggested from the report first, then Most used), one line per item (the name and how
+ * it is priced), a tap turns a row light green with a tick, a counter and Done. A name typed that
+ * is not on the list can be added as it was typed.
  */
 export function ServicePicker({
+  kind = "both",
   categories,
   services,
   usage,
   department,
-  onPick,
+  onDone,
   onClose,
   suggested = [],
-  onCustom,
+  allowCustom = true,
   editHref,
-  title = "Add a job or service",
+  title,
 }: {
+  kind?: PickerKind;
   categories: ServiceCategory[];
   services: Service[];
   usage: Record<string, number>;
   department: string | null;
-  onPick: (service: Service) => void;
+  /** The picked items in the order they were tapped, then any names typed by hand. */
+  onDone: (picked: Service[], custom: string[]) => void;
   onClose: () => void;
   /** Services that fit the report's findings, shown first. */
   suggested?: Service[];
-  /** A job typed by hand, not on the list. */
-  onCustom?: (title: string) => void;
+  allowCustom?: boolean;
   /** Where the owner edits the list. */
   editHref?: string | null;
   title?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<string>(suggested.length ? "suggested" : "most");
-  const sorted = useMemo(() => {
-    const fits = (s: Service) => s.department === "both" || !department || department === "both" || s.department === department;
+  const [picked, setPicked] = useState<Service[]>([]);
+  const [custom, setCustom] = useState<string[]>([]);
+  const fitsKind = (s: Service) => kind === "both" || (kind === "labour" ? s.price_aed === null : s.price_aed !== null);
+  const sortedAll = useMemo(() => {
+    const fits = (s: Service) => (s.department === "both" || !department || department === "both" || s.department === department) && fitsKind(s);
     return [...services].filter(fits).sort((a, b) => (usage[b.id] ?? 0) - (usage[a.id] ?? 0) || a.position - b.position);
-  }, [services, usage, department]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [services, usage, department, kind]);
+  const suggestedHere = suggested.filter(fitsKind);
+  const [tab, setTab] = useState<string>(suggestedHere.length ? "suggested" : "most");
   const q = query.trim().toLowerCase();
+  const cats = categories.filter((c) => sortedAll.some((s) => s.category_id === c.id));
   const shown = q
-    ? sorted.filter((s) => s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q)).slice(0, 40)
+    ? sortedAll.filter((s) => s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q)).slice(0, 40)
     : tab === "suggested"
-      ? suggested
+      ? suggestedHere
       : tab === "most"
-        ? sorted.filter((s) => (usage[s.id] ?? 0) > 0).slice(0, 12)
-        : sorted.filter((s) => s.category_id === tab);
-  const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? "";
-  const exact = q ? services.some((s) => s.name.toLowerCase() === q) : true;
-  const priceText = (s: Service) => (s.price_aed !== null ? `${aed(s.price_aed)}${s.price_per && s.price_per !== "job" ? ` per ${s.price_per}` : ""}` : s.default_hours !== null ? hoursText(s.default_hours) : "hours to type");
+        ? sortedAll.filter((s) => (usage[s.id] ?? 0) > 0).slice(0, 14)
+        : sortedAll.filter((s) => s.category_id === tab);
+  const exact = q ? services.some((s) => s.name.toLowerCase() === q) || custom.some((c) => c.toLowerCase() === q) : true;
+  const priceText = (s: Service) => (s.price_aed !== null ? `${aed(s.price_aed)}${s.price_per && s.price_per !== "job" ? ` per ${s.price_per}` : ""}` : s.default_hours !== null ? hoursText(s.default_hours) : "hours typed by you");
+  const isPicked = (s: Service) => picked.some((p) => p.id === s.id);
+  const toggle = (s: Service) => setPicked((cur) => (cur.some((p) => p.id === s.id) ? cur.filter((p) => p.id !== s.id) : [...cur, s]));
+  const count = picked.length + custom.length;
+  const heading = title ?? (kind === "labour" ? "Labour jobs" : kind === "service" ? "Services" : "Labour jobs and services");
 
   const tabBtn = (id: string, label: string, bold = false) => (
-    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm whitespace-nowrap ${bold ? "font-bold" : "font-semibold"} ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`}>
+    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm ${bold ? "font-bold" : "font-semibold"} ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`}>
       {label}
     </button>
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-card bg-white p-5 flex flex-col gap-3 shadow-xl max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-3 sm:p-4" role="dialog" aria-modal="true" aria-label={heading} onClick={onClose}>
+      <div className="w-full max-w-3xl rounded-card bg-white p-4 sm:p-5 flex flex-col gap-3 shadow-xl max-h-[94vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
-          <h2 className="text-lg font-extrabold">{title}</h2>
+          <h2 className="text-lg font-extrabold">{heading}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button>
         </div>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type to find any job or service…" autoFocus spellCheck lang="en" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" />
-        <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-3 min-h-0 flex-1">
-          <div className="flex sm:flex-col gap-1 overflow-auto">
-            {suggested.length ? tabBtn("suggested", `Suggested (${suggested.length})`, true) : null}
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={kind === "service" ? "Type to find a service…" : "Type to find a job…"} autoFocus spellCheck lang="en" aria-label="Search" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" />
+        <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-3 min-h-0 flex-1">
+          <div className="flex flex-wrap sm:flex-col gap-1 sm:overflow-y-auto sm:max-h-[60vh]">
+            {suggestedHere.length ? tabBtn("suggested", `Suggested (${suggestedHere.length})`, true) : null}
             {tabBtn("most", "Most used", true)}
-            {categories.map((c) => tabBtn(c.id, c.name))}
+            {cats.map((c) => tabBtn(c.id, c.name))}
           </div>
-          <div className="overflow-auto flex flex-col gap-1">
+          <div className="overflow-y-auto flex flex-col gap-1 min-h-[12rem]">
             {shown.length === 0 && !q ? <p className="text-sm text-muted p-2">{tab === "most" ? "Nothing used yet. Pick a category, or start typing." : "Pick a category, or start typing."}</p> : null}
-            {shown.map((s) => (
-              <button key={s.id} type="button" onClick={() => onPick(s)} className="min-h-12 rounded-control border border-line px-3 py-2 text-left hover:border-ink flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="font-semibold">{s.name}</span>
-                <span className="text-xs text-muted">{catName(s.category_id)}</span>
-                <span className="ml-auto text-xs font-semibold">{priceText(s)}</span>
-                {s.position_ask ? <span className="text-[11px] text-muted w-full">Asks: front, rear or both</span> : null}
-                {s.parts_requests.length ? <span className="text-[11px] text-muted w-full">Sends to Parts: {s.parts_requests.join(", ")}</span> : null}
+            {shown.length === 0 && q && !allowCustom ? <p className="text-sm text-muted p-2">Nothing on the list matches.</p> : null}
+            {shown.map((s) => {
+              const on = isPicked(s);
+              return (
+                <button key={s.id} type="button" onClick={() => toggle(s)} aria-pressed={on} className={`min-h-12 rounded-control border px-3 text-left flex items-center gap-3 ${on ? "border-green bg-green-soft" : "border-line hover:border-ink"}`}>
+                  <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${on ? "bg-green text-white" : "border border-line-strong text-transparent"}`}>✓</span>
+                  <span className="font-semibold truncate flex-1 min-w-0">{s.name}</span>
+                  <span className="text-xs font-semibold shrink-0 text-muted">{priceText(s)}</span>
+                </button>
+              );
+            })}
+            {custom.map((c) => (
+              <button key={`custom-${c}`} type="button" onClick={() => setCustom((cur) => cur.filter((x) => x !== c))} aria-pressed className="min-h-12 rounded-control border border-green bg-green-soft px-3 text-left flex items-center gap-3">
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-[11px] font-bold text-white">✓</span>
+                <span className="font-semibold truncate flex-1 min-w-0">{c}</span>
+                <span className="text-xs font-semibold shrink-0 text-muted">as typed</span>
               </button>
             ))}
-            {q && !exact && onCustom ? (
-              <button type="button" onClick={() => onCustom(query.trim())} className="min-h-12 rounded-control border border-dashed border-line-strong px-3 text-left text-sm font-bold">
-                + Add &quot;{query.trim()}&quot; as a custom job (hours typed by you)
+            {q && !exact && allowCustom ? (
+              <button type="button" onClick={() => { setCustom((cur) => [...cur, query.trim()]); setQuery(""); }} className="min-h-12 rounded-control border border-dashed border-line-strong px-3 text-left text-sm font-bold">
+                + Add &quot;{query.trim()}&quot; as typed
               </button>
             ) : null}
           </div>
         </div>
-        <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
+        <div className="flex items-center gap-2 border-t border-line pt-3">
           {editHref ? <a href={editHref} className="text-xs font-semibold text-muted underline underline-offset-4">Edit the list</a> : <span />}
-          <button type="button" onClick={onClose} className="min-h-11 rounded-control px-4 text-sm font-bold text-muted hover:bg-chip">Close</button>
+          <span className="ml-auto text-sm font-semibold">{count ? `${count} selected` : ""}</span>
+          <button type="button" onClick={onClose} className="min-h-12 rounded-control px-4 text-sm font-bold text-muted hover:bg-chip">Cancel</button>
+          <button type="button" disabled={!count} onClick={() => onDone(picked, custom)} className={`min-h-12 rounded-control px-5 text-sm font-bold text-white ${count ? "bg-ink" : "bg-ink/40"}`}>Done{count ? ` (${count})` : ""}</button>
         </div>
       </div>
     </div>
