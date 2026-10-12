@@ -8,6 +8,7 @@ import { JumpButton, ProblemsBar, jumpTo } from "@/components/FormAssist";
 import { Card, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { CHECK_STATUSES, ITEM_STATUS_LABELS, type CheckStatus } from "@/lib/inspection";
 import { ROAD_TEST_ITEMS, roadTestProblems, type RoadTestItems } from "@/lib/road-test";
+import { chipSentence, type ChipRow } from "@/lib/road-test-chips";
 
 const STATUS_CLASS: Record<CheckStatus, string> = { good: "border-green bg-green text-white", average: "border-amber-bar bg-amber-bar text-white", bad: "border-red-bar bg-red-bar text-white" };
 
@@ -35,16 +36,31 @@ function SubmitRow({ problems, attempted, notPossible, onAttempt, onJump }: { pr
   );
 }
 
-/** Five checks, each GOOD / AVERAGE / BAD with remarks and optional photos or video; or "not possible" with a reason. */
-export function RoadTestForm({ action, inspectionId, initial, initialFiles, initialNotPossible, initialReason, readOnly }: { action: FormAction; inspectionId: string | null; initial: RoadTestItems; initialFiles: (InspectionFile & { itemKey: string | null })[]; initialNotPossible: boolean; initialReason: string; readOnly: boolean }) {
+/**
+ * Eight checks, each GOOD / AVERAGE / BAD. On Bad or Average, rows of one-tap chips (what, where, when) write the
+ * remark; the sentence stays editable and typing is always possible. Photos or video per item; or "not possible"
+ * with a reason.
+ */
+export function RoadTestForm({ action, inspectionId, initial, initialFiles, initialNotPossible, initialReason, readOnly, chips = {} }: { action: FormAction; inspectionId: string | null; initial: RoadTestItems; initialFiles: (InspectionFile & { itemKey: string | null })[]; initialNotPossible: boolean; initialReason: string; readOnly: boolean; chips?: Record<string, ChipRow[]> }) {
   const [items, setItems] = useState<RoadTestItems>(initial);
   const [notPossible, setNotPossible] = useState(initialNotPossible);
   const [files, setFiles] = useState(initialFiles);
   const [attempted, setAttempted] = useState(false);
+  // The chips tapped per item, row by row; the sentence they make goes into the remark.
+  const [picked, setPicked] = useState<Record<string, string[][]>>({});
   const problems = roadTestProblems(items);
   const problemKeys = new Set(problems.map((p) => p.key));
   const setStatus = (key: string, status: CheckStatus) => setItems((p) => ({ ...p, [key]: { ...(p[key as keyof RoadTestItems] ?? {}), status } }));
   const setRemarks = (key: string, remarks: string) => setItems((p) => ({ ...p, [key]: { ...(p[key as keyof RoadTestItems] ?? {}), remarks } }));
+  const toggleChip = (key: string, rowIndex: number, chip: string) => {
+    const rows = chips[key] ?? [];
+    const cur = picked[key] ?? rows.map(() => []);
+    const row = cur[rowIndex] ?? [];
+    const nextRow = row.includes(chip) ? row.filter((c) => c !== chip) : [...row, chip];
+    const next = cur.map((r, i) => (i === rowIndex ? nextRow : r));
+    setPicked((p) => ({ ...p, [key]: next }));
+    setRemarks(key, chipSentence(key, rows, next));
+  };
 
   return (
     <ActionForm action={action} className="flex flex-col gap-4">
@@ -74,6 +90,8 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
                 const v = items[it.key] ?? {};
                 const needs = v.status === "average" || v.status === "bad";
                 const done = !problemKeys.has(it.key);
+                const rows = chips[it.key] ?? [];
+                const sel = picked[it.key] ?? [];
                 return (
                   <Card key={it.key} className={`flex flex-col gap-3 ${v.status === "bad" ? "border-red-bar" : v.status === "average" ? "border-amber-bar" : ""}`}>
                     <div id={`item-${it.key}`} className="flex items-center justify-between gap-2">
@@ -92,9 +110,29 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
                         </button>
                       ))}
                     </div>
+                    {needs && rows.length && !readOnly ? (
+                      <div className="flex flex-col gap-2 rounded-control bg-chip p-2" data-chips={it.key}>
+                        {rows.map((row, i) => (
+                          <div key={row.label + i} className="flex flex-col gap-1">
+                            <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">{row.label}</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {row.chips.map((c) => {
+                                const on = (sel[i] ?? []).includes(c);
+                                return (
+                                  <button key={c} type="button" onClick={() => toggleChip(it.key, i, c)} aria-pressed={on} className={`min-h-9 rounded-control border px-2.5 text-xs font-semibold ${on ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>
+                                    {on ? "✓ " : ""}{c}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                        <input type="hidden" name={`chips__${it.key}`} value={JSON.stringify(sel.flat())} />
+                      </div>
+                    ) : null}
                     <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold text-muted">Remarks{needs ? " (required)" : ""}</span>
-                      <Textarea name={`remarks__${it.key}`} value={v.remarks ?? ""} onChange={(e) => setRemarks(it.key, e.target.value)} rows={2} disabled={readOnly} />
+                      <span className="text-xs font-semibold text-muted">Remarks{needs ? " (required: tap the chips or type)" : ""}</span>
+                      <Textarea name={`remarks__${it.key}`} value={v.remarks ?? ""} onChange={(e) => setRemarks(it.key, e.target.value)} rows={2} disabled={readOnly} spellCheck lang="en" />
                     </label>
                     {inspectionId ? (
                       <InspectionMedia inspectionId={inspectionId} files={files.filter((f) => f.itemKey === `road.${it.key}`)} where={{ itemKey: `road.${it.key}` }} disabled={readOnly} onAdded={(f) => setFiles((p) => [...p, { ...f, itemKey: `road.${it.key}` }])} />

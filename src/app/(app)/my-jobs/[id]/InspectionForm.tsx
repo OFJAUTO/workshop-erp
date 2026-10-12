@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
 import { PartPicker } from "@/components/PartPicker";
-import { batteryEntriesFrom, mergePartsList, newEntryId, partsListLine, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
 import { JumpButton, ProblemsBar, SubmitOutcome, jumpTo } from "@/components/FormAssist";
 import { PrescanToggle } from "@/components/PrescanToggle";
@@ -23,10 +23,12 @@ import {
   TYRE_POSITIONS,
   TYRE_REASON_ABOVE_MM,
   TYRE_REPLACE_REASONS,
+  autoRemarkFor,
   cleanTyreConditions,
   discStatus,
   fluidGradesFor,
   fluidUnitFor,
+  hasStructuredDetail,
   isDiscItem,
   isFluidItem,
   isLeakItem,
@@ -231,6 +233,7 @@ export function InspectionForm({
   limits = AUTO_LIMITS,
   suggestions = {},
   quickRemarks = [],
+  tyreBrands = [],
   fluidGrades = [],
   bigJobTags = [],
   initialTags = [],
@@ -276,6 +279,8 @@ export function InspectionForm({
   suggestions?: Suggestions;
   /** One-tap remarks offered on every item (Settings), before the learned ones. */
   quickRemarks?: string[];
+  /** The brand list under the tyre brand box (Settings); it filters as the technician types and anything else can still be typed. */
+  tyreBrands?: string[];
   fluidGrades?: string[];
   bigJobTags?: string[];
   initialTags?: string[];
@@ -293,6 +298,8 @@ export function InspectionForm({
   const [pickerFor, setPickerFor] = useState<{ itemKey: string | null; label: string } | null>(null);
   const [noPartItems, setNoPartItems] = useState<string[]>(initialNoPart);
   const [showAverage, setShowAverage] = useState(false);
+  // Items whose choices already describe them keep the remark box folded; these were opened by hand.
+  const [remarkOpen, setRemarkOpen] = useState<Set<string>>(new Set());
   const toggleNoPart = (key: string) => {
     const next = noPartItems.includes(key) ? noPartItems.filter((k) => k !== key) : [...noPartItems, key];
     setNoPartItems(next);
@@ -437,7 +444,10 @@ export function InspectionForm({
     const next = { ...it, [field]: value };
     if (next.disc_condition === "below_minimum") next.disc_action = "replace";
     const status = discStatus(next.disc_condition, next.disc_action);
-    patchItem(it.key, { disc_condition: next.disc_condition, disc_action: next.disc_action, ...(status ? { status } : {}) });
+    // The remark is written from the choices unless the technician wrote his own.
+    const auto = autoRemarkFor(next);
+    const remarks = !it.remarks.trim() || it.remarks === autoRemarkFor(it) ? auto : it.remarks;
+    patchItem(it.key, { disc_condition: next.disc_condition, disc_action: next.disc_action, remarks, ...(status ? { status } : {}) });
   }
 
   const filesFor = (where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }) =>
@@ -598,6 +608,10 @@ export function InspectionForm({
             {sectionItems.map((it) => {
               const isJob = it.style === "job";
               const needsDetail = !isJob && (it.status === "average" || it.status === "bad");
+              // Choices that already describe the item (disc condition, leak severity, measured pads...) make the written remark optional and folded.
+              const structured = needsDetail && hasStructuredDetail(it, measurements);
+              const remarkRequired = needsDetail && !structured;
+              const remarkShown = remarkRequired || remarkOpen.has(it.key) || (!structured && !!it.remarks) || (isJob && it.status === "bad");
               const sug = suggestions[it.key] ?? {};
               const disc = isDiscItem(it.label);
               const fluid = isFluidItem(it.label);
@@ -623,9 +637,15 @@ export function InspectionForm({
                       </div>
                     </div>
                   ) : null}
-                  {needsDetail || it.remarks || (isJob && it.status === "bad") ? (
+                  {structured && !remarkOpen.has(it.key) ? (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-muted">{it.remarks.trim() ? <>Remark: <span className="font-semibold text-ink">{it.remarks}</span></> : "The choices above describe this item; no remark needed."}</span>
+                      {!locked ? <button type="button" onClick={() => setRemarkOpen((s) => new Set(s).add(it.key))} className="min-h-8 rounded-control px-2 font-bold underline underline-offset-4">{it.remarks.trim() ? "Edit the remark" : "Add a remark"}</button> : null}
+                    </div>
+                  ) : null}
+                  {remarkShown ? (
                     <div className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold text-muted">Remarks{needsDetail ? " (required)" : isJob ? " (optional)" : ""}</span>
+                      <span className="text-xs font-semibold text-muted">Remarks{remarkRequired ? " (required)" : " (optional)"}</span>
                       {(quickRemarks.length || sug.remarks?.length) && !locked ? (
                         <div className="flex flex-wrap gap-1.5">
                           {Array.from(new Set([...quickRemarks, ...(sug.remarks ?? [])])).slice(0, 12).map((r) => (
@@ -666,7 +686,7 @@ export function InspectionForm({
                             {!locked ? <button type="button" aria-label={`Remove ${e.name}`} onClick={() => removeEntry(e.id)} className="min-h-6 px-1 font-bold text-red">×</button> : null}
                           </span>
                         ))}
-                        {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: it.key, label: it.label })} className="min-h-9 rounded-control border border-dashed border-line-strong px-3 text-xs font-bold">+ Parts</button> : null}
+                        {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: it.key, label: it.label })} className="min-h-9 rounded-control border border-dashed border-line-strong px-3 text-xs font-bold">{partsList.some((e) => e.item_key === it.key) ? "+ Add another part" : "+ Parts"}</button> : null}
                       </div>
                     </div>
                   ) : null}
@@ -697,6 +717,7 @@ export function InspectionForm({
       <Card className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="inline-flex flex-wrap items-center gap-2"><SectionLabel>Tyres (all required)</SectionLabel>{complaintTag("wheels_tyres_and_brakes")}</span>
+          <datalist id="tyre-brands">{tyreBrands.filter((b) => b.toLowerCase() !== "other").map((b) => <option key={b} value={b} />)}</datalist>
           <Dot ok={tyresOk} attempted={attempted} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -729,7 +750,7 @@ export function InspectionForm({
           return (
             <div key={p.key} className={`rounded-card border p-3 flex flex-col gap-3 ${danger ? "border-red-bar border-2" : "border-line"}`}>
               <p className="font-semibold flex flex-wrap items-center gap-2">{p.label}{danger ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <label id={`item-m-tyre_${p.key}_tread`} className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">Tread depth (mm, 0 to {limits.tread_max})</span>
                   <Input value={measurements[`tyre_${p.key}_tread`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_tread`, e.target.value)} inputMode="decimal" disabled={locked} className={outOfRange(`tyre_${p.key}_tread`) ? "border-red-bar" : ""} />
@@ -741,13 +762,17 @@ export function InspectionForm({
                       <option value="">Choose…</option>
                       {yearOptions.map((y) => <option key={y.value} value={y.value}>{y.label}</option>)}
                     </Select>
-                    {p.key !== "fl" && measurements.tyre_fl_year && !locked ? <button type="button" onClick={() => { for (const f of ["year", "tread", "brand"]) setMeasurement(`tyre_${p.key}_${f}`, measurements[`tyre_fl_${f}`] ?? "", true); if ((p.key === "rl" || p.key === "rr") && measurements.tyre_size_front) setMeasurement("tyre_size_rear", tyreSizeText(measurements.tyre_size_front ?? ""), true); }} className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-xs font-bold whitespace-nowrap" title="Copies the year, size, brand and tread">Same as front left</button> : null}
+                    {p.key !== "fl" && measurements.tyre_fl_year && !locked ? <button type="button" onClick={() => { for (const f of ["year", "tread", "brand", "model"]) setMeasurement(`tyre_${p.key}_${f}`, measurements[`tyre_fl_${f}`] ?? "", true); if ((p.key === "rl" || p.key === "rr") && measurements.tyre_size_front) setMeasurement("tyre_size_rear", tyreSizeText(measurements.tyre_size_front ?? ""), true); }} className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-xs font-bold whitespace-nowrap" title="Copies the year, size, brand, model and tread">Same as front left</button> : null}
                   </div>
                   {age !== null && age > limits.tyre_years ? <span className="text-xs font-bold text-red">Older than {limits.tyre_years} years</span> : age !== null && age >= 6 ? <span className="text-xs font-bold text-amber">{age} years old</span> : null}
                 </div>
                 <label id={`item-m-tyre_${p.key}_brand`} className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">Brand</span>
-                  <Input value={measurements[`tyre_${p.key}_brand`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_brand`, e.target.value)} onBlur={(e) => setMeasurement(`tyre_${p.key}_brand`, e.target.value.trim(), true)} disabled={locked} placeholder="Michelin" textCase="title" />
+                  <Input value={measurements[`tyre_${p.key}_brand`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_brand`, e.target.value)} onBlur={(e) => setMeasurement(`tyre_${p.key}_brand`, e.target.value.trim(), true)} disabled={locked} placeholder="Michelin" textCase="title" list="tyre-brands" />
+                </label>
+                <label id={`item-m-tyre_${p.key}_model`} className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-muted">Model (optional)</span>
+                  <Input value={measurements[`tyre_${p.key}_model`] ?? ""} onChange={(e) => setMeasurement(`tyre_${p.key}_model`, e.target.value)} onBlur={(e) => setMeasurement(`tyre_${p.key}_model`, e.target.value.trim(), true)} disabled={locked} placeholder="Pilot Sport 4S" />
                 </label>
               </div>
               <div id={`item-m-tyre_${p.key}_cond`} className="flex flex-col gap-1">
@@ -856,7 +881,7 @@ export function InspectionForm({
               return (
                 <li key={line.key} className="py-2 flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-semibold">{line.name}</span>
-                  {line.positions.length ? <span className="text-muted">{line.positions.join(", ")}</span> : null}
+                  {line.positions.length ? <span className="text-muted">{positionsWords(line.positions)}</span> : null}
                   <span className="text-xs text-muted">· {fromLabel(line)}</span>
                   {dupPositions(line).length ? <span className="text-[11px] font-semibold text-amber">Appears twice for {dupPositions(line).join(", ")}: check the quantity</span> : null}
                   <span className="ml-auto inline-flex items-center rounded-control border border-line-strong bg-white">
@@ -872,6 +897,19 @@ export function InspectionForm({
             })}
           </ul>
         ) : null}
+        {(() => {
+          // Parts that go with one on the list (a wear sensor with brake pads): offered, never added by themselves.
+          const offers = locked ? [] : goesWithOffers(partsList, catalogue);
+          return offers.length ? (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-control bg-chip p-2 text-xs" data-goes-with>
+              <span className="font-semibold">Goes with:</span>
+              {offers.map((o) => (
+                <button key={o.key} type="button" onClick={() => setList([...partsRef.current, offerEntry(o)])} className="min-h-9 rounded-control border border-line-strong bg-white px-2.5 font-bold">+ Add {o.label.charAt(0).toLowerCase()}{o.label.slice(1)}?</button>
+              ))}
+              <span className="text-muted">Offered only; nothing is added by itself.</span>
+            </div>
+          ) : null;
+        })()}
         {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: null, label: "" })} className="self-start min-h-11 rounded-control border border-dashed border-line-strong px-4 text-sm font-bold">+ Add a part</button> : null}
         {partsListFooter}
       </Card>

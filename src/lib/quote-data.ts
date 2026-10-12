@@ -6,14 +6,17 @@ import { cleanPartsList, mergePartsList } from "./parts-list";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
 import { expectedChargePercent, type Settings } from "./settings";
 import { newToken } from "./media";
+import { dubaiDate } from "./jobs";
+import { loadPricingRows, valuesOfPart, PRICING_PART_SELECT, type PricingPart } from "./parts-pricing";
+import { rowState } from "./parts-rows";
 
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
   "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, expected_payment_method, editing_by, editing_at, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per, positions, left_off, recovery_type";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, recovery_paid_by, recovery_mention_free, markup_confirmed, price_per, positions, left_off, recovery_type";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active, position_ask, suggest_for";
-export const PART_SELECT = "id, job_id, part_request_id, part_number, description, original_description, list_price_aed, discount_percent, quantity_changed_at, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
+export const PART_SELECT = "id, job_id, part_request_id, part_number, description, original_description, list_price_aed, discount_percent, quantity_changed_at, removed_at, removed_by, removed_reason, discount_approval_status, client_key, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason, positions, note, catalogue_id";
 
 /** Numbers come back from Postgres as strings; the maths wants numbers. */
@@ -129,7 +132,7 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
   const admin = createAdminClient();
   const [{ data: qs }, { data: parts }, { data: requests }, { data: doneJobs }] = await Promise.all([
     admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at, completed_at, viewed_full_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
-    admin.from("part_items").select("job_id, cost_aed, confirm_status").in("job_id", jobIds).eq("is_active", true),
+    admin.from("part_items").select(`job_id, ${PRICING_PART_SELECT}`).in("job_id", jobIds).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", jobIds).eq("is_active", true),
     admin.from("jobs").select("id").in("id", jobIds).not("parts_pricing_done_at", "is", null),
   ]);
@@ -139,14 +142,16 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
     const s = out.get(q.job_id)!;
     if (!s.quotation) s.quotation = toQuote(q) as QuoteSummary["quotation"];
   }
-  for (const p of (parts ?? []) as { job_id: string; cost_aed: number | null; confirm_status: string }[]) {
+  const today = dubaiDate();
+  for (const p of (parts ?? []) as unknown as (PricingPart & { job_id: string })[]) {
     const s = out.get(p.job_id)!;
     if (p.confirm_status === "pending") s.waitingConfirm++;
     if (p.confirm_status === "rejected") s.rejectedParts++;
     else {
       s.partsTotal!++;
-      if (p.cost_aed === null) s.waitingPrices++;
-      else s.partsPriced!++;
+      // The same "priced" as the Parts table: part number, type, net above 0, supplier, availability.
+      if (rowState(valuesOfPart(p, today)) === "priced") s.partsPriced!++;
+      else s.waitingPrices++;
     }
   }
   for (const r of (requests ?? []) as { job_id: string; status: string }[]) if (r.status === "open" && !pricingDone.has(r.job_id)) out.get(r.job_id)!.openRequests++;
@@ -356,27 +361,27 @@ export { INSPECTION_BUCKET };
 export async function loadQuoteChecks(jobId: string | null): Promise<{ openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }> {
   if (!jobId) return { openRequests: 0, workshopEstimate: null };
   const admin = createAdminClient();
-  const [{ data: reqs }, { data: insp }, { data: jobRow }] = await Promise.all([
-    admin.from("part_requests").select("id").eq("job_id", jobId).eq("is_active", true).eq("status", "open"),
+  const [pricing, { data: insp }, { data: jobRow }] = await Promise.all([
+    loadPricingRows(jobId),
     admin.from("inspections").select("estimated_hours, estimated_hours_manager").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     admin.from("jobs").select("parts_pricing_done_at").eq("id", jobId).maybeSingle(),
   ]);
-  // Parts pressed "Pricing done": whatever is still open no longer holds the advisor.
+  // Parts pressed "Pricing done": whatever is still open no longer holds the advisor. Otherwise every row that is
+  // not finished or waiting for the owner's approval does (the same state function as the Parts table).
   const pricingDone = !!jobRow?.parts_pricing_done_at;
   const hours = insp?.estimated_hours === null || insp?.estimated_hours === undefined ? null : Number(insp.estimated_hours);
   const managerHours = insp?.estimated_hours_manager === null || insp?.estimated_hours_manager === undefined ? null : Number(insp.estimated_hours_manager);
-  return { openRequests: pricingDone ? 0 : (reqs ?? []).length, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null } };
+  return { openRequests: pricingDone ? 0 : pricing.summary.open, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null } };
 }
 
 /** How long the advisor has been waiting on Parts: the oldest open request or unpriced part, in minutes, and who the Parts people are. */
 export async function loadPartsWait(jobId: string): Promise<{ count: number; minutes: number; names: string[] }> {
   const admin = createAdminClient();
-  const [{ data: reqs }, { data: parts }, { data: people }] = await Promise.all([
-    admin.from("part_requests").select("created_at").eq("job_id", jobId).eq("is_active", true).eq("status", "open"),
-    admin.from("part_items").select("created_at").eq("job_id", jobId).eq("is_active", true).neq("confirm_status", "rejected").is("cost_aed", null),
+  const [pricing, { data: people }] = await Promise.all([
+    loadPricingRows(jobId),
     admin.from("staff").select("display_name").eq("role_id", "parts").eq("is_active", true).order("display_name"),
   ]);
-  const stamps = [...(reqs ?? []), ...(parts ?? [])].map((r) => Date.parse((r as { created_at: string }).created_at)).filter((t) => Number.isFinite(t));
+  const stamps = pricing.rows.filter((r) => r.state === "not_finished" || r.state === "waiting_approval").map((r) => Date.parse(r.createdAt)).filter((t) => Number.isFinite(t));
   const minutes = stamps.length ? Math.max(0, Math.floor((Date.now() - Math.min(...stamps)) / 60000)) : 0;
   return { count: stamps.length, minutes, names: (people ?? []).map((p) => p.display_name as string) };
 }

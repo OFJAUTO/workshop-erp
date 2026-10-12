@@ -8,6 +8,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autoPauseBreaks, autoPauseEndOfShift } from "@/lib/work-flow";
 import { monthKey, monthLabel, monthlySummary, shiftMonth } from "@/lib/owner-report";
+import { loadDocAlerts } from "@/lib/doc-reminders-data";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -253,6 +254,29 @@ export async function GET(request: NextRequest) {
       await notifyRoles(["owner"], { type: "parts_no_home", title: `Part with no home · ${job?.job_number ?? ""}`, body: `${p.description} has waited three working days for an ending: back to the supplier, to stock, or fitted with your approval.`, jobId: p.job_id as string, href: "/parts/no-home" });
       await admin.from("part_items").update({ no_home_notified_at: new Date().toISOString() }).eq("id", p.id);
       report.partsNoHome = (report.partsNoHome ?? 0) + 1;
+    }
+  }
+
+  // 15. Documents not sent past the red limit (report, quotation, proforma, tax invoice, customer's reply): the advisor
+  //     is reminded once per document; the job remembers which reminders went out.
+  {
+    const { data: openJobs } = await admin.from("jobs").select("id, job_number, gated_in_by, doc_reminders").eq("is_open", true).limit(500);
+    const jobIds = (openJobs ?? []).map((j) => j.id as string);
+    const alerts = await loadDocAlerts(jobIds, settings);
+    for (const j of openJobs ?? []) {
+      const red = (alerts.get(j.id as string) ?? []).filter((a) => a.state === "red");
+      if (!red.length) continue;
+      const done = { ...(((j.doc_reminders as Record<string, string> | null) ?? {})) };
+      const fresh = red.filter((a) => !done[a.key]);
+      if (!fresh.length) continue;
+      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", j.id as string);
+      const people = Array.from(new Set([j.gated_in_by as string | null, ...(appr ?? []).map((a) => a.sent_by as string | null)].filter((x): x is string => !!x)));
+      for (const a of fresh) {
+        await notifyStaff(people, { type: "doc_not_sent", title: `${a.label} not sent · ${j.job_number}`, body: `${a.text}. Send it now.`, jobId: j.id as string, href: `/jobs/${j.id}` });
+        done[a.key] = new Date().toISOString();
+      }
+      await admin.from("jobs").update({ doc_reminders: done }).eq("id", j.id as string);
+      report.docReminders = (report.docReminders ?? 0) + fresh.length;
     }
   }
 

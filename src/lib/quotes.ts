@@ -1,6 +1,8 @@
 /** Quotations and estimates: line types, the maths, what blocks sending, and plain-word statuses. Safe for the browser. */
 
 import type { WorkingTime } from "./working-time";
+import { customerAvailabilityWords, daysFromDate } from "./parts-rows";
+import { positionsWords } from "./parts-list";
 
 export const LINE_TYPES = [
   { value: "labour", label: "Labour" },
@@ -83,6 +85,10 @@ export type QuoteLine = {
   left_off?: boolean;
   /** Normal / Full down / Closed box, from Settings. */
   recovery_type?: string | null;
+  /** Who pays for the recovery: us (cost only, internal) or the customer (priced on the quotation). */
+  recovery_paid_by?: "us" | "customer" | null;
+  /** A recovery we pay for, shown to the customer at AED 0 as "free of charge". */
+  recovery_mention_free?: boolean;
 };
 
 export type QuoteRow = {
@@ -165,6 +171,13 @@ export type PartItem = {
   list_price_aed?: number | null;
   discount_percent?: number | null;
   quantity_changed_at?: string | null;
+  /** "Remove: not needed" before the order: kept greyed with the reason, Put back possible. */
+  removed_at?: string | null;
+  removed_by?: string | null;
+  removed_reason?: string | null;
+  /** A supplier discount above the owner's limit waits for his one-tap approval. */
+  discount_approval_status?: "pending" | "approved" | "refused" | null;
+  client_key?: string | null;
   quantity: number;
   diagram_path: string | null;
   supplier: string | null;
@@ -220,6 +233,10 @@ export type PartRequest = {
   positions?: string[] | null;
   note?: string | null;
   catalogue_id?: string | null;
+  /** "Remove: not needed" on a request with no part yet: kept greyed with the reason, Put back possible. */
+  removed_at?: string | null;
+  removed_by?: string | null;
+  removed_reason?: string | null;
 };
 
 export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
@@ -229,13 +246,18 @@ export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 1
 export const round1 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 10) / 10;
 export const aed = (n: number | null | undefined) => `AED ${round2(n ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** "1.5 h", always one decimal. */
-export const hoursText = (h: number | null | undefined) => `${round1(h ?? 0).toFixed(1)} h`;
+/** "2.0 h", "10.25 h": one decimal, two when the figure needs them. */
+export const hoursText = (h: number | null | undefined) => {
+  const n = round2(h ?? 0);
+  return `${Math.abs(n * 10 - Math.round(n * 10)) < 1e-9 ? n.toFixed(1) : n.toFixed(2)} h`;
+};
 /** Hours typed with a full stop or a comma, one decimal place, at least 0.1. Null when empty. */
 export function parseHours(text: string | number | null | undefined): number | null {
   if (text === null || text === undefined || text === "") return null;
   const n = Number(String(text).replace(",", ".").replace(/[^\d.]/g, ""));
   if (!Number.isFinite(n)) return null;
-  return Math.max(0.1, round1(n));
+  // Two decimals: "10.25" stays 10.25 (the hours columns take two decimals since 12 October 2026).
+  return Math.max(0.1, round2(n));
 }
 
 /** Lines whose price comes from a cost plus markup, with the minimum markup as a floor on the final price. */
@@ -417,10 +439,10 @@ export function sendBlockers(
 }
 
 /** The customer's wording for a recovery line: "Recovery, closed box, two ways". */
-export function recoveryTitle(typeLabel: string | null | undefined, trips: number | null | undefined): string {
+export function recoveryTitle(typeLabel: string | null | undefined, trips: number | null | undefined, free = false): string {
   const t = Math.max(1, Math.round(Number(trips) || 1));
   const way = t === 1 ? "one way" : t === 2 ? "two ways" : `${t} trips`;
-  return `Recovery${typeLabel ? `, ${typeLabel.toLowerCase()}` : ""}, ${way}`;
+  return `Recovery${typeLabel ? `, ${typeLabel.toLowerCase()}` : ""}, ${way}${free ? ": free of charge" : ""}`;
 }
 
 /** Whole-dirham totals to offer when sending: the nearest ten below (the default) and above. */
@@ -539,20 +561,12 @@ export function quoteState(s: QuoteSummary, hasInspectionApproved: boolean): Quo
   }
 }
 
-export const AVAILABILITY_LABELS = { in_stock: "Available now", to_order: "To order" } as const;
+export const AVAILABILITY_LABELS = { in_stock: "In stock", to_order: "To order" } as const;
 
-/** What the customer reads under a part: "In stock", "Arrives in 3 days" or "To order". */
+/** What the customer reads under a part: "In stock", "Today", "Tomorrow", "In 3 days" or "To order". */
 export function partAvailabilityText(p: { availability: "in_stock" | "to_order" | null; delivery_date: string | null } | null | undefined, today: string): string | null {
   if (!p) return null;
-  if (p.availability === "in_stock") return "In stock";
-  if (p.availability === "to_order") {
-    if (p.delivery_date) {
-      const days = Math.max(1, Math.round((Date.parse(p.delivery_date) - Date.parse(today)) / 86400000));
-      return `Arrives in ${days} day${days === 1 ? "" : "s"}`;
-    }
-    return "To order";
-  }
-  return null;
+  return customerAvailabilityWords(p.availability, daysFromDate(p.delivery_date, today));
 }
 export const CONFIRM_LABELS = { pending: "Waiting for the technician", confirmed: "Confirmed by the technician", rejected: "Rejected by the technician" } as const;
 
@@ -574,8 +588,7 @@ export function lineQuantityText(l: Pick<QuoteLine, "line_type" | "hours" | "qua
 /** The positions of a job in words after its name: "Brake pads · front and rear". */
 export function withPositions(title: string, positions?: string[] | null): string {
   if (!positions?.length) return title;
-  const words = positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ");
-  return `${title} · ${words}`;
+  return `${title} · ${positionsWords(positions)}`;
 }
 export const lineTitleText = (l: Pick<QuoteLine, "title" | "positions">) => withPositions(l.title, l.positions);
 /** The positions a job can take on the quotation. */

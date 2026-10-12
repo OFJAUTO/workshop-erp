@@ -1,5 +1,7 @@
 "use client";
 
+import { ReasonChips } from "@/components/ReasonChips";
+
 import { useState } from "react";
 import { Badge, Button, Input, Textarea } from "@/components/ui";
 import { DISPOSITIONS, EXCHANGE_REASONS, type PartState } from "@/lib/part-state";
@@ -15,7 +17,7 @@ export function PartStateBadge({ state }: { state: PartState }) {
  * Under a part on the handover page: "Wrong or faulty" (one-tap reason, then the exchange starts) and
  * "Not needed" (a reason). Only the input the chosen action needs opens, and closes when done.
  */
-export function PartActions({ partId, back, canExchange, canNotNeeded, exchangeAction, notNeededAction }: { partId: string; back?: string; canExchange: boolean; canNotNeeded: boolean; exchangeAction: Action; notNeededAction: Action }) {
+export function PartActions({ partId, back, canExchange, canNotNeeded, exchangeAction, notNeededAction, notNeededReasons = [] }: { partId: string; back?: string; canExchange: boolean; canNotNeeded: boolean; exchangeAction: Action; notNeededAction: Action; /** One-tap reasons for "not needed" (Settings). */ notNeededReasons?: string[] }) {
   const [open, setOpen] = useState<null | "exchange" | "not_needed">(null);
   const [reason, setReason] = useState("");
   if (!canExchange && !canNotNeeded) return null;
@@ -44,7 +46,7 @@ export function PartActions({ partId, back, canExchange, canNotNeeded, exchangeA
       <form action={notNeededAction} className="flex flex-col gap-2 rounded-control border border-line bg-white p-3">
         <input type="hidden" name="part" value={partId} />
         {back ? <input type="hidden" name="back" value={back} /> : null}
-        <label className="flex flex-col gap-1 text-sm font-semibold">Why is it not needed?<Textarea name="reason" rows={1} required placeholder="For example: the old one was fine after cleaning" textCase="sentence" className="min-h-12" /></label>
+        <ReasonChips name="reason" label="Why is it not needed?" options={notNeededReasons} required placeholder="For example: the old one was fine after cleaning" textCase="sentence" />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" size="md">Mark not needed</Button>
           <Button type="button" tone="ghost" size="md" onClick={() => setOpen(null)}>Cancel</Button>

@@ -7,6 +7,8 @@ import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice } from
 import { paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
+import { reasonsFor } from "@/lib/reasons";
+import { ReasonChips } from "@/components/ReasonChips";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -122,8 +124,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       {p.status === "recorded" && canVoid ? (
                         <details className="text-xs">
                           <summary className="cursor-pointer font-semibold text-muted underline underline-offset-4">Void this receipt</summary>
-                          <form action={voidPaymentAction.bind(null, p.id)} className="mt-1 flex flex-wrap items-center gap-1">
-                            <Input name="reason" placeholder="Why (stays on the record)" required className="w-64" />
+                          <form action={voidPaymentAction.bind(null, p.id)} className="mt-1 flex flex-wrap items-end gap-2">
+                            <ReasonChips name="reason" options={reasonsFor(settings, "void_payment")} placeholder="Why (stays on the record)" required className="min-w-64" />
                             <Button type="submit" size="md" tone="danger">Void</Button>
                           </form>
                         </details>
@@ -231,7 +233,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 </form>
               ) : can(role, "issueInvoices") && !staff.viewingAs ? (
                 <form action={requestCreditNote.bind(null, invoice.id)} className="flex flex-col gap-2 border-t border-line pt-2">
-                  <Textarea name="reason" rows={2} placeholder="What needs correcting (the owner approves)" required />
+                  <ReasonChips name="reason" rows={2} options={reasonsFor(settings, "credit_note")} placeholder="What needs correcting (the owner approves)" required />
                   <Button type="submit" tone="secondary" size="md">Ask the owner for a credit note</Button>
                 </form>
               ) : null}

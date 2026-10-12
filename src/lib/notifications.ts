@@ -7,6 +7,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "approval_opened", label: "Customer opened the approval link", locked: true },
   { type: "approval_approved", label: "Customer approved the job card", locked: true },
   { type: "approval_reminder", label: "Approval link not opened in time", locked: true },
+  { type: "doc_not_sent", label: "A document not sent in time: report, quotation, proforma or invoice", locked: true },
   { type: "loose_gated_in", label: "Loose items gated in, quotation needed" },
   { type: "owner_report", label: "Owner's report after gate-out" },
   { type: "monthly_summary", label: "Monthly summary on the 1st" },

@@ -33,7 +33,8 @@ import { exchangePartAction } from "../../parts/handover-actions";
 import { pendingHandoversFor } from "@/lib/handover";
 import { confirmHandoverOnDevice } from "../../parts/handover-actions";
 import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/work-data";
-import { PAUSE_REASONS, activeTechnicians } from "@/lib/work-flow";
+import { activeTechnicians } from "@/lib/work-flow";
+import { reasonsFor } from "@/lib/reasons";
 import { InspectionForm, type Suggestions } from "./InspectionForm";
 import { WorkClock, WorkJobs, type PanelLine, type PanelPart, type RunningSession } from "./WorkPanel";
 
@@ -243,7 +244,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             running={running}
             mineRunning={running.some((r) => r.mine)}
             reminders={reminders}
-            pauseReasons={PAUSE_REASONS}
+            pauseReasons={reasonsFor(settings, "pause")}
+            leaveReasons={reasonsFor(settings, "leave_job")}
             canWork={canWork}
             workDone={!!job.work_done_at}
             waitingOnManager={managerName}
@@ -357,7 +359,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
       {!inWork && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved") ? (
         <>
-          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: true, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
+          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: true, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>

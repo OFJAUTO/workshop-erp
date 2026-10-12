@@ -73,6 +73,65 @@ export function FormGuard() {
     } catch {}
   }, [pathname, search]);
 
+  // 3. The browser's own "Please fill out this field" bubble never shows. The box that was refused gets a red
+  //    outline and the system's message under it, in plain words; the first one gets the cursor.
+  useEffect(() => {
+    let lastAt = 0;
+    type Box = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+    const messageFor = (el: Box) => {
+      const v = el.validity;
+      const type = (el as HTMLInputElement).type;
+      if (v.valueMissing) return el.tagName === "SELECT" ? "Please choose one" : type === "checkbox" || type === "radio" ? "Please tick this" : type === "file" ? "Please add a file" : "Please fill this in";
+      if (v.typeMismatch) return type === "email" ? "Please enter a proper email address" : type === "url" ? "Please enter a proper web address" : "Please check this entry";
+      if (v.patternMismatch) return el.title || "Please check the format";
+      if (v.tooShort) return `Please write at least ${(el as HTMLInputElement).minLength} characters`;
+      if (v.tooLong) return `Please keep this under ${(el as HTMLInputElement).maxLength} characters`;
+      if (v.rangeUnderflow || v.rangeOverflow) return `Please enter a number between ${(el as HTMLInputElement).min || "0"} and ${(el as HTMLInputElement).max}`;
+      if (v.stepMismatch || v.badInput) return "Please enter a number";
+      return "Please check this entry";
+    };
+    const hostOf = (el: Box) => (el.closest("label") ?? el.parentElement) as HTMLElement | null;
+    const show = (el: Box, text: string) => {
+      el.classList.add("erp-invalid");
+      const host = hostOf(el);
+      if (!host) return;
+      let msg = host.querySelector<HTMLElement>(":scope > .erp-field-msg");
+      if (!msg) {
+        msg = document.createElement("span");
+        msg.className = "erp-field-msg text-xs font-semibold text-red";
+        host.appendChild(msg);
+      }
+      msg.textContent = text;
+    };
+    const clear = (el: Box) => {
+      el.classList.remove("erp-invalid");
+      hostOf(el)?.querySelector(":scope > .erp-field-msg")?.remove();
+    };
+    const onInvalid = (e: Event) => {
+      const el = e.target as Box | null;
+      if (!el || !("validity" in el)) return;
+      e.preventDefault();
+      show(el, messageFor(el));
+      const now = Date.now();
+      // The first refused box of this attempt gets the cursor and comes into view.
+      if (now - lastAt > 100) {
+        el.focus({ preventScroll: true });
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+      lastAt = now;
+      const onFix = () => {
+        if (!el.validity.valid) return;
+        clear(el);
+        el.removeEventListener("input", onFix);
+        el.removeEventListener("change", onFix);
+      };
+      el.addEventListener("input", onFix);
+      el.addEventListener("change", onFix);
+    };
+    document.addEventListener("invalid", onInvalid, true);
+    return () => document.removeEventListener("invalid", onInvalid, true);
+  }, []);
+
   return null;
 }
 

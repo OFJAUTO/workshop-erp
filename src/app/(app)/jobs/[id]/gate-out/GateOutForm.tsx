@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { ReasonChips } from "@/components/ReasonChips";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
-import { ChoiceButtons, Field, Input, Notice, Textarea } from "@/components/ui";
+import { ChoiceButtons, Field, Input, Notice } from "@/components/ui";
 
 export type BalanceInfo = { state: "paid" | "part_paid" | "unpaid" | "cheque_pending" | "no_invoice" | "nothing"; balance: number; invoiceNumber: string | null };
 
 /** The gate-out form: how the car leaves, the checks before release, the handover. */
-export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldParts, canOverride, canApproveRelease, balance }: { jobId: string; action: FormAction; keysCount: number; keychain: boolean; dashCam: boolean; oldParts: boolean; canOverride: boolean; canApproveRelease: boolean; balance: BalanceInfo }) {
+export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldParts, canOverride, canApproveRelease, balance, reasons = { keys: [], release: [] } }: { jobId: string; action: FormAction; keysCount: number; keychain: boolean; dashCam: boolean; oldParts: boolean; canOverride: boolean; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for the keys override and for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
   const [method, setMethod] = useState<string>("customer");
   const [returned, setReturned] = useState<string>(String(keysCount));
   const [chain, setChain] = useState<string>(keychain ? "yes" : "no");
@@ -63,7 +64,7 @@ export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldPa
             canOverride ? (
               <>
                 <Notice tone="error">Does not match gate-in ({keysCount} key{keysCount === 1 ? "" : "s"}, {keychain ? "with" : "no"} keychain). Blocked unless you override with a reason. The override is logged.</Notice>
-                <Field label="Reason for the keys override"><Textarea name="override_reason" defaultValue={v.override_reason} rows={2} required /></Field>
+                <ReasonChips name="override_reason" label="Reason for the keys override" rows={2} options={reasons.keys} defaultValue={v.override_reason ?? ""} required placeholder="Tap a reason, or type" />
               </>
             ) : (
               <Notice tone="error">Does not match gate-in ({keysCount} key{keysCount === 1 ? "" : "s"}, {keychain ? "with" : "no"} keychain). Gate-out is blocked. Only the owner or workshop manager can override.</Notice>
@@ -87,7 +88,7 @@ export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldPa
             canApproveRelease ? (
               <>
                 <Notice tone="error">{blockedText} You can approve the release with a reason (logged).</Notice>
-                <Field label="Reason for releasing"><Textarea name="release_reason" defaultValue={v.release_reason} rows={2} required /></Field>
+                <ReasonChips name="release_reason" label="Reason for releasing" rows={2} options={reasons.release} defaultValue={v.release_reason ?? ""} required placeholder="Tap a reason, or type" />
               </>
             ) : (
               <Notice tone="error">{blockedText} Gate-out is blocked until the owner or accounts approve the release.</Notice>

@@ -36,6 +36,8 @@ export default async function SettingsPage() {
   let inboundToken = "";
   let labourJobsText = "";
   let candidates: Record<string, number> = {};
+  let docLimits: Record<string, { amber: number; red: number | string }> = {};
+  let reasonPresets: Record<string, string[]> = {};
   const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: true, advisor_labour_discount: false, customer_documents_uppercase: false };
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
@@ -47,7 +49,10 @@ export default async function SettingsPage() {
     else if (row.key === "stage_target_hours") stageHours = (row.value as Record<string, number>) ?? {};
     else if (row.key === "branches") branchesText = ((row.value as { name: string; address: string }[]) ?? []).map((b) => `${b.name} | ${b.address}`).join("\n");
     else if (row.key === "inspection_checklist" || row.key === "item_suggestions" || row.key === "labour_hours_memory") continue;
-    else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
+    else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "tyre_brands"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
+    else if (row.key === "doc_reminder_limits") docLimits = (row.value as Record<string, { amber: number; red: number | string }>) ?? {};
+    else if (row.key === "reason_presets") reasonPresets = (row.value as Record<string, string[]>) ?? {};
+    else if (row.key === "road_test_chips" || row.key === "road_test_chip_usage" || row.key === "tyre_brand_custom" || row.key === "manager_note_usage" || row.key === "item_suggestions" || row.key === "complaint_keywords" || row.key === "part_pool_custom" || row.key === "custom_jobs_used" || row.key === "manager_note_groups") continue;
     else if (row.key === "known_words") listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join(", ") : "";
     else if (row.key === "inspection_limits") limits = { ...limits, ...((row.value as Record<string, number>) ?? {}) };
     else if (row.key === "prescan_gate_enabled") prescanGate = row.value === true;
@@ -109,6 +114,8 @@ export default async function SettingsPage() {
             labourJobsText={labourJobsText}
             candidates={candidates}
             flags={flags}
+            docLimits={docLimits}
+            reasonPresets={reasonPresets}
           />
         </div>
         <div className="flex flex-col gap-6">

@@ -14,6 +14,7 @@ import { PrescanToggle } from "@/components/PrescanToggle";
 import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_ITEMS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
+import { reasonsFor } from "@/lib/reasons";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { approveInspection, approveScanNotPossible, confirmPartsList, decideInspectionChange, requestInspectionChange, returnInspection } from "../../inspection-actions";
@@ -247,7 +248,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           </Card>
 
           {reviewing ? (
-            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} partsListFooter={<PartsListTick action={confirmPartsList.bind(null, id)} confirmedAt={insp.parts_list_confirmed_at} confirmedByName={tickName} count={partLines.length} canTick={canApprove && insp.status === "submitted"} />} />
+            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} partsListFooter={<PartsListTick action={confirmPartsList.bind(null, id)} confirmedAt={insp.parts_list_confirmed_at} confirmedByName={tickName} count={partLines.length} canTick={canApprove && insp.status === "submitted"} />} />
           ) : (
             <>
               <Card className="flex flex-col gap-2">
@@ -379,8 +380,8 @@ export default async function InspectionReportPage({ params }: { params: Promise
           {canApprove && insp.status === "submitted" ? (
             <Card className="flex flex-col gap-4 border-ink">
               <SectionLabel>Workshop manager&apos;s decision</SectionLabel>
-              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} groups={noteGroups} usage={noteUsage} />
-              <ReturnForm action={returnInspection.bind(null, id)} />
+              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} groups={noteGroups} usage={noteUsage} reasons={{ raise: reasonsFor(settings, "hours_raise"), lower: reasonsFor(settings, "hours_lower") }} />
+              <ReturnForm action={returnInspection.bind(null, id)} reasons={reasonsFor(settings, "send_back")} />
             </Card>
           ) : null}
 

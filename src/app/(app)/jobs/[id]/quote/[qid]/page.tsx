@@ -14,6 +14,8 @@ import { formatPlate } from "@/lib/types";
 import { confirmEstimateUnchanged, decideQuoteApproval, declineQuotation, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 import { loadCatalogue } from "@/lib/parts-catalogue";
+import { loadPricingRows } from "@/lib/parts-pricing";
+import { reasonsFor } from "@/lib/reasons";
 import { quoteReferenceOf } from "@/lib/quote-reference";
 
 export const dynamic = "force-dynamic";
@@ -44,13 +46,14 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const candidateMap = (settings.custom_jobs_used ?? {}) as Record<string, number>;
   const candidates = Object.entries(candidateMap).filter(([, n]) => Number(n) >= 2).map(([t]) => t);
   const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
-  const countedParts = bundle.parts.filter((p) => p.confirm_status !== "rejected");
+  // The same rows and state as the Parts table: "4 of 5 parts priced" means the same thing on both screens.
+  const pricing = await loadPricingRows(id);
   const { data: unavailableRows } = await createAdminClient().from("part_requests").select("label, closed_reason").eq("job_id", id).eq("status", "unavailable").eq("is_active", true);
   const wait: PartsWait = {
     unavailable: (unavailableRows ?? []).map((u) => ({ label: u.label as string, note: (u.closed_reason as string | null) ?? null })),
     openRequests: checks.openRequests,
-    partsTotal: countedParts.length,
-    partsPriced: countedParts.filter((p) => p.cost_aed !== null).length,
+    partsTotal: pricing.summary.total,
+    partsPriced: pricing.summary.counts.priced,
     waitingMinutes: partsWait.minutes,
     partsNames: partsWait.names.join(", "),
     remindAfter: Number(settings.parts_remind_minutes) || 30,
@@ -93,6 +96,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     depositPercent: Number(settings.deposit_percent) || 50,
     today: dubaiDate(),
     workingTime: workingTimeOf(settings),
+    reasons: { part_discount: reasonsFor(settings, "part_discount") },
   };
   const tone = q.status === "approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
   const urgentCount = bundle.lines.filter((l) => l.urgency === "urgent" && !isHidden(l)).length;

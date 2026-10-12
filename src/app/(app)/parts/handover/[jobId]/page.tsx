@@ -10,6 +10,7 @@ import { hasNoHome, partState } from "@/lib/part-state";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, toPartFull, type JobBrief } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
+import { reasonsFor } from "@/lib/reasons";
 import { isBatteryPart, stickerSettings } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -108,7 +109,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
             {toHandParts.map((p) => (
               <li key={p.id} className="py-2 flex flex-col gap-2">
                 <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><PartStateBadge state={partState(p)} />{p.not_received_at ? <span className="text-xs text-muted">not received {formatDateTime(p.not_received_at)}</span> : null}</span>
-                <PartActions partId={p.id} back={back} canExchange={p.received_qty > 0} canNotNeeded exchangeAction={exchangePartAction.bind(null, jobId)} notNeededAction={notNeededAction.bind(null, jobId)} />
+                <PartActions partId={p.id} back={back} canExchange={p.received_qty > 0} canNotNeeded exchangeAction={exchangePartAction.bind(null, jobId)} notNeededAction={notNeededAction.bind(null, jobId)} notNeededReasons={reasonsFor(settings, "remove_part")} />
               </li>
             ))}
           </ul>
@@ -122,7 +123,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
             {handed.map((p) => (
               <li key={p.id} className="py-2 flex flex-col gap-2">
                 <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><span className="text-muted">× {p.tech_received_qty ?? p.issued_qty ?? 1} · received by {nameOf.get(p.issue_confirmed_by ?? "") ?? "the technician"}, {formatDateTime(p.issue_confirmed_at)}</span><PartStateBadge state={partState(p)} />{p.stickers_printed ? <Badge tone="outline">{p.stickers_printed} sticker{p.stickers_printed === 1 ? "" : "s"}</Badge> : null}</span>
-                {canSettle ? <PartActions partId={p.id} back={back} canExchange canNotNeeded exchangeAction={exchangePartAction.bind(null, jobId)} notNeededAction={notNeededAction.bind(null, jobId)} /> : null}
+                {canSettle ? <PartActions partId={p.id} back={back} canExchange canNotNeeded exchangeAction={exchangePartAction.bind(null, jobId)} notNeededAction={notNeededAction.bind(null, jobId)} notNeededReasons={reasonsFor(settings, "remove_part")} /> : null}
               </li>
             ))}
           </ul>

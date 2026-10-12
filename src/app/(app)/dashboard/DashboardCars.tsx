@@ -35,6 +35,10 @@ export type DashRow = {
   statusLine: string;
   inspectionLabel: string | null;
   urgency: (number | string)[];
+  /** The job's worst document alert ("Report not sent · 25 min", "Quotation sent 14:05"), or none. */
+  docAlert: { text: string; tone: "muted" | "amber" | "red" | "green" } | null;
+  /** A document past its first limit: counted in the Pending row as "Not sent". */
+  notSent: boolean;
 };
 
 const SORTS = [
@@ -127,13 +131,13 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
   const [query, setQuery] = useState("");
   const [sort, setSort] = useStoredSort();
   const [tile, setTile] = useState<TileKey>("all");
-  const [pending, setPending] = useState<string | null>(PENDING_GROUPS.some((g) => g.key === initialPending) ? (initialPending as string) : null);
+  const [pending, setPending] = useState<string | null>(PENDING_GROUPS.some((g) => g.key === initialPending) || initialPending === "not_sent" ? (initialPending as string) : null);
 
   const tileDef = TILES.find((t) => t.key === tile) ?? TILES[0];
   const searched = rows.filter((r) => matchesQuery(r, query.trim()) && tileDef.match(r));
   const group = PENDING_GROUPS.find((g) => g.key === pending);
-  const visible = sortRows(group ? searched.filter((r) => group.statuses.includes(r.status)) : searched, sort);
-  const filtered = query.trim() || tile !== "all" || !!group;
+  const visible = sortRows(pending === "not_sent" ? searched.filter((r) => r.notSent) : group ? searched.filter((r) => group.statuses.includes(r.status)) : searched, sort);
+  const filtered = query.trim() || tile !== "all" || !!group || pending === "not_sent";
 
   return (
     <>
@@ -190,6 +194,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
               onClick={() => setPending(group?.key === g.key ? null : g.key)}
             />
           ))}
+          <PendingChip label="Not sent" count={searched.filter((r) => r.notSent).length} active={pending === "not_sent"} onClick={() => setPending(pending === "not_sent" ? null : "not_sent")} />
         </div>
       </section>
 
@@ -249,7 +254,10 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                     </span>
                   </div>
                   <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
-                    <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
+                      {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
+                    </span>
                     <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
                   </div>
                 </Card>

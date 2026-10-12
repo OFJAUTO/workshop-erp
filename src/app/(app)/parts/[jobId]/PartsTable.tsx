@@ -2,11 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Badge, Button, Input } from "@/components/ui";
+import { Button, Input } from "@/components/ui";
+import { formatDateTime } from "@/lib/format";
 import { PART_TYPE_LABELS } from "@/lib/quotes";
-import { discountOf, netOf, rowComplete, supplierDiscount, type RowValues, type SupplierOption } from "@/lib/parts-rows";
+import { AVAILABILITY_CHOICES, availabilityChoice, availabilityFromChoice, availabilityWords, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
-import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, removePart, splitPart } from "../actions";
+import { ReasonChips } from "@/components/ReasonChips";
+import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, splitPart } from "../actions";
+import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 
 export type TableRow = {
   key: string;
@@ -31,39 +34,60 @@ export type TableRow = {
   question: string | null;
   answer: string | null;
   perSet: boolean;
+  /** "Remove: not needed": greyed with the reason, Put back possible. */
+  removed: { by: string; reason: string } | null;
+  /** A supplier discount above the owner's limit, waiting for his approval. */
+  waitingApproval: boolean;
 };
 
+type Action = (formData: FormData) => void | Promise<void>;
+
 /**
- * The columns, sized to their content and starting from the left. Under a wide screen the part number and
- * the type move to a second line inside the row, so nothing squashes on a small laptop.
+ * The columns, sized to their content and starting from the left. On a very wide screen everything sits on one line;
+ * on a laptop the part number and the type take a second line inside the row. A third line (the status line) holds
+ * the notes and the "Not finished" tag, so a row never changes height whatever its state.
  */
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(9rem,1fr)_6.5rem_5.5rem_4.5rem_6rem_11rem_11rem_2.5rem] xl:grid-cols-[minmax(9rem,1fr)_6.5rem_14rem_7.5rem_5.5rem_4.5rem_6rem_11rem_11rem_2.5rem] gap-x-2 gap-y-1.5 items-center";
-const SECOND_LINE = "col-span-2 md:col-span-4 md:order-last xl:col-span-1 xl:order-none";
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(9rem,1fr)_6rem_4.75rem_3.75rem_5.25rem_7.5rem_9.5rem_2.5rem] 2xl:grid-cols-[minmax(9rem,1fr)_6rem_10rem_12.5rem_4.75rem_3.75rem_5.25rem_8.5rem_9.5rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
+const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 2xl:col-span-1 2xl:order-none";
+const STATUS_LINE = "col-span-2 md:col-span-8 2xl:col-span-10 md:order-3";
 const EMPTY: RowValues = { part_number: "", part_type: "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
 const num = (s: string) => Number(String(s).replace(",", ".")) || 0;
+const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, { unavailable: r.unavailable, removed: !!r.removed, waitingApproval: r.waitingApproval });
 
 /**
  * The Parts pricing table: one row per part, every row saving itself as it is filled in. Part, Qty, Part number,
  * Type, List, Disc %, Net, Supplier, Availability and a three-dot menu. The discount fills in from the supplier,
- * the net is calculated, the quantity has − and +, the name can be corrected, a bundled row can be split.
- * Nothing redraws while someone is typing.
+ * the net is calculated, the quantity has − and +, the name can be corrected, a bundled row can be split. Rows keep
+ * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
+ * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; catalogue?: string[] }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; catalogue?: string[]; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[] }) {
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
-  const [onlyUnpriced, setOnlyUnpriced] = useState(false);
+  // "Show only unpriced" is a snapshot: the rows shown stay put while they are being finished.
+  const [onlyUnpriced, setOnlyUnpriced] = useState<Set<string> | null>(null);
   const [listOpen, setListOpen] = useState(false);
-  // Rows added or changed elsewhere arrive on refresh; what this screen holds for a row wins while it is being edited.
+  // "Pricing done" pressed with rows still open: they get a red outline until finished.
+  const [attempted, setAttempted] = useState(false);
+  const [lastJump, setLastJump] = useState<string | null>(null);
+  // Rows added or changed elsewhere arrive on refresh; this screen keeps its order and what it holds for a row being edited.
   const [seen, setSeen] = useState(initialRows);
   if (seen !== initialRows) {
     setSeen(initialRows);
     setRows((cur) => {
-      const mine = new Map(cur.map((r) => [r.key, r]));
-      const merged = initialRows.map((r) => {
-        const k = mine.get(r.key);
-        return k ? { ...r, name: k.name, values: k.values } : r;
-      });
-      for (const r of cur) if (!r.partId && !r.requestId && !merged.some((m) => m.key === r.key)) merged.push(r);
+      const incoming = new Map(initialRows.map((r) => [r.key, r]));
+      const used = new Set<string>();
+      const merged: TableRow[] = [];
+      for (const r of cur) {
+        const byKey = incoming.get(r.key);
+        const byPart = !byKey && r.partId ? initialRows.find((x) => x.key === r.partId) : undefined;
+        const server = byKey ?? byPart;
+        if (server) {
+          used.add(server.key);
+          merged.push({ ...server, name: r.name, values: r.values });
+        } else if (!r.partId && !r.requestId) merged.push(r);
+      }
+      for (const r of initialRows) if (!used.has(r.key)) merged.push(r);
       return merged;
     });
   }
@@ -72,18 +96,36 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     setSeenSup(initialSuppliers);
     setSuppliers((cur) => [...initialSuppliers, ...cur.filter((c) => !initialSuppliers.some((s) => s.id === c.id))]);
   }
-  const done = rows.filter((r) => r.unavailable || rowComplete(r.values, !!r.partId)).length;
-  const shown = onlyUnpriced ? rows.filter((r) => !r.unavailable && !rowComplete(r.values, !!r.partId)) : rows;
+  const states = rows.map((r) => stateOf(r));
+  const summary = pricingSummary(states);
+  const shown = onlyUnpriced ? rows.filter((r) => onlyUnpriced.has(r.key)) : rows;
+  const firstOpen = rows.find((r) => stateOf(r) === "not_finished");
+  const firstOpenText = firstOpen ? `${firstOpen.name}: ${rowMissing(firstOpen.values).map((m) => m.long).join(", ") || "not finished"}` : null;
 
+  function toggleUnpriced() {
+    setOnlyUnpriced((cur) => (cur ? null : new Set(rows.filter((r) => stateOf(r) !== "priced" && stateOf(r) !== "removed").map((r) => r.key))));
+  }
+  function goNext() {
+    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-row-state='not_finished']"));
+    if (!els.length) return;
+    const i = els.findIndex((el) => el.dataset.rowKey === lastJump);
+    const el = els[(i + 1) % els.length];
+    setLastJump(el.dataset.rowKey ?? null);
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    // The cursor lands in the box outlined red (the missing piece), else in the first empty one.
+    const marked = el.querySelector<HTMLInputElement | HTMLSelectElement>("input.border-red-bar, select.border-red-bar");
+    const empty = Array.from(el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")).find((c) => !c.disabled && c.value.trim() === "" && c.getAttribute("aria-label") !== "Brand" && c.offsetParent !== null);
+    (marked ?? empty)?.focus();
+  }
   function addLoose() {
     const name = window.prompt("Which part? Type its name.");
     if (!name?.trim()) return;
-    setRows((p) => [...p, { key: `new:${Date.now()}`, requestId: null, partId: null, name: name.trim(), original: null, techQty: 1, info: "Added by Parts", values: { ...EMPTY, part_type: types[0] ?? "" }, optionGroup: null, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: false }]);
+    setRows((p) => [...p, { key: `new:${Date.now()}`, requestId: null, partId: null, name: name.trim(), original: null, techQty: 1, info: "Added by Parts", values: { ...EMPTY, part_type: types[0] ?? "" }, optionGroup: null, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: false, removed: null, waitingApproval: false }]);
   }
   function addOption(base: TableRow) {
     setRows((p) => {
       const i = p.findIndex((r) => r.key === base.key);
-      const row: TableRow = { key: `opt:${Date.now()}`, requestId: base.requestId, partId: null, name: base.name, original: null, techQty: base.techQty, info: "Option: another type or brand for the same part", values: { ...EMPTY, qty: base.values.qty, part_type: "" }, optionGroup: base.optionGroup ?? base.partId, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: base.perSet };
+      const row: TableRow = { key: `opt:${Date.now()}`, requestId: base.requestId, partId: null, name: base.name, original: null, techQty: base.techQty, info: "Option: another type or brand for the same part", values: { ...EMPTY, qty: base.values.qty, part_type: "" }, optionGroup: base.optionGroup ?? base.partId, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: base.perSet, removed: null, waitingApproval: false };
       (row as TableRow & { optionOf?: string }).optionOf = base.partId ?? undefined;
       const copy = [...p];
       copy.splice(i + 1, 0, row);
@@ -102,34 +144,63 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     setSuppliers((cur) => (cur.some((x) => x.id === s.id) ? cur : [...cur, s].sort((a, b) => a.name.localeCompare(b.name))));
     return s;
   }
+  const notFinished = summary.counts.not_finished;
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-col gap-1 flex-1 min-w-[12rem]">
-          <span className="text-sm font-bold">{done} of {rows.length} priced</span>
-          <span className="h-1.5 w-full max-w-xs rounded-full bg-track overflow-hidden"><span className="block h-full bg-ink" style={{ width: `${rows.length ? Math.round((done / rows.length) * 100) : 0}%` }} /></span>
+          <span className="text-sm font-bold" data-pricing-counter>{summary.text}</span>
+          <span className="h-1.5 w-full max-w-xs rounded-full bg-track overflow-hidden"><span className="block h-full bg-ink" style={{ width: `${summary.total ? Math.round((summary.done / summary.total) * 100) : 0}%` }} /></span>
         </div>
-        <button type="button" onClick={() => setOnlyUnpriced((v) => !v)} aria-pressed={onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
+        <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
         <Button type="button" tone="secondary" size="md" onClick={() => setListOpen(true)}>Copy list for supplier</Button>
       </div>
-      <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
-        <span>Part</span><span>Qty</span><span className="hidden xl:block">Part number</span><span className="hidden xl:block">Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {shown.map((r) => (
-          <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
-        ))}
-        {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
+      <div className="overflow-x-auto">
+        <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
+          <span>Part</span><span>Qty</span><span className="hidden 2xl:block">Part number</span><span className="hidden 2xl:block">Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
+        </div>
+        <div className="flex flex-col gap-1.5 pt-1.5">
+          {shown.map((r) => (
+            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} attempted={attempted} removeReasons={removeReasons} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
+          ))}
+          {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
+        </div>
       </div>
       {canPrice ? <Button type="button" tone="secondary" size="md" onClick={addLoose} className="self-start">+ Add a part the technician did not list</Button> : null}
       <datalist id="part-pool">{catalogue.map((c) => <option key={c} value={c} />)}</datalist>
       {listOpen ? <SupplierList rows={rows} car={car} vin={vin} openingLine={openingLine} onClose={() => setListOpen(false)} /> : null}
+      {showBar && onPricingDone ? (
+        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+            {pricingDoneAt ? <span className="text-xs font-semibold text-green">✓ Sent to the advisor, {formatDateTime(pricingDoneAt)}</span> : null}
+            {attempted && summary.open ? (
+              <span className="text-sm font-semibold text-red" data-bar-text>
+                {notFinished ? `${notFinished} part${notFinished === 1 ? "" : "s"} not finished` : ""}
+                {notFinished && firstOpenText ? ` · ${firstOpenText}` : ""}
+                {summary.counts.waiting_approval ? `${notFinished ? " · " : ""}${summary.counts.waiting_approval} waiting for owner approval` : ""}
+              </span>
+            ) : (
+              <span className="text-xs text-muted" data-bar-text>{summary.open === 0 && summary.total ? `Every part is priced or marked not available (${summary.text})` : summary.text}</span>
+            )}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {attempted && notFinished ? <button type="button" onClick={goNext} className="min-h-12 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">Go to next</button> : null}
+              {summary.open === 0 ? (
+                <form action={onPricingDone}><input type="hidden" name="force" value="" /><button type="submit" className="min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">{pricingDoneAt ? "Pricing done again" : "Pricing done"}</button></form>
+              ) : attempted ? (
+                <form action={onPricingDone}><input type="hidden" name="force" value="1" /><button type="submit" className="min-h-12 rounded-control bg-ink px-4 text-sm font-bold text-white">Send what you have</button></form>
+              ) : (
+                <button type="button" onClick={() => setAttempted(true)} className="min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">{pricingDoneAt ? "Pricing done again" : "Pricing done"}</button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: string[]; canPrice: boolean; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
+function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, removeReasons, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: string[]; canPrice: boolean; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
   const router = useRouter();
   const [v, setV] = useState<RowValues>(row.values);
   const [name, setName] = useState(row.name);
@@ -137,14 +208,21 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
   const [focused, setFocused] = useState(false);
   const [menu, setMenu] = useState<null | "down" | "up">(null);
   const [editingName, setEditingName] = useState(false);
-  const [editingPn, setEditingPn] = useState(!row.values.part_number);
+  const [otherMode, setOtherMode] = useState(() => availabilityChoice(row.values) === "other");
   const [copied, setCopied] = useState(false);
   const [split, setSplit] = useState(false);
+  // "Remove: not needed": which kind of row is being removed, and the few seconds of Undo after it.
+  const [removing, setRemoving] = useState<null | "part" | "request" | "ordered">(null);
+  const [undo, setUndo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [, start] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ v, name });
+  // The saved part's id as the server last told us, and the saves in a chain: a second change while the first save is
+  // still on its way must see the part the first one made, never make a second one.
+  const partIdRef = useRef<string | null>(row.partId);
+  const chain = useRef<Promise<void>>(Promise.resolve());
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const optionOf = (row as TableRow & { optionOf?: string }).optionOf ?? null;
@@ -152,17 +230,25 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  const complete = rowComplete(v, !!partId);
-  const partial = !complete && Object.entries(v).some(([k, x]) => k !== "qty" && x.trim() !== "" && x !== (types[0] ?? ""));
-  const tone = row.unavailable ? "bg-amber-soft/60" : focused ? "bg-chip border-l-4 border-ink" : complete ? "bg-green-soft" : "bg-white";
+  const state = stateOf(row, v);
+  const missing = state === "not_finished" ? rowMissing(v) : [];
+  const complete = state === "priced";
+  const partial = state === "not_finished" && Object.entries(v).some(([k, x]) => k !== "qty" && x.trim() !== "" && !(k === "part_type" && x === (types[0] ?? "")));
+  const red = attempted && state === "not_finished";
+  const tone = row.removed ? "border-line bg-canvas opacity-60" : red ? "border-red-bar bg-white" : focused ? `border-ink ${complete ? "bg-green-soft" : "bg-chip"}` : row.waitingApproval ? "border-amber-bar bg-amber-soft/40" : row.unavailable ? "border-line bg-amber-soft/60" : complete ? "border-green bg-green-soft" : "border-line bg-white";
   const supplier = suppliers.find((s) => s.name.toLowerCase() === v.supplier.toLowerCase());
+  const standard = supplier ? supplierDiscount(supplier, v.part_type) : null;
+  const standardNote = standard !== null && v.discount.trim() !== "" && Math.abs(Number(v.discount.replace(",", ".")) - standard) > 0.001 ? `Standard ${standard}%, changed to ${v.discount}%` : "";
   const qty = num(v.qty) || 1;
   const qtyChanged = Math.abs(qty - row.techQty) > 0.001;
+  const choice = availabilityChoice(v, otherMode);
+  const missingField = (f: string) => red && missing.some((m) => m.field === f);
 
   function queue(nextV: RowValues, nextName: string) {
     latest.current = { v: nextV, name: nextName };
     setV(nextV);
     setName(nextName);
+    onValues(nextName, nextV);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void persist(nextV, nextName), 900);
   }
@@ -179,6 +265,12 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
     const discount = supplier ? String(supplierDiscount(supplier, part_type)) : latest.current.v.discount;
     change({ part_type, discount, cost_aed: netOf(latest.current.v.list_price, discount) || latest.current.v.cost_aed });
   };
+  const changeAvailability = (c: AvailabilityChoice, el: HTMLSelectElement) => {
+    setOtherMode(c === "other");
+    change(availabilityFromChoice(c, latest.current.v.days));
+    // "Other…": the cursor moves into the days box beside the dropdown.
+    if (c === "other") requestAnimationFrame(() => el.closest<HTMLElement>("[data-row-key]")?.querySelector<HTMLInputElement>("input[aria-label='Days until it arrives']")?.focus());
+  };
   const flushNow = () => {
     if (timer.current) {
       clearTimeout(timer.current);
@@ -187,17 +279,24 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
     }
   };
   async function persist(next: RowValues, nextName: string) {
-    setSaving(true);
-    const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId, optionOf, name: nextName, ...next, quantity: next.qty });
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
-    setError(null);
-    if (res.partId && res.partId !== partId) setPartId(res.partId);
-    onSaved(res.partId ?? partId, nextName, next);
-    if (res.complete) start(() => refreshWhenIdle(() => router.refresh()));
+    const run = chain.current.then(async () => {
+      setSaving(true);
+      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty });
+      setSaving(false);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setError(null);
+      if (res.partId && res.partId !== partIdRef.current) {
+        partIdRef.current = res.partId;
+        setPartId(res.partId);
+      }
+      onSaved(res.partId ?? partIdRef.current, nextName, next);
+      if (res.complete) start(() => refreshWhenIdle(() => router.refresh()));
+    });
+    chain.current = run.catch(() => undefined);
+    await run;
   }
   const run = (fn: () => Promise<unknown>) => start(async () => { try { await fn(); } catch { /* a redirect ends the action */ } refreshWhenIdle(() => router.refresh()); });
   const openMenu = () => {
@@ -216,86 +315,80 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
       setTimeout(() => setCopied(false), 1500);
     } catch {}
   };
-  const box = "min-h-10 text-sm";
-  const readOnly = row.unavailable || !canPrice || row.locked;
-  const label = (t: string) => <span className="xl:hidden text-[10px] font-bold uppercase tracking-[0.06em] text-muted">{t}</span>;
+  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed;
+  const removeTarget = partId ? { partId } : { requestId: row.requestId };
+  const doRemove = (kind: "part" | "request" | "ordered", reason: string) => {
+    const fd = new FormData();
+    fd.set("reason", reason);
+    run(async () => {
+      const r = kind === "ordered" && partId ? await notNeededFromParts(jobId, partId, fd) : await removeNotNeeded(jobId, removeTarget, fd);
+      if (r.error) setError(r.error);
+      else if (kind !== "ordered") {
+        setUndo(true);
+        setTimeout(() => setUndo(false), 6000);
+      }
+    });
+  };
+  const box = (f: string, extra = "") => `h-9 min-h-9 text-sm ${extra} ${missingField(f) ? "border-red-bar" : ""}`;
+  const select = (f: string) => `h-9 w-full min-w-0 rounded-control border bg-white px-1.5 text-sm ${missingField(f) ? "border-red-bar" : "border-line-strong"}`;
+  const textCell = (t: string, extra = "") => <span className={`h-9 flex items-center min-w-0 truncate text-sm ${extra}`} title={t}>{t}</span>;
+  const notes = [row.removed ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, row.original && row.original !== name ? `Technician wrote: ${row.original}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
+  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
 
   return (
-    <div className={`${GRID} rounded-control border border-line px-2 py-1.5 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
-      {/* Part: the name (tap to correct it), the notes under it */}
-      <div className="col-span-2 md:col-span-1 flex flex-col gap-0.5 min-w-0">
-        <span className="flex flex-wrap items-center gap-1.5 text-sm">
-          {complete ? <span className="text-green font-extrabold" aria-label="priced">✓</span> : null}
-          {editingName && !readOnly ? (
-            <Input value={name} onChange={(e) => queue(latest.current.v, e.target.value)} onBlur={() => setEditingName(false)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditingName(false); flushNow(); } }} list="part-pool" aria-label="Part name" className="min-h-9 w-full max-w-xs font-bold" textCase="sentence" autoFocus />
-          ) : (
-            <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className="font-bold text-left disabled:cursor-default" title={readOnly ? undefined : "Tap to correct the name"}>{name}</button>
-          )}
-          {row.optionGroup ? <Badge tone="outline">Option</Badge> : null}
-          {row.unavailable ? <Badge tone="amber">Not available</Badge> : null}
-          {row.orderLabel ? <Badge tone="ink">{row.orderLabel}</Badge> : null}
-          {row.diagramUrl ? <a href={row.diagramUrl} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Diagram</a> : null}
-          {saving ? <span className="text-[11px] text-muted">Saving…</span> : null}
-        </span>
-        {row.info ? <span className="text-[11px] text-muted">{row.info}</span> : null}
-        {row.original && row.original !== name ? <span className="text-[11px] text-muted">Technician wrote: {row.original}</span> : null}
-        {qtyChanged ? <span className="text-[11px] text-muted">Technician asked for {row.techQty}, Parts changed to {qty}</span> : null}
-        {row.closedReason && row.unavailable ? <span className="text-[11px] text-muted">{row.closedReason}</span> : null}
-        {row.question ? <span className="text-[11px]"><span className="font-semibold">Asked the manager:</span> {row.question}{row.answer ? <span className="font-semibold text-green"> · {row.answer}</span> : <span className="text-muted"> · waiting</span>}</span> : null}
-        {error ? <span className="text-[11px] font-semibold text-red">{error}</span> : null}
+    <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
+      {/* Part: the name (tap to correct it) */}
+      <div className="col-span-2 md:col-span-1 h-9 flex items-center gap-1.5 min-w-0">
+        <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
+        {editingName && !readOnly ? (
+          <Input value={name} onChange={(e) => queue(latest.current.v, e.target.value)} onBlur={() => setEditingName(false)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditingName(false); flushNow(); } }} list="part-pool" aria-label="Part name" className="h-9 min-h-9 w-full font-bold" textCase="sentence" autoFocus />
+        ) : (
+          <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`h-9 min-w-0 flex-1 truncate text-left font-bold disabled:cursor-default ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? undefined : `${name} · tap to correct the name`}>{name}</button>
+        )}
+        {row.diagramUrl ? <a href={row.diagramUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold underline underline-offset-4">Diagram</a> : null}
       </div>
       {/* Qty: − and +, and the box itself */}
-      <span className="inline-flex items-center gap-0.5">
+      <span className="h-9 inline-flex items-center gap-0.5">
         <button type="button" disabled={readOnly || qty <= 1} onClick={() => change({ qty: String(Math.max(1, Math.round(qty) - 1)) })} className="h-9 w-7 rounded-control border border-line-strong bg-white text-sm font-bold disabled:opacity-40" aria-label="One less">−</button>
-        <Input value={v.qty} onChange={(e) => change({ qty: e.target.value })} inputMode="decimal" disabled={readOnly} aria-label="Quantity" className="min-h-9 w-11 px-1 text-center text-sm font-bold" />
+        <Input value={v.qty} onChange={(e) => change({ qty: e.target.value })} inputMode="decimal" disabled={readOnly} aria-label="Quantity" className="h-9 min-h-9 w-10 px-0.5 text-center text-sm font-bold" />
         <button type="button" disabled={readOnly} onClick={() => change({ qty: String(Math.round(qty) + 1) })} className="h-9 w-7 rounded-control border border-line-strong bg-white text-sm font-bold disabled:opacity-40" aria-label="One more">+</button>
         {row.perSet ? <span className="text-[10px] text-muted">sets</span> : null}
       </span>
-      {/* Part number: a box about 20 characters wide; once saved, plain text in full with Copy */}
-      <span className={`${SECOND_LINE} flex flex-col gap-0.5 min-w-0`}>
-        {label("Part number")}
-        {!readOnly && editingPn ? (
-          <Input value={v.part_number} onChange={(e) => change({ part_number: e.target.value })} onBlur={() => { if (latest.current.v.part_number.trim()) setEditingPn(false); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); } }} placeholder="Part number" textCase="upper" className={`${box} w-full`} aria-label="Part number" autoFocus={!!row.values.part_number} />
-        ) : (
-          <span className="flex items-start gap-1 min-w-0">
-            <button type="button" disabled={readOnly} onClick={() => setEditingPn(true)} className="text-left text-sm font-semibold break-all whitespace-normal disabled:cursor-default" title={readOnly ? undefined : "Tap to change"}>{v.part_number || <span className="text-muted font-normal">No part number</span>}</button>
-            {v.part_number ? <button type="button" onClick={copyPn} className="shrink-0 min-h-7 rounded-control border border-line px-1.5 text-[11px] font-bold" aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button> : null}
-          </span>
+      {/* Part number: always a box (never swapped for text while the row is open), with Copy beside it */}
+      <span className={`${SECOND_LINE} h-9 flex items-center gap-1 min-w-0`}>
+        {readOnly ? textCell(v.part_number || "No part number", "flex-1 font-semibold") : (
+          <Input value={v.part_number} onChange={(e) => change({ part_number: e.target.value })} placeholder="Part number" textCase="upper" className={box("part_number", "w-full min-w-0 flex-1 px-2")} aria-label="Part number" />
         )}
+        <button type="button" onClick={copyPn} disabled={!v.part_number} className={`shrink-0 h-9 w-12 rounded-control border border-line text-[11px] font-bold ${v.part_number ? "" : "invisible"}`} aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button>
       </span>
-      {/* Type */}
-      <span className={`${SECOND_LINE} flex flex-col gap-0.5`}>
-        {label("Type")}
-        {readOnly ? (
-          <span className="text-sm">{v.part_type ? (PART_TYPE_LABELS[v.part_type] ?? v.part_type) + (v.brand ? ` · ${v.brand}` : "") : ""}</span>
-        ) : (
-          <span className="flex flex-col gap-1">
-            <select value={v.part_type} onChange={(e) => changeType(e.target.value)} className="min-h-10 w-full rounded-control border border-line-strong bg-white px-2 text-sm" aria-label="Type">
+      {/* Type and brand on one line; the brand box keeps its place when it does not apply */}
+      <span className={`${SECOND_LINE} h-9 flex items-center gap-1 min-w-0`}>
+        {readOnly ? textCell(v.part_type ? (PART_TYPE_LABELS[v.part_type] ?? v.part_type) + (v.brand ? ` · ${v.brand}` : "") : "") : (
+          <>
+            <select value={v.part_type} onChange={(e) => changeType(e.target.value)} className={`${select("part_type")} basis-[46%]`} aria-label="Type">
               <option value="">Type…</option>
               {types.map((t) => <option key={t} value={t}>{PART_TYPE_LABELS[t] ?? t}</option>)}
             </select>
-            {v.part_type && v.part_type !== "genuine" ? <Input value={v.brand} onChange={(e) => change({ brand: e.target.value })} placeholder="Brand" className="min-h-9 text-xs" textCase="title" aria-label="Brand" /> : null}
-          </span>
+            <Input value={v.brand} onChange={(e) => change({ brand: e.target.value })} placeholder="Brand" className={`h-9 min-h-9 basis-[54%] min-w-0 px-2 text-xs ${v.part_type && v.part_type !== "genuine" ? "" : "invisible"}`} textCase="title" aria-label="Brand" tabIndex={v.part_type && v.part_type !== "genuine" ? undefined : -1} />
+          </>
         )}
       </span>
       {/* List, Disc %, Net */}
       {readOnly ? (
         <>
-          <span className="text-right text-sm">{v.list_price ? Number(v.list_price).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : ""}</span>
-          <span className="text-right text-sm">{v.discount ? `${v.discount}%` : ""}</span>
-          <span className="text-right text-sm font-semibold">{v.cost_aed ? Number(v.cost_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : ""}</span>
+          {textCell(v.list_price ? Number(v.list_price).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : "", "justify-end")}
+          {textCell(v.discount ? `${v.discount}%` : "", "justify-end")}
+          {textCell(v.cost_aed ? Number(v.cost_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : "", "justify-end font-semibold")}
         </>
       ) : (
         <>
-          <Input value={v.list_price} onChange={(e) => changeList(e.target.value)} inputMode="decimal" placeholder="List" className={`${box} text-right px-1`} aria-label="List price" />
-          <Input value={v.discount} onChange={(e) => changeDisc(e.target.value)} inputMode="decimal" placeholder="%" className={`${box} text-right px-1`} aria-label="Discount percent" />
-          <Input value={v.cost_aed} onChange={(e) => changeNet(e.target.value)} inputMode="decimal" placeholder="Net" className={`${box} text-right px-1 font-semibold`} aria-label="Cost before VAT" />
+          <Input value={v.list_price} onChange={(e) => changeList(e.target.value)} inputMode="decimal" placeholder="List" className={box("list_price", "text-right px-1")} aria-label="List price" />
+          <Input value={v.discount} onChange={(e) => changeDisc(e.target.value)} inputMode="decimal" placeholder="%" className={box("discount", "text-right px-1")} aria-label="Discount percent" />
+          <Input value={v.cost_aed} onChange={(e) => changeNet(e.target.value)} inputMode="decimal" placeholder="Net" className={box("cost_aed", "text-right px-1 font-semibold")} aria-label="Cost before VAT" />
         </>
       )}
       {/* Supplier: from the list, with Add a supplier at the bottom */}
-      {readOnly ? (
-        <span className="text-sm whitespace-normal">{v.supplier}</span>
-      ) : (
+      {readOnly ? textCell(v.supplier) : (
         <select
           value={supplier ? supplier.id : v.supplier ? "__text" : ""}
           onChange={(e) => {
@@ -304,7 +397,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
             else if (val === "") changeSupplier(undefined, "");
             else if (val !== "__text") { const s = suppliers.find((x) => x.id === val); if (s) changeSupplier(s, s.name); }
           }}
-          className="min-h-10 w-full rounded-control border border-line-strong bg-white px-2 text-sm"
+          className={select("supplier")}
           aria-label="Supplier"
         >
           <option value="">Supplier…</option>
@@ -313,21 +406,21 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
           <option value="__add">+ Add a supplier…</option>
         </select>
       )}
-      {/* Availability in words */}
-      {readOnly ? (
-        <span className="text-sm">{v.availability === "in_stock" ? "In stock" : v.availability === "to_order" ? `Order · arrives in ${v.days} days` : ""}</span>
-      ) : (
-        <span className="flex flex-wrap items-center gap-1">
-          <button type="button" onClick={() => change({ availability: "in_stock", days: "" })} aria-pressed={v.availability === "in_stock"} className={`min-h-9 rounded-control border px-2 text-[11px] font-extrabold ${v.availability === "in_stock" ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>In stock</button>
-          <button type="button" onClick={() => change({ availability: "to_order" })} aria-pressed={v.availability === "to_order"} className={`min-h-9 rounded-control border px-2 text-[11px] font-extrabold ${v.availability === "to_order" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Order</button>
-          {v.availability === "to_order" ? <span className="inline-flex items-center gap-1 text-[11px] text-muted">arrives in <Input value={v.days} onChange={(e) => change({ days: e.target.value })} inputMode="numeric" className="min-h-9 w-12 px-1 text-xs text-center" aria-label="Days until it arrives" /> days</span> : null}
+      {/* Availability: one dropdown, the days box beside it only for Other */}
+      {readOnly ? textCell(availabilityWords(v.availability, v.days)) : (
+        <span className="h-9 flex items-center gap-1 min-w-0">
+          <select value={choice} onChange={(e) => changeAvailability(e.target.value as AvailabilityChoice, e.currentTarget)} className={`${select(v.availability === "to_order" ? "days" : "availability")} basis-[62%]`} aria-label="Availability">
+            <option value="">Availability…</option>
+            {AVAILABILITY_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          <Input value={v.days} onChange={(e) => change({ days: e.target.value })} inputMode="numeric" placeholder="days" className={`h-9 min-h-9 basis-[38%] min-w-0 px-1 text-xs text-center ${choice === "other" ? "" : "invisible"} ${missingField("days") ? "border-red-bar" : ""}`} aria-label="Days until it arrives" tabIndex={choice === "other" ? undefined : -1} />
         </span>
       )}
       {/* The three-dot menu: narrow, always visible, opens upwards near the bottom */}
-      <div className="relative flex justify-end">
+      <div className="relative h-9 flex items-center justify-end">
         {canPrice ? (
           <>
-            <button ref={menuRef} type="button" onClick={openMenu} aria-label="More for this part" aria-expanded={!!menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>⋯</button>
+            <button ref={menuRef} type="button" onClick={openMenu} aria-label="More for this part" aria-expanded={!!menu} className={`h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>⋯</button>
             {menu ? (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
@@ -340,7 +433,10 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
                   {row.requestId && !row.unavailable && !partId ? <MenuItem label="Not available" onClick={() => { setMenu(null); const note = window.prompt("Not available. A note for the advisor (optional)", ""); if (note !== null) { const fd = new FormData(); fd.set("note", note); run(() => markRequestUnavailable(row.requestId!, fd)); } }} /> : null}
                   {row.requestId && !partId ? <MenuItem label="Already covered in another request" onClick={() => { setMenu(null); run(() => coverRequest(row.requestId!)); }} /> : null}
                   {row.requestId && !partId ? <MenuItem label="Cannot source: close the request" onClick={() => { setMenu(null); const note = window.prompt("Why is this request closed? (shown to the advisor)", ""); if (note && note.trim().length >= 3) { const fd = new FormData(); fd.set("note", note); run(() => closePartRequest(row.requestId!, fd)); } }} /> : null}
-                  {partId && !row.locked ? <MenuItem label="Remove" red onClick={() => { setMenu(null); if (window.confirm(`Remove ${name} from this job?`)) run(() => removePart(partId)); }} /> : null}
+                  {partId && !row.locked && !row.removed ? <MenuItem label="Remove: not needed" red onClick={() => { setMenu(null); setRemoving("part"); }} /> : null}
+                  {!partId && row.requestId && !row.removed ? <MenuItem label="Remove: not needed" red onClick={() => { setMenu(null); setRemoving("request"); }} /> : null}
+                  {partId && row.locked && !row.removed ? <MenuItem label="Remove: not needed (ordered: choose its ending)" red onClick={() => { setMenu(null); setRemoving("ordered"); }} /> : null}
+                  {row.removed ? <MenuItem label="Put back" onClick={() => { setMenu(null); run(() => putBackPart(jobId, removeTarget)); }} /> : null}
                   {!partId && !row.requestId ? <MenuItem label="Remove this row" red onClick={() => { setMenu(null); onRemovedLocal(); }} /> : null}
                 </div>
               </>
@@ -353,10 +449,45 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, onSaved, onAdd
           </>
         ) : null}
       </div>
-      {partial && !complete && !row.unavailable ? <span className="col-span-2 md:col-span-8 xl:col-span-10 md:order-last text-[11px] text-muted">Not finished: {[!v.part_type ? "type" : "", !v.cost_aed.trim() ? "net cost" : "", !v.supplier.trim() ? "supplier" : "", v.availability === "to_order" && !(Number(v.days) > 0) ? "days to arrive" : !v.availability ? "availability" : ""].filter(Boolean).join(", ")}.</span> : null}
+      {/* The status line: always there, always one line high, so the row never grows or shrinks */}
+      <div className={`${STATUS_LINE} h-5 flex items-center gap-2 min-w-0 text-[11px] leading-none`} data-status-line>
+        {row.removed ? <Chip tone="outline">Removed</Chip> : null}
+        {row.waitingApproval && !row.removed ? <Chip tone="amber">Waiting for owner approval</Chip> : null}
+        {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
+        {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
+        {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
+        <span className="min-w-0 flex-1 truncate text-muted" title={notes}>{notes}</span>
+        {row.removed && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
+        <span className={`shrink-0 max-w-[60%] truncate ${tag.cls}`} title={tag.text} data-row-tag>{tag.text}</span>
+      </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
+      {removing ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason) => { const kind = removing; setRemoving(null); doRemove(kind, reason); }} /> : null}
     </div>
   );
+}
+
+/** "Remove: not needed": one-tap reasons (Settings) or typed; before the order the row is greyed with Put back, after it the part gets an ending. */
+function RemoveDialog({ kind, name, options, onClose, onConfirm }: { kind: "part" | "request" | "ordered"; name: string; options: readonly string[]; onClose: () => void; onConfirm: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-remove-dialog>
+        <span className="text-lg font-extrabold">Remove: not needed</span>
+        <p className="text-xs text-muted">{kind === "ordered" ? `${name} is already ordered. After this it needs an ending: back to the supplier, to stock, or fitted with the owner's approval (Parts without a home).` : `${name} comes off the list and the quotation, greyed with the reason; Put back is one tap. The advisor and the workshop manager are told. "Not available" is different: wanted, but the supplier cannot supply it.`}</p>
+        <ReasonChips name="reason" label="Why?" options={options} onValue={setReason} placeholder="Tap a reason, or type" textCase="sentence" />
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>Remove</Button>
+          <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A small label of fixed height on the status line. */
+function Chip({ tone, children }: { tone: "outline" | "amber" | "ink"; children: React.ReactNode }) {
+  const cls = tone === "amber" ? "bg-amber-soft text-amber" : tone === "ink" ? "bg-ink text-white" : "border border-ink text-ink";
+  return <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10px] font-bold whitespace-nowrap ${cls}`}>{children}</span>;
 }
 
 /** One line of the three-dot menu. */

@@ -132,7 +132,7 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
   // The estimated hours: the manager agrees, raises or lowers the technician's figure, with a reason when changed.
   const techHours = bundle.inspection.estimated_hours;
   const hoursRaw = String(formData.get("estimated_hours_manager") ?? "").trim().replace(",", ".");
-  const managerHours = hoursRaw ? Math.round(Number(hoursRaw) * 10) / 10 : null;
+  const managerHours = hoursRaw ? Math.round(Number(hoursRaw) * 100) / 100 : null;
   const hoursReason = blankToNull(formData.get("hours_reason"));
   if (techHours !== null && (managerHours === null || !Number.isFinite(managerHours) || managerHours <= 0)) return { error: "Agree or change the technician's estimated hours.", values };
   if (techHours !== null && managerHours !== null && managerHours !== techHours && !hoursReason) return { error: "Say why you changed the estimated hours.", values };
@@ -161,6 +161,20 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
     learned[i.item_key] = { parts: entry.parts.slice(0, 10), remarks: entry.remarks.slice(0, 8) };
   }
   if (learnedAny) await admin.from("settings").update({ value: learned }).eq("key", "item_suggestions");
+  // Tyre brands typed that are not on the list are counted and offered to the owner on the Inspection checklist page.
+  const brandList = ((settingsNow.tyre_brands ?? []) as string[]).map((b) => b.toLowerCase());
+  const customBrands = { ...((settingsNow.tyre_brand_custom ?? {}) as Record<string, number>) };
+  let brandAny = false;
+  const measured = ((bundle.inspection as unknown as { measurements?: Record<string, unknown> | null }).measurements ?? {}) as Record<string, unknown>;
+  for (const p of ["fl", "fr", "rl", "rr", "spare"]) {
+    const b = String(measured[`tyre_${p}_brand`] ?? "").trim();
+    if (b && !brandList.includes(b.toLowerCase())) {
+      const key = Object.keys(customBrands).find((k) => k.toLowerCase() === b.toLowerCase()) ?? b;
+      customBrands[key] = (Number(customBrands[key]) || 0) + 1;
+      brandAny = true;
+    }
+  }
+  if (brandAny) await admin.from("settings").update({ value: customBrands }).eq("key", "tyre_brand_custom");
   // The pool counts what was picked; custom parts are offered to the owner in Settings > Parts list.
   const customPool = { ...((settingsNow.part_pool_custom ?? {}) as Record<string, number>) };
   let customAny = false;

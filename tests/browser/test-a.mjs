@@ -99,8 +99,16 @@ await section("A5-A6 assignment", async () => {
   const count = await boxes.count();
   check("job card assign form has chips", count >= 2, String(count));
   check("assign button enabled", !(await card.locator("button[type=submit]").isDisabled()), (await card.textContent() ?? "").match(/Blocked[^.]*./)?.[0] ?? "");
-  await boxes.nth(0).check({ force: true });
-  await boxes.nth(1).check({ force: true });
+  // A technician already on a car asks "Assign anyway?" first (the list is freest first, so this depends on the live workshop).
+  const pickTech = async (i) => {
+    if (await boxes.nth(i).isChecked()) return;
+    await boxes.nth(i).click({ force: true });
+    await sleep(200);
+    const yes = card.getByRole("button", { name: "Yes, assign" });
+    if (await yes.count()) { await yes.click(); await sleep(200); }
+  };
+  await pickTech(0);
+  await pickTech(1);
   await card.locator("input[type=radio][name=road_test][value=not_needed]").check({ force: true });
   await card.locator("button[type=submit]").click();
   await submitted(page);
@@ -274,7 +282,7 @@ await section("PDF checks", async () => {
   };
   const qt = await textOf(`/api/pdf/quote/${token}`);
   check("quotation PDF has no Prepared by or Advisor (C6)", !/HTTP/.test(qt) && !/Prepared by|Advisor/.test(qt), qt.match(/Prepared by[^\n]*|Advisor[^\n]*/)?.[0] ?? qt.slice(0, 30));
-  check("quotation PDF shows part availability (C10)", /Arrives in \d+ days?|In stock/i.test(qt), qt.match(/Arrives in[^\n]*/)?.[0] ?? "");
+  check("quotation PDF shows part availability (C10)", /In \d+ days?|Tomorrow|Today|In stock/i.test(qt), qt.match(/In \d+ days?|Tomorrow|Today|In stock/i)?.[0] ?? "");
   const rtok = "stagereport" + Date.now();
   const ins = await api("/api/e2e/sql", { sql: "insert into public.report_links (job_id, inspection_id, token, status) values ($1, $2, $3, 'sent') returning id", params: [jobId, seed.json.inspectionId, rtok] });
   if (ins.json?.rows?.length) {

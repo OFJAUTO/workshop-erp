@@ -8,6 +8,7 @@ import { blankToNull } from "@/lib/format";
 import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { ROAD_TEST_ITEMS, roadTestProblems, type RoadTestItems } from "@/lib/road-test";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSettings } from "@/lib/settings";
 
 /** Saves the road test as done (every check marked, remarks where needed) or as not possible with a reason. */
 export async function saveRoadTest(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -37,6 +38,20 @@ export async function saveRoadTest(jobId: string, _state: FormState, formData: F
     row.status = "done";
     row.items = items;
     row.not_possible_reason = null;
+    // The chips tapped count towards "most used first" on the next road test.
+    const used: string[] = [];
+    for (const it of ROAD_TEST_ITEMS) {
+      try {
+        const arr = JSON.parse(String(formData.get(`chips__${it.key}`) ?? "[]"));
+        if (Array.isArray(arr)) for (const c of arr) used.push(`${it.key}|${String(c).slice(0, 60)}`);
+      } catch {}
+    }
+    if (used.length) {
+      const settings = await getSettings();
+      const usage = { ...((settings.road_test_chip_usage ?? {}) as Record<string, number>) };
+      for (const u of used) usage[u] = (Number(usage[u]) || 0) + 1;
+      await admin.from("settings").update({ value: usage }).eq("key", "road_test_chip_usage");
+    }
   }
   const { error } = await admin.from("road_tests").upsert(row, { onConflict: "job_id" });
   if (error) return { error: error.message, values };

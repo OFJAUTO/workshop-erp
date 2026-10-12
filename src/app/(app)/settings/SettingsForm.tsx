@@ -3,6 +3,8 @@
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { Card, Field, Input, SectionLabel, Select, Textarea } from "@/components/ui";
 import { STAGE_LABELS, STAGES } from "@/lib/jobs";
+import { DEFAULT_DOC_LIMITS, DOC_HINTS, DOC_KEYS, DOC_LABELS } from "@/lib/doc-reminder-defs";
+import { DEFAULT_REASONS, REASON_CONTEXTS } from "@/lib/reasons";
 import { TonePicker } from "./TonePicker";
 
 const DAYS: { id: string; label: string }[] = [
@@ -34,6 +36,8 @@ export function SettingsForm({
   labourJobsText = "",
   candidates = {},
   flags = {},
+  docLimits = {},
+  reasonPresets = {},
 }: {
   action: FormAction;
   initialValues: Record<string, string>;
@@ -53,6 +57,8 @@ export function SettingsForm({
   labourJobsText?: string;
   candidates?: Record<string, number>;
   flags?: Record<string, boolean>;
+  docLimits?: Record<string, { amber: number; red: number | string }>;
+  reasonPresets?: Record<string, string[]>;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
@@ -418,6 +424,9 @@ export function SettingsForm({
             <Field label="Part types (one per line)" hint="One-tap choice on every part: the first is the default. Genuine needs no brand; the others ask for one.">
               <Textarea name="part_types" defaultValue={v.part_types ?? listTexts.part_types} rows={4} required />
             </Field>
+            <Field label="Supplier discount needing owner approval above (%)" hint="A part priced with a supplier discount above this waits for the owner's one-tap approval before it counts as priced.">
+              <Input name="supplier_discount_approval_above_percent" defaultValue={v.supplier_discount_approval_above_percent ?? "70"} inputMode="numeric" required className="max-w-32" />
+            </Field>
           </Card>
 
           <Card className="flex flex-col gap-4">
@@ -461,10 +470,49 @@ export function SettingsForm({
             <Field label="Acknowledgement the customer ticks when declining dangerous work">
               <Textarea name="dangerous_acknowledgement_text" defaultValue={v.dangerous_acknowledgement_text} rows={2} required />
             </Field>
+            <Field label="Tyre brands (one per line)" hint="The list under the tyre brand box; it filters as the technician types and anything else can still be typed. Brands typed more than once are offered on the Inspection checklist page.">
+              <Textarea name="tyre_brands" defaultValue={v.tyre_brands ?? listTexts.tyre_brands} rows={6} required />
+            </Field>
             <p className="text-xs text-muted">Tap-first suggestions per checklist item learn from every approved report on their own.</p>
           </Card>
 
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>Documents not sent</SectionLabel>
+            <p className="text-xs text-muted">On the job card and the dashboard line: amber &quot;Not sent&quot; after the first limit, red after the second with a reminder to the advisor, green once sent. Working time only (hours, Sundays and breaks). In minutes.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {DOC_KEYS.map((k) => (
+                <div key={k} className="flex flex-col gap-1 rounded-control border border-line p-3">
+                  <span className="text-sm font-semibold">{DOC_LABELS[k]}</span>
+                  <span className="text-[11px] text-muted">Counted {DOC_HINTS[k]}.</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Amber after (min)<Input name={`doc__${k}_amber`} defaultValue={v[`doc__${k}_amber`] ?? String(docLimits[k]?.amber ?? DEFAULT_DOC_LIMITS[k].amber)} inputMode="numeric" required /></label>
+                    {k === "customer_reply" ? (
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Red after<Select name={`doc__${k}_red`} defaultValue={v[`doc__${k}_red`] ?? String(docLimits[k]?.red ?? DEFAULT_DOC_LIMITS[k].red)}>
+                        <option value="next_working_day">Next working day</option>
+                        <option value="480">8 h</option>
+                        <option value="720">12 h</option>
+                        <option value="1440">24 h</option>
+                      </Select></label>
+                    ) : (
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Red after (min)<Input name={`doc__${k}_red`} defaultValue={v[`doc__${k}_red`] ?? String(docLimits[k]?.red ?? DEFAULT_DOC_LIMITS[k].red)} inputMode="numeric" required /></label>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
 
+          <Card className="flex flex-col gap-4">
+            <SectionLabel>One-tap reasons</SectionLabel>
+            <p className="text-xs text-muted">Wherever the system asks why, these chips sit above the box: one tap writes the reason, several allowed, typing always possible. One reason per line; a box left empty keeps the built-in list.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {REASON_CONTEXTS.map((c) => (
+                <Field key={c.key} label={c.label}>
+                  <Textarea name={`reason__${c.key}`} defaultValue={v[`reason__${c.key}`] ?? (reasonPresets[c.key] ?? DEFAULT_REASONS[c.key]).join("\n")} rows={4} />
+                </Field>
+              ))}
+            </div>
+          </Card>
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>Notification sounds</SectionLabel>

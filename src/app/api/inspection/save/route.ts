@@ -197,7 +197,7 @@ export async function POST(request: NextRequest) {
     const patch: Record<string, unknown> = { ...stamp };
     if ("estimated_hours" in i) {
       const n = num(i.estimated_hours, 999);
-      patch.estimated_hours = n === null ? null : Math.round(n * 10) / 10;
+      patch.estimated_hours = n;
     }
     if ("estimate_reason" in i) patch.estimate_reason = text(i.estimate_reason, 300);
     if ("requests_note" in i) patch.requests_note = text(i.requests_note, 2000);

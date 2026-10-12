@@ -164,7 +164,7 @@ try {
     const supVal = await supSel.locator("option").evaluateAll((os, name) => (os.find((o) => (o.textContent ?? "").startsWith(name)) ?? {}).value ?? "", supplierName);
     check("supplier list on the row has the supplier (12 Oct, 3)", !!supVal, supplierName);
     if (supVal) await supSel.selectOption(supVal);
-    await page.getByRole("button", { name: "In stock" }).first().click();
+    await page.locator("select[aria-label='Availability']").first().selectOption("in_stock");
     await sleep(3500);
     const pi = await sql("select id, cost_aed, availability from public.part_items where job_id = $1", [jobId]);
     check("part priced in stock", pi.length >= 1 && Number(pi[0].cost_aed) === 200, JSON.stringify(pi));

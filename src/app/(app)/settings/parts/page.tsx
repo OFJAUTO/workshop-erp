@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
 export default async function PartsListSettingsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   await requirePermission("manageSettings");
   const { message, error } = await searchParams;
-  const [settings, { data }] = await Promise.all([getSettings(), createAdminClient().from("part_catalogue").select("id, category, name, needs_position, position").eq("is_active", true).order("position")]);
-  const rows: EditRow[] = ((data ?? []) as { id: string; category: string; name: string; needs_position: boolean | null }[]).map((r) => ({ id: r.id, key: r.id, category: r.category, name: r.name, needs_position: !!r.needs_position }));
+  const [settings, { data }] = await Promise.all([getSettings(), createAdminClient().from("part_catalogue").select("id, category, name, needs_position, paired, goes_with, position").eq("is_active", true).order("position")]);
+  const rows: EditRow[] = ((data ?? []) as { id: string; category: string; name: string; needs_position: boolean | null; paired: boolean | null; goes_with: string[] | null }[]).map((r) => ({ id: r.id, key: r.id, category: r.category, name: r.name, needs_position: !!r.needs_position, paired: !!r.paired, goes_with: (r.goes_with ?? []).join(", ") }));
   const categories = Array.from(new Set(rows.map((r) => r.category)));
   const custom = Object.entries((settings.part_pool_custom ?? {}) as Record<string, number>).sort((a, b) => b[1] - a[1]);
   return (

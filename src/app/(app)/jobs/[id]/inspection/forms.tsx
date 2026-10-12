@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
+import { ReasonChips } from "@/components/ReasonChips";
 import { Input, Textarea } from "@/components/ui";
 
 const SAFE_TO_DRIVE = /safe to drive/i;
@@ -20,13 +21,14 @@ function ScrollOnError({ error }: { error: string | null }) {
  * green state follows hand edits), the note box, an internal note for the advisor, the estimated hours.
  * The buttons live in the bar fixed to the bottom of the page (ReviewBar), nowhere else.
  */
-export function ApproveForm({ action, hasPrescan, techHours = null, groups = {}, usage = {} }: { action: FormAction; hasPrescan: boolean; techHours?: number | null; groups?: Record<string, string[]>; usage?: Record<string, number> }) {
+export function ApproveForm({ action, hasPrescan, techHours = null, groups = {}, usage = {}, reasons = { raise: [], lower: [] } }: { action: FormAction; hasPrescan: boolean; techHours?: number | null; groups?: Record<string, string[]>; usage?: Record<string, number>; /** One-tap reasons for raising or lowering the technician's hours (Settings). */ reasons?: { raise: string[]; lower: string[] } }) {
   const [hours, setHours] = useState(techHours === null ? "" : String(techHours));
   const [note, setNote] = useState("");
   const [used, setUsed] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const changed = techHours !== null && hours.trim() !== "" && Number(hours.replace(",", ".")) !== techHours;
+  const raising = techHours !== null && Number(hours.replace(",", ".")) > techHours;
   const all = Array.from(new Set(Object.values(groups).flat()));
   const top = [...all].sort((a, b) => (usage[b] ?? 0) - (usage[a] ?? 0)).slice(0, 5);
   const selected = (p: string) => note.includes(p);
@@ -97,10 +99,9 @@ export function ApproveForm({ action, hasPrescan, techHours = null, groups = {},
                     <Input name="estimated_hours_manager" value={hours} onChange={(e) => setHours(e.target.value)} inputMode="decimal" className="w-28" required />
                   </label>
                   {changed ? (
-                    <label className="flex flex-col gap-1 flex-1 min-w-48">
-                      <span className="text-xs font-semibold text-muted">Why (required when changed)</span>
-                      <Input name="hours_reason" defaultValue={v.hours_reason} required />
-                    </label>
+                    <div className="flex flex-col gap-1 flex-1 min-w-48">
+                      <ReasonChips name="hours_reason" label={`Why ${raising ? "more" : "fewer"} hours? (required when changed)`} options={raising ? reasons.raise : reasons.lower} defaultValue={v.hours_reason ?? ""} required placeholder="Tap a reason, or type" />
+                    </div>
                   ) : null}
                 </div>
                 <span className="text-[11px] text-muted">The advisor sees the agreed figure on the quotation as the workshop estimate.</span>
@@ -118,14 +119,14 @@ export function ApproveForm({ action, hasPrescan, techHours = null, groups = {},
 }
 
 /** The reason for sending the report back; the button is in the bar at the bottom. */
-export function ReturnForm({ action }: { action: FormAction }) {
+export function ReturnForm({ action, reasons = [] }: { action: FormAction; /** One-tap reasons for sending back (Settings). */ reasons?: string[] }) {
   return (
     <ActionForm id="return-form" action={action} className="flex flex-col gap-3 border-t border-line pt-4">
       {(v) => (
-        <label className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1">
           <span className="text-sm font-semibold">Send back to the technician because</span>
-          <Textarea name="return_reason" defaultValue={v.return_reason} rows={2} placeholder="Required to send back" />
-        </label>
+          <ReasonChips name="return_reason" rows={2} options={reasons} defaultValue={v.return_reason ?? ""} placeholder="Required to send back: tap a reason or type" />
+        </div>
       )}
     </ActionForm>
   );

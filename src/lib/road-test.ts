@@ -2,12 +2,16 @@
 
 import type { CheckStatus } from "./inspection";
 
+/** Eight checks (the keys of the first five never change: saved road tests carry them). */
 export const ROAD_TEST_ITEMS = [
   { key: "noises", label: "Noises" },
   { key: "vibration", label: "Vibration" },
   { key: "pulling", label: "Pulling to one side" },
-  { key: "gearbox", label: "Gearbox behaviour" },
-  { key: "braking", label: "Braking" },
+  { key: "braking", label: "Brakes" },
+  { key: "steering", label: "Steering" },
+  { key: "gearbox", label: "Transmission" },
+  { key: "engine", label: "Engine" },
+  { key: "suspension", label: "Suspension" },
 ] as const;
 export type RoadTestKey = (typeof ROAD_TEST_ITEMS)[number]["key"];
 

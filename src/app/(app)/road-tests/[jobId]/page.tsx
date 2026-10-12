@@ -5,7 +5,9 @@ import { formatDateTime } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { CONDITIONS, labelOf } from "@/lib/jobs";
-import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
+import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_ITEMS, ROAD_TEST_SELECT, ROAD_TEST_STATUS_LABELS, type RoadTestRow } from "@/lib/road-test";
+import { chipRowsFor } from "@/lib/road-test-chips";
+import { getSettings } from "@/lib/settings";
 import { can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
@@ -20,11 +22,13 @@ export default async function RoadTestPage({ params }: { params: Promise<{ jobId
   const { jobId } = await params;
   if (!(can(role, "roadTest") || can(role, "approveInspections") || role === "service_advisor")) notFound();
   const supabase = await createClient();
-  const [card, bundle, { data: test }] = await Promise.all([
+  const [card, bundle, { data: test }, settings] = await Promise.all([
     loadJobCard(supabase, jobId),
     loadInspection(jobId),
     supabase.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", jobId).maybeSingle(),
+    getSettings(),
   ]);
+  const chips = Object.fromEntries(ROAD_TEST_ITEMS.map((it) => [it.key, chipRowsFor(settings, it.key)]));
   if (!card) notFound();
   const rt = (test as RoadTestRow | null) ?? null;
   const readOnly = !can(role, "roadTest") || !card.job.is_open;
@@ -59,7 +63,7 @@ export default async function RoadTestPage({ params }: { params: Promise<{ jobId
         </ol>
       </Card>
       {rt?.done_at ? <p className="text-xs text-muted">Last saved {formatDateTime(rt.done_at)}.</p> : null}
-      <RoadTestForm action={saveRoadTest.bind(null, jobId)} inspectionId={bundle?.inspection.id ?? null} initial={rt?.items ?? {}} initialFiles={files} initialNotPossible={rt?.status === "not_possible"} initialReason={rt?.not_possible_reason ?? ""} readOnly={readOnly} />
+      <RoadTestForm action={saveRoadTest.bind(null, jobId)} inspectionId={bundle?.inspection.id ?? null} initial={rt?.items ?? {}} initialFiles={files} initialNotPossible={rt?.status === "not_possible"} initialReason={rt?.not_possible_reason ?? ""} readOnly={readOnly} chips={chips} />
     </>
   );
 }

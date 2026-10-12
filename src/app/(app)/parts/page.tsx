@@ -3,10 +3,11 @@ import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
+import { dubaiDate, formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { REQUEST_SELECT } from "@/lib/quote-data";
 import { PART_FULL_SELECT, toPartFull } from "@/lib/parts-data";
-import { AVAILABILITY_LABELS, type PartRequest } from "@/lib/quotes";
+import { availabilityWords, daysFromDate } from "@/lib/parts-rows";
+import { type PartRequest } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -121,7 +122,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                   <li key={p.id} className="py-2 flex flex-wrap items-center gap-2">
                     <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="part" value={p.id} defaultChecked className="h-5 w-5 accent-ink" /><span className="font-semibold">{p.description}</span></label>
                     {p.part_number ? <span className="text-muted">{p.part_number}</span> : null}
-                    <span className="text-muted">× {p.confirmed_quantity ?? p.quantity} · AED {(p.cost_aed ?? 0).toFixed(2)} · {p.supplier ?? "no supplier"} · {p.availability ? AVAILABILITY_LABELS[p.availability] : ""}{p.delivery_date ? ` · ${p.delivery_date}` : ""}</span>
+                    <span className="text-muted">× {p.confirmed_quantity ?? p.quantity} · AED {(p.cost_aed ?? 0).toFixed(2)} · {p.supplier ?? "no supplier"} · {availabilityWords(p.availability, daysFromDate(p.delivery_date, dubaiDate()))}</span>
                     {p.advisor_added_label ? <Badge tone="outline">{p.advisor_added_label}</Badge> : null}
                   </li>
                 ))}

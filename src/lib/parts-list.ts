@@ -21,9 +21,51 @@ export type PartsListEntry = {
   unit?: "pc" | "set";
 };
 
-export type CatalogueRow = { id: string; category: string; name: string; needs_position: boolean; usage_count: number; /** Sold per set (brake pads, wiper blades...): the choice is Front / Rear and the quantity counts sets. */ unit?: "each" | "set" };
+export type CatalogueRow = {
+  id: string;
+  category: string;
+  name: string;
+  needs_position: boolean;
+  usage_count: number;
+  /** Sold per set (brake pads, wiper blades...): the choice is Front / Rear and the quantity counts sets. */
+  unit?: "each" | "set";
+  /** Comes in pairs (control arms, discs, shock absorbers...): Front pair / Rear pair / All four, or one side only. */
+  paired?: boolean;
+  /** Parts offered alongside when this one is picked (a wear sensor with brake pads); never added by themselves. */
+  goes_with?: string[];
+};
 
 export const PART_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right", "Front", "Rear", "Left", "Right"] as const;
+export const SINGLE_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right"] as const;
+/** The big buttons for a paired part or job: the positions and the quantity that goes with them. */
+export const PAIR_CHOICES: { label: string; positions: string[]; qty: number }[] = [
+  { label: "Front pair", positions: ["Front left", "Front right"], qty: 2 },
+  { label: "Rear pair", positions: ["Rear left", "Rear right"], qty: 2 },
+  { label: "All four", positions: ["Front left", "Front right", "Rear left", "Rear right"], qty: 4 },
+];
+
+/** "front pair", "rear pair", "all four", "front and rear", else the positions in lower case. */
+export function positionsWords(positions: string[] | null | undefined): string {
+  if (!positions?.length) return "";
+  const s = new Set(positions.map((p) => p.toLowerCase()));
+  const fl = s.has("front left"), fr = s.has("front right"), rl = s.has("rear left"), rr = s.has("rear right");
+  if (s.size === 4 && fl && fr && rl && rr) return "all four";
+  if (s.size === 2 && fl && fr) return "front pair";
+  if (s.size === 2 && rl && rr) return "rear pair";
+  if (s.size === 2 && s.has("front") && s.has("rear")) return "front and rear";
+  return positions.map((p) => p.toLowerCase()).join(", ");
+}
+
+/** The axles a set of positions touches, for a per-axle part offered alongside (a wear sensor for front pads). */
+export function axlesOf(positions: string[] | null | undefined): ("Front" | "Rear")[] {
+  const out = new Set<"Front" | "Rear">();
+  for (const p of positions ?? []) {
+    const l = p.toLowerCase();
+    if (l.startsWith("front")) out.add("Front");
+    if (l.startsWith("rear")) out.add("Rear");
+  }
+  return Array.from(out);
+}
 
 export function newEntryId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -97,8 +139,41 @@ export function mergePartsList(list: PartsListEntry[]): MergedPartLine[] {
 }
 
 /** "Brake pads × 2 · Front left, Front right", or for a set "Brake pads · front · 1 set". */
+/** A part offered alongside one already picked: "Front brake pad wear sensor" with front brake pads. Offered, never added by itself. */
+export type GoesWithOffer = { key: string; label: string; base: PartsListEntry; target: CatalogueRow; axle: "Front" | "Rear" | null };
+
+export function goesWithOffers(entries: PartsListEntry[], catalogue: CatalogueRow[]): GoesWithOffer[] {
+  const byId = new Map(catalogue.map((c) => [c.id, c]));
+  const byName = new Map(catalogue.map((c) => [c.name.toLowerCase(), c]));
+  const has = (name: string, axle: "Front" | "Rear" | null) => entries.some((e) => e.name.toLowerCase() === name.toLowerCase() && (!axle || !e.positions.length || e.positions.some((p) => p.toLowerCase().startsWith(axle.toLowerCase()))));
+  const out: GoesWithOffer[] = [];
+  for (const e of entries) {
+    const c = (e.catalogue_id ? byId.get(e.catalogue_id) : undefined) ?? byName.get(e.name.toLowerCase());
+    for (const name of c?.goes_with ?? []) {
+      const target = byName.get(name.toLowerCase());
+      if (!target || target.id === c?.id) continue;
+      const axles = target.unit === "set" || target.needs_position ? axlesOf(e.positions) : [];
+      const variants: ("Front" | "Rear" | null)[] = axles.length ? axles : [null];
+      for (const axle of variants) {
+        const key = `${target.id}|${axle ?? ""}`;
+        if (out.some((o) => o.key === key) || has(target.name, axle)) continue;
+        out.push({ key, label: axle ? `${axle} ${target.name.charAt(0).toLowerCase()}${target.name.slice(1)}` : target.name, base: e, target, axle });
+      }
+    }
+  }
+  return out;
+}
+
+/** The entry an accepted offer adds: same finding as the part it goes with, the axle as its position. */
+export function offerEntry(o: GoesWithOffer): PartsListEntry {
+  return { id: newEntryId(), catalogue_id: o.target.id, name: o.target.name, qty: 1, positions: o.axle ? [o.axle] : [], item_key: o.base.item_key, source: o.base.source === "tyre" || o.base.source === "measure" ? "item" : o.base.source, note: null, unit: o.target.unit === "set" ? "set" : "pc" };
+}
+
 export function partsListLine(e: { name: string; qty: number; positions: string[]; unit?: "pc" | "set" }) {
-  if (e.unit === "set") return `${e.name}${e.positions.length ? ` · ${e.positions.join(", ").toLowerCase()}` : ""} · ${e.qty} set${e.qty === 1 ? "" : "s"}`;
+  if (e.unit === "set") return `${e.name}${e.positions.length ? ` · ${positionsWords(e.positions)}` : ""} · ${e.qty} set${e.qty === 1 ? "" : "s"}`;
+  const words = positionsWords(e.positions);
+  // A paired part reads "Lower control arm - front pair - 2".
+  if (/pair|all four/.test(words)) return `${e.name} - ${words} - ${e.qty}`;
   return `${e.name} × ${e.qty}${e.positions.length ? ` · ${e.positions.join(", ")}` : ""}`;
 }
 

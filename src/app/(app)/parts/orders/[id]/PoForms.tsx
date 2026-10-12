@@ -1,5 +1,7 @@
 "use client";
 
+import { ReasonChips } from "@/components/ReasonChips";
+
 import { useState } from "react";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Button, Input, Select, Textarea } from "@/components/ui";
@@ -105,11 +107,11 @@ export function OrderedForm({ lines, action }: { lines: Line[]; action: (formDat
 }
 
 /** The owner's approval with the deposit override box when needed. */
-export function DecideForm({ action, depositShort, isOwner }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean }) {
+export function DecideForm({ action, depositShort, isOwner, reasons = [] }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean; /** One-tap reasons to approve without the deposit (Settings). */ reasons?: string[] }) {
   return (
     <form action={action} className="flex flex-col gap-2">
       {depositShort ? <p className="text-sm font-semibold text-red">{depositShort}</p> : null}
-      {depositShort && isOwner ? <Textarea name="override_reason" rows={2} placeholder="Reason to approve without the deposit (logged)" /> : null}
+      {depositShort && isOwner ? <ReasonChips name="override_reason" rows={2} options={reasons} placeholder="Reason to approve without the deposit (logged)" /> : null}
       <Textarea name="note" rows={2} placeholder="Note to Parts (optional)" />
       <div className="flex gap-2">
         <Button type="submit" name="decision" value="approve" size="md" disabled={!!depositShort && !isOwner}>Approve</Button>

@@ -256,6 +256,7 @@ export const MEASUREMENTS: MeasurementField[] = [
     { key: `tyre_${p.key}_tread`, label: `${p.label} tread`, unit: "mm", kind: "number" as const, group: "Tyres" },
     { key: `tyre_${p.key}_year`, label: `${p.label} tyre year`, kind: "year" as const, group: "Tyres" },
     { key: `tyre_${p.key}_brand`, label: `${p.label} tyre brand`, kind: "text" as const, group: "Tyres", optional: true },
+    { key: `tyre_${p.key}_model`, label: `${p.label} tyre model`, kind: "text" as const, group: "Tyres", optional: true },
   ]),
   { key: "tyre_spare_tread", label: "Spare tread", unit: "mm", kind: "number", group: "Spare tyre", optional: true },
   { key: "tyre_spare_year", label: "Spare tyre year", kind: "year", group: "Spare tyre", optional: true },
@@ -333,7 +334,7 @@ export function formatMinutes(min: number) {
 export type ReportProblem = { key: string; label: string };
 
 export type ReportState = {
-  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string; dangerous?: boolean; dangerous_reason?: string; style?: ItemStyle | string | null }[];
+  items: { key: string; label: string; sectionKey: string; status: ItemStatus | null; remarks: string; dangerous?: boolean; dangerous_reason?: string; style?: ItemStyle | string | null; disc_condition?: string; disc_action?: string; leak_severity?: string; leak_repair?: string; fluid_qty?: string; fluid_unit?: string; fluid_grade?: string }[];
   /** Customer requests are read on the report, not answered. Kept optional for old callers. */
   findings?: { requestId: string; text: string; status: ItemStatus | null; found: string }[];
   measurements: Record<string, string>;
@@ -351,7 +352,7 @@ export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimi
     const short = i.label.length > 28 ? i.label.slice(0, 26) + "…" : i.label;
     if (!i.status) {
       if (i.sectionKey !== OPTIONAL_SECTION_KEY) out.push({ key: i.key, label: `${short}: not marked` });
-    } else if (i.style !== "job" && (i.status === "average" || i.status === "bad") && !i.remarks.trim()) out.push({ key: i.key, label: `${short}: remark needed` });
+    } else if (i.style !== "job" && (i.status === "average" || i.status === "bad") && !i.remarks.trim() && !hasStructuredDetail(i, s.measurements)) out.push({ key: i.key, label: `${short}: remark needed` });
     if (i.dangerous && !(i.dangerous_reason ?? "").trim()) out.push({ key: i.key, label: `${short}: why is it dangerous?` });
   }
   for (const p of TYRE_POSITIONS) {
@@ -491,6 +492,42 @@ export function leakPartFor(repair: string | null | undefined, label: string): s
       return null;
   }
 }
+type StructuredItem = { label: string; style?: ItemStyle | string | null; disc_condition?: string; disc_action?: string; leak_severity?: string; leak_repair?: string; fluid_qty?: string; fluid_unit?: string; fluid_grade?: string };
+
+/**
+ * The remark the system writes from the structured choices (evening of 12 October 2026, item 6): brake discs from the
+ * condition and the action, leaks from the severity and the repair, fluids from the quantity and grade. Empty when
+ * no choice was made.
+ */
+export function autoRemarkFor(i: StructuredItem): string {
+  if (isDiscItem(i.label) && (i.disc_condition || i.disc_action)) {
+    const c = DISC_CONDITIONS.find((x) => x.value === i.disc_condition)?.label;
+    const a = DISC_ACTIONS.find((x) => x.value === i.disc_action)?.label;
+    return [c, a && a !== "None" ? a.toLowerCase() : ""].filter(Boolean).join(", ");
+  }
+  if (i.leak_severity || i.leak_repair) return leakRemark(i.leak_severity, i.leak_repair);
+  if (i.fluid_qty && String(i.fluid_qty).trim()) return `Top up ${String(i.fluid_qty).trim()} ${i.fluid_unit === "g" ? "g" : "L"}${i.fluid_grade ? ` ${i.fluid_grade}` : ""}`;
+  return "";
+}
+
+/**
+ * An item whose choices already describe it needs no written remark: OK / Required items, discs with a condition, leaks
+ * with a severity or repair, fluids with a quantity, brake pads with the measured thickness, the battery with its test
+ * result, tyres with their answers. Plain Good / Average / Bad items still need the remark.
+ */
+export function hasStructuredDetail(i: StructuredItem, measurements: Record<string, string> = {}): boolean {
+  if (i.style === "job") return true;
+  if (autoRemarkFor(i)) return true;
+  const l = i.label.toLowerCase();
+  if (/brake pad/.test(l)) {
+    const axle = /rear/.test(l) ? "pad_rear" : /front/.test(l) ? "pad_front" : null;
+    return axle ? !!measurements[axle]?.trim() : !!(measurements.pad_front?.trim() && measurements.pad_rear?.trim());
+  }
+  if (/battery/.test(l)) return !!measurements.battery_health?.trim();
+  if (/tyre/.test(l)) return TYRE_POSITIONS.every((p) => !!measurements[`tyre_${p.key}_action`]?.trim());
+  return false;
+}
+
 /** Brake discs: the condition and the action set the item's status. Below minimum means BAD and replace. */
 export function discStatus(condition: string | null | undefined, action: string | null | undefined): ItemStatus | null {
   if (condition === "below_minimum" || action === "replace") return "bad";

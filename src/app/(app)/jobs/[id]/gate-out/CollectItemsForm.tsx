@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
+import { ReasonChips } from "@/components/ReasonChips";
 import { Field, Input, Notice } from "@/components/ui";
 import type { BalanceInfo } from "./GateOutForm";
 
 type Item = { id: string; label: string; collected: boolean };
 
 /** Loose items go home one by one: tick what leaves now, write who took it. The job closes when the last one goes. */
-export function CollectItemsForm({ action, items, canApproveRelease, balance }: { action: FormAction; items: Item[]; canApproveRelease: boolean; balance: BalanceInfo }) {
+export function CollectItemsForm({ action, items, canApproveRelease, balance, reasons = { keys: [], release: [] } }: { action: FormAction; items: Item[]; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
   const left = items.filter((i) => !i.collected);
   const [ticked, setTicked] = useState<Record<string, boolean>>(Object.fromEntries(left.map((i) => [i.id, true])));
   const count = left.filter((i) => ticked[i.id]).length;
@@ -40,7 +41,7 @@ export function CollectItemsForm({ action, items, canApproveRelease, balance }: 
               <div className="flex flex-col gap-2 rounded-card border border-amber-bar bg-amber-soft/40 p-3">
                 <span className="text-sm font-semibold">{blockedText} Releasing anyway is written down.</span>
                 <Field label="Reason for releasing">
-                  <Input name="release_reason" defaultValue={v.release_reason} required textCase="sentence" />
+                  <ReasonChips name="release_reason" options={reasons.release} defaultValue={v.release_reason ?? ""} required textCase="sentence" placeholder="Tap a reason, or type" />
                 </Field>
               </div>
             ) : (

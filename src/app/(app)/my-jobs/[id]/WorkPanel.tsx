@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { breakMinutesBetween, breakNow, type BreakWindow } from "@/lib/working-time";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea, Input } from "@/components/ui";
+import { ReasonChips } from "@/components/ReasonChips";
 
 export type PanelLine = { id: string; title: string; details: string | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
 export type PanelPart = { id: string; description: string; quantity: number; state: "handed" | "here" | "coming"; when: string | null };
@@ -54,7 +55,7 @@ export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakW
 }
 
 /** Timer, Working and Pause, Leave this job. Sits at the top of the technician's screen. */
-export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, minePause = null, reminders, pauseReasons, canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; /** The technician's own open pause on this car, if any. */ minePause?: { reason: string; since: string } | null; reminders: string[]; pauseReasons: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakWindow | null; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
+export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, minePause = null, reminders, pauseReasons, leaveReasons = [], canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; /** The technician's own open pause on this car, if any. */ minePause?: { reason: string; since: string } | null; reminders: string[]; pauseReasons: readonly string[]; /** One-tap reasons for leaving a job (Settings). */ leaveReasons?: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakWindow | null; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
   const [pausing, setPausing] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [brk, setBrk] = useState(() => breakNow(breakWindow));
@@ -118,7 +119,7 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, min
             ) : leaving ? (
               <form action={leaveAction} className="flex flex-col gap-2">
                 <span className="text-sm font-semibold">Why do you leave this job?</span>
-                <Textarea name="reason" rows={2} required placeholder="For example: moved to another car by the manager" />
+                <ReasonChips name="reason" rows={2} options={leaveReasons} required placeholder="Tap a reason, or type" />
                 <div className="flex gap-2">
                   <Button type="submit" tone="danger" size="lg">Leave this job</Button>
                   <Button type="button" tone="ghost" size="lg" onClick={() => setLeaving(false)}>Back</Button>

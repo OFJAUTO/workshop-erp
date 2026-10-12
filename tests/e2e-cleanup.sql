@@ -73,10 +73,11 @@ set session_replication_role = default;
 select count(*) as left_over_ui from public.customers where phone like '+9715000000%';
 -- Test services and the test customer's leftovers.
 set session_replication_role = replica;
-delete from public.quotation_lines where service_id in (select id from public.services where name like 'e2e %');
-delete from public.services where name like 'e2e %';
-delete from public.suppliers where name like 'e2e %' and not exists (select 1 from public.purchase_orders where supplier_id = suppliers.id);
-delete from public.service_categories where name like 'e2e %';
+delete from public.quotation_lines where service_id in (select id from public.services where name ilike 'e2e %');
+delete from public.services where name ilike 'e2e %';
+delete from public.supplier_discount_changes where supplier_id in (select id from public.suppliers where name ilike 'e2e %');
+delete from public.suppliers where name ilike 'e2e %' and not exists (select 1 from public.purchase_orders where supplier_id = suppliers.id);
+delete from public.service_categories where name ilike 'e2e %';
 delete from public.notifications where type in ('owner_report') and job_id is null;
 set session_replication_role = default;
-select count(*) as left_over_services from public.services where name like 'e2e %';
+select count(*) as left_over_services from public.services where name ilike 'e2e %';

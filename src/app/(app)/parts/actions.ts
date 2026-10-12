@@ -6,7 +6,10 @@ import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
+import { dubaiDate } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { loadPricingRows } from "@/lib/parts-pricing";
+import { dateFromDays, daysComplete, rowMissing, rowState } from "@/lib/parts-rows";
 import { PARTS_BUCKET, PART_SELECT, minMarkupFor, refreshQuoteTotals, toPart, parentLineFor } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -72,18 +75,14 @@ export async function syncLineForPart(jobId: string, partId: string, by: string)
 }
 
 /** When every request on the job is answered and every part has a price, the advisor hears about it. */
+/** Every row Priced or Not available (the one state function in src/lib/parts-rows.ts): the advisor is told with the breakdown. */
 async function tellAdvisorIfComplete(jobId: string) {
   const admin = createAdminClient();
-  const [{ data: parts }, { data: reqs }, job] = await Promise.all([
-    admin.from("part_items").select("cost_aed, confirm_status").eq("job_id", jobId).eq("is_active", true),
-    admin.from("part_requests").select("status").eq("job_id", jobId).eq("is_active", true),
-    jobOf(jobId),
-  ]);
-  const open = (parts ?? []).filter((p) => p.confirm_status !== "rejected" && p.cost_aed === null).length + (reqs ?? []).filter((r) => r.status === "open" || r.status === "listed").length;
-  if (open || !job) return;
+  const [{ summary }, job] = await Promise.all([loadPricingRows(jobId), jobOf(jobId)]);
+  if (summary.open || !summary.total || !job) return;
   const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
   const ids = [job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x);
-  await notifyStaff(ids, { type: "parts_priced", title: `Parts priced · ${job.job_number}`, body: "Every part on this car has a price. Finish the quotation.", jobId, href: `/jobs/${jobId}` });
+  await notifyStaff(ids, { type: "parts_priced", title: `Parts priced · ${job.job_number}`, body: `Every part on this car is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
 }
 
 const PART_TYPES = ["genuine", "oem", "aftermarket", "used"];
@@ -311,7 +310,7 @@ export async function removePart(partId: string) {
    Evening of 11 October 2026: the Parts table saves itself row by row.
    --------------------------------------------------------------------------- */
 
-export type RowSave = { requestId: string | null; partId: string | null; optionOf?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number };
+export type RowSave = { requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number };
 
 const numOrNull = (v: string | number | undefined | null) => {
   if (v === undefined || v === null) return null;
@@ -345,7 +344,7 @@ async function flagSentQuotations(jobId: string, job: { job_number: string; gate
  * (the technician's words stay on the row) and the quantity (noted, the advisor and the manager told); any change
  * after the quotation went out flags it and tells the advisor.
  */
-export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ error?: string; partId?: string; complete?: boolean }> {
+export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ error?: string; partId?: string; complete?: boolean; waitingApproval?: boolean }> {
   const staff = await getCurrentStaff();
   if (!staff || staff.viewingAs) return { error: "Please sign in again." };
   const role = staff.role_id as RoleId;
@@ -360,17 +359,43 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   const cost = numOrNull(row.cost_aed);
   if (cost !== null && cost < 0) return { error: "The cost must be a number." };
   const list = numOrNull(row.list_price);
-  const discount = numOrNull(row.discount);
+  // A discount can never exceed 100%.
+  const discountRaw = numOrNull(row.discount);
+  const discount = discountRaw === null ? null : Math.min(100, Math.max(0, discountRaw));
   const qty = numOrNull(row.quantity);
   if (qty !== null && qty <= 0) return { error: "The quantity must be above zero." };
   const supplier = (row.supplier ?? "").trim().slice(0, 120) || null;
   const availability = row.availability === "to_order" ? "to_order" : row.availability === "in_stock" ? "in_stock" : null;
-  const days = Math.max(0, Math.round(Number(row.days) || 0));
-  const delivery = availability === "to_order" && days > 0 ? new Date(Date.now() + days * 86400000).toISOString().slice(0, 10) : null;
+  // Whole days from today in Dubai: "0" is Same day (ordered today, here today), "1" Next day.
+  const daysText = String(row.days ?? "").trim();
+  const delivery = availability === "to_order" && daysComplete(daysText) ? dateFromDays(daysText, dubaiDate()) : null;
   const fields = { part_number: (row.part_number ?? "").trim().slice(0, 80) || null, part_type: type, brand: type && type !== "genuine" ? (row.brand ?? "").trim().slice(0, 80) || null : null, list_price_aed: list, discount_percent: discount === null ? null : Math.min(100, Math.max(0, discount)), cost_aed: cost, supplier, availability, delivery_date: delivery };
-  const complete = !!(type && cost !== null && supplier && (availability === "in_stock" || (availability === "to_order" && delivery)));
+  // Priced means the same here as on the screen: part number, type, net above 0, supplier, availability (src/lib/parts-rows.ts).
+  const complete = rowState({ part_number: (row.part_number ?? "").trim(), part_type: type ?? "", brand: "", list_price: "", discount: "", cost_aed: cost === null ? "" : String(cost), supplier: supplier ?? "", availability: availability ?? "", days: delivery ? daysText : "", qty: "1" }) === "priced";
   const now = new Date().toISOString();
   let partId = row.partId;
+  const clientKey = row.clientKey ? String(row.clientKey).slice(0, 80) : null;
+  if (!partId && clientKey) {
+    // The same row saved twice in quick succession: the second save finds the part the first one made.
+    const { data: same } = await admin.from("part_items").select("id").eq("job_id", jobId).eq("client_key", clientKey).eq("is_active", true).order("created_at").limit(1).maybeSingle();
+    if (same) partId = same.id;
+  }
+  // A supplier discount above the owner's limit waits for his one-tap approval; until then the part is not priced.
+  const approvalLimit = Number(settings.supplier_discount_approval_above_percent ?? 70);
+  const needsApproval = discount !== null && discount > approvalLimit;
+  const { data: prev } = partId ? await admin.from("part_items").select("discount_percent, discount_approval_status").eq("id", partId).maybeSingle() : { data: null };
+  const prevDiscount = prev?.discount_percent === null || prev?.discount_percent === undefined ? null : Number(prev.discount_percent);
+  let approvalStatus: string | null = (prev?.discount_approval_status as string | null | undefined) ?? null;
+  let askOwner = false;
+  if (!needsApproval) approvalStatus = null;
+  else if ((approvalStatus === "approved" || approvalStatus === "pending") && prevDiscount === discount) {
+    // Already decided, or already asked, for this very discount.
+  } else {
+    approvalStatus = "pending";
+    askOwner = true;
+  }
+  const approval = { discount_approval_status: approvalStatus };
+  const completeNow = complete && approvalStatus !== "pending";
   let previousCost: number | null = null;
   let description = (row.name ?? "").trim().slice(0, 200);
   let requestId = row.requestId;
@@ -380,7 +405,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: cur } = await admin.from("part_items").select("id, cost_aed, description, original_description, part_request_id, quantity, confirmed_quantity").eq("id", partId).eq("job_id", jobId).maybeSingle();
     if (!cur) return { error: "Part not found." };
     previousCost = cur.cost_aed === null ? null : Number(cur.cost_aed);
-    const patch: Record<string, unknown> = { ...fields, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), updated_by: staff.id };
+    const patch: Record<string, unknown> = { ...fields, ...approval, ...(completeNow ? { priced_by: staff.id, priced_at: now } : {}), updated_by: staff.id };
     // The name corrected by Parts: the technician's words stay on the row and are used nowhere else.
     if (description && description !== cur.description) {
       patch.description = description;
@@ -424,7 +449,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: req2 } = requestId ? await admin.from("part_requests").select("label, quantity").eq("id", requestId).maybeSingle() : { data: null };
     const { data: created, error } = await admin
       .from("part_items")
-      .insert({ job_id: jobId, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, positions, option_group: optionGroup, ...fields, ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
+      .insert({ job_id: jobId, client_key: clientKey, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, positions, option_group: optionGroup, ...fields, ...approval, ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
       .select("id")
       .single();
     if (error || !created) return { error: error?.message ?? "Could not save the part." };
@@ -434,8 +459,8 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
       if (quotationId) await admin.from("quotation_lines").update({ option_group: optionGroup, updated_by: staff.id }).eq("quotation_id", quotationId).eq("part_item_id", row.optionOf);
     }
   }
-  if (requestId) await admin.from("part_requests").update({ status: complete ? "done" : "listed", updated_by: staff.id }).eq("id", requestId).in("status", ["open", "listed", "done"]);
-  if (complete && partId) {
+  if (requestId) await admin.from("part_requests").update({ status: completeNow ? "done" : "listed", updated_by: staff.id }).eq("id", requestId).in("status", ["open", "listed", "done"]);
+  if (completeNow && partId) {
     await syncLineForPart(jobId, partId, staff.id);
     await tellAdvisorIfComplete(jobId);
   }
@@ -447,8 +472,12 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_quantity", note: `${description}: quantity changed from ${qtyChange.from} to ${qtyChange.to} by ${staff.display_name}`, created_by: staff.id });
   }
   if (changes.length) await flagSentQuotations(jobId, job, changes.join("; "), staff);
+  if (askOwner && partId) {
+    await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Supplier discount ${discount}% needs your approval · ${job.job_number}`, body: `${description}: list AED ${list ?? "?"}, ${discount}% from ${supplier ?? "no supplier"}, net AED ${cost ?? "?"}. Approve or refuse with one tap.`, jobId, href: "/parts/approvals" });
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "discount_approval", note: `${description}: ${discount}% discount from ${supplier ?? "?"} waits for the owner's approval (${staff.display_name})`, created_by: staff.id });
+  }
   refresh(jobId);
-  return { partId: partId ?? undefined, complete };
+  return { partId: partId ?? undefined, complete: completeNow, waitingApproval: approvalStatus === "pending" };
 }
 
 /**
@@ -513,21 +542,19 @@ export async function pricingDone(jobId: string, formData: FormData) {
   const admin = createAdminClient();
   const job = await jobOf(jobId);
   if (!job || !job.is_open) redirect(`/parts/${jobId}?error=${encodeURIComponent("This job is closed.")}`);
-  const [{ data: parts }, { data: reqs }] = await Promise.all([
-    admin.from("part_items").select("id, cost_aed, part_type, supplier, availability, part_request_id").eq("job_id", jobId).eq("is_active", true).neq("confirm_status", "rejected"),
-    admin.from("part_requests").select("id, status").eq("job_id", jobId).eq("is_active", true),
-  ]);
-  const priced = new Set((parts ?? []).filter((p) => p.cost_aed !== null && p.part_type && p.supplier && p.availability).map((p) => p.part_request_id).filter((x): x is string => !!x));
-  const openRequests = (reqs ?? []).filter((r) => (r.status === "open" || r.status === "listed") && !priced.has(r.id)).length;
-  const openParts = (parts ?? []).filter((p) => p.cost_aed === null).length;
-  const open = openRequests + openParts;
-  if (open && String(formData.get("force") ?? "") !== "1") redirect(`/parts/${jobId}?error=${encodeURIComponent(`${open} part${open === 1 ? " has" : "s have"} no price yet. Tap Pricing done again and choose Send what I have.`)}`);
+  // The same rows and the same state function as the table on the screen (src/lib/parts-pricing.ts): Priced, Not
+  // available and Removed never hold anything; only Not finished and Waiting for owner approval do.
+  const { rows, summary } = await loadPricingRows(jobId);
+  const open = summary.open;
+  const first = rows.find((r) => r.state === "not_finished");
+  const firstText = first ? `${first.name}: ${rowMissing(first.values).map((m) => m.long).join(", ") || "not finished"}` : null;
+  if (open && String(formData.get("force") ?? "") !== "1") redirect(`/parts/${jobId}?error=${encodeURIComponent(`${open} part${open === 1 ? " is" : "s are"} not finished${firstText ? ` (${firstText})` : ""}. Finish them, or choose Send what you have.`)}`);
   const now = new Date().toISOString();
   await admin.from("jobs").update({ parts_pricing_done_at: now, parts_pricing_done_by: staff.id, updated_by: staff.id }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `Pricing done by ${staff.display_name}${open ? ` (${open} part${open === 1 ? "" : "s"} without a price)` : ""}`, created_by: staff.id });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `Pricing done by ${staff.display_name} (${summary.text})`, created_by: staff.id });
   const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
   const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
-  await notifyStaff(ids, { type: "parts_priced", title: `Parts pricing done · ${job.job_number}`, body: open ? `${staff.display_name} sent what Parts have: ${open} part${open === 1 ? "" : "s"} still without a price. The quotation is yours.` : "Every part has a price or is marked not available. Finish the quotation.", jobId, href: `/jobs/${jobId}` });
+  await notifyStaff(ids, { type: "parts_priced", title: `Parts pricing done · ${job.job_number}`, body: open ? `${staff.display_name} sent what Parts have: ${summary.text}. The quotation is yours.` : `Every part is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
   refresh(jobId);
   revalidatePath(`/jobs/${jobId}/quote`, "layout");
   redirect(`/parts/${jobId}?message=${encodeURIComponent("Sent to the advisor.")}`);

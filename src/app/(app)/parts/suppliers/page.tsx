@@ -1,7 +1,7 @@
-import { Badge, Button, Card, Empty, Field, Input, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { addSupplier, setSupplierActive, updateSupplier } from "./actions";
+import { addSupplier, applySupplierDiscount, setSupplierActive, updateSupplier } from "./actions";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ function SupplierFields({ s, types, canDiscount }: { s?: Supplier; types: string
         {types.map((t) => (
           <label key={t} className="flex flex-col gap-1 text-xs font-semibold text-muted">{t[0].toUpperCase() + t.slice(1)} parts %<Input name={`discount__${t}`} defaultValue={byType[t] === undefined ? "" : String(byType[t])} inputMode="decimal" placeholder="default" disabled={!canDiscount} /></label>
         ))}
-        <span className="col-span-2 sm:col-span-4 text-[11px] text-muted">Parts enter the list price; the discount gives the net cost. {canDiscount ? "A box left empty uses the default." : "The owner and accounts set the discounts."}</span>
+        <span className="col-span-2 sm:col-span-4 text-[11px] text-muted">Parts enter the list price; the discount gives the net cost. A box left empty uses the default. Every change is logged with who and when.{canDiscount ? "" : ""}</span>
       </div>
       <Field label="Name"><Input name="name" defaultValue={s?.name ?? ""} required textCase="title" /></Field>
       <Field label="TRN" optional hint="15 digits"><Input name="trn" defaultValue={s?.trn ?? ""} inputMode="numeric" maxLength={15} /></Field>
@@ -31,10 +31,11 @@ function SupplierFields({ s, types, canDiscount }: { s?: Supplier; types: string
 }
 
 /** The supplier list: LPOs and supplier invoices pick from it. Parts and accounts keep it. */
-export default async function SuppliersPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string }> }) {
-  const staff = await requirePermission("manageSuppliers");
-  const canDiscount = staff.role_id === "owner" || staff.role_id === "accounts";
-  const { message, error, show } = await searchParams;
+export default async function SuppliersPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string; apply?: string; count?: string }> }) {
+  await requirePermission("manageSuppliers");
+  // Parts, accounts and the owner all set the standard discounts (evening of 12 October 2026, item 11).
+  const canDiscount = true;
+  const { message, error, show, apply, count } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
@@ -46,6 +47,13 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
       <PageHeader title="Suppliers" subtitle="Name, TRN, phone, email, address and payment terms. LPOs and supplier invoices pick from this list." />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {apply && all.some((s) => s.id === apply) ? (
+        <div className="rounded-card border border-ink bg-white p-5 flex flex-wrap items-center gap-3" data-apply-discount>
+          <span className="text-sm font-semibold">Apply {all.find((s) => s.id === apply)?.default_discount_percent ?? 0}% to the {count ?? "?"} open {all.find((s) => s.id === apply)?.name} line{count === "1" ? "" : "s"}? (priced, not yet ordered; sent quotations are flagged)</span>
+          <form action={applySupplierDiscount.bind(null, apply)} className="ml-auto"><Button type="submit" size="md">Apply to the open lines</Button></form>
+          <LinkButton href="/parts/suppliers" tone="ghost" size="md">Not now</LinkButton>
+        </div>
+      ) : null}
       <Card className="flex flex-col gap-3">
         <SectionLabel>Add a supplier</SectionLabel>
         <form action={addSupplier} className="flex flex-col gap-3">

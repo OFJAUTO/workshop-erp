@@ -97,29 +97,34 @@ await section("3-12-13 Parts table", async () => {
   check("columns: Part, Qty, Part number, Type, List, Disc %, Net, Supplier, Availability (3)", ["Part", "Qty", "Part number", "Type", "List", "Disc %", "Net", "Supplier", "Availability"].every((h) => heads.includes(h)), heads.join("|"));
   // The request's own row (the stage seed already has priced parts on the job).
   const rowOf = () => page.locator("div.rounded-control.border", { has: page.getByRole("button", { name: /^Brake pads$|^Front brake pads, set$/ }) }).first();
+  // Number boxes hand their figure on when left (or a second after typing stops): Tab out after each.
   const list = rowOf().locator("input[aria-label='List price']");
   await list.fill("500");
+  await list.press("Tab");
   await rowOf().locator("input[aria-label='Discount percent']").fill("10");
+  await rowOf().locator("input[aria-label='Discount percent']").press("Tab");
   await sleep(300);
   check("net follows list and discount (1, 3)", (await rowOf().locator("input[aria-label='Cost before VAT']").inputValue()) === "450", await rowOf().locator("input[aria-label='Cost before VAT']").inputValue());
   const supSel = rowOf().locator("select[aria-label='Supplier']");
   const opts = await supSel.locator("option").allTextContents();
   check("supplier is a list with Add a supplier at the bottom (3)", opts.some((o) => /e2e Discount Supplier/i.test(o)) && /Add a supplier/.test(opts[opts.length - 1]), opts.join("|"));
   const val = await supSel.locator("option").evaluateAll((os) => (os.find((o) => /e2e Discount Supplier/i.test(o.textContent ?? "")) ?? {}).value ?? "");
+  // A tap on the supplier list takes the cursor out of the net box (selectOption alone does not move focus).
+  await supSel.focus();
   await supSel.selectOption(val);
   await sleep(300);
   check("the supplier's discount fills in and the net follows (1)", (await rowOf().locator("input[aria-label='Discount percent']").inputValue()) === "15" && (await rowOf().locator("input[aria-label='Cost before VAT']").inputValue()) === "425");
   await rowOf().locator("input[aria-label='Part number']").fill("A 222 320 04 38 80");
   await rowOf().locator("select[aria-label='Type']").selectOption("genuine");
-  await rowOf().getByRole("button", { name: "Order" }).click();
+  await rowOf().locator("select[aria-label='Availability']").selectOption("other");
   await rowOf().locator("input[aria-label='Days until it arrives']").fill("3");
   await rowOf().locator("input[aria-label='Days until it arrives']").press("Tab");
   await sleep(2500);
   const saved = await sql("select description, part_number, list_price_aed, discount_percent, cost_aed, supplier, availability from public.part_items where job_id = $1 and description = 'Brake pads'", [jobId]);
   check("the row saved list, discount, net, supplier and Order with days (3)", saved.length === 1 && saved[0].part_number === "A 222 320 04 38 80" && Number(saved[0].list_price_aed) === 500 && Number(saved[0].discount_percent) === 15 && Number(saved[0].cost_aed) === 425 && /e2e discount supplier/i.test(saved[0].supplier ?? "") && saved[0].availability === "to_order", JSON.stringify(saved));
   await go(page, `${base}/parts/${jobId}`);
-  check("a saved part number shows as text with Copy (3)", (await rowOf().getByRole("button", { name: "Copy the part number" }).count()) === 1 && (await rowOf().locator("input[aria-label='Part number']").count()) === 0);
-  check("availability in words with the days visible (3)", /arrives in/.test(await rowOf().textContent() ?? ""));
+  check("a saved part number stays in its box, in full, with Copy (3, 12 Oct evening U1)", (await rowOf().getByRole("button", { name: "Copy the part number" }).count()) === 1 && (await rowOf().locator("input[aria-label='Part number']").inputValue()) === "A 222 320 04 38 80");
+  check("availability dropdown shows the saved days (3)", (await rowOf().locator("select[aria-label='Availability']").inputValue()) === "d3", await rowOf().locator("select[aria-label='Availability']").inputValue());
   // 12: the quantity, with a note and the advisor and manager told.
   const mark = Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0]?.m ?? 0);
   await rowOf().getByRole("button", { name: "One more" }).click();

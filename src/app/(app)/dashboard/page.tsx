@@ -14,6 +14,8 @@ import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
 import { dailyProfit } from "@/lib/profit";
+import { docHeadline, docNotSent } from "@/lib/doc-reminders";
+import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { DashboardCars, type DashRow } from "./DashboardCars";
@@ -72,6 +74,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", all.map((j) => j.id)),
     createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
   ]);
+  // Documents not sent (report, quotation, proforma, tax invoice, the customer's reply), one line per car.
+  const docAlerts = await loadDocAlerts(all.map((j) => j.id), settings);
   const invoicedJobs = new Map(((invoiced ?? []) as unknown as { job_id: string; number: string; total_aed: number | string }[]).map((i) => [i.job_id, i]));
   const toSend = all.filter((j) => invoicedJobs.has(j.id) && !(j as unknown as { ready_sent_at: string | null }).ready_sent_at);
   const awaitingPayment = all.filter((j) => j.status === "pending_payment");
@@ -129,6 +133,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       majorDamage: !!j.gate_in?.major_damage,
       timing: inspOver ? { tone: "red" as const, label: `Inspection ${formatMinutes(inspMinutes)} · over target`, daysOver: baseTiming.daysOver } : baseTiming,
       inspectionLabel: insp && insp.started_at && showInspectionTime ? `Inspection ${insp.status === "in_progress" ? "running " : ""}${formatMinutes(inspMinutes)}` : null,
+      docAlert: (() => { const h = docHeadline(docAlerts.get(j.id) ?? []); return h ? { text: h.text, tone: h.tone } : null; })(),
+      notSent: docNotSent(docAlerts.get(j.id) ?? []),
       urgency: inspOver ? [0, ...urgencyRank(j, clock, vipIds.has(j.customer_id)).slice(1)] : [...urgencyRank(j, clock, vipIds.has(j.customer_id))],
     };
   });

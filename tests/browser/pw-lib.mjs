@@ -79,7 +79,8 @@ export const setPin = (id, pin = "1234") => api("/api/e2e/stage", { stage: "pin"
 export const MANAGER_MECH = "ef508864-0daa-43d9-8d74-e581e18fb841";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-export const go = async (page, url) => { await page.goto(url, { waitUntil: "load" }); await sleep(1500); };
+// A first visit compiles the page on the dev server, which can take longer than the usual 15 s.
+export const go = async (page, url) => { await page.goto(url, { waitUntil: "load", timeout: 60000 }); await sleep(1500); };
 export const settle = async (page) => { await page.waitForLoadState("load"); await sleep(1500); };
 /** Waits for a form's redirect: the URL changes and carries ?message= or ?error=. Never waits for "networkidle" (the notification poll never stops). */
 export const submitted = async (page) => { const before = page.url(); await page.waitForURL((u) => u.toString() !== before && /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null); await settle(page); };

@@ -8,6 +8,8 @@ import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { PO_STATUS_LABELS, loadPurchaseOrder } from "@/lib/parts-data";
 import { partTypeText } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
+import { reasonsFor } from "@/lib/reasons";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
@@ -30,9 +32,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   if (!bundle) notFound();
   const { po, lines, job, names, parts } = bundle;
   const admin = createAdminClient();
-  const [{ data: q }, { data: pays }] = await Promise.all([
+  const [{ data: q }, { data: pays }, settings] = await Promise.all([
     approvedQuotations(po.job_id).then((qs) => ({ data: qs.length ? { deposit_aed: qs.reduce((a, q) => a + q.deposit_aed, 0), number: qs.map((q) => q.number).join(", ") } : null })),
     admin.from("payments").select(PAYMENT_SELECT).eq("job_id", po.job_id).eq("is_active", true),
+    getSettings(),
   ]);
   const depositRequired = Number(q?.deposit_aed) || 0;
   const depositReceived = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + p.amount_aed, 0);
@@ -106,7 +109,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Approve this LPO</SectionLabel>
-              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} depositShort={depositShort} isOwner={role === "owner"} />
+              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} />
             </Card>
           ) : null}
           {po.status === "approved" && canManage ? (

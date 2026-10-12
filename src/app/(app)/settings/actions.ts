@@ -10,6 +10,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { getSettings } from "@/lib/settings";
+import { DOC_KEYS, DOC_LABELS } from "@/lib/doc-reminder-defs";
+import { REASON_CONTEXTS } from "@/lib/reasons";
 
 const NUMBER_KEYS = [
   "tablet_idle_lock_seconds",
@@ -56,6 +58,7 @@ const NUMBER_KEYS = [
   "markup_confirm_percent",
   "pin_needed_above_aed",
   "comeback_window_days",
+  "supplier_discount_approval_above_percent",
 ] as const;
 /** Settings that keep decimals (percentages like 1.9). */
 const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent", "bank_charge_transfer_percent"] as const;
@@ -67,7 +70,7 @@ const DECIMAL_LIMITS: Record<(typeof DECIMAL_KEYS)[number], [number, number, str
   bank_charge_transfer_percent: [0, 20, "Bank charge, bank transfer"],
 };
 /** Settings kept as a list, one entry per line on the form. */
-const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words"] as const;
+const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words", "tyre_brands"] as const;
 const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years"] as const;
 
 const TEXT_KEYS = [
@@ -156,6 +159,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   markup_confirm_percent: [5, 100000, "Markup confirmation from"],
   pin_needed_above_aed: [0, 1000000, "PIN needed for consumables above"],
   comeback_window_days: [1, 365, "Comeback window"],
+  supplier_discount_approval_above_percent: [0, 100, "Supplier discount needing owner approval above"],
 };
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -315,6 +319,24 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   if (limits.vent_max <= limits.vent_min) return { error: "The vent temperature maximum must be above the minimum.", values };
   updates.push({ key: "inspection_limits", value: limits });
 
+  // Documents not sent: two limits per document, in working minutes (the customer's second one may be "next working day").
+  const docLimits: Record<string, { amber: number; red: number | string }> = {};
+  for (const k of DOC_KEYS) {
+    const amber = Number(String(formData.get(`doc__${k}_amber`) ?? "").trim());
+    const redRaw = String(formData.get(`doc__${k}_red`) ?? "").trim();
+    const red = redRaw === "next_working_day" ? "next_working_day" : Number(redRaw);
+    if (!Number.isFinite(amber) || amber <= 0 || (red !== "next_working_day" && (!Number.isFinite(red) || red <= amber))) return { error: `"${DOC_LABELS[k]}": the amber limit must be above 0 and the red limit above the amber one.`, values };
+    docLimits[k] = { amber: Math.round(amber), red: red === "next_working_day" ? red : Math.round(red) };
+  }
+  updates.push({ key: "doc_reminder_limits", value: docLimits });
+  // One-tap reasons, one list per place; an empty box keeps the built-in list.
+  const reasons: Record<string, string[]> = {};
+  for (const c of REASON_CONTEXTS) {
+    const list = Array.from(new Set(String(formData.get(`reason__${c.key}`) ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 120)).filter(Boolean))).slice(0, 40);
+    if (list.length) reasons[c.key] = list;
+  }
+  updates.push({ key: "reason_presets", value: reasons });
+
   for (const u of updates) {
     const { error } = await supabase.from("settings").update({ value: u.value }).eq("key", u.key);
     if (error) return { error: error.message, values };
@@ -408,7 +430,8 @@ export async function saveManagerNotePresets(_state: FormState, formData: FormDa
    Settings > Parts list: the pool the technicians pick from.
    --------------------------------------------------------------------------- */
 
-type CatalogueEdit = { id?: string | null; category?: unknown; name?: unknown; needs_position?: unknown; position?: unknown; remove?: unknown };
+type CatalogueEdit = { id?: string | null; category?: unknown; name?: unknown; needs_position?: unknown; paired?: unknown; goes_with?: unknown; position?: unknown; remove?: unknown };
+const goesWithList = (raw: unknown) => Array.from(new Set(String(raw ?? "").split(/[,\n]/).map((s) => s.trim().slice(0, 120)).filter(Boolean))).slice(0, 10);
 
 /** The whole pool in one save: renamed, reordered, added, removed (made inactive). */
 export async function savePartCatalogue(_state: FormState, formData: FormData): Promise<FormState> {
@@ -436,10 +459,10 @@ export async function savePartCatalogue(_state: FormState, formData: FormData): 
     if (seen.has(key)) return { error: `"${name}" is in the list twice.` };
     seen.add(key);
     if (r.id) {
-      const { error } = await admin.from("part_catalogue").update({ name, category, needs_position: !!r.needs_position, position, updated_by: staff.id }).eq("id", String(r.id));
+      const { error } = await admin.from("part_catalogue").update({ name, category, needs_position: !!r.needs_position, paired: !!r.paired, goes_with: goesWithList(r.goes_with), position, updated_by: staff.id }).eq("id", String(r.id));
       if (error) return { error: error.message };
     } else {
-      const { error } = await admin.from("part_catalogue").insert({ name, category, needs_position: !!r.needs_position, position, created_by: staff.id, updated_by: staff.id });
+      const { error } = await admin.from("part_catalogue").insert({ name, category, needs_position: !!r.needs_position, paired: !!r.paired, goes_with: goesWithList(r.goes_with), position, created_by: staff.id, updated_by: staff.id });
       if (error) return { error: /unique|duplicate/i.test(error.message) ? `"${name}" is already in the list.` : error.message };
       added++;
     }

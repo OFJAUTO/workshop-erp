@@ -26,6 +26,8 @@ import { ROAD_TEST_CHOICES, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTes
 import { newQuotation, startQuotation } from "../../quotes/actions";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
+import { reasonsFor } from "@/lib/reasons";
+import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -100,6 +102,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const check = mediaChecklist(media, { majorDamage: gateIn?.major_damage ?? false, wheelsRequired: gateIn?.wheels_required ?? false, damageNote: gateIn?.damage_note ?? "", hasCarPicture: !!vehicle.photo_path });
   const wt = workingTimeOf(settings);
   const timing = jobTiming(job.promised_at, job.is_open, clockOf(job, settings));
+  // Documents not sent: report, quotation, proforma, tax invoice and the customer's reply, with their clocks.
+  const docAlerts = (await loadDocAlerts([id], settings)).get(id) ?? [];
   const isVip = customer?.is_vip ?? customerPublic?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? customerPublic?.vip_note ?? vip?.vip_note ?? null;
   const customerName = customer?.company_name ?? customer?.full_name ?? customerPublic?.company_name ?? customerPublic?.full_name ?? "Customer";
@@ -284,6 +288,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
               </span>
             </div>
+            {docAlerts.length ? (
+              <div className="flex flex-wrap items-center gap-1.5" data-doc-alerts>
+                {docAlerts.map((a) => <Badge key={a.key} tone={a.tone === "muted" ? "neutral" : a.tone}>{a.text}</Badge>)}
+              </div>
+            ) : null}
             <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
@@ -693,14 +702,14 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <p className="text-sm">
                   <span className="font-semibold">{pendingMove.requester?.display_name}</span> · {formatDateTime(pendingMove.created_at)}: {pendingMove.reason}
                 </p>
-                {can(role, "moveJobs") ? <DecideMoveForm action={decideMove.bind(null, id, pendingMove.id)} currentStatus={job.status} /> : <p className="text-xs text-muted">Waiting for the owner.</p>}
+                {can(role, "moveJobs") ? <DecideMoveForm action={decideMove.bind(null, id, pendingMove.id)} currentStatus={job.status} reasons={reasonsFor(settings, "special_move")} /> : <p className="text-xs text-muted">Waiting for the owner.</p>}
               </Card>
             ) : null}
             {canRequestMove && !pendingMove ? (
               <Card className="flex flex-col gap-3">
                 <SectionLabel>Request special move</SectionLabel>
                 <p className="text-xs text-muted">Only the owner can move a job past a gate. Ask with a reason; the owner is notified.</p>
-                <RequestMoveForm action={requestMove.bind(null, id)} />
+                <RequestMoveForm action={requestMove.bind(null, id)} reasons={reasonsFor(settings, "special_move")} />
               </Card>
             ) : null}
             {canMove ? (

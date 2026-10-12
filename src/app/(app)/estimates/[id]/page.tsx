@@ -8,6 +8,7 @@ import { labourRateFor, loadQuotation, loadServices, minMarkupFor } from "@/lib/
 import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
+import { reasonsFor } from "@/lib/reasons";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -110,6 +111,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           depositPercent: Number(settings.deposit_percent) || 50,
           today: dubaiDate(),
           workingTime: workingTimeOf(settings),
+          reasons: { part_discount: reasonsFor(settings, "part_discount") },
         }}
         readOnly={!canEdit}
         lockedBy={lockedBy}

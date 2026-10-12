@@ -38,6 +38,9 @@ type LinePatch = {
   left_off?: boolean;
   /** Normal / Full down / Closed box (Settings). */
   recovery_type?: string | null;
+  /** Who pays for the recovery (us: cost only, off the customer's quotation) and whether to mention it as free. */
+  recovery_paid_by?: string | null;
+  recovery_mention_free?: boolean;
 };
 type Body = {
   quotationId?: string;
@@ -223,6 +226,20 @@ export async function POST(request: NextRequest) {
       if (k === "customer") Object.assign(out, { unit_cost: 0, unit_price: 0, visible_to_customer: false, recovery_provider: null });
       if (k === "ours") out.recovery_provider = null;
     }
+    // Who pays decides what the customer sees: paid by us means no price and nothing on the quotation, unless it is mentioned as free (AED 0).
+    if (p.recovery_paid_by !== undefined) {
+      const who = String(p.recovery_paid_by ?? "");
+      if (who !== "us" && who !== "customer") return "Who pays for the recovery: us or the customer?";
+      out.recovery_paid_by = who;
+      const free = p.recovery_mention_free !== undefined ? p.recovery_mention_free === true : current?.recovery_mention_free === true;
+      if (who === "us") Object.assign(out, { unit_price: 0, visible_to_customer: free, recovery_mention_free: free });
+      else Object.assign(out, { visible_to_customer: true, recovery_mention_free: false });
+    }
+    if (p.recovery_mention_free !== undefined && p.recovery_paid_by === undefined) {
+      const on = p.recovery_mention_free === true;
+      out.recovery_mention_free = on;
+      if ((current?.recovery_paid_by ?? (current?.visible_to_customer === false ? "us" : "customer")) === "us") Object.assign(out, { visible_to_customer: on, unit_price: 0 });
+    }
     return out;
   };
 
@@ -316,13 +333,14 @@ export async function POST(request: NextRequest) {
         if (row.recovery_trips === undefined) row.recovery_trips = 1;
         if (row.quantity === undefined) row.quantity = row.recovery_trips;
         if (row.recovery_provider_kind === undefined) row.recovery_provider_kind = "ours";
+        if (row.recovery_paid_by === undefined) row.recovery_paid_by = row.visible_to_customer === false ? "us" : "customer";
         const rt = recoveryTypes.find((t) => t.key === row.recovery_type) ?? recoveryTypes[0] ?? null;
         if (rt) {
           row.recovery_type = rt.key;
           if (row.unit_cost === undefined) row.unit_cost = Number(rt.cost) || 0;
-          if (row.unit_price === undefined) row.unit_price = Number(rt.price) || 0;
+          if (row.unit_price === undefined) row.unit_price = row.recovery_paid_by === "us" ? 0 : Number(rt.price) || 0;
         }
-        row.title = recoveryTitle(rt?.label ?? null, Number(row.recovery_trips) || 1);
+        row.title = recoveryTitle(rt?.label ?? null, Number(row.recovery_trips) || 1, row.recovery_paid_by === "us" && row.recovery_mention_free === true);
         row.details = null;
       }
       if (type === "other" && !row.title) row.title = "";
@@ -352,7 +370,7 @@ export async function POST(request: NextRequest) {
     if (cur.line_type === "recovery") {
       // The customer's wording follows the type and the trips: "Recovery, closed box, two ways".
       const rt = recoveryTypes.find((t) => t.key === merged.recovery_type) ?? null;
-      patch.title = recoveryTitle(rt?.label ?? null, merged.recovery_trips ?? merged.quantity ?? 1);
+      patch.title = recoveryTitle(rt?.label ?? null, merged.recovery_trips ?? merged.quantity ?? 1, (merged.recovery_paid_by ?? (merged.visible_to_customer === false ? "us" : "customer")) === "us" && merged.recovery_mention_free === true);
       patch.details = null;
       merged.title = String(patch.title);
     }
