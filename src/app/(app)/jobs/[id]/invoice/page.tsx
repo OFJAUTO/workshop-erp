@@ -116,14 +116,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           {can(role, "recordPayments") && !staff.viewingAs && job.is_open && active && activeBalance && activeBalance.balance > 0 ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel right={`AED ${m(activeBalance.balance)} due`}>Payment against {active.number}</SectionLabel>
-              <PaymentForm invoiceId={active.id} jobId={null} balance={activeBalance.balance} action={recordPayment} returnTo={`/jobs/${id}/invoice`} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} isOwner={role === "owner"} />
+              <PaymentForm invoiceId={active.id} jobId={null} balance={activeBalance.balance} action={recordPayment} returnTo={`/jobs/${id}/invoice`} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} bankChargeTransfer={Number(settings.bank_charge_transfer_percent) || 0} isOwner={role === "owner"} />
             </Card>
           ) : null}
           {can(role, "recordPayments") && !staff.viewingAs && !active && job.is_open ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel right={draft.lines.length ? `AED ${m(Math.max(0, draft.totals.total - depositTotal))} to go` : undefined}>Deposit before the proforma</SectionLabel>
               {depositRows.map((p) => <p key={p.id} className="text-sm">{p.number} · AED {m(p.amount_aed)} by {p.method} · {formatDateTime(p.received_at)}</p>)}
-              <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={`/jobs/${id}/invoice`} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} isOwner={role === "owner"} />
+              <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={`/jobs/${id}/invoice`} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} bankChargeTransfer={Number(settings.bank_charge_transfer_percent) || 0} isOwner={role === "owner"} />
             </Card>
           ) : null}
         </div>

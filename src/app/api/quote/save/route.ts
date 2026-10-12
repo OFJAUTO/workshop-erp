@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
 import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine } from "@/lib/quote-data";
-import { notifyRoles } from "@/lib/notifications";
+import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -48,7 +48,9 @@ type Body = {
   /** keepParts: the job goes but its parts stay on the quotation, unlinked. */
   removeLine?: { id: string; keepParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean };
+  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string };
+  /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
+  lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
   requestPart?: { description: string; quantity?: number | string; source_type?: string | null; source_key?: string | null; positions?: unknown; catalogue_id?: string | null };
   /** A finding the advisor is not quoting, with the reason; a null reason takes the mark off again. */
@@ -83,13 +85,29 @@ export async function POST(request: NextRequest) {
   const isOwner = role === "owner";
   if (!can(role, "editQuotes")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const admin = createAdminClient();
-  const { data: q } = await admin.from("quotations").select("id, kind, job_id, number, status, created_by, vehicle_id, not_quoted").eq("id", String(body.quotationId ?? "")).maybeSingle();
+  const { data: q } = await admin.from("quotations").select("id, kind, job_id, number, status, created_by, vehicle_id, not_quoted, editing_by, editing_at").eq("id", String(body.quotationId ?? "")).maybeSingle();
   if (!q) return NextResponse.json({ error: "Quotation not found." }, { status: 404 });
-  if (!isOwner && q.created_by !== staff.id) {
-    const { data: job } = q.job_id ? await admin.from("jobs").select("gated_in_by").eq("id", q.job_id).maybeSingle() : { data: null };
-    const { data: appr } = q.job_id ? await admin.from("approval_requests").select("id").eq("job_id", q.job_id).eq("sent_by", staff.id).limit(1) : { data: [] };
-    if (job?.gated_in_by !== staff.id && !(appr ?? []).length) return NextResponse.json({ error: "This is another advisor's quotation." }, { status: 403 });
+  // One person edits a quotation at a time. The lock is fresh for a minute and a half after the last heartbeat.
+  const LOCK_FRESH_MS = 90000;
+  const lockHeldByOther = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < LOCK_FRESH_MS;
+  const lockerName = async () => (await admin.from("staff").select("display_name").eq("id", q.editing_by ?? "").maybeSingle()).data?.display_name ?? "Someone";
+  if (body.lock === "release") {
+    if (q.editing_by === staff.id) await admin.from("quotations").update({ editing_by: null, editing_at: null }).eq("id", q.id);
+    return NextResponse.json({ ok: true });
   }
+  if (body.lock === "take") {
+    if (lockHeldByOther) return NextResponse.json({ error: `${await lockerName()} is editing this quotation.`, lockedBy: await lockerName() }, { status: 423 });
+    const taking = q.editing_by !== staff.id;
+    await admin.from("quotations").update({ editing_by: staff.id, editing_at: new Date().toISOString() }).eq("id", q.id);
+    if (taking && q.job_id) {
+      // The car's advisor hears when someone else starts on his quotation.
+      const [{ data: job }, { data: appr }] = await Promise.all([admin.from("jobs").select("gated_in_by, job_number").eq("id", q.job_id).maybeSingle(), admin.from("approval_requests").select("sent_by").eq("job_id", q.job_id)]);
+      const advisors = Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x && x !== staff.id)));
+      if (advisors.length && !advisors.includes(staff.id)) await notifyStaff(advisors, { type: "quote_other_editor", title: `${staff.display_name} is working on ${q.number} · ${job?.job_number ?? ""}`, body: "Your car's quotation is being changed by someone else.", jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${q.id}` });
+    }
+    return NextResponse.json({ ok: true });
+  }
+  if (lockHeldByOther) return NextResponse.json({ error: `${await lockerName()} is editing this quotation. You can read it; changes open once they leave.` }, { status: 423 });
   if (q.status !== "draft" && q.status !== "pending_owner") return NextResponse.json({ error: "This version has been sent. Revise it to make changes." }, { status: 423 });
   const settings = await getSettings();
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
@@ -386,6 +404,11 @@ export async function POST(request: NextRequest) {
     if (h.customer_note !== undefined) patch.customer_note = h.customer_note ? String(h.customer_note).trim().slice(0, 2000) : null;
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;
+    if (h.expected_payment_method !== undefined) {
+      const m = String(h.expected_payment_method);
+      if (!["card", "link", "cash", "cheque", "transfer", "not_sure"].includes(m)) return NextResponse.json({ error: "Choose how the customer will pay." }, { status: 400 });
+      patch.expected_payment_method = m;
+    }
     const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await refreshed();

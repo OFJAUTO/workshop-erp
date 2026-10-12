@@ -13,6 +13,8 @@ import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
 import { decidePurchaseOrder, markOrdered, receivePurchaseOrder, supplierInvoice } from "../../order-actions";
 import { DecideForm, OrderedForm, ReceiveForm, SupplierInvoiceForm } from "./PoForms";
+import { LpoSendControl } from "./LpoSendControl";
+import { getSiteUrl } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +44,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const typeOf = (partId: string) => { const p = bundle.parts.find((x) => x.id === partId); return p ? partTypeText(p) : null; };
   const formLines = lines.map((l) => ({ id: l.id, description: l.description, part_number: l.part_number, quantity: l.quantity, received_qty: l.received_qty, unit_cost: l.unit_cost, flag: l.flag }));
   const v = job?.vehicle;
+  const site = await getSiteUrl();
+  const supplierDigits = (bundle.supplier?.phone ?? "").replace(/[^\d]/g, "");
+  const sendable = po.status !== "pending_approval" && po.status !== "cancelled" && !!po.verify_token;
 
   return (
     <>
@@ -60,9 +65,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <CopyVin vin={v?.vin} />
             <LinkButton href="/parts/orders" tone="secondary" size="lg">All LPOs</LinkButton>
             {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}
-            {po.status !== "pending_approval" && po.status !== "cancelled" ? (
-              <a href={`/api/pdf/po/${po.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-ink text-white hover:bg-black min-h-14 px-6 text-base">PO PDF</a>
+            {sendable ? (
+              <a href={`/api/pdf/po/${po.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Supplier copy (PDF)</a>
             ) : null}
+            {sendable && canManage ? <LpoSendControl poId={po.id} number={po.number} dateText={formatDate(po.approved_at ?? po.created_at)} link={`${site}/api/pdf/lpo/${po.verify_token}`} phoneDigits={supplierDigits} sentAt={po.sent_at} /> : null}
           </>
         }
       />
@@ -106,7 +112,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {po.status === "approved" && canManage ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Send it, then mark ordered</SectionLabel>
-              <p className="text-sm text-muted">Download the PO PDF and send it to {po.supplier_name}. Then enter the expected date per line.</p>
+              <p className="text-sm text-muted">Send the supplier copy to {po.supplier_name} with the button at the top (the PDF link in a short message). Then enter the expected date per line. The supplier copy carries no job card, dates or names; this screen keeps them.</p>
               <OrderedForm lines={formLines} action={markOrdered.bind(null, po.id)} />
             </Card>
           ) : null}
@@ -133,6 +139,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 { label: "Approved", value: po.approved_at ? `${formatDateTime(po.approved_at)} by ${po.approved_by ? (names.get(po.approved_by) ?? "") : ""}` : null },
                 { label: "Deposit override", value: po.deposit_override_reason },
                 { label: "Ordered", value: po.ordered_at ? `${formatDateTime(po.ordered_at)} by ${po.ordered_by ? (names.get(po.ordered_by) ?? "") : ""}` : null },
+                { label: "Sent to supplier", value: po.sent_at ? `${formatDateTime(po.sent_at)} by ${po.sent_by ? (names.get(po.sent_by) ?? "") : ""}${po.sent_method ? ` (${po.sent_method})` : ""}` : null },
                 { label: "Received", value: po.received_at ? formatDateTime(po.received_at) : null },
                 { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_amount ? ` · AED ${po.supplier_invoice_amount.toFixed(2)}` : ""} · ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "To follow" : null },
                 ...(scanUrl ? [{ label: "Scan", value: <a href={scanUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4 font-semibold">Open the supplier invoice</a> }] : []),

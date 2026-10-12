@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { CustomerDocument, DocLines, DocSection, DocTotals, type DocRow } from "@/components/CustomerDocument";
 import { ContactButtons, CustomerFront, advisorContact, customerBoxes } from "@/components/CustomerFront";
 import { PayNowButton } from "@/components/PayNowButton";
 import { Notice } from "@/components/ui";
@@ -24,9 +23,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * "Paid in full", one View button, Pay now (a payment link that opens once) and the folded bank details.
  * "?view=1" opens the full document with Download PDF and a way back.
  */
-export default async function CustomerInvoicePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ view?: string; error?: string }> }) {
+export default async function CustomerInvoicePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
   const { token } = await params;
-  const { view, error } = await searchParams;
+  const { error } = await searchParams;
   const settings = await getSettings();
   const company = companyFromSettings(settings);
   const admin = createAdminClient();
@@ -37,18 +36,16 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   if (!bundle) return plain(<Notice tone="error">This invoice is no longer available.</Notice>);
   // The proforma link keeps working once it became the tax invoice: the customer sees the tax invoice.
   if (bundle.invoice.converted_to) bundle = (await loadInvoice(bundle.invoice.converted_to)) ?? bundle;
-  const { invoice, lines, payments, customer, vehicle, job } = bundle;
+  const { invoice, payments, customer, vehicle, job } = bundle;
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
   const car = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
   const isProforma = invoice.kind === "proforma";
   const isTax = invoice.kind === "tax_invoice";
   const title = isProforma ? "Proforma invoice" : invoice.kind === "credit_note" ? "Credit note" : "Tax invoice";
-  const money = (n: number) => aed(n).replace("AED ", "");
   const payable = isTax || isProforma;
   const paid = payable && bal.state === "paid";
   const due = payable && !paid;
-  const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
   const meta = [
     { label: isProforma ? "Proforma no." : isTax ? "Invoice no." : "Credit note no.", value: invoice.number },
     { label: "Date", value: formatDate(invoice.issued_at) },
@@ -60,7 +57,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
     vehicle || invoice.vehicle_snapshot ? { kind: vehicle?.kind ?? null, variant: vehicle?.variant ?? invoice.vehicle_snapshot?.variant ?? null, vin: invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null, plate: invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null), title: invoice.vehicle_snapshot?.title ?? car ?? "Vehicle" } : null,
   );
 
-  if (view !== "1") {
+  {
     const [links, advisor] = await Promise.all([paymentLinksOf(invoice.id), advisorContact(admin, [invoice.issued_by, job?.gated_in_by])]);
     const link = currentPaymentLink(links);
     return (
@@ -69,7 +66,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         title={title}
         meta={meta}
         boxes={boxes}
-        view={{ href: `/invoice/${token}?view=1`, label: isProforma ? "View proforma" : isTax ? "View tax invoice" : "View credit note" }}
+        view={{ href: `/api/pdf/invoice/${token}`, label: isProforma ? "View proforma (PDF)" : isTax ? "View tax invoice (PDF)" : "View credit note (PDF)" }}
         action={
           due ? (
             <div className="flex flex-col gap-3">
@@ -96,8 +93,8 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
           ) : paid && live.length ? (
             <div className="flex flex-col gap-2">
               {live.map((p) => (
-                <a key={p.id} href={`/api/pdf/receipt/${p.id}?t=${token}`} className="flex min-h-12 items-center justify-between rounded-lg border border-[#D4D4D8] px-4 text-sm font-bold">
-                  <span>View receipt {p.number}</span>
+                <a key={p.id} href={`/api/pdf/receipt/${p.id}?t=${token}`} target="_blank" rel="noreferrer" className="flex min-h-12 items-center justify-between rounded-lg border border-[#D4D4D8] px-4 text-sm font-bold">
+                  <span>View receipt {p.number} (PDF)</span>
                   <span className="text-[#5F6368] font-semibold">{formatDate(p.received_at)} · {METHOD_LABELS[p.method]}</span>
                 </a>
               ))}
@@ -124,45 +121,4 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
       </CustomerFront>
     );
   }
-
-  let n = 0;
-  const rowOf = (l: (typeof lines)[number]): DocRow => {
-    n++;
-    return { n, description: l.description, details: [l.part_number, l.hours === null ? l.details : null].filter(Boolean).join(" · ") || null, qty: l.hours !== null ? `${l.hours.toFixed(1)} h` : String(l.quantity), rate: money(l.unit_price), amount: l.amount_aed === 0 ? "Complimentary" : money(l.amount_aed), amountNum: l.amount_aed };
-  };
-  const services = lines.filter((l) => l.section === "services").map(rowOf);
-  const parts = lines.filter((l) => l.section === "parts").map(rowOf);
-  const fees = lines.filter((l) => l.section === "fees").map(rowOf);
-
-  return (
-    <CustomerDocument company={company} title={title} meta={meta} boxes={boxes} pdfHref={`/api/pdf/invoice/${token}`} backHref={`/invoice/${token}`} computerGenerated={isTax}>
-      {isProforma ? <div className="rounded-lg border border-[#D4D4D8] bg-[#F4F4F5] px-4 py-3 text-sm"><span className="font-bold">This is not a tax invoice.</span> It shows what is due for the work approved. The tax invoice is issued on full payment.</div> : null}
-      {paid ? <div className="rounded-lg border-2 border-[#111113] p-3 text-center text-lg font-extrabold">Paid, thank you</div> : null}
-      {services.length || fees.length ? <DocLines title="Services" rows={[...services, ...fees]} discount={invoice.discount_aed ? { label: "Discount on labour and services", amount: invoice.discount_aed } : null} subtotalLabel="Services subtotal" /> : null}
-      {parts.length ? <DocLines title="Spare parts" rows={parts} subtotalLabel="Spare parts subtotal" /> : null}
-      <DocTotals
-        rows={[
-          { label: "Gross amount", value: money(invoice.subtotal_aed) },
-          ...(invoice.discount_aed ? [{ label: "Discount", value: `− ${money(invoice.discount_aed)}`, bold: true }] : []),
-          ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: `− ${money(invoice.warranty_credit_aed)}`, bold: true }] : []),
-          ...(rounding ? [{ label: rounding < 0 ? "Discount (rounding)" : "Rounding", value: `${rounding < 0 ? "− " : ""}${money(Math.abs(rounding))}` }] : []),
-          { label: "Taxable amount", value: money(invoice.taxable_aed) },
-          { label: "VAT 5%", value: money(invoice.vat_aed) },
-        ]}
-        total={{ label: "Total AED", value: money(invoice.total_aed) }}
-        after={payable && bal.paid ? [{ label: "Paid", value: `− ${money(bal.paid)}` }] : []}
-        box={payable ? (paid ? { label: "Paid in full", value: null, note: bal.paidAt ? `Final payment received ${formatDate(bal.paidAt)}` : null } : { label: bal.state === "cheque_pending" ? "Cheque pending" : "Balance due", value: aed(bal.balance) }) : null}
-      />
-      {live.length ? (
-        <DocSection title="Payments received">
-          <div className="text-sm divide-y divide-line">
-            {live.map((p) => (
-              <div key={p.id} className="flex items-center justify-between gap-2 py-1.5"><span>{p.number} · {formatDate(p.received_at)} · {METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status === "pending" ? " (pending clearance)" : ""}</span><span className="font-bold">{aed(p.amount_aed)}</span></div>
-            ))}
-          </div>
-        </DocSection>
-      ) : null}
-      {invoice.notes ? <div className="rounded-control border border-line p-3 text-sm whitespace-pre-wrap">{invoice.notes}</div> : null}
-    </CustomerDocument>
-  );
 }

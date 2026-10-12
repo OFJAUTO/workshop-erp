@@ -53,7 +53,7 @@ export async function settleJob(jobId: string, invoiceId: string, by: string, se
 export async function recordPaymentCore(actor: Actor, input: PaymentInput, settings: Settings): Promise<PaymentResult> {
   const admin = createAdminClient();
   const method = input.method;
-  if (!["cash", "card", "link", "cheque"].includes(method)) return { error: "Choose the payment method." };
+  if (!["cash", "card", "link", "cheque", "transfer"].includes(method)) return { error: "Choose the payment method." };
   const amount = round2(input.amount);
   if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter the amount received." };
   // The same tap twice: the second one is the same payment.

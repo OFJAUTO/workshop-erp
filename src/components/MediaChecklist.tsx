@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { CarPictureCrop } from "./CarPictureCrop";
 import { DamageNote } from "./DamageNote";
 import { MediaCapture } from "./MediaCapture";
@@ -41,8 +44,20 @@ export function ChecklistSummary({ check }: { check: Checklist }) {
   );
 }
 
-/** The full set of gate-in capture controls, used on the PC/tablet media step and on the phone page. */
-export function MediaChecklist({ jobId, check, token, carPictureUrl = null }: { jobId: string; check: Checklist; token?: string; /** The current car picture, so "Tap to replace" opens the crop with it. */ carPictureUrl?: string | null }) {
+/**
+ * The full set of gate-in capture controls, used on the PC/tablet media step and on the phone page. One source
+ * of truth: the checklist the server computes from the recorded files. Every upload hands the server's fresh
+ * checklist back here the moment the file is recorded, so a tick turns green only when the gate-in counts the
+ * item as done; the page's own refresh brings the same answer when the upload happened on another device.
+ */
+export function MediaChecklist({ jobId, check: serverCheck, token, carPictureUrl = null }: { jobId: string; check: Checklist; token?: string; /** The current car picture, so "Tap to replace" opens the crop with it. */ carPictureUrl?: string | null }) {
+  const [check, setCheck] = useState(serverCheck);
+  const [seen, setSeen] = useState(serverCheck);
+  if (seen !== serverCheck) {
+    setSeen(serverCheck);
+    setCheck(serverCheck);
+  }
+  const onChecklist = (c: Partial<Checklist>) => setCheck((cur) => ({ ...cur, ...c }));
   // Wheels are taken in order: each one unlocks once the previous photo is in.
   const wheelSteps = check.wheelsRequired ? check.wheels.length : 0;
   const damageStep = 7 + wheelSteps;
@@ -50,12 +65,12 @@ export function MediaChecklist({ jobId, check, token, carPictureUrl = null }: { 
     <div className="flex flex-col gap-4">
       <ChecklistSummary check={check} />
       <CarPictureCrop jobId={jobId} token={token} done={check.carPicture} currentUrl={carPictureUrl} />
-      <VideoCapture jobId={jobId} kind="video_exterior" label="2. Exterior video" hint="Walk around the outside of the car." token={token} done={check.videoExterior} />
-      <VideoCapture jobId={jobId} kind="video_interior" label="3. Interior video" hint="Seats, dashboard, boot and controls." token={token} done={check.videoInterior} />
-      <MediaCapture jobId={jobId} kind="dashboard_photo" label="4. Dashboard photo (mileage)" done={check.dashboard} token={token} />
+      <VideoCapture jobId={jobId} kind="video_exterior" label="2. Exterior video" hint="Walk around the outside of the car." token={token} done={check.videoExterior} onChecklist={onChecklist} />
+      <VideoCapture jobId={jobId} kind="video_interior" label="3. Interior video" hint="Seats, dashboard, boot and controls." token={token} done={check.videoInterior} onChecklist={onChecklist} />
+      <MediaCapture jobId={jobId} kind="dashboard_photo" label="4. Dashboard photo (mileage)" done={check.dashboard} token={token} onChecklist={onChecklist} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <MediaCapture jobId={jobId} kind="keys_photo_front" label="5. Keys, front" done={check.keysFront} token={token} />
-        <MediaCapture jobId={jobId} kind="keys_photo_back" label="6. Keys, back" done={check.keysBack} token={token} />
+        <MediaCapture jobId={jobId} kind="keys_photo_front" label="5. Keys, front" done={check.keysFront} token={token} onChecklist={onChecklist} />
+        <MediaCapture jobId={jobId} kind="keys_photo_back" label="6. Keys, back" done={check.keysBack} token={token} onChecklist={onChecklist} />
       </div>
       {check.wheelsRequired ? (
         <div className="flex flex-col gap-3">
@@ -78,6 +93,7 @@ export function MediaChecklist({ jobId, check, token, carPictureUrl = null }: { 
         multiple
         done={check.damageCount > 0}
         token={token}
+        onChecklist={onChecklist}
       />
       <DamageNote jobId={jobId} initial={check.damageNote} token={token} />
       {check.complete ? <Notice tone="success">All done. You can close this page.</Notice> : null}

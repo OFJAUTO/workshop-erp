@@ -26,20 +26,15 @@ function refresh(jobId: string | null, quotationId?: string) {
 }
 
 /** The owner, or an advisor who is this job's advisor (or made the estimate). */
+/** Who may work on a quotation: the owner and any advisor (the car keeps its own advisor; he is told when someone else changes or sends it). */
 async function mayEdit(jobId: string | null, createdBy: string | null) {
+  void jobId;
+  void createdBy;
   const staff = await getCurrentStaff();
   if (!staff || staff.viewingAs) return null;
   const role = staff.role_id as RoleId;
-  if (role === "owner") return staff;
-  if (!can(role, "editQuotes")) return null;
-  if (createdBy === staff.id) return staff;
-  if (!jobId) return null;
-  const admin = createAdminClient();
-  const [{ data: job }, { data: appr }] = await Promise.all([
-    admin.from("jobs").select("gated_in_by").eq("id", jobId).maybeSingle(),
-    admin.from("approval_requests").select("id").eq("job_id", jobId).eq("sent_by", staff.id).limit(1),
-  ]);
-  return job?.gated_in_by === staff.id || (appr ?? []).length > 0 ? staff : null;
+  if (role === "owner" || can(role, "editQuotes")) return staff;
+  return null;
 }
 
 /** Part lines for every listed part on the job that is not yet on the quotation. */
@@ -283,6 +278,12 @@ export async function markQuoteSent(quotationId: string, method: string): Promis
   if (q.status === "draft" && q.token) {
     await admin.from("quotations").update({ status: "sent", sent_at: new Date().toISOString(), sent_by: staff.id, sent_method: method.slice(0, 20), updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "quote_sent", `${q.number} v${q.version} sent to the customer by ${staff.display_name} (${method})`);
+    if (q.job_id) {
+      // Sent by someone other than the car's advisor: the advisor is told.
+      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", q.job_id);
+      const advisors = Array.from(new Set([bundle.job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+      if (advisors.length && !advisors.includes(staff.id)) await notifyStaff(advisors, { type: "quote_other_editor", title: `${staff.display_name} sent ${q.number} · ${bundle.job?.job_number ?? ""}`, body: "Your car's quotation went to the customer, sent by someone else.", jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${q.id}` });
+    }
     if (q.job_id && bundle.job && (bundle.job.status === "pending_quote" || bundle.job.status === "in_inspection")) {
       await admin.from("jobs").update({ status: "pending_customer_approval", stage: "approval", stage_entered_at: new Date().toISOString() }).eq("id", q.job_id);
       await admin.from("job_events").insert({ job_id: q.job_id, event_type: "status_change", from_status: bundle.job.status, to_status: "pending_customer_approval", note: `Quotation ${q.number} sent`, created_by: staff.id });

@@ -158,9 +158,13 @@ try {
     check("the request's position is on the row (E4)", /Front/.test(bodyParts ?? ""));
     await page.locator("input[aria-label='Part number']").first().fill("BP-100");
     await cost.fill("200");
+    // The supplier comes from the list (item 3 of 12 Oct); availability is in words.
     const supplierName = (await sql("select name from public.suppliers where is_active order by name limit 1"))[0]?.name ?? "e2e Supplier";
-    await page.locator("input[aria-label='Supplier']").first().fill(supplierName);
-    await page.getByRole("button", { name: "Stock" }).first().click();
+    const supSel = page.locator("select[aria-label='Supplier']").first();
+    const supVal = await supSel.locator("option").evaluateAll((os, name) => (os.find((o) => (o.textContent ?? "").startsWith(name)) ?? {}).value ?? "", supplierName);
+    check("supplier list on the row has the supplier (12 Oct, 3)", !!supVal, supplierName);
+    if (supVal) await supSel.selectOption(supVal);
+    await page.getByRole("button", { name: "In stock" }).first().click();
     await sleep(3500);
     const pi = await sql("select id, cost_aed, availability from public.part_items where job_id = $1", [jobId]);
     check("part priced in stock", pi.length >= 1 && Number(pi[0].cost_aed) === 200, JSON.stringify(pi));
@@ -265,6 +269,10 @@ try {
   {
     const { browser, page } = await browserForId(techId, { viewport: { width: 820, height: 1180 }, touch: true });
     await go(page, `${base}/my-jobs/${jobId}`);
+    // 12 Oct, 9: "Parts for this car" under Start work: Receive parts, then the ticks and the PIN.
+    const receive = page.getByRole("button", { name: "Receive parts" }).first();
+    check("Receive parts under Start work (12 Oct, 9)", (await receive.count()) === 1, (await page.textContent("body") ?? "").match(/.{0,30}waiting for you.{0,20}/)?.[0] ?? "");
+    if (await receive.count()) { await receive.click(); await sleep(400); }
     const pin = page.locator("input[aria-label=PIN]");
     if (await pin.count()) { await pin.fill("1234"); await page.getByRole("button", { name: "I received these parts" }).click(); await sleep(3500); }
     const ho = await sql("select status from public.part_handovers where job_id = $1 order by created_at desc limit 1", [jobId]);

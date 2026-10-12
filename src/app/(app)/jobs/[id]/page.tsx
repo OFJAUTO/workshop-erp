@@ -139,10 +139,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name);
   const approvalTemplate = fillCar(settings.whatsapp_approval_template);
   const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", customerName);
-  // The proforma message carries the bank details (the page has them too, with Pay now); the tax invoice has its own message.
-  const bankLines = [settings.bank_name ? `Bank transfer: ${settings.bank_account_name}, ${settings.bank_name}` : "", settings.bank_iban ? `IBAN ${settings.bank_iban}` : ""].filter(Boolean).join("\n");
-  const readyRaw = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", customerName);
-  const readyTemplate = readyRaw.includes("[bank]") ? readyRaw.replaceAll("[bank]", bankLines) : bankLines ? `${readyRaw}\n${bankLines}` : readyRaw;
+  // The messages are short: no bank details (those sit behind "Bank details" on the proforma page and in the PDF).
+  const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", customerName).replaceAll("[bank]", "");
   const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? "")).replaceAll("[name]", customerName);
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
@@ -174,10 +172,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     quote: qState,
     extra: { partsState: job.parts_state, partsLate: partsState.late.length, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, invoiceKind: bal?.invoice?.kind ?? null, invoiceSent: !!job.invoice_sent_at, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
   });
-  const canQuote = (role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)))) && job.is_open && !staff.viewingAs;
+  const canQuote = (role === "owner" || role === "service_advisor") && job.is_open && !staff.viewingAs;
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
-  // The quotation exists only for the owner and the job's advisor; nobody else sees the card or a link to it.
-  const seesQuote = role === "owner" || (role === "service_advisor" && (job.gated_in_by === staff.id || approvals.some((a) => a.sent_by === staff.id)));
+  // The quotation exists for the owner and the advisors; nobody else sees the card or a link to it.
+  const seesQuote = role === "owner" || role === "service_advisor";
   const quoteOpenStatuses = ["draft", "pending_owner", "sent", "opened"];
   const myMove = role === "owner" || step.actorRole === role || (step.actorRole === "gate_in" && can(role, "editGateIn"));
 

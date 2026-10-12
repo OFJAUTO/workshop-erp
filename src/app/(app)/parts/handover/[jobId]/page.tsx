@@ -15,7 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { activeTechnicians } from "@/lib/work-flow";
 import { cancelHandoverAction, dispositionAction, exchangePartAction, handoverParts, notNeededAction, returnToParts, signHandoverAtCounter } from "../../handover-actions";
-import { HandoverForm, ReturnForm, SignHere, type HandoverPart } from "./HandoverForm";
+import { HandoverForm, ReturnForm, SignForForm, type HandoverPart } from "./HandoverForm";
 import { EndingForm, PartActions, PartStateBadge } from "./PartActions";
 
 export const dynamic = "force-dynamic";
@@ -85,13 +85,13 @@ export default async function HandoverPage({ params, searchParams }: { params: P
       {pending.map((h) => (
         <Card key={h.id} className="flex flex-col gap-3 border-amber-bar">
           <div className="flex flex-wrap items-center gap-2">
-            <SectionLabel right={formatDateTime(h.created_at)}>Waiting for {h.takerName}&apos;s PIN</SectionLabel>
+            <SectionLabel right={formatDateTime(h.created_at)}>Waiting for {h.takerName} to confirm</SectionLabel>
             <Badge tone="amber">{h.items.length} part{h.items.length === 1 ? "" : "s"}</Badge>
             {Object.keys(h.stickers ?? {}).length ? <Badge tone={h.stickers_printed_at ? "green" : "red"}>{h.stickers_printed_at ? "Stickers printed" : "Stickers not printed yet"}</Badge> : null}
           </div>
-          <p className="text-sm">{h.giverName} is handing {h.items.map((i) => `${i.description} × ${i.quantity}`).join(", ")} to <span className="font-semibold">{h.takerName}</span>. {personal.has(h.to_staff ?? "") ? "He has it on his own device and ticks what he receives there." : "He ticks what he receives and signs here at the counter."} The parts count as with Parts until then.</p>
+          <p className="text-sm">{h.giverName} is handing {h.items.map((i) => `${i.description} × ${i.quantity}`).join(", ")} to <span className="font-semibold">{h.takerName}</span>. He ticks what he receives on his own screen, under Start work, and confirms with his PIN there. The parts count as with Parts until then.</p>
           <div className="flex flex-wrap items-start gap-3">
-            {!staff.viewingAs ? <SignHere jobId={jobId} takerName={h.takerName} items={h.items.map((i) => ({ id: i.id, description: i.description, quantity: i.quantity }))} canSignFor={canSignFor} signerNeedsPin={role === "workshop_manager"} action={signHandoverAtCounter.bind(null, h.id)} /> : null}
+            {!staff.viewingAs && canSignFor ? <SignForForm jobId={jobId} takerName={h.takerName} signerNeedsPin={role === "workshop_manager"} action={signHandoverAtCounter.bind(null, h.id)} /> : null}
             {Object.keys(h.stickers ?? {}).length ? <a href={`/print/stickers/${h.id}?back=${encodeURIComponent(back)}`} target="_blank" rel="noreferrer" className={h.stickers_printed_at ? newTab : `${newTab} border-ink`}>{h.stickers_printed_at ? "Print the stickers again" : "Print the stickers (new tab)"}</a> : null}
             {canHand ? <form action={cancelHandoverAction.bind(null, h.id)}><input type="hidden" name="job_id" value={jobId} /><Button type="submit" tone="ghost" size="md">Cancel this handover</Button></form> : null}
           </div>
@@ -121,7 +121,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
           <ul className="divide-y divide-line text-sm">
             {handed.map((p) => (
               <li key={p.id} className="py-2 flex flex-col gap-2">
-                <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><span className="text-muted">× {p.tech_received_qty ?? p.issued_qty ?? 1} · {nameOf.get(p.issue_confirmed_by ?? "") ?? "technician"} · {formatDateTime(p.issue_confirmed_at)}</span><PartStateBadge state={partState(p)} />{p.stickers_printed ? <Badge tone="outline">{p.stickers_printed} sticker{p.stickers_printed === 1 ? "" : "s"}</Badge> : null}</span>
+                <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><span className="text-muted">× {p.tech_received_qty ?? p.issued_qty ?? 1} · received by {nameOf.get(p.issue_confirmed_by ?? "") ?? "the technician"}, {formatDateTime(p.issue_confirmed_at)}</span><PartStateBadge state={partState(p)} />{p.stickers_printed ? <Badge tone="outline">{p.stickers_printed} sticker{p.stickers_printed === 1 ? "" : "s"}</Badge> : null}</span>
                 {canSettle ? <PartActions partId={p.id} back={back} canExchange canNotNeeded exchangeAction={exchangePartAction.bind(null, jobId)} notNeededAction={notNeededAction.bind(null, jobId)} /> : null}
               </li>
             ))}

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { refreshWhenIdle } from "@/lib/refresh-idle";
 
 type Row = Record<string, unknown>;
 
@@ -26,7 +27,7 @@ export function LiveRefresh({ tables, jobId, pollMs = 60000 }: { tables: string[
     const supabase = createClient();
     const schedule = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => router.refresh(), 300);
+      timer.current = setTimeout(() => refreshWhenIdle(() => router.refresh()), 300);
     };
     const matches = (row: Row | null | undefined) => !jobId || !row || row.id === jobId || row.job_id === jobId;
     const channel = supabase.channel(`live-${key}-${jobId ?? "all"}-${Math.random().toString(36).slice(2, 8)}`);
@@ -46,9 +47,9 @@ export function LiveRefresh({ tables, jobId, pollMs = 60000 }: { tables: string[
         if (status === "SUBSCRIBED") schedule();
       });
     });
-    const poll = pollMs > 0 ? setInterval(() => router.refresh(), pollMs) : null;
+    const poll = pollMs > 0 ? setInterval(() => refreshWhenIdle(() => router.refresh()), pollMs) : null;
     const onVisible = () => {
-      if (document.visibilityState === "visible") router.refresh();
+      if (document.visibilityState === "visible") refreshWhenIdle(() => router.refresh());
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {

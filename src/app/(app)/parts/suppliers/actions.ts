@@ -8,6 +8,23 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const back = (msg: string, ok: boolean) => redirect(`/parts/suppliers?${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
 
+/** The discounts on the form: only the owner and accounts may change them (the boxes are off for Parts). */
+function readDiscounts(formData: FormData, role: string): { default_discount_percent: number; discount_by_type: Record<string, number> } | null {
+  if (!(role === "owner" || role === "accounts")) return null;
+  if (formData.get("discount_default") === null) return null;
+  const pct = (v: FormDataEntryValue | null) => {
+    const n = Number(String(v ?? "").trim().replace(",", "."));
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n * 100) / 100)) : null;
+  };
+  const byType: Record<string, number> = {};
+  for (const [k, v] of formData.entries()) {
+    if (!k.startsWith("discount__")) continue;
+    const n = String(v ?? "").trim() === "" ? null : pct(v);
+    if (n !== null) byType[k.slice("discount__".length)] = n;
+  }
+  return { default_discount_percent: pct(formData.get("discount_default")) ?? 0, discount_by_type: byType };
+}
+
 function read(formData: FormData) {
   const name = (blankToNull(formData.get("name")) ?? "").slice(0, 120);
   if (name.length < 2) back("Type the supplier's name.", false);
@@ -38,7 +55,7 @@ export async function addSupplier(formData: FormData) {
     }
     back(`${row.name} is already on the list.`, false);
   }
-  const { error } = await admin.from("suppliers").insert({ ...row, created_by: staff.id, updated_by: staff.id });
+  const { error } = await admin.from("suppliers").insert({ ...row, ...(readDiscounts(formData, staff.role_id) ?? {}), created_by: staff.id, updated_by: staff.id });
   if (error) back(error.message, false);
   revalidatePath("/parts/suppliers");
   revalidatePath("/parts");
@@ -49,7 +66,7 @@ export async function updateSupplier(id: string, formData: FormData) {
   const staff = await requirePermission("manageSuppliers");
   const row = read(formData);
   const admin = createAdminClient();
-  const { error } = await admin.from("suppliers").update({ ...row, updated_by: staff.id }).eq("id", id);
+  const { error } = await admin.from("suppliers").update({ ...row, ...(readDiscounts(formData, staff.role_id) ?? {}), updated_by: staff.id }).eq("id", id);
   if (error) back(error.message, false);
   // LPOs carry the supplier's name at the time; the ones not yet sent follow a rename.
   await admin.from("purchase_orders").update({ supplier_name: row.name, updated_by: staff.id }).eq("supplier_id", id).in("status", ["pending_approval", "approved"]);

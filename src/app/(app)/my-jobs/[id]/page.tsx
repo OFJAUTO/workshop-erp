@@ -28,7 +28,8 @@ import { jobFinished, keepWorking, leaveJobAction, pauseWorkAction, reportAdditi
 import { breakOf } from "@/lib/breaks";
 import { getCurrentDevice } from "@/lib/devices";
 import { ScanStepCard } from "./ScanStepCard";
-import { PendingHandoverCard } from "./PendingHandoverCard";
+import { PartsForCar } from "./PartsForCar";
+import { exchangePartAction } from "../../parts/handover-actions";
 import { pendingHandoversFor } from "@/lib/handover";
 import { confirmHandoverOnDevice } from "../../parts/handover-actions";
 import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/work-data";
@@ -233,7 +234,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         </Card>
       ) : null}
 
-      <PendingHandoverCard handovers={pendingHandovers} confirm={confirmHandoverOnDevice} />
+      {!(work && inWork) && pendingHandovers.length ? <PartsForCar jobId={id} handovers={pendingHandovers} confirm={confirmHandoverOnDevice} parts={panelParts} canAct={canWork} exchangeAction={exchangePartAction.bind(null, id)} /> : null}
       {work && inWork ? (
         <>
           <WorkClock
@@ -256,6 +257,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             pauseAction={pauseWorkAction.bind(null, id)}
             leaveAction={leaveJobAction.bind(null, id)}
           />
+          <PartsForCar jobId={id} handovers={pendingHandovers} confirm={confirmHandoverOnDevice} parts={panelParts} canAct={canWork} exchangeAction={exchangePartAction.bind(null, id)} />
           {roadTestCard}
           {requestsCard}
           {looseItems.length ? (
@@ -267,7 +269,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
           <WorkJobs
             jobId={id}
             lines={panelLines}
-            parts={panelParts}
+            parts={[]}
             findings={work.additional.map((a) => ({ id: a.id, remark: a.remark, parts_needed: a.parts_needed, status: a.status, decision_note: a.decision_note, label: additionalWorkLabel(a).text, tone: additionalWorkLabel(a).tone }))}
             canWork={canWork}
             workDone={!!job.work_done_at}

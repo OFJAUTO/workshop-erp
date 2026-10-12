@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { CustomerDocument, DocLines, DocTotals, type DocRow } from "@/components/CustomerDocument";
 import { ContactButtons, CustomerFront, advisorContact, customerBoxes } from "@/components/CustomerFront";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -7,8 +6,7 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { aed, blockOf, isHidden, isUnchosen, lineQuantityText, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
-import { dubaiDate } from "@/lib/jobs";
+import { aed, isHidden, isUnchosen, quoteTotals } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -33,9 +31,9 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
  * the grand total in large print, one "View quotation" button and one "Approved" button, then Call and
  * WhatsApp. "?view=1" opens the full document (recorded, so the job shows whether it was read before approving).
  */
-export default async function CustomerQuotePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string; view?: string }> }) {
+export default async function CustomerQuotePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
   const { token } = await params;
-  const { error, view } = await searchParams;
+  const { error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const company = companyFromSettings(settings);
@@ -47,11 +45,9 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const { data: row } = await admin.from("quotations").select("id, kind, status, valid_until, viewed_full_at").eq("token", token).maybeSingle();
   if (!row) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const isEstimate = row.kind === "estimate";
-  const full = view === "1";
 
-  // First opening: remembered and the advisor told. Opening the full document is remembered too.
+  // First opening: remembered and the advisor told. Opening the PDF is remembered by the PDF route.
   if (row.status === "sent") await admin.from("quotations").update({ status: "opened", opened_at: new Date().toISOString() }).eq("id", row.id);
-  if (full && !row.viewed_full_at && ["sent", "opened"].includes(row.status)) await admin.from("quotations").update({ viewed_full_at: new Date().toISOString() }).eq("id", row.id);
   const expired = (row.status === "sent" || row.status === "opened") && isPastNow(row.valid_until);
   if (expired) await admin.from("quotations").update({ status: "expired" }).eq("id", row.id);
   const bundle = await loadQuotation(row.id);
@@ -70,8 +66,6 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const carName = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
   const title = isEstimate ? "Estimate" : q.version > 1 ? "Revised quotation" : "Quotation";
-  const money = (n: number) => aed(n).replace("AED ", "");
-  const today = dubaiDate();
   const open = q.status === "sent" || q.status === "opened";
   const meta = [
     { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },
@@ -102,7 +96,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     </>
   );
 
-  if (!full) {
+  {
     const advisor = await advisorContact(admin, [q.sent_by, q.created_by, job?.gated_in_by]);
     return (
       <CustomerFront
@@ -110,7 +104,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         title={title}
         meta={meta}
         boxes={boxes}
-        view={{ href: `/quote/${token}?view=1`, label: isEstimate ? "View estimate" : "View quotation" }}
+        view={{ href: `/api/pdf/quote/${token}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)" }}
         action={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} /> : null}
         contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} label="Questions or changes?" />}
       >
@@ -123,39 +117,4 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       </CustomerFront>
     );
   }
-
-  let n = 0;
-  const rowOf = (l: (typeof lines)[number]): DocRow => {
-    n++;
-    const part = l.part_item_id ? bundle.parts.find((p) => p.id === l.part_item_id) : null;
-    const details = [l.line_type === "part" ? partTypeText(l) : null, part?.part_number ?? null, l.line_type === "part" ? partAvailabilityText(part, today) : null, l.details].filter(Boolean).join(" · ") || null;
-    return { n, description: l.line_type === "part" && part?.part_number && l.title.endsWith(`(${part.part_number})`) ? l.title.slice(0, -(part.part_number.length + 2)).trim() : withPositions(l.title, l.positions), details, tag: !isEstimate && l.urgency === "urgent" ? "Urgent" : null, qty: lineQuantityText(l), rate: money(lineUnitPrice(l)), amount: lineTotal(l) === 0 ? "Complimentary" : money(lineTotal(l)), amountNum: lineTotal(l) };
-  };
-  const labour = lines.filter((l) => blockOf(l) === "labour").map(rowOf);
-  const parts = lines.filter((l) => blockOf(l) === "parts").map(rowOf);
-  const other = lines.filter((l) => blockOf(l) === "other").map(rowOf);
-  const { data: reportLink } = job ? await admin.from("report_links").select("token").eq("job_id", job.id).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
-
-  return (
-    <CustomerDocument company={company} title={title} meta={meta} boxes={boxes} pdfHref={`/api/pdf/quote/${token}`} backHref={`/quote/${token}`}>
-      {statusNotes}
-      {reportLink?.token ? <a href={`/report/${reportLink.token}`} className="self-start text-xs font-semibold text-[#5F6368] underline underline-offset-4">See your inspection report</a> : null}
-      {labour.length ? <DocLines title="Labour and services" rows={labour} vatPercent={Number(q.vat_percent) || 5} discount={totals.discount ? { label: `Discount ${q.discount_percent}% on labour and services`, amount: totals.discount } : null} subtotalLabel="Labour and services subtotal" /> : null}
-      {parts.length ? <DocLines title="Parts" rows={parts} vatPercent={Number(q.vat_percent) || 5} subtotalLabel="Parts subtotal" /> : null}
-      {other.length ? <DocLines title="Other charges" rows={other} vatPercent={Number(q.vat_percent) || 5} subtotalLabel="Other charges subtotal" /> : null}
-      <DocTotals
-        rows={[
-          { label: "Subtotal", value: money(totals.subtotal) },
-          ...(totals.discount ? [{ label: `Discount ${q.discount_percent}%`, value: `− ${money(totals.discount)}`, bold: true }] : []),
-          ...(totals.rounding ? [{ label: totals.rounding < 0 ? "Discount (rounding)" : "Rounding", value: `${totals.rounding < 0 ? "− " : ""}${money(Math.abs(totals.rounding))}` }] : []),
-          { label: "Taxable amount", value: money(totals.net) },
-          { label: `VAT ${q.vat_percent}%`, value: money(totals.vat) },
-        ]}
-        total={{ label: "Total AED", value: money(totals.total) }}
-        after={totals.deposit ? [{ label: "Deposit required", value: money(totals.deposit), bold: true }] : []}
-        box={{ label: isEstimate ? "Estimate total" : "Quotation total", value: aed(totals.total), note: q.valid_until ? `Valid until ${formatDate(q.valid_until)}` : null }}
-      />
-      {q.customer_note ? <div className="rounded-control border border-line p-3 text-sm whitespace-pre-wrap">{q.customer_note}</div> : null}
-    </CustomerDocument>
-  );
 }

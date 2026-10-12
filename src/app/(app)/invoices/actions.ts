@@ -222,6 +222,7 @@ export async function markReadySent(jobId: string, method: string): Promise<{ er
   const staff = await requirePermission("sendApproval");
   const admin = createAdminClient();
   await admin.from("jobs").update({ ready_sent_at: new Date().toISOString() }).eq("id", jobId);
+  await admin.from("invoices").update({ sent_by: staff.id, sent_at: new Date().toISOString() }).eq("job_id", jobId).eq("kind", "proforma").eq("is_active", true);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: `Proforma and "your car is ready" sent by ${staff.display_name} (${method})`, created_by: staff.id });
   refresh(jobId);
   return { ok: true };
@@ -232,6 +233,7 @@ export async function markInvoiceSent(jobId: string, method: string): Promise<{ 
   const staff = await requirePermission("sendApproval");
   const admin = createAdminClient();
   await admin.from("jobs").update({ invoice_sent_at: new Date().toISOString() }).eq("id", jobId);
+  await admin.from("invoices").update({ sent_by: staff.id, sent_at: new Date().toISOString() }).eq("job_id", jobId).eq("kind", "tax_invoice").eq("is_active", true);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_sent", note: `Tax invoice sent by ${staff.display_name} (${method})`, created_by: staff.id });
   refresh(jobId);
   return { ok: true };
@@ -241,7 +243,7 @@ export async function markInvoiceSent(jobId: string, method: string): Promise<{ 
 export async function updateBankCharges(formData: FormData) {
   const staff = await requirePermission("issueInvoices");
   const admin = createAdminClient();
-  const keys = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent"] as const;
+  const keys = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent", "bank_charge_transfer_percent"] as const;
   const values: Record<string, number> = {};
   for (const k of keys) {
     const n = Number(String(formData.get(k) ?? "").trim().replace(",", "."));

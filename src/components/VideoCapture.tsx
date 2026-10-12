@@ -4,11 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui";
 import { uploadFile, type UploadKind } from "@/lib/upload-client";
+import type { Checklist } from "@/lib/media";
+import { refreshWhenIdle } from "@/lib/refresh-idle";
 
 export const MAX_VIDEO_SECONDS = 240;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 
-type Phase = "idle" | "checking" | "uploading" | "done" | "failed";
+type Phase = "idle" | "checking" | "uploading" | "processing" | "done" | "failed";
 
 /** Reads how long a video file is, using the browser's own player. */
 function readDuration(file: File): Promise<number | null> {
@@ -45,16 +47,26 @@ export function VideoCapture({
   hint,
   token,
   done = false,
+  onChecklist,
 }: {
   jobId: string;
   kind: UploadKind;
   label: string;
   hint: string;
   token?: string;
+  /** The server counts this video as done (the one truth: a green tick means exactly this). */
   done?: boolean;
+  /** The server's fresh checklist once the file is recorded. */
+  onChecklist?: (c: Partial<Checklist>) => void;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>(done ? "done" : "idle");
+  // The tick follows the server: when the gate-in counts the video as done, the box turns green, never before.
+  const [seenDone, setSeenDone] = useState(done);
+  if (seenDone !== done) {
+    setSeenDone(done);
+    if (done && phase !== "uploading" && phase !== "checking") setPhase("done");
+  }
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ file: File; duration: number | null } | null>(null);
@@ -88,10 +100,13 @@ export function VideoCapture({
     setError(null);
     try {
       const type = (p.file.type || "video/mp4").split(";")[0];
-      await uploadFile(jobId, kind, p.file, type, setProgress, { duration: p.duration ? Math.round(p.duration) : undefined, token });
-      setPhase("done");
+      setPhase("uploading");
+      const checklist = (await uploadFile(jobId, kind, p.file, type, (x) => { setProgress(x); if (x >= 1) setPhase("processing"); }, { duration: p.duration ? Math.round(p.duration) : undefined, token })) as Partial<Checklist>;
       setPending(null);
-      router.refresh();
+      const counted = kind === "video_exterior" ? checklist.videoExterior : kind === "video_interior" ? checklist.videoInterior : undefined;
+      onChecklist?.(checklist);
+      setPhase(counted === false ? "processing" : "done");
+      refreshWhenIdle(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
       setPhase("failed");
@@ -99,10 +114,10 @@ export function VideoCapture({
   }
 
   const finished = phase === "done";
-  const busy = phase === "checking" || phase === "uploading";
+  const busy = phase === "checking" || phase === "uploading" || phase === "processing";
 
   return (
-    <div className={`flex flex-col gap-3 rounded-card border-2 p-4 ${finished ? "border-green bg-green-soft" : phase === "failed" ? "border-red-bar bg-red-soft" : "border-line-strong bg-white"}`}>
+    <div className={`flex flex-col gap-3 rounded-card border-2 p-4 ${finished ? "border-green bg-green-soft" : phase === "failed" ? "border-red-bar bg-red-soft" : phase === "processing" ? "border-amber-bar bg-amber-soft" : "border-line-strong bg-white"}`}>
       <div className="flex items-center justify-between gap-3">
         <span className="flex flex-col">
           <span className="font-bold">{label}</span>
@@ -123,6 +138,7 @@ export function VideoCapture({
       ) : null}
 
       {phase === "checking" ? <p className="text-sm text-muted">Checking the video…</p> : null}
+      {phase === "processing" ? <p className="text-sm font-semibold text-amber">Processing… the file is being recorded.</p> : null}
 
       {phase === "uploading" ? (
         <div className="flex flex-col gap-2">

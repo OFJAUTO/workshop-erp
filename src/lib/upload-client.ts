@@ -56,8 +56,9 @@ export async function registerMedia(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jobId, kind, path, ...extra }),
   });
-  const data = (await res.json()) as { ok?: boolean; error?: string; checklist?: Record<string, boolean> };
+  const data = (await res.json()) as { ok?: boolean; error?: string; checklist?: Record<string, unknown> };
   if (!res.ok || !data.ok) throw new Error(data.error ?? "Could not record the file.");
+  // The server's own checklist, computed from the recorded files: the one truth every tick follows.
   return data.checklist ?? {};
 }
 

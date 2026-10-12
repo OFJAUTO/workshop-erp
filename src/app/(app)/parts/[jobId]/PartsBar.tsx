@@ -12,7 +12,7 @@ type Action = (formData: FormData) => void | Promise<void>;
 export function PartsBar({ mode, openCount, pricingDoneAt, onPricingDone, planning }: { mode: "pricing" | "planning"; openCount: number; pricingDoneAt: string | null; onPricingDone: Action; planning?: { unplanned: number; planned: boolean; onAllInStock: Action; onPartsPlanned: Action } | null }) {
   const [asking, setAsking] = useState(false);
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur px-4 py-2.5">
+    <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
         {mode === "planning" && planning ? (
           <>

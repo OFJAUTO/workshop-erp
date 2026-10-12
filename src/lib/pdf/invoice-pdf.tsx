@@ -1,16 +1,16 @@
 import "server-only";
-import { Text, View, renderToBuffer } from "@react-pdf/renderer";
+/* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
+import { Image, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, type InvoiceBundle, type InvoiceLineRow, type PaymentRow } from "@/lib/invoice-data";
 import { amountInWords, round2 } from "@/lib/money";
 import type { PoBundle } from "@/lib/parts-data";
-import { partTypeText } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, WordsAndPayments, companyOf, currencyOf, qtyText, styles, type DocLine, type StatusBox } from "./template";
+import { DocumentTail, InfoBoxes, LinesTable, PdfDocument, PoLinesTable, TitleRow, TotalsBlock, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type StatusBox } from "./template";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
 const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", credit_note: "Credit note no." } as const;
@@ -67,7 +67,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
   const company = companyOf(settings);
-  const [logo, qr] = await Promise.all([loadLogo(), invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/invoice/${invoice.token}`) : Promise.resolve(null)]);
+  const [logo, qr] = await Promise.all([loadLogo(), invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/${invoice.kind === "proforma" ? "proforma" : "invoice"}/${invoice.token}`) : Promise.resolve(null)]);
   const isCredit = invoice.kind === "credit_note";
   const rounding = round2(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)));
   const doc = (
@@ -83,40 +83,42 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
       <LinesTable title="Services" lines={[...services, ...fees]} currency={currency} vatPercent={vatPercent} subtotalLabel="Services subtotal" discount={invoice.discount_aed ? { label: "Discount on labour and services", amount: invoice.discount_aed } : null} />
       {parts.length ? <LinesTable title="Spare parts" lines={parts} currency={currency} vatPercent={vatPercent} subtotalLabel="Spare parts subtotal" startAt={services.length + fees.length + 1} /> : null}
-      <View style={styles.bottom}>
-        <WordsAndPayments
-          words={amountInWords(invoice.total_aed)}
-          payments={live.map((p) => ({ date: formatDate(p.received_at), method: METHOD_LABELS[p.method] + (p.method === "cheque" && p.cheque_status !== "cleared" ? " (pending)" : ""), amount: p.amount_aed, note: p.method === "cheque" ? p.cheque_number : p.reference }))}
-          bank={company.bank}
-          currency={currency}
-          showBank={!isCredit && bal.state !== "paid"}
-        />
-        <TotalsBlock
-          currency={currency}
-          rows={[
-            { label: "Gross amount", value: invoice.subtotal_aed },
-            ...(invoice.discount_aed ? [{ label: "Discount", value: invoice.discount_aed, bold: true, negative: true }] : []),
-            ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed, bold: true, negative: true }] : []),
-            ...(rounding ? [{ label: rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(rounding), negative: rounding < 0 }] : []),
-            { label: "Taxable amount", value: invoice.taxable_aed },
-            { label: `VAT ${vatPercent}%`, value: invoice.vat_aed },
-          ]}
-          total={{ label: isCredit ? "Credit total" : "Total", value: invoice.total_aed }}
-          after={!isCredit && bal.paid ? [{ label: "Paid", value: bal.paid, negative: true }] : []}
-          status={statusBoxFor(invoice, live)}
-        />
-      </View>
-      {invoice.notes ? (
-        <View style={styles.note} wrap={false}>
-          <Text style={styles.smallTitle}>Note</Text>
-          <Text>{invoice.notes}</Text>
-        </View>
-      ) : null}
-      {isCredit && invoice.credit_of ? (
-        <View style={styles.note} wrap={false}>
-          <Text>This credit note corrects an earlier tax invoice.</Text>
-        </View>
-      ) : null}
+      <DocumentTail
+        words={amountInWords(invoice.total_aed)}
+        payments={live.map((p) => ({ date: formatDate(p.received_at), method: METHOD_LABELS[p.method] + (p.method === "cheque" && p.cheque_status !== "cleared" ? " (pending)" : ""), amount: p.amount_aed, note: p.method === "cheque" ? p.cheque_number : p.reference }))}
+        bank={!isCredit && bal.state !== "paid" ? company.bank : null}
+        totals={
+          <TotalsBlock
+            currency={currency}
+            rows={[
+              { label: "Gross amount", value: invoice.subtotal_aed },
+              ...(invoice.discount_aed ? [{ label: "Discount", value: invoice.discount_aed, bold: true, negative: true }] : []),
+              ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed, bold: true, negative: true }] : []),
+              ...(rounding ? [{ label: rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(rounding), negative: rounding < 0 }] : []),
+              { label: "Taxable amount", value: invoice.taxable_aed },
+              { label: `VAT ${vatPercent}%`, value: invoice.vat_aed },
+            ]}
+            total={{ label: isCredit ? "Credit total" : "Total", value: invoice.total_aed }}
+            after={!isCredit && bal.paid ? [{ label: "Paid", value: bal.paid, negative: true }] : []}
+            status={statusBoxFor(invoice, live)}
+          />
+        }
+        notes={
+          <>
+            {invoice.notes ? (
+              <View style={styles.note} wrap={false}>
+                <Text style={styles.smallTitle}>Note</Text>
+                <Text>{invoice.notes}</Text>
+              </View>
+            ) : null}
+            {isCredit && invoice.credit_of ? (
+              <View style={styles.note} wrap={false}>
+                <Text>This credit note corrects an earlier tax invoice.</Text>
+              </View>
+            ) : null}
+          </>
+        }
+      />
     </PdfDocument>
   );
   return renderToBuffer(doc);
@@ -148,9 +150,12 @@ export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBund
         ]}
       />
       <LinesTable title="Payment" lines={[line]} currency={currency} vatPercent={0} subtotalLabel="Amount received" />
-      <View style={styles.bottom}>
-        <WordsAndPayments words={amountInWords(payment.amount_aed)} payments={[]} bank={company.bank} currency={currency} showBank={false} />
+      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: px(4) }}>
         <TotalsBlock currency={currency} rows={[]} total={{ label: "Received", value: payment.amount_aed }} status={pending ? { title: "Cheque pending clearance", value: payment.amount_aed } : { title: "Received with thanks", value: payment.amount_aed, note: invoice ? (invoiceBalance(invoice.invoice, invoice.payments).balance > 0 ? `Balance remaining on the invoice ${invoiceBalance(invoice.invoice, invoice.payments).balance.toFixed(2)}` : "Invoice paid in full") : null }} />
+      </View>
+      <View style={{ marginTop: px(14) }} wrap={false}>
+        <Text style={styles.smallTitle}>Amount in words</Text>
+        <Text style={styles.words}>{amountInWords(payment.amount_aed)}</Text>
       </View>
     </PdfDocument>
   );
@@ -159,33 +164,57 @@ export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBund
 
 /** An LPO for a supplier: part numbers, quantities and the agreed cost. Internal document. */
 export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise<Buffer> {
-  const { po, lines, job, names, supplier } = bundle;
+  // The supplier copy: the only LPO that leaves the system. LPO number and date, the supplier, the VIN only, the
+  // lines with list price, discount, net, VAT and total, then "Approved electronically" with the time and a QR code
+  // to the verification page. No job card, no expected dates, no urgency, no staff names.
+  const { po, lines, job, supplier } = bundle;
   const currency = currencyOf(settings);
   const company = companyOf(settings);
-  const logo = await loadLogo();
   const vatPercent = 5;
-  const docLines: DocLine[] = lines.map((l) => {
-    const amount = round2(l.quantity * l.unit_cost);
-    const vat = round2(amount * (vatPercent / 100));
-    const part = bundle.parts.find((p) => p.id === l.part_item_id);
-    return { description: l.part_number ? `${l.part_number} · ${l.description}` : l.description, partNumber: null, details: [part ? partTypeText(part) : null, l.expected_date ? `Expected ${formatDate(l.expected_date)}` : null].filter(Boolean).join(" · ") || null, qty: qtyText(l.quantity), rate: l.unit_cost, amount, vat, total: round2(amount + vat) };
+  const verifyUrl = po.verify_token ? `${PRODUCTION_SITE_URL}/lpo/${po.verify_token}` : null;
+  const [logo, qr] = await Promise.all([loadLogo(), verifyUrl ? qrPng(verifyUrl) : Promise.resolve(null)]);
+  const rows: PoDocRow[] = lines.map((l) => {
+    const list = l.list_price !== null && l.list_price !== undefined ? l.list_price : l.unit_cost;
+    const disc = l.discount_percent !== null && l.discount_percent !== undefined ? l.discount_percent : list > 0 ? round2((1 - l.unit_cost / list) * 100) : 0;
+    const net = round2(l.quantity * l.unit_cost);
+    const vat = round2(net * (vatPercent / 100));
+    return { partNumber: l.part_number, name: l.description, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
   });
-  const gross = round2(docLines.reduce((a, l) => a + l.amount, 0));
+  const gross = round2(rows.reduce((a, r) => a + r.net, 0));
   const vat = round2(gross * (vatPercent / 100));
-  const v = job?.vehicle;
+  const total = round2(gross + vat);
+  const vin = job?.vehicle?.vin ?? null;
+  const approvedAt = po.approved_at ?? po.created_at;
   const doc = (
     <PdfDocument title={`LPO ${po.number}`} company={company} logo={logo} footerLines={["Please quote the LPO number on your delivery note and invoice. Prices before VAT as agreed."]}>
-      <TitleRow title="LOCAL PURCHASE ORDER" meta={[{ label: "LPO no.", value: po.number }, { label: "Date", value: formatDate(po.approved_at ?? po.created_at) }, job ? { label: "Job card", value: job.job_number } : null, { label: "Approved by", value: po.approved_by ? (names.get(po.approved_by) ?? "") : "" }]} />
+      <TitleRow title="LOCAL PURCHASE ORDER" meta={[{ label: "LPO no.", value: po.number }, { label: "Date", value: formatDate(approvedAt) }]} />
       <InfoBoxes
         boxes={[
-          { title: "Supplier", strong: po.supplier_name, lines: [supplier?.trn ? `TRN ${supplier.trn}` : null, supplier?.address ?? null, [supplier?.phone, supplier?.email].filter(Boolean).join(" · ") || null, supplier?.payment_terms ? `Terms: ${supplier.payment_terms}` : null, po.notes] },
-          { title: "Vehicle", strong: v ? [[v.make?.name, v.model?.name, (v as { model_year?: number | null }).model_year].filter(Boolean).join(" "), formatPlate(v)].filter(Boolean).join(" · ") : "", lines: [v?.vin ? `VIN ${v.vin}` : null, `Prepared by ${po.created_by ? (names.get(po.created_by) ?? "") : ""}${po.approved_by ? ` · Approved by ${names.get(po.approved_by) ?? ""}` : ""}`, job ? `Job card ${job.job_number}` : null] },
+          { title: "Supplier", strong: po.supplier_name, lines: [supplier?.trn ? `TRN ${supplier.trn}` : null, supplier?.address ?? null, [supplier?.phone, supplier?.email].filter(Boolean).join(" · ") || null, supplier?.payment_terms ? `Terms: ${supplier.payment_terms}` : null] },
+          { title: "Vehicle", strong: vin ? `VIN ${vin}` : "VIN to follow" },
         ]}
       />
-      <LinesTable title="Parts ordered" lines={docLines} currency={currency} vatPercent={vatPercent} subtotalLabel="Order subtotal" />
-      <View style={styles.bottom}>
-        <WordsAndPayments words={amountInWords(round2(gross + vat))} payments={[]} bank={company.bank} currency={currency} showBank={false} />
-        <TotalsBlock currency={currency} rows={[{ label: "Gross amount", value: gross }, { label: `VAT ${vatPercent}%`, value: vat }]} total={{ label: "Total", value: round2(gross + vat) }} status={{ title: "Deliver to", value: null, note: company.address.join(", ") }} />
+      <PoLinesTable rows={rows} vatPercent={vatPercent} />
+      <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+        <TotalsBlock currency={currency} rows={[{ label: "Net amount", value: gross }, { label: `VAT ${vatPercent}%`, value: vat }]} total={{ label: "Total", value: total }} />
+      </View>
+      <View style={{ marginTop: px(12) }} wrap={false}>
+        <Text style={styles.smallTitle}>Amount in words</Text>
+        <Text style={styles.words}>{amountInWords(total)}</Text>
+      </View>
+      {po.notes ? (
+        <View style={styles.note} wrap={false}>
+          <Text style={styles.smallTitle}>Note</Text>
+          <Text>{po.notes}</Text>
+        </View>
+      ) : null}
+      <View style={[styles.note, { flexDirection: "row", alignItems: "center", gap: px(14) }]} wrap={false}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.smallTitle}>Approved electronically</Text>
+          <Text>This order was issued by the OFJ Automotive system and needs no signature or stamp.</Text>
+          <Text style={styles.small}>{formatDateTime(approvedAt)}{verifyUrl ? ` · Scan the code to verify this order` : ""}</Text>
+        </View>
+        {qr ? <Image src={{ data: qr, format: "png" }} style={styles.qr} /> : null}
       </View>
     </PdfDocument>
   );

@@ -1,6 +1,7 @@
 "use server";
 
 import { approvedQuotations } from "@/lib/quote-data";
+import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
@@ -54,7 +55,8 @@ export async function createPurchaseOrder(jobId: string, formData: FormData) {
   const { data: rows } = await admin.from("part_items").select(PART_FULL_SELECT).in("id", ids).eq("job_id", jobId).eq("is_active", true);
   const parts = ((rows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).filter((p) => p.order_status === "to_order" && !p.po_id);
   if (!parts.length) redirect(back + encodeURIComponent("Those parts are already on an LPO."));
-  const lines = parts.map((p, i) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: p.part_number, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed ?? 0 }));
+  // The Parts quantity, the net cost, and the list price and discount behind it for the supplier copy.
+  const lines = parts.map((p, i) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: p.part_number, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed ?? 0, list_price: p.list_price_aed ?? null, discount_percent: p.discount_percent ?? null }));
   const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
   const { data: sup } = picked ? { data: picked } : await admin.from("suppliers").select("id").ilike("name", supplier).maybeSingle();
   let supplierRef = sup?.id ?? null;
@@ -62,7 +64,7 @@ export async function createPurchaseOrder(jobId: string, formData: FormData) {
     const { data: created } = await admin.from("suppliers").insert({ name: supplier, created_by: staff.id, updated_by: staff.id }).select("id").single();
     supplierRef = created?.id ?? null;
   }
-  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, supplier_id: supplierRef, supplier_name: supplier, notes, total_cost_aed: total, created_by: staff.id, updated_by: staff.id }).select("id, number").single();
+  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, supplier_id: supplierRef, supplier_name: supplier, notes, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: staff.id, updated_by: staff.id }).select("id, number").single();
   if (error || !po) redirect(back + encodeURIComponent(error?.message ?? "Could not raise the LPO."));
   const { data: createdLines } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: staff.id, updated_by: staff.id }))).select("id, part_item_id");
   for (const l of createdLines ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: staff.id }).eq("id", l.part_item_id);
@@ -75,6 +77,18 @@ export async function createPurchaseOrder(jobId: string, formData: FormData) {
   await notifyStaff((heads ?? []).map((h) => h.id), { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
   refresh(jobId, po.id);
   redirect(`/parts/orders/${po.id}?message=${encodeURIComponent(`${po.number} raised. It waits for approval before it can be sent.`)}`);
+}
+
+/** The supplier copy went to the supplier: written down with who sent it and how. */
+export async function markLpoSent(poId: string, method: string): Promise<{ ok?: boolean; error?: string }> {
+  const staff = await requirePermission("managePurchaseOrders");
+  const admin = createAdminClient();
+  const { data: po } = await admin.from("purchase_orders").select("id, number, job_id, status").eq("id", poId).maybeSingle();
+  if (!po || po.status === "pending_approval" || po.status === "cancelled") return { error: "This LPO cannot be sent." };
+  await admin.from("purchase_orders").update({ sent_at: new Date().toISOString(), sent_by: staff.id, sent_method: method.slice(0, 20), updated_by: staff.id }).eq("id", poId);
+  await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_sent", note: `${po.number} sent to the supplier by ${staff.display_name} (${method})`, created_by: staff.id });
+  refresh(po.job_id, poId);
+  return { ok: true };
 }
 
 /** The deposit on the job's approved quotation, and what has been received against it. */

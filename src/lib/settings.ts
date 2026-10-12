@@ -31,16 +31,15 @@ const DEFAULTS = {
   label_height_mm: 30,
   qc_general_checks: ["No warning lights on the dashboard", "Fluid levels correct", "No leaks under the car", "Wheel bolts torqued", "Tyre pressures set", "Undertrays, covers and clips refitted", "Battery terminals tight", "No tools, rags or old parts left in the car", "Interior clean, no grease marks", "Protective covers removed", "Service indicator reset where a service was done", "Dash cam reconnected if fitted", "Old parts kept for the customer if requested", "Road test after repair"] as string[],
   followup_days: 3,
-  whatsapp_ready_template:
-    "Dear [name], your [make model] ([plate]) is ready for collection at OFJ Automotive. Your invoice and balance are here:\n[link]\nThank you, [advisor], OFJ Automotive",
-  whatsapp_invoice_template:
-    "Dear [name], thank you for your payment. Your tax invoice for the [make model] ([plate]) is here:\n[link]\nThank you, [advisor], OFJ Automotive",
+  whatsapp_ready_template: "[make model] ([plate]) is ready. Your proforma and the amount due are here:\n[link]\nOnce payment is received, your car is ready to collect.",
+  whatsapp_invoice_template: "Thank you for your payment. The tax invoice for [make model] ([plate]) is here:\n[link]",
   whatsapp_followup_template:
     "Dear [name], thank you for choosing OFJ Automotive for your [make model] ([plate]). We hope everything is running well. If anything needs our attention, please let us know.\nThank you, [advisor], OFJ Automotive",
   bank_charge_card_percent: 2.26,
   bank_charge_link_percent: 1.75,
   bank_charge_cash_percent: 0,
   bank_charge_cheque_percent: 0,
+  bank_charge_transfer_percent: 0,
   bank_charge_fee_percent: 2.26,
   quick_remarks: ["Noise", "Crack", "Broken", "Leak", "Worn", "Loose", "Missing", "Corroded"] as string[],
   advisor_labour_discount: false,
@@ -163,12 +162,9 @@ const DEFAULTS = {
   parts_pricing_target_hours: 4,
   quote_send_target_hours: 4,
   estimate_followup_days: 2,
-  whatsapp_quote_template:
-    "Dear [name], your quotation for your [make model] ([plate]) is ready. Please review it and approve the work you would like us to do:\n[link]\nThank you, [advisor], OFJ Automotive",
-  whatsapp_estimate_template:
-    "Dear [name], our estimate for your [make model] ([plate]) is ready. The final price is confirmed once the vehicle is with us:\n[link]\nThank you, [advisor], OFJ Automotive",
-  whatsapp_report_template:
-    "Dear [name], the inspection of your [make model] ([plate]) is complete. Please review the report with our findings and photos:\n[link]\nThank you, [advisor], OFJ Automotive",
+  whatsapp_quote_template: "Your quotation for [make model] ([plate]) is ready:\n[link]",
+  whatsapp_estimate_template: "Our estimate for [make model] ([plate]) is here:\n[link]\nThe final price is confirmed once the car is with us.",
+  whatsapp_report_template: "The inspection of [make model] ([plate]) is complete. The report is here:\n[link]",
   inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],
   appointment_reminder_hours_before: 1,
   appointment_evening_reminder_hour: 18,
@@ -181,8 +177,7 @@ const DEFAULTS = {
     "Dear [name], your [car] is ready for collection at OFJ Automotive tomorrow, [date] at [time]. Thank you, [advisor], OFJ Automotive",
   whatsapp_reminder_template:
     "Dear [name], a reminder of your appointment at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
-  whatsapp_approval_template:
-    "Dear [name], your [make model] ([plate]) has been received at OFJ Automotive. Please review the check-in video and job card, and approve so we can begin the inspection:\n[link]\nThank you, [advisor], OFJ Automotive",
+  whatsapp_approval_template: "[make model] ([plate]) has been received at OFJ Automotive. Please review the check-in and approve the inspection:\n[link]",
 };
 
 export type Settings = typeof DEFAULTS;
@@ -202,8 +197,23 @@ export const getSettings = cache(async (): Promise<Settings> => {
 
 /** The bank charge kept by each payment method, in percent. */
 export function bankChargePercentFor(settings: Settings, method: string): number {
-  const key = method === "card" ? "bank_charge_card_percent" : method === "link" ? "bank_charge_link_percent" : method === "cash" ? "bank_charge_cash_percent" : method === "cheque" ? "bank_charge_cheque_percent" : null;
+  const key = method === "card" ? "bank_charge_card_percent" : method === "link" ? "bank_charge_link_percent" : method === "cash" ? "bank_charge_cash_percent" : method === "cheque" ? "bank_charge_cheque_percent" : method === "transfer" ? "bank_charge_transfer_percent" : null;
   return key ? Number(settings[key]) || 0 : 0;
+}
+
+export const EXPECTED_PAYMENT_METHODS = [
+  { value: "not_sure", label: "Not sure" },
+  { value: "card", label: "Card" },
+  { value: "link", label: "Payment link" },
+  { value: "cash", label: "Cash" },
+  { value: "cheque", label: "Cheque" },
+  { value: "transfer", label: "Bank transfer" },
+] as const;
+
+/** The bank charge a quotation assumes from the way the customer is expected to pay: "Not sure" takes the card rate; the real charge replaces it at payment. */
+export function expectedChargePercent(settings: Settings, method: string | null | undefined): number {
+  const m = method && method !== "not_sure" ? method : "card";
+  return bankChargePercentFor(settings, m);
 }
 
 /** The rate a quotation assumes for its hidden bank charge: the highest of the four, corrected at payment. */

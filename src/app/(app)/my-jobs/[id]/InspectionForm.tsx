@@ -458,6 +458,37 @@ export function InspectionForm({
   const prescanFiles = filesFor({ isPrescan: true });
   const yearOptions = tyreYearOptions(thisYear, limits.tyre_years);
   const mergedParts = mergePartsList(partsList);
+  /** A position listed twice for the same part: it was probably picked twice. */
+  const dupPositions = (line: { entries: PartsListEntry[] }) => {
+    const seen = new Map<string, number>();
+    for (const e of line.entries) for (const p of e.positions) seen.set(p, (seen.get(p) ?? 0) + 1);
+    return Array.from(seen.entries()).filter(([, n]) => n > 1).map(([p]) => p);
+  };
+  /** The manager (or the technician) corrects a part's name on the list; the pool link is dropped when the name no longer matches. */
+  const renameLine = (line: { entries: PartsListEntry[]; name: string }) => {
+    const n = window.prompt("Correct the part name", line.name);
+    const clean = n?.trim();
+    if (!clean || clean === line.name) return;
+    const ids = new Set(line.entries.map((e) => e.id));
+    setList(partsRef.current.map((e) => (ids.has(e.id) ? { ...e, name: clean, catalogue_id: null } : e)));
+  };
+  /** A bundled line ("Radiator + pipes + hoses") becomes separate parts, each with its own quantity. */
+  const splitLine = (line: { entries: PartsListEntry[]; name: string }) => {
+    const text = window.prompt("Split into separate parts, separated by commas. For example: Radiator × 1, Pipes × 2, Hoses × 2", "");
+    if (!text?.trim()) return;
+    const parsed = text.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean).map((t) => {
+      const m = t.match(/^(.*?)(?:\s*[×x*]\s*(\d+(?:\.\d+)?))?$/i);
+      return { name: (m?.[1] ?? t).trim(), qty: m?.[2] ? Number(m[2]) : 1 };
+    }).filter((p) => p.name);
+    if (parsed.length < 2) {
+      window.alert("Give at least two parts, separated by commas.");
+      return;
+    }
+    const first = line.entries[0];
+    const ids = new Set(line.entries.map((e) => e.id));
+    const fresh: PartsListEntry[] = parsed.map((p) => ({ id: newEntryId(), catalogue_id: null, name: p.name, qty: p.qty, positions: [...first.positions], item_key: first.item_key, source: "custom", note: first.note, unit: "pc" }));
+    setList([...partsRef.current.filter((e) => !ids.has(e.id)), ...fresh]);
+  };
   const fromLabel = (line: { entries: PartsListEntry[] }) =>
     Array.from(new Set(line.entries.map((e) => (e.source === "tyre" ? "Tyres" : e.source === "measure" ? "Battery test" : e.item_key ? (items.find((i) => i.key === e.item_key)?.label ?? "") : "")))).filter(Boolean).join(", ");
   const outOfRange = (key: string) => problems.some((p) => p.key === `m-${key}` && /to |between/.test(p.label));
@@ -827,11 +858,14 @@ export function InspectionForm({
                   <span className="font-semibold">{line.name}</span>
                   {line.positions.length ? <span className="text-muted">{line.positions.join(", ")}</span> : null}
                   <span className="text-xs text-muted">· {fromLabel(line)}</span>
+                  {dupPositions(line).length ? <span className="text-[11px] font-semibold text-amber">Appears twice for {dupPositions(line).join(", ")}: check the quantity</span> : null}
                   <span className="ml-auto inline-flex items-center rounded-control border border-line-strong bg-white">
                     <button type="button" disabled={locked || auto} aria-label={`One less ${line.name}`} onClick={() => setList(partsRef.current.map((e) => (e.id === first.id ? { ...e, qty: Math.max(1, e.qty - 1) } : e)))} className="min-h-10 w-10 text-lg font-bold disabled:text-faint">−</button>
                     <span className="w-8 text-center text-sm font-bold">{line.qty}</span>
                     <button type="button" disabled={locked || auto} aria-label={`One more ${line.name}`} onClick={() => setList(partsRef.current.map((e) => (e.id === first.id ? { ...e, qty: e.qty + 1 } : e)))} className="min-h-10 w-10 text-lg font-bold disabled:text-faint">+</button>
                   </span>
+                  {!locked && !auto ? <button type="button" onClick={() => renameLine(line)} className="min-h-10 rounded-control border border-line px-2 text-xs font-bold">Rename</button> : null}
+                  {!locked && !auto ? <button type="button" onClick={() => splitLine(line)} className="min-h-10 rounded-control border border-line px-2 text-xs font-bold">Split</button> : null}
                   {!locked && !auto ? <button type="button" aria-label={`Remove ${line.name}`} onClick={() => setList(partsRef.current.filter((e) => !(e.name.toLowerCase() === line.key && (e.source === "item" || e.source === "custom"))))} className="min-h-10 w-10 rounded-control border border-line text-sm font-bold text-red">×</button> : null}
                 </li>
               );

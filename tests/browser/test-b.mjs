@@ -170,6 +170,8 @@ await section("C-D handover and stickers", async () => {
   await go(pt, `${base}/my-jobs`);
   check("technician's list shows the handover banner (C2)", /handing you/.test(await pt.textContent("body")), (await pt.textContent("body") ?? "").match(/.{0,40}handing you.{0,60}/)?.[0] ?? "");
   await go(pt, `${base}/my-jobs/${jobId}`);
+  const receive = pt.getByRole("button", { name: "Receive parts" }).first();
+  if (await receive.count()) { await receive.click(); await sleep(400); }
   const pin = pt.locator("input[aria-label=PIN]");
   check("PIN box on the technician's device (C2)", (await pin.count()) === 1);
   if (await pin.count()) {

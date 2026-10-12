@@ -79,7 +79,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
             ) : null}
             {children}
             {view ? (
-              <a href={view.href} className="flex min-h-16 items-center justify-center rounded-lg bg-[#111113] px-4 text-lg font-extrabold text-white">
+              <a href={view.href} target="_blank" rel="noreferrer" className="flex min-h-16 items-center justify-center rounded-lg bg-[#111113] px-4 text-lg font-extrabold text-white">
                 {view.label}
               </a>
             ) : null}

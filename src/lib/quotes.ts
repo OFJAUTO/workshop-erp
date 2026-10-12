@@ -143,6 +143,11 @@ export type QuoteRow = {
   declined_by: string | null;
   /** Parts changed a price after this version was sent. */
   parts_price_changed_at: string | null;
+  /** How the customer is expected to pay (internal): sets the estimated bank charge. */
+  expected_payment_method: "card" | "link" | "cash" | "cheque" | "transfer" | "not_sure";
+  /** One person edits at a time: who holds the quotation and the last heartbeat. */
+  editing_by: string | null;
+  editing_at: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -154,6 +159,12 @@ export type PartItem = {
   part_request_id: string | null;
   part_number: string | null;
   description: string;
+  /** What the technician wrote, kept when Parts correct the name. */
+  original_description?: string | null;
+  /** The supplier's list price and the discount behind the net cost. */
+  list_price_aed?: number | null;
+  discount_percent?: number | null;
+  quantity_changed_at?: string | null;
   quantity: number;
   diagram_path: string | null;
   supplier: string | null;

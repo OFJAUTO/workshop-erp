@@ -79,46 +79,25 @@ export function HandoverForm({ parts, technicians, defaultTechnician, plate, can
 }
 
 /**
- * "Sign here" at the counter: the technician ticks what he receives (everything to start) and types his
- * PIN; nothing else opens. A manager ticks "I sign instead" and types his own PIN; the owner needs none.
+ * The owner or the workshop manager signs for a technician from their own screen: the owner with no PIN, the
+ * manager with his own PIN. The technician's own PIN is never typed on a Parts or advisor screen.
  */
-export function SignHere({ jobId, takerName, items, canSignFor, signerNeedsPin = false, action }: { jobId: string; takerName: string; items: { id: string; description: string; quantity: number }[]; canSignFor: boolean; signerNeedsPin?: boolean; action: (formData: FormData) => void }) {
+export function SignForForm({ jobId, takerName, signerNeedsPin, action }: { jobId: string; takerName: string; signerNeedsPin: boolean; action: (formData: FormData) => void }) {
   const [open, setOpen] = useState(false);
   const [pin, setPin] = useState("");
-  const [signFor, setSignFor] = useState(false);
-  const [off, setOff] = useState<Set<string>>(() => new Set());
-  if (!open) return <Button type="button" size="md" onClick={() => setOpen(true)}>Sign here</Button>;
-  const received = items.filter((i) => !off.has(i.id));
-  const pinOk = signFor ? (!signerNeedsPin || pin.length === 4) : pin.length === 4;
+  if (!open) return <Button type="button" tone="secondary" size="md" onClick={() => setOpen(true)}>Sign for {takerName}</Button>;
   return (
     <form action={action} className="rounded-card border-2 border-ink p-4 flex flex-col gap-3 bg-white max-w-md">
       <input type="hidden" name="job_id" value={jobId} />
-      <input type="hidden" name="has_ticks" value="1" />
-      {received.map((i) => <input key={i.id} type="hidden" name="received" value={i.id} />)}
-      <p className="text-base font-bold">{takerName}, tick what you have in your hands, then type your PIN.</p>
-      <ul className="divide-y divide-line">
-        {items.map((i) => {
-          const on = !off.has(i.id);
-          return (
-            <li key={i.id}>
-              <button type="button" onClick={() => setOff((s) => { const n = new Set(s); if (n.has(i.id)) n.delete(i.id); else n.add(i.id); return n; })} aria-pressed={on} className={`flex w-full min-h-11 items-center gap-3 text-left text-sm ${on ? "" : "opacity-60"}`}>
-                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${on ? "bg-green text-white" : "border border-line-strong text-transparent"}`}>✓</span>
-                <span className="flex-1 font-semibold">{i.description}</span>
-                <span className="text-muted">× {i.quantity}</span>
-                {!on ? <span className="text-xs font-semibold text-amber">Not received</span> : null}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {canSignFor ? <label className="flex items-center gap-2 text-xs"><input type="checkbox" name="sign_for" checked={signFor} onChange={(e) => { setSignFor(e.target.checked); setPin(""); }} className="h-5 w-5 accent-ink" />I sign for {takerName} instead (manager or owner, logged)</label> : null}
-      {!signFor || signerNeedsPin ? (
-        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">{signFor ? "Your own PIN (manager)" : `${takerName}'s PIN`}
-          <Input name={signFor ? "signer_pin" : "pin"} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" autoFocus autoComplete="off" className="text-center text-2xl tracking-[0.5em] w-40" aria-label="PIN" />
+      <input type="hidden" name="sign_for" value="on" />
+      <p className="text-base font-bold">Sign for {takerName}: the parts count as received by him, logged under your name.</p>
+      {signerNeedsPin ? (
+        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Your own PIN
+          <Input name="signer_pin" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" autoFocus autoComplete="off" className="text-center text-2xl tracking-[0.5em] w-40" aria-label="PIN" />
         </label>
       ) : <span className="text-xs text-muted">The owner signs without a PIN.</span>}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="lg" disabled={!pinOk || received.length === 0}>{received.length === items.length ? "Confirm" : `Confirm ${received.length} of ${items.length}`}</Button>
+        <Button type="submit" size="lg" disabled={signerNeedsPin && pin.length !== 4}>Confirm</Button>
         <Button type="button" tone="ghost" size="lg" onClick={() => { setOpen(false); setPin(""); }}>Cancel</Button>
       </div>
     </form>

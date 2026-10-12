@@ -8,6 +8,7 @@ import type { CatalogueRow } from "@/lib/parts-list";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { formatDayTime } from "@/lib/format";
+import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { AVAILABILITY_LABELS, aed, blockOf, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
@@ -104,6 +105,9 @@ export type EditorSettings = {
   approvalAbove: number;
   technicianCostRate: number | null;
   bankChargePercent: number;
+  /** The card and payment-link rates: the expected payment method picks one of them, live on the screen. */
+  bankRateCard?: number;
+  bankRateLink?: number;
   /** Settings: advisors see a small discount column on labour and service lines. */
   advisorDiscount?: boolean;
   depositThreshold: number;
@@ -204,6 +208,7 @@ export function QuoteEditor({
   completedAt = null,
   estimatedDays = 0,
   isRevision = false,
+  lockedBy = null,
 }: {
   quotation: QuoteRow;
   lines: QuoteLine[];
@@ -236,10 +241,16 @@ export function QuoteEditor({
   completedAt?: string | null;
   estimatedDays?: number;
   isRevision?: boolean;
+  /** Someone else holds the editing lock: read only until they leave. */
+  lockedBy?: string | null;
 }) {
   const router = useRouter();
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "" });
+  /** Lines with a change typed but not yet confirmed by a refresh: the screen's values win over the server's for them. */
+  const [dirty, setDirty] = useState<Set<string>>(() => new Set());
+  const [lockLive, setLockLive] = useState<string | null>(null);
+  const [menuUp, setMenuUp] = useState(false);
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure" });
   const [attempted, setAttempted] = useState(false);
   const [picker, setPicker] = useState<null | { kind: PickerKind; replace?: string; sourceType?: "item" | "tyre" | "request" | null; sourceKey?: string | null; label?: string }>(null);
   const [partPicker, setPartPicker] = useState(false);
@@ -255,10 +266,15 @@ export function QuoteEditor({
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const refresh = useCallback(() => router.refresh(), [router]);
+  // Never under someone's fingers: the refresh waits until the typing stops.
+  const refresh = useCallback(() => {
+    setDirty(new Set());
+    refreshWhenIdle(() => router.refresh());
+  }, [router]);
   const onConfirm = useCallback((op: Op, message: string) => setConfirming({ op, message }), [setConfirming]);
   const { save, state, error } = useQuoteAutosave(quotation.id, refresh, onConfirm);
-  const disabled = readOnly;
+  const lockedName = lockedBy ?? lockLive;
+  const disabled = readOnly || !!lockedName;
   const isQuotation = quotation.kind === "quotation";
 
   // Lines changed elsewhere (Parts pricing a part, a refused save, a new line) arrive on refresh; local edits of known lines are kept.
@@ -277,6 +293,7 @@ export function QuoteEditor({
       return initialLines.map((l) => {
         const k = known.get(l.id);
         if (!k || l.fee_kind) return l;
+        if (dirty.has(l.id)) return { ...l, ...k };
         return { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, left_off: l.left_off, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title };
       });
     });
@@ -295,6 +312,28 @@ export function QuoteEditor({
       el.select?.();
     }
   }, [focusTarget]);
+  // The editing lock: taken every half minute while this screen is open, released on leaving.
+  useEffect(() => {
+    if (readOnly || lockedBy) return;
+    const call = (lock: "take" | "release") => fetch("/api/quote/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ quotationId: quotation.id, lock }), keepalive: true });
+    const beat = () => {
+      call("take").then(async (res) => {
+        if (res.status === 423) {
+          const data = (await res.json().catch(() => ({}))) as { lockedBy?: string };
+          setLockLive(data.lockedBy ?? "Someone");
+        } else if (res.ok) setLockLive(null);
+      }).catch(() => null);
+    };
+    beat();
+    const t = setInterval(beat, 30000);
+    const release = () => { void call("release"); };
+    window.addEventListener("pagehide", release);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("pagehide", release);
+      release();
+    };
+  }, [quotation.id, readOnly, lockedBy]);
   useEffect(() => {
     if (!menuFor) return;
     const close = (e: PointerEvent) => {
@@ -309,6 +348,7 @@ export function QuoteEditor({
     timers.current[key] = setTimeout(() => save(op()), 500);
   };
   const patch = (id: string, fields: Partial<QuoteLine>, immediate = false) => {
+    setDirty((s) => (s.has(id) ? s : new Set(s).add(id)));
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...fields } : l)));
     const op = () => ({ patchLine: { id, ...fields } });
     if (immediate) save(op());
@@ -342,7 +382,10 @@ export function QuoteEditor({
     });
 
   const q = { ...quotation, ...header };
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: settings.bankChargePercent });
+  // The estimated bank charge follows how the customer is expected to pay: card or "not sure" at the card rate, the payment link at its rate, cash, cheque and bank transfer at nothing.
+  const expectedMethod = header.expected_payment_method;
+  const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate });
   const labourLines = lines.filter((l) => l.is_active && blockOf(l) === "labour");
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
@@ -494,11 +537,11 @@ export function QuoteEditor({
           <span className="w-24 text-right font-bold">{aed(total)}</span>
           {!disabled ? (
             <span className="relative" data-line-menu>
-              <button type="button" onClick={() => setMenuFor(menu ? null : l.id)} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
+              <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuUp(window.innerHeight - e.currentTarget.getBoundingClientRect().bottom < 320); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
                 ⋯
               </button>
               {menu ? (
-                <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-card border border-line bg-white py-1 shadow-xl">
+                <div className={`absolute right-0 z-50 w-60 rounded-card border border-line bg-white py-1 shadow-xl ${menuUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
                   {!l.title.trim() ? <MenuItem label={isService ? "Switch to Labour" : "Switch to Service"} onClick={() => { setMenuFor(null); switchKind(l); }} /> : null}
                   {isQuotation && !l.dangerous ? <MenuItem label={l.urgency === "urgent" ? "Not urgent" : "Mark as urgent"} onClick={() => { setMenuFor(null); patch(l.id, { urgency: l.urgency === "urgent" ? null : "urgent" }, true); }} /> : null}
                   {l.dangerous && isOwner ? <MenuItem label="Switch the safety warning off" onClick={() => { setMenuFor(null); patch(l.id, { dangerous: false, urgency: "urgent" }, true); }} /> : null}
@@ -638,6 +681,7 @@ export function QuoteEditor({
   return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 pb-28">
       <div className="xl:col-span-2 flex flex-col gap-4">
+        {lockedName ? <Notice tone="info">{lockedName} is editing this quotation. You can read it; changes open once they leave.</Notice> : null}
         {error ? <Notice tone="error">{error}</Notice> : null}
         {actionError ? <Notice tone="error">{actionError}</Notice> : null}
 
@@ -860,12 +904,21 @@ export function QuoteEditor({
           {showProfit ? (
             <div className="flex flex-col gap-1 rounded-control bg-chip p-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Internal (not shown to the customer)</span>
+              <div className="flex flex-col gap-1 py-1">
+                <span className="text-[11px] font-semibold text-muted">Customer will pay by</span>
+                <div className="flex flex-wrap gap-1">
+                  {([["not_sure", "Not sure"], ["card", "Card"], ["link", "Payment link"], ["cash", "Cash"], ["cheque", "Cheque"], ["transfer", "Bank transfer"]] as const).map(([v, label]) => (
+                    <button key={v} type="button" disabled={disabled} onClick={() => setHeaderField({ expected_payment_method: v }, true)} aria-pressed={expectedMethod === v} className={`min-h-8 rounded-control border px-2 text-[11px] font-bold ${expectedMethod === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{label}</button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-muted">Sets the estimated bank charge only. The customer may still pay any way; the real charge replaces it at payment.</span>
+              </div>
               <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs">
                 <dt className="text-muted">Parts cost</dt><dd className="text-right">{aed(totals.partsCost)}</dd>
                 <dt className="text-muted">Labour at cost ({hoursText(totals.labourHours)} × AED {settings.technicianCostRate ?? 0})</dt><dd className="text-right">{aed(totals.labourCost)}</dd>
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
-                <dt className="text-muted">Bank charge ({settings.bankChargePercent}% of the total with VAT, estimated)</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
+                <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
                 <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totalCost)}</dd>
                 <dt className="font-bold">Profit before VAT</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
                 <dt className="text-muted">Labour margin</dt><dd className="text-right">{aed(totals.labourMargin)}</dd>
@@ -982,7 +1035,7 @@ export function QuoteEditor({
 
       {/* The decision, in a slim bar fixed to the bottom: finish, then send; afterwards the state and Send again */}
       {!disabled || (sent && canSend) ? (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-4 py-2.5">
+        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
             {!disabled ? <span className={`text-[11px] font-bold ${state === "offline" ? "text-amber" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
             {!sent ? <span className="text-xs font-semibold">{progressText}</span> : <span className="text-xs font-semibold">{quotation.status === "sent" ? "Sent, not yet opened" : quotation.status === "opened" ? "Opened by the customer" : quotation.status === "approved" ? "Approved" : quotation.status === "declined" ? "Declined" : quotation.status === "expired" ? "Expired" : quotation.status === "urgent_requested" ? "Urgent work asked for" : "Sent"}</span>}

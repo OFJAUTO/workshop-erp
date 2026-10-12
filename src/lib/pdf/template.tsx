@@ -39,7 +39,7 @@ export const AMBER = "#8a5a00";
 export const GREEN = "#1b6b2f";
 
 // The design is 794 px wide at 96 dpi; a point is 0.75 of a px.
-const px = (n: number) => Math.round(n * 0.75 * 100) / 100;
+export const px = (n: number) => Math.round(n * 0.75 * 100) / 100;
 
 /**
  * One template for every document the workshop sends, following docs/ofj-invoice-design.html: white
@@ -52,6 +52,9 @@ export const styles = StyleSheet.create({
   page: { paddingTop: px(30), paddingBottom: px(150), paddingHorizontal: px(44), fontFamily: FONT, fontSize: px(12), color: INK },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: px(3), borderBottomColor: INK, paddingBottom: px(18), marginBottom: px(26) },
   logo: { height: px(80), width: px(155), objectFit: "contain", objectPosition: "left" },
+  logoSmall: { height: px(34), width: px(90), objectFit: "contain", objectPosition: "left" },
+  compact: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%" },
+  compactTitle: { fontSize: px(11), fontWeight: 700, color: GREY, letterSpacing: 0.6, textTransform: "uppercase" },
   headerRight: { flexDirection: "row", alignItems: "stretch" },
   headerCol: { justifyContent: "center" },
   headerDivider: { borderLeftWidth: 1, borderLeftColor: RULE, paddingLeft: px(22), marginLeft: px(22) },
@@ -175,23 +178,36 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
   return (
     <Document title={title} author={company.tradingName} creator={company.tradingName} producer={company.tradingName}>
       <Page size="A4" style={styles.page}>
-        <View style={styles.header} fixed>
-          {logo ? <Image src={{ data: logo, format: "png" }} style={styles.logo} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
-          <View style={styles.headerRight}>
-            <View style={styles.headerCol}>
-              <Text style={styles.legalName}>{company.legalName}</Text>
-              {company.address.map((l, i) => (
-                <Text key={i} style={styles.addressLine}>{l}</Text>
-              ))}
-            </View>
-            {company.trn ? (
-              <View style={[styles.headerCol, styles.headerDivider]}>
-                <Text style={styles.trnLabel}>Tax registration no.</Text>
-                <Text style={styles.trn}>{company.trn}</Text>
+        <View
+          style={styles.header}
+          fixed
+          render={({ pageNumber }) =>
+            pageNumber > 1 ? (
+              <View style={styles.compact}>
+                {logo ? <Image src={{ data: logo, format: "png" }} style={styles.logoSmall} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
+                <Text style={styles.compactTitle}>{title}</Text>
               </View>
-            ) : null}
-          </View>
-        </View>
+            ) : (
+              <>
+                {logo ? <Image src={{ data: logo, format: "png" }} style={styles.logo} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
+                <View style={styles.headerRight}>
+                  <View style={styles.headerCol}>
+                    <Text style={styles.legalName}>{company.legalName}</Text>
+                    {company.address.map((l, i) => (
+                      <Text key={i} style={styles.addressLine}>{l}</Text>
+                    ))}
+                  </View>
+                  {company.trn ? (
+                    <View style={[styles.headerCol, styles.headerDivider]}>
+                      <Text style={styles.trnLabel}>Tax registration no.</Text>
+                      <Text style={styles.trn}>{company.trn}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </>
+            )
+          }
+        />
         {/* The footer sits before the content: react-pdf drops fixed elements placed after a block that wraps over pages. */}
         <View style={styles.footer} fixed>
           <View style={styles.footerMain}>
@@ -215,7 +231,7 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
             {company.email ? <Text><Text style={styles.contactLabel}>Email   </Text>{company.email}</Text> : null}
           </View>
         </View>
-        <View style={uppercase ? { textTransform: "uppercase" } : undefined}>{children}</View>
+        <View style={uppercase ? { textTransform: "uppercase", flexGrow: 1 } : { flexGrow: 1 }}>{children}</View>
       </Page>
     </Document>
   );
@@ -286,7 +302,7 @@ export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLab
   const money = currency === "aed" ? "AED" : "";
   return (
     <View style={{ marginBottom: px(18) }}>
-      <View style={styles.th}>
+      <View style={styles.th} fixed>
         <Text style={[styles.cNo, { color: GREY }]}>#</Text>
         <Text style={styles.cDesc}>{title}</Text>
         <Text style={styles.cQty}>Qty</Text>
@@ -341,6 +357,58 @@ export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLab
         <Text style={styles.cAmt}>{moneyDigits(sum("amount") - (discount?.amount ?? 0))}</Text>
         <Text style={styles.cVat}>{moneyDigits(sum("vat") - dVat)}</Text>
         <Text style={[styles.cTot, { paddingRight: px(8) }]}>{moneyDigits(sum("total") - (discount?.amount ?? 0) - dVat)}</Text>
+      </View>
+    </View>
+  );
+}
+
+export type PoDocRow = { partNumber: string | null; name: string; qty: string; list: number; disc: number; net: number; vat: number; total: number };
+
+/** The supplier copy's lines: part number and name in full, list price, discount, net, VAT and total. Long part numbers wrap inside the row. */
+export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPercent?: number }) {
+  const cPn = { width: px(128), paddingRight: px(8), fontSize: px(10.5) };
+  const cList = { width: px(64), textAlign: "right" as const };
+  const cDisc = { width: px(46), textAlign: "right" as const };
+  const cNet = { width: px(72), textAlign: "right" as const };
+  const cVat = { width: px(60), textAlign: "right" as const };
+  const cTot = { width: px(76), textAlign: "right" as const };
+  const sum = (k: "net" | "vat" | "total") => rows.reduce((a, r) => a + r[k], 0);
+  return (
+    <View style={{ marginBottom: px(18) }}>
+      <View style={styles.th} fixed>
+        <Text style={[styles.cNo, { color: GREY }]}>#</Text>
+        <Text style={cPn}>Part number</Text>
+        <Text style={styles.cDesc}>Part</Text>
+        <Text style={styles.cQty}>Qty</Text>
+        <Text style={cList}>List</Text>
+        <Text style={cDisc}>Disc %</Text>
+        <Text style={cNet}>Net</Text>
+        <Text style={cVat}>VAT {vatPercent}%</Text>
+        <Text style={cTot}>Total</Text>
+      </View>
+      {rows.map((r, i) => (
+        <View key={i} style={styles.tr} wrap={false}>
+          <Text style={styles.cNo}>{i + 1}</Text>
+          <Text style={cPn}>{r.partNumber ?? ""}</Text>
+          <Text style={[styles.cDesc, styles.lineTitle]}>{r.name}</Text>
+          <Text style={styles.cQty}>{r.qty}</Text>
+          <Text style={cList}>{moneyDigits(r.list)}</Text>
+          <Text style={cDisc}>{r.disc ? `${Math.round(r.disc * 100) / 100}%` : ""}</Text>
+          <Text style={cNet}>{moneyDigits(r.net)}</Text>
+          <Text style={cVat}>{moneyDigits(r.vat)}</Text>
+          <Text style={[cTot, { fontWeight: 600 }]}>{moneyDigits(r.total)}</Text>
+        </View>
+      ))}
+      <View style={styles.subtotal} wrap={false}>
+        <Text style={[styles.cNo, { paddingLeft: px(8), color: INK }]}>{""}</Text>
+        <Text style={cPn}>{""}</Text>
+        <Text style={styles.cDesc}>Order subtotal</Text>
+        <Text style={styles.cQty}>{""}</Text>
+        <Text style={cList}>{""}</Text>
+        <Text style={cDisc}>{""}</Text>
+        <Text style={cNet}>{moneyDigits(sum("net"))}</Text>
+        <Text style={cVat}>{moneyDigits(sum("vat"))}</Text>
+        <Text style={[cTot, { paddingRight: px(8) }]}>{moneyDigits(sum("total"))}</Text>
       </View>
     </View>
   );
@@ -418,6 +486,40 @@ export function WordsAndPayments({ words, payments, bank, currency, showBank = t
         </View>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * The end of a money document in a fixed order: the totals (never split), the amount in words with any
+ * payments received, the notes, then the bank details as one block at the bottom of the last page, directly
+ * above the footer.
+ */
+export function DocumentTail({ totals, words, payments = [], notes = null, bank = null }: { totals: ReactNode; words: string; payments?: PaymentLine[]; notes?: ReactNode; bank?: Company["bank"] | null }) {
+  return (
+    <>
+      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: px(4) }}>{totals}</View>
+      <View style={{ marginTop: px(14) }} wrap={false}>
+        <Text style={styles.smallTitle}>Amount in words</Text>
+        <Text style={styles.words}>{words}</Text>
+        {payments.length ? (
+          <View>
+            <Text style={styles.smallTitle}>Payments received</Text>
+            {payments.map((p, i) => (
+              <Text key={i} style={styles.bankLine}>{p.date} · {p.method}{p.note ? ` · ${p.note}` : ""} · AED {moneyDigits(p.amount)}</Text>
+            ))}
+          </View>
+        ) : null}
+      </View>
+      {notes}
+      {bank && (bank.iban || bank.accountNumber) ? (
+        <View style={[styles.bank, { marginTop: "auto", paddingTop: px(14) }]} wrap={false}>
+          <Text style={styles.smallTitle}>Bank details</Text>
+          <Text style={styles.bankLine}>{[bank.name, bank.accountName].filter(Boolean).join(" · ")}</Text>
+          <Text style={styles.bankLine}>{[bank.accountNumber ? `Account ${bank.accountNumber}` : "", bank.swift ? `SWIFT ${bank.swift}` : ""].filter(Boolean).join(" · ")}</Text>
+          {bank.iban ? <Text style={styles.bankLine}>IBAN {bank.iban}</Text> : null}
+        </View>
+      ) : null}
+    </>
   );
 }
 

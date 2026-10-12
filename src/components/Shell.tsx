@@ -40,15 +40,19 @@ export function Shell({
         </div>
         {nav.length ? <SidebarNav items={nav} /> : null}
         {user ? (
-          <div className="md:mt-auto flex items-center gap-3 shrink-0 md:border-t md:border-white/15 md:pt-5">
-            <Avatar name={user.name} photoUrl={user.photoUrl} size={40} />
-            <span className="hidden md:flex flex-col leading-tight min-w-0">
-              <span className="text-sm font-bold truncate">{user.name}</span>
-              <span className="text-xs text-white/70 truncate">{user.role}</span>
-            </span>
-          </div>
+          // The name or photo opens a small menu with Sign out, so nothing on the page can ever cover it.
+          <details className="relative shrink-0 ml-auto md:ml-0 md:mt-auto md:border-t md:border-white/15 md:pt-5">
+            <summary className="list-none cursor-pointer flex items-center gap-3 min-h-11 rounded-control px-1 hover:bg-white/10" aria-label="Your menu">
+              <Avatar name={user.name} photoUrl={user.photoUrl} size={40} />
+              <span className="hidden md:flex flex-col leading-tight min-w-0">
+                <span className="text-sm font-bold truncate">{user.name}</span>
+                <span className="text-xs text-white/70 truncate">{user.role}</span>
+              </span>
+              <span className="hidden md:inline ml-auto text-xs text-white/60" aria-hidden>▾</span>
+            </summary>
+            <div className="absolute right-0 top-full mt-2 md:top-auto md:bottom-full md:left-0 md:right-0 md:mt-0 md:mb-2 z-50 min-w-44 rounded-card border border-white/20 bg-sidebar p-2 shadow-xl">{footer}</div>
+          </details>
         ) : null}
-        {footer ? <div className="shrink-0 ml-auto md:ml-0">{footer}</div> : null}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col relative">
         {viewingAs && user ? (

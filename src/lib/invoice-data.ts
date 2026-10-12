@@ -71,7 +71,7 @@ export type PaymentRow = {
   job_id: string | null;
   invoice_id: string | null;
   customer_id: string;
-  method: "cash" | "card" | "link" | "cheque";
+  method: "cash" | "card" | "link" | "cheque" | "transfer";
   amount_aed: number;
   received_at: string;
   received_by: string | null;
@@ -102,7 +102,7 @@ export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id
 export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id";
 export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at";
 
-export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque" };
+export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque", transfer: "Bank transfer" };
 
 function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
   const out = { ...row };

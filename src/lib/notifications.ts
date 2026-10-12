@@ -97,6 +97,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "parts_not_received", label: "The technician did not receive some parts", locked: true },
   { type: "parts_exchange", label: "A wrong or faulty part needs exchanging", locked: true },
   { type: "parts_no_home", label: "A part has no home: not needed, wrong, or back with Parts (owner)", locked: true },
+  { type: "quote_other_editor", label: "Another advisor changed or sent your quotation", locked: true },
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */

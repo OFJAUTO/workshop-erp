@@ -4,16 +4,16 @@ import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type Inspecti
 import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
 import { cleanPartsList, mergePartsList } from "./parts-list";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
-import { highestBankCharge, type Settings } from "./settings";
+import { expectedChargePercent, type Settings } from "./settings";
 import { newToken } from "./media";
 
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, created_at, created_by, updated_at";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, expected_payment_method, editing_by, editing_at, created_at, created_by, updated_at";
 export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, markup_confirmed, price_per, positions, left_off, recovery_type";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active, position_ask, suggest_for";
-export const PART_SELECT = "id, job_id, part_request_id, part_number, description, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
+export const PART_SELECT = "id, job_id, part_request_id, part_number, description, original_description, list_price_aed, discount_percent, quantity_changed_at, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason, positions, note, catalogue_id";
 
 /** Numbers come back from Postgres as strings; the maths wants numbers. */
@@ -27,7 +27,7 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
 }
 const LINE_NUM: (keyof QuoteLine)[] = ["position", "quantity", "unit_cost", "markup_percent", "unit_price", "hours", "labour_rate", "discount_percent", "line_total", "recovery_trips"];
 const QUOTE_NUM: (keyof QuoteRow)[] = ["version", "discount_percent", "vat_percent", "subtotal_aed", "discount_aed", "vat_aed", "total_aed", "approved_total_aed", "deposit_aed", "validity_days", "rounded_total_aed", "estimated_days"];
-const PART_NUM: (keyof PartItem)[] = ["quantity", "cost_aed", "confirmed_quantity"];
+const PART_NUM: (keyof PartItem)[] = ["quantity", "cost_aed", "confirmed_quantity", "list_price_aed", "discount_percent"];
 
 export const toLine = (r: Record<string, unknown>) => num(r as unknown as QuoteLine, LINE_NUM);
 export const toQuote = (r: Record<string, unknown>) => num(r as unknown as QuoteRow, QUOTE_NUM);
@@ -285,7 +285,7 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
 export async function refreshQuoteTotals(quotationId: string, settings: Settings, by: string, opts: { reopen?: boolean } = {}) {
   const admin = createAdminClient();
   const [{ data: q }, { data: lines }] = await Promise.all([
-    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at, rounded_total_aed").eq("id", quotationId).maybeSingle(),
+    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at, rounded_total_aed, expected_payment_method").eq("id", quotationId).maybeSingle(),
     admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", quotationId).eq("is_active", true),
   ]);
   if (!q) return;
@@ -297,7 +297,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   // The automatic bank charge: one hidden Fee line at the set percentage of the total including VAT.
   // Never shown to the customer, counted as a cost against profit, corrected by the real charge at payment.
   if (q.status === "draft" || q.status === "pending_owner") {
-    const feePercent = highestBankCharge(settings);
+    const feePercent = expectedChargePercent(settings, String(q.expected_payment_method ?? "not_sure"));
     const others = ls.filter((l) => l.fee_kind !== "bank_charge");
     const fee = feePercent > 0 ? round2(quoteTotals(others, qArgs).total * (feePercent / 100)) : 0;
     const existing = ls.filter((l) => l.fee_kind === "bank_charge");

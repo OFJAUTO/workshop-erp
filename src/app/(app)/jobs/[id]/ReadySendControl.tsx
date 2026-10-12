@@ -11,7 +11,8 @@ export function ReadySendControl({ jobId, token, siteUrl, messageTemplate, phone
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [, start] = useTransition();
-  const message = token ? messageTemplate.replaceAll("[link]", `${siteUrl}/invoice/${token}`) : null;
+  // Before payment the link says proforma, never invoice; the tax invoice has its own address.
+  const message = token ? messageTemplate.replaceAll("[link]", `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) : null;
   if (!token) return <p className="text-xs text-muted">The message is ready once the proforma is prepared.</p>;
   const tax = kind === "tax_invoice";
   return (

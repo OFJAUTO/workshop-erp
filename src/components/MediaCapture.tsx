@@ -4,6 +4,20 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui";
 import { uploadFile, type UploadKind } from "@/lib/upload-client";
+import type { Checklist } from "@/lib/media";
+import { refreshWhenIdle } from "@/lib/refresh-idle";
+
+/** Whether the server's checklist counts this kind of photo as done. */
+function countedDone(c: Partial<Checklist>, kind: UploadKind): boolean | undefined {
+  switch (kind) {
+    case "dashboard_photo": return c.dashboard;
+    case "keys_photo_front": return c.keysFront;
+    case "keys_photo_back": return c.keysBack;
+    case "car_picture": return c.carPicture;
+    case "damage_photo": return c.damageCount === undefined ? undefined : c.damageCount > 0;
+    default: return undefined;
+  }
+}
 
 /** One-tap photo capture and upload with a progress bar and retry. */
 export function MediaCapture({
@@ -17,7 +31,10 @@ export function MediaCapture({
   disabled = false,
   hint,
   onUploaded,
+  onChecklist,
 }: {
+  /** The server's fresh checklist once a file is recorded. */
+  onChecklist?: (c: Partial<Checklist>) => void;
   jobId: string;
   kind: UploadKind;
   label: string;
@@ -34,6 +51,14 @@ export function MediaCapture({
   const [error, setError] = useState<string | null>(null);
   const [count, setCount] = useState(0);
   const [failed, setFailed] = useState<File[]>([]);
+  const [processing, setProcessing] = useState(false);
+  // Green only when the server counts the photo: the checklist from the upload, or the page's refresh.
+  const [serverDone, setServerDone] = useState<boolean | null>(null);
+  const [seenDone, setSeenDone] = useState(done);
+  if (seenDone !== done) {
+    setSeenDone(done);
+    setServerDone(null);
+  }
 
   async function uploadAll(files: File[]) {
     setError(null);
@@ -43,17 +68,22 @@ export function MediaCapture({
       const type = file.type || "image/jpeg";
       setProgress(0);
       try {
-        await uploadFile(jobId, kind, file, type, setProgress, { token, caption });
+        const checklist = (await uploadFile(jobId, kind, file, type, (x) => { setProgress(x); if (x >= 1) setProcessing(true); }, { token, caption })) as Partial<Checklist>;
+        setProcessing(false);
         setCount((c) => c + 1);
+        const counted = countedDone(checklist, kind);
+        if (counted !== undefined) setServerDone(counted);
+        onChecklist?.(checklist);
         onUploaded?.();
       } catch (err) {
+        setProcessing(false);
         notDone.push(file);
         setError(err instanceof Error ? err.message : "Upload failed.");
       }
     }
     setProgress(null);
     setFailed(notDone);
-    if (notDone.length < files.length) router.refresh();
+    if (notDone.length < files.length) refreshWhenIdle(() => router.refresh());
   }
 
   async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -63,7 +93,7 @@ export function MediaCapture({
     await uploadAll(files);
   }
 
-  const finished = done || count > 0;
+  const finished = done || serverDone === true;
 
   return (
     <div className="flex flex-col gap-2">
@@ -71,13 +101,15 @@ export function MediaCapture({
         <input type="file" accept="image/*" capture="environment" multiple={multiple} onChange={onChange} className="sr-only" disabled={progress !== null || disabled} />
         <span
           className={`flex min-h-16 items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${
-            finished ? "border-green bg-green-soft" : failed.length ? "border-red-bar bg-red-soft" : disabled ? "border-line bg-chip opacity-60" : "border-line-strong bg-white"
+            finished ? "border-green bg-green-soft" : failed.length ? "border-red-bar bg-red-soft" : processing ? "border-amber-bar bg-amber-soft" : disabled ? "border-line bg-chip opacity-60" : "border-line-strong bg-white"
           }`}
         >
           <span className="flex flex-col">
             <span className="font-bold">{label}</span>
             <span className="text-xs text-muted">
-              {progress !== null
+              {processing
+                ? "Processing… the file is being recorded."
+                : progress !== null
                 ? `Uploading… ${Math.round(progress * 100)}%`
                 : finished
                   ? multiple

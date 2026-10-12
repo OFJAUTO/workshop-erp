@@ -32,6 +32,12 @@ export type PurchaseOrderRow = {
   ordered_by: string | null;
   received_at: string | null;
   supplier_invoice_status: SupplierInvoiceStatus;
+  /** The public verification link on the supplier copy (QR). */
+  verify_token: string | null;
+  superseded_by: string | null;
+  sent_at: string | null;
+  sent_by: string | null;
+  sent_method: string | null;
   supplier_invoice_number: string | null;
   supplier_invoice_path: string | null;
   supplier_invoice_amount: number | null;
@@ -48,7 +54,10 @@ export type PoLineRow = {
   description: string;
   part_number: string | null;
   quantity: number;
+  /** The net cost per unit after the supplier's discount. */
   unit_cost: number;
+  list_price: number | null;
+  discount_percent: number | null;
   expected_date: string | null;
   received_qty: number;
   received_at: string | null;
@@ -57,8 +66,8 @@ export type PoLineRow = {
   invoice_unit_cost: number | null;
 };
 
-export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status, notes, total_cost_aed, approved_by, approved_at, deposit_override_by, deposit_override_reason, ordered_at, ordered_by, received_at, supplier_invoice_status, supplier_invoice_number, supplier_invoice_path, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_by, created_at, created_by";
-export const PO_LINE_SELECT = "id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, expected_date, received_qty, received_at, flag, flag_note, invoice_unit_cost";
+export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status, notes, total_cost_aed, approved_by, approved_at, deposit_override_by, deposit_override_reason, ordered_at, ordered_by, received_at, supplier_invoice_status, supplier_invoice_number, supplier_invoice_path, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_by, verify_token, superseded_by, sent_at, sent_by, sent_method, created_at, created_by";
+export const PO_LINE_SELECT = "id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, list_price, discount_percent, expected_date, received_qty, received_at, flag, flag_note, invoice_unit_cost";
 /** The part columns the Parts desk needs after approval, on top of the quotation ones. */
 export const PART_FULL_SELECT = PART_SELECT + ", stickers_printed, po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed, tech_received_qty, not_received_at, exchange_status, exchange_reason, exchange_note, exchange_at, replacement_part_id, replaced_part_id, not_needed_at, not_needed_by, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, credit_note_path, goodwill_cost_aed";
 
@@ -107,7 +116,7 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
   return out;
 }
 export const toPo = (r: Record<string, unknown>) => num(r as unknown as PurchaseOrderRow, ["total_cost_aed", "supplier_invoice_amount"]);
-export const toPoLine = (r: Record<string, unknown>) => num(r as unknown as PoLineRow, ["position", "quantity", "unit_cost", "received_qty", "invoice_unit_cost"]);
+export const toPoLine = (r: Record<string, unknown>) => num(r as unknown as PoLineRow, ["position", "quantity", "unit_cost", "list_price", "discount_percent", "received_qty", "invoice_unit_cost"]);
 export const toPartFull = (r: Record<string, unknown>) => num({ ...toPart(r), ...(r as object) } as unknown as PartFull, ["quantity", "cost_aed", "confirmed_quantity", "received_qty", "issued_qty", "returned_qty", "final_cost_aed"]);
 
 export type JobBrief = { id: string; job_number: string; status: string; is_open: boolean; customer_id: string; gated_in_by: string; assigned_to: string | null; department: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year?: number | null; make: { name: string } | null; model: { name: string } | null } | null };
@@ -127,7 +136,7 @@ export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
     admin.from("part_items").select(PART_FULL_SELECT).eq("po_id", id).eq("is_active", true),
     po.supplier_id ? admin.from("suppliers").select("id, name, trn, phone, email, address, payment_terms").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const ids = [po.created_by, po.approved_by, po.ordered_by, po.supplier_invoice_by, po.deposit_override_by].filter((x): x is string => !!x);
+  const ids = [po.created_by, po.approved_by, po.ordered_by, po.supplier_invoice_by, po.deposit_override_by, po.sent_by].filter((x): x is string => !!x);
   const { data: people } = ids.length ? await admin.from("staff").select("id, display_name").in("id", ids) : { data: [] as { id: string; display_name: string }[] };
   return {
     po,

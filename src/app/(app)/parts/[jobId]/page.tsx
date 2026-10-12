@@ -4,6 +4,8 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
+import { loadCatalogue } from "@/lib/parts-catalogue";
+import { rowComplete, type SupplierOption } from "@/lib/parts-rows";
 import { PARTS_BUCKET, PART_SELECT, REQUEST_SELECT, signPaths, toPart } from "@/lib/quote-data";
 import { type PartItem, type PartRequest } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -14,15 +16,14 @@ import { pricingDone } from "../actions";
 import { allInStock, partsPlanned, setPartPlan } from "../../jobs/planning-actions";
 import { PlanPartRow, type PlanPart } from "./PlanParts";
 import { PartsBar } from "./PartsBar";
-import { rowComplete } from "@/lib/parts-rows";
 import { PartsTable, type TableRow } from "./PartsTable";
 
 export const dynamic = "force-dynamic";
 
 /**
- * One job for the Parts team: the car, the job number and the VIN in the header; one table, Part · Qty · Part number
- * · Type · Cost · Supplier · Availability, where every row saves itself; "Pricing done" in the bar at the bottom.
- * Nothing from the inspection report but the parts themselves and the Dangerous flag. No customer, no technician.
+ * One job for the Parts team: the car, the job number and the VIN in the header; one table, Part · Qty · Part
+ * number · Type · List · Disc % · Net · Supplier · Availability, where every row saves itself; "Pricing done" in
+ * the bar at the bottom. Nothing from the inspection report but the parts themselves and the Dangerous flag.
  */
 export default async function PartsJobPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
@@ -32,13 +33,14 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
-  const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }, insp] = await Promise.all([
+  const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }, insp, catalogue] = await Promise.all([
     admin.from("jobs").select("id, job_number, status, is_open, parts_pricing_done_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT).eq("job_id", jobId).eq("is_active", true).order("created_at"),
     admin.from("part_items").select(PART_SELECT + ", po_id, expected_date, received_qty, issue_status, return_status").eq("job_id", jobId).eq("is_active", true).order("created_at"),
-    admin.from("suppliers").select("name").eq("is_active", true).order("name"),
+    admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name").eq("is_active", true),
     loadInspection(jobId),
+    loadCatalogue(),
   ]);
   if (!job) notFound();
   type V = { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null };
@@ -52,20 +54,22 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
   const canPrice = can(role, "priceParts") && !staff.viewingAs && job.is_open;
   const urls = await signPaths(PARTS_BUCKET, parts.map((p) => p.diagram_path).filter((x): x is string => !!x));
-  const suppliers = Array.from(new Set([...(supplierRows ?? []).map((s) => s.name as string), ...parts.map((p) => p.supplier).filter((x): x is string => !!x)])).sort();
+  const suppliers: SupplierOption[] = (supplierRows ?? []).map((s) => ({ id: s.id as string, name: s.name as string, discount: Number(s.default_discount_percent) || 0, byType: (s.discount_by_type as Record<string, number> | null) ?? {} }));
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const nowMs = Date.now();
   const daysOf = (p: PartItem) => (p.delivery_date ? String(Math.max(1, Math.round((Date.parse(p.delivery_date) - nowMs) / 86400000))) : "");
   const orderLabel = (p: PartItem) => (p.order_status === "none" ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
   const infoOf = (r: PartRequest | null) => (r ? [r.positions?.length ? r.positions.join(", ") : "", r.note ?? ""].filter(Boolean).join(" · ") || null : null);
-  const rowOfPart = (p: PartItem, r: PartRequest | null): TableRow => ({
-    key: p.id,
+  const text = (n: number | null | undefined) => (n === null || n === undefined ? "" : String(n));
+  const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
+    key,
     requestId: p.part_request_id,
     partId: p.id,
     name: p.description,
-    qty: Number(p.confirmed_quantity ?? p.quantity) || 1,
+    original: p.original_description ?? null,
+    techQty: Number(p.quantity) || 1,
     info: infoOf(r),
-    values: { part_number: p.part_number ?? "", part_type: p.part_type ?? "", brand: p.brand ?? "", cost_aed: p.cost_aed === null ? "" : String(p.cost_aed), supplier: p.supplier ?? "", availability: p.availability ?? "", days: daysOf(p) },
+    values: { part_number: p.part_number ?? "", part_type: p.part_type ?? "", brand: p.brand ?? "", list_price: text(p.list_price_aed), discount: text(p.discount_percent), cost_aed: text(p.cost_aed), supplier: p.supplier ?? "", availability: p.availability ?? "", days: daysOf(p), qty: String(Number(p.confirmed_quantity ?? p.quantity) || 1) },
     optionGroup: p.option_group,
     unavailable: false,
     closedReason: null,
@@ -74,14 +78,16 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     diagramUrl: p.diagram_path ? (urls[p.diagram_path] ?? null) : null,
     question: p.question_text,
     answer: p.answer_text ? `${nameOf.get(p.answered_by ?? "") ?? "Manager"}: ${p.answer_text}` : null,
+    perSet: r?.unit === "set",
   });
   const rows: TableRow[] = [];
   for (const r of requests) {
     const items = parts.filter((p) => p.part_request_id === r.id);
-    if (items.length) items.forEach((p) => rows.push(rowOfPart(p, r)));
-    else if (r.status !== "rejected") rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, qty: Number(r.quantity) || 1, info: infoOf(r), values: { part_number: "", part_type: types[0] ?? "", brand: "", cost_aed: "", supplier: "", availability: "", days: "" }, optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null });
+    // The row keeps the request's key once its part exists, so the screen never redraws under someone's fingers.
+    if (items.length) items.forEach((p, i) => rows.push(rowOfPart(p, r, i === 0 ? `req:${r.id}` : p.id)));
+    else if (r.status !== "rejected") rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, info: infoOf(r), values: { part_number: "", part_type: types[0] ?? "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: String(Number(r.quantity) || 1) }, optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set" });
   }
-  for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null));
+  for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null, p.id));
   const openCount = rows.filter((r) => !r.unavailable && !rowComplete(r.values, !!r.partId)).length;
 
   // Planning inside the Parts step: the approved parts, in stock or to order with the date.
@@ -125,8 +131,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         </Card>
       ) : null}
 
-      <Card className="flex flex-col gap-2">
-        <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} />
+      <Card className="flex flex-col gap-2 overflow-visible">
+        <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue.map((c) => c.name)} />
       </Card>
       {canPrice ? <div className="h-20" /> : null}
       {canPrice ? (

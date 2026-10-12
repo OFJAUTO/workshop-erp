@@ -29,6 +29,10 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const isOwner = role === "owner";
   if (!(isOwner || (can(role, "viewEstimates") && mine))) redirect("/estimates");
   const canEdit = !staff.viewingAs && q.status === "draft";
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
+  const { data: locker } = lockFresh ? await createAdminClient().from("staff").select("display_name").eq("id", q.editing_by!).maybeSingle() : { data: null };
+  const lockedBy = lockFresh ? (locker?.display_name ?? "Someone") : null;
   const services = await loadServices(staff.id);
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_estimate_template
@@ -99,6 +103,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
           goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),
+          bankRateCard: Number(settings.bank_charge_card_percent) || 0,
+          bankRateLink: Number(settings.bank_charge_link_percent) || 0,
           advisorDiscount: settings.advisor_labour_discount === true,
           depositThreshold: Number(settings.deposit_threshold_aed) || 0,
           depositPercent: Number(settings.deposit_percent) || 50,
@@ -106,6 +112,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           workingTime: workingTimeOf(settings),
         }}
         readOnly={!canEdit}
+        lockedBy={lockedBy}
         showProfit
         canSend={!staff.viewingAs}
         isOwner={isOwner}

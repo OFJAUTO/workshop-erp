@@ -28,11 +28,16 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   if (!bundle || bundle.quotation.job_id !== id) notFound();
   const { quotation: q, job, vehicle, customer } = bundle;
 
-  const { data: sentApprovals } = role === "service_advisor" ? await createAdminClient().from("approval_requests").select("id").eq("job_id", id).eq("sent_by", staff.id).limit(1) : { data: [] as { id: string }[] };
-  const isAdvisor = role === "service_advisor" && (q.created_by === staff.id || job?.gated_in_by === staff.id || (sentApprovals ?? []).length > 0);
+  // Any advisor can open, edit and send any quotation; the car keeps its own advisor.
+  const isAdvisor = role === "service_advisor";
   if (!(role === "owner" || isAdvisor)) redirect(role === "technician" ? "/my-jobs" : role === "gate_in" ? "/gate-in" : `/jobs/${id}`);
   const isOwner = role === "owner";
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
+  // Someone else holding the editing lock (a heartbeat within the last minute and a half): read only for this person.
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
+  const { data: locker } = lockFresh ? await createAdminClient().from("staff").select("display_name").eq("id", q.editing_by!).maybeSingle() : { data: null };
+  const lockedBy = lockFresh ? (locker?.display_name ?? "Someone") : null;
   const canSend = !staff.viewingAs;
   const services = await loadServices(staff.id);
   const [checks, partsWait] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id)]);
@@ -81,6 +86,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
     bankChargePercent: highestBankCharge(settings),
+    bankRateCard: Number(settings.bank_charge_card_percent) || 0,
+    bankRateLink: Number(settings.bank_charge_link_percent) || 0,
     advisorDiscount: settings.advisor_labour_discount === true,
     depositThreshold: Number(settings.deposit_threshold_aed) || 0,
     depositPercent: Number(settings.deposit_percent) || 50,
@@ -154,6 +161,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         department={job?.department ?? null}
         settings={editorSettings}
         readOnly={!canEdit}
+        lockedBy={lockedBy}
         showProfit
         canSend={canSend}
         isOwner={isOwner}

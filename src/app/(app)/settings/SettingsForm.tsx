@@ -352,8 +352,11 @@ export function SettingsForm({
               <Field label="Bank charge, cash (%)" hint="Normally 0.">
                 <Input name="bank_charge_cash_percent" defaultValue={v.bank_charge_cash_percent ?? "0"} inputMode="decimal" required />
               </Field>
-              <Field label="Bank charge, cheque (%)" hint="Normally 0. The quotation's hidden Fee line assumes the highest of the four rates; the real charge is taken at payment.">
+              <Field label="Bank charge, cheque (%)" hint="Normally 0. The quotation's hidden Fee line follows the way the customer is expected to pay; the real charge is taken at payment.">
                 <Input name="bank_charge_cheque_percent" defaultValue={v.bank_charge_cheque_percent ?? "0"} inputMode="decimal" required />
+              </Field>
+              <Field label="Bank charge, bank transfer (%)" hint="Normally 0.">
+                <Input name="bank_charge_transfer_percent" defaultValue={v.bank_charge_transfer_percent ?? "0"} inputMode="decimal" required />
               </Field>
               <Field label="Remind Parts after (minutes)" hint="The advisor's Remind Parts button opens after this wait.">
                 <Input name="parts_remind_minutes" defaultValue={v.parts_remind_minutes} inputMode="numeric" required />

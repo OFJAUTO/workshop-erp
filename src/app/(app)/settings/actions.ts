@@ -58,12 +58,13 @@ const NUMBER_KEYS = [
   "comeback_window_days",
 ] as const;
 /** Settings that keep decimals (percentages like 1.9). */
-const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent"] as const;
+const DECIMAL_KEYS = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent", "bank_charge_transfer_percent"] as const;
 const DECIMAL_LIMITS: Record<(typeof DECIMAL_KEYS)[number], [number, number, string]> = {
   bank_charge_card_percent: [0, 20, "Bank charge, card machine"],
   bank_charge_link_percent: [0, 20, "Bank charge, payment link"],
   bank_charge_cash_percent: [0, 20, "Bank charge, cash"],
   bank_charge_cheque_percent: [0, 20, "Bank charge, cheque"],
+  bank_charge_transfer_percent: [0, 20, "Bank charge, bank transfer"],
 };
 /** Settings kept as a list, one entry per line on the form. */
 const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words"] as const;

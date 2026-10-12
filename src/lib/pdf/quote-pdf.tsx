@@ -10,7 +10,7 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, WordsAndPayments, companyOf, currencyOf, qtyText, styles, type DocLine } from "./template";
+import { DocumentTail, InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, companyOf, currencyOf, qtyText, styles, type DocLine } from "./template";
 
 /** The customer's quotation or estimate on the document template: no internal costs, margins, hidden lines or bank charges. */
 export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): Promise<Buffer> {
@@ -71,39 +71,46 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       <LinesTable title="Labour and services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Labour and services subtotal" discount={totals.discount ? { label: `Discount ${q.discount_percent}% on labour and services`, amount: totals.discount } : null} />
       {parts.length ? <LinesTable title="Parts" lines={parts} currency={currency} vatPercent={vatPct} subtotalLabel="Parts subtotal" startAt={services.length + 1} /> : null}
       {others.length ? <LinesTable title="Other charges" lines={others} currency={currency} vatPercent={vatPct} subtotalLabel="Other charges subtotal" startAt={services.length + parts.length + 1} /> : null}
-      <View style={styles.bottom}>
-        <WordsAndPayments words={amountInWords(totals.total)} payments={[]} bank={company.bank} currency={currency} showBank={!isEstimate} />
-        <TotalsBlock
-          currency={currency}
-          rows={[
-            { label: "Gross amount", value: totals.subtotal },
-            ...(totals.discount ? [{ label: "Discount", value: totals.discount, bold: true, negative: true }] : []),
-            ...(totals.rounding ? [{ label: totals.rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(totals.rounding), negative: totals.rounding < 0 }] : []),
-            { label: "Taxable amount", value: totals.net },
-            { label: `VAT ${vatPct}%`, value: totals.vat },
-          ]}
-          total={{ label: "Total", value: totals.total }}
-          after={totals.deposit ? [{ label: "Deposit required", value: totals.deposit, bold: true }] : []}
-          status={{ title: isEstimate ? "Estimate total" : "Quotation total", value: totals.total, note: q.promised_at && !isEstimate ? `Promised date ${formatDate(q.promised_at)}` : isEstimate ? "Final price confirmed once the vehicle is with us" : null }}
-        />
-      </View>
-      {dangerous ? (
-        <View style={styles.note} wrap={false}>
-          <Text style={styles.smallTitle}>Safety warning</Text>
-          <Text>{settings.dangerous_customer_text}</Text>
-        </View>
-      ) : null}
-      {q.customer_note ? (
-        <View style={styles.note} wrap={false}>
-          <Text style={styles.smallTitle}>Note</Text>
-          <Text>{q.customer_note}</Text>
-        </View>
-      ) : null}
-      {statusLine ? (
-        <View style={styles.note} wrap={false}>
-          <Text>{statusLine}</Text>
-        </View>
-      ) : null}
+      <DocumentTail
+        words={amountInWords(totals.total)}
+        bank={isEstimate ? null : company.bank}
+        totals={
+          <TotalsBlock
+            currency={currency}
+            rows={[
+              { label: "Gross amount", value: totals.subtotal },
+              ...(totals.discount ? [{ label: "Discount", value: totals.discount, bold: true, negative: true }] : []),
+              ...(totals.rounding ? [{ label: totals.rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(totals.rounding), negative: totals.rounding < 0 }] : []),
+              { label: "Taxable amount", value: totals.net },
+              { label: `VAT ${vatPct}%`, value: totals.vat },
+            ]}
+            total={{ label: "Total", value: totals.total }}
+            after={totals.deposit ? [{ label: "Deposit required", value: totals.deposit, bold: true }] : []}
+            status={{ title: isEstimate ? "Estimate total" : "Quotation total", value: totals.total, note: q.promised_at && !isEstimate ? `Promised date ${formatDate(q.promised_at)}` : isEstimate ? "Final price confirmed once the vehicle is with us" : null }}
+          />
+        }
+        notes={
+          <>
+            {dangerous ? (
+              <View style={styles.note} wrap={false}>
+                <Text style={styles.smallTitle}>Safety warning</Text>
+                <Text>{settings.dangerous_customer_text}</Text>
+              </View>
+            ) : null}
+            {q.customer_note ? (
+              <View style={styles.note} wrap={false}>
+                <Text style={styles.smallTitle}>Note</Text>
+                <Text>{q.customer_note}</Text>
+              </View>
+            ) : null}
+            {statusLine ? (
+              <View style={styles.note} wrap={false}>
+                <Text>{statusLine}</Text>
+              </View>
+            ) : null}
+          </>
+        }
+      />
     </PdfDocument>
   );
   return renderToBuffer(doc);
