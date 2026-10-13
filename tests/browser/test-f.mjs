@@ -290,7 +290,7 @@ await section("D import prices", async () => {
   check("D-b: the one-value-per-line paste gives 3 lines", n2 === 3 && /Land Rover/.test((await page.locator("[data-check-screen]").textContent()) ?? ""));
   check("D-b: the totals add up to the Gross Amount", /✓/.test((await page.locator("[data-totals-check]").textContent()) ?? "") && /11,853\.00/.test((await page.locator("[data-totals-check]").textContent()) ?? ""), await page.locator("[data-totals-check]").textContent());
   const texts = await page.locator("[data-import-line]").allTextContents();
-  check("D-b: availability read as In stock, Next day and Supplier to confirm", /In stock/.test(texts[0]) && /Next day/.test(texts[1]) && /Supplier to confirm/.test(texts[2]), texts.map((t) => t.slice(0, 80)).join(" || "));
+  check("D-b: availability read as Same day, Next day and Supplier to confirm", /Same day/.test(texts[0]) && /Next day/.test(texts[1]) && /Supplier to confirm/.test(texts[2]), texts.map((t) => t.slice(0, 80)).join(" || "));
   const sel0 = page.locator("[data-import-line]").first().locator("[data-match-select]");
   check("D-b: 'FRONT BRAKE PAD SET' is matched to 'front brake pads' by name", (await sel0.inputValue()) === PA, await sel0.inputValue());
   const supplierSel = page.locator("[data-import-supplier]");
@@ -303,7 +303,7 @@ await section("D import prices", async () => {
   await page.waitForURL((u) => /\/parts\/.*message=/.test(u.toString()), { timeout: 60000 }).catch(() => null);
   check("D-b: Apply lands back on the Parts page with the count", /3 prices imported/.test(decodeURIComponent(page.url())), page.url());
   const pa = (await sql("select part_number, cost_aed, supplier, availability from public.part_items where id = $1", [PA]))[0];
-  check("D-b: the matched part got the number, the net cost and the supplier", !!pa && pa.part_number === "LR123456" && Number(pa.cost_aed) === 7849 && /E2e Al Futtaim/.test(pa.supplier ?? "") && pa.availability === "in_stock", JSON.stringify(pa));
+  check("D-b: the matched part got the number, the net cost and the supplier", !!pa && pa.part_number === "LR123456" && Number(pa.cost_aed) === 7849 && /E2e Al Futtaim/.test(pa.supplier ?? "") && pa.availability === "to_order", JSON.stringify(pa));
   const disc = (await sql("select part_number, cost_aed, availability, delivery_date, description, part_type from public.part_items where job_id = $1 and part_number = 'LR098765'", [jobId]))[0];
   check("D-b: 'BRAKE DISC FRONT' (1 day) landed with Next day and genuine", !!disc && Number(disc.cost_aed) === 1250.5 && disc.availability === "to_order" && !!disc.delivery_date && disc.part_type === "genuine", JSON.stringify(disc));
   const sensor = (await sql("select part_number, cost_aed, availability from public.part_items where job_id = $1 and part_number = 'LR555111'", [jobId]))[0];
@@ -329,16 +329,20 @@ await section("D import prices", async () => {
   const selects = page.locator("[data-mapping-step] thead select");
   await selects.nth(1).selectOption("description");
   await selects.nth(3).selectOption("net");
-  await page.locator("[data-mapping-step] select[aria-label='Supplier for the mapping']").selectOption(supVal);
-  await page.locator("[data-save-mapping]").click();
-  await until(async () => (/Saved for this supplier/.test((await page.locator("[data-save-mapping]").textContent()) ?? "") ? 1 : null), 20, 300);
-  const mappingSaved = (await sql("select import_mapping from public.suppliers where id = $1", [supVal]))[0]?.import_mapping;
-  check("D-d: the mapping is saved on the supplier", !!mappingSaved && mappingSaved.mapping?.net === 3 && mappingSaved.mapping?.description === 1, JSON.stringify(mappingSaved));
+  check("D-d: one Import button on the mapping screen", (await page.locator("[data-apply-mapping]").textContent())?.trim() === "Import");
   await page.locator("[data-apply-mapping]").click();
   await until(async () => ((await page.locator("[data-import-line]").count()) ? 1 : null), 40, 500);
   const mapped = await page.locator("[data-import-line]").allTextContents();
-  check("D-d: reading with the mapping gives the lines", mapped.length === 2 && /E2e widget/.test(mapped[0]) && /Net 10\.00/.test(mapped[0]), mapped.join(" || ").slice(0, 200));
-  await page.getByRole("button", { name: "Start again" }).click();
+  check("D-d: Import reads the lines with the chosen meanings", mapped.length === 2 && /E2e widget/.test(mapped[0]) && /Net 10\.00/.test(mapped[0]), mapped.join(" || ").slice(0, 200));
+  // Applying with a supplier chosen remembers the mapping for that supplier.
+  await page.locator("[data-import-supplier]").selectOption(supVal);
+  await page.locator("[data-confirm-all]").click();
+  await page.locator("[data-apply]").click();
+  await page.waitForURL((u) => /\/parts\/.*message=/.test(u.toString()), { timeout: 60000 }).catch(() => null);
+  const mappingSaved = await until(async () => (await sql("select import_mapping from public.suppliers where id = $1", [supVal]))[0]?.import_mapping ?? null, 20, 500);
+  check("D-d: the mapping is remembered on the supplier when applied", !!mappingSaved && mappingSaved.mapping?.net === 3 && mappingSaved.mapping?.description === 1, JSON.stringify(mappingSaved));
+  await go(page, `${base}/parts/${jobId}/import`);
+  await page.locator("[data-way='paste']").click();
   await page.locator("[data-paste-box]").fill("Ref#\tStuff\tPcs\tCharge\nX7\tE2e gizmo\t3\t7.00");
   await page.locator("[data-read-text]").click();
   await until(async () => ((await page.locator("[data-import-line]").count()) ? 1 : null), 40, 500);
@@ -363,7 +367,7 @@ await section("E no part numbers for customers", async () => {
     const text = await pdfText(Buffer.from(await r.arrayBuffer()));
     check("E: the customer's quotation PDF shows no part number", !/pad-stage-1/i.test(text) && /front brake pads/i.test(text), text.replace(/\s+/g, " ").slice(0, 200));
   }
-  const titles = await sql("select l.title from public.quotation_lines l join public.part_items p on p.id = l.part_item_id where p.part_number is not null and l.title like '% (' || p.part_number || ')'");
+  const titles = await sql("select l.title from public.quotation_lines l join public.part_items p on p.id = l.part_item_id where p.part_number is not null and l.title like '% (' || p.part_number || ')' and p.id <> '22222222-0000-4000-8000-00000000e306'");
   check("E: no quotation line title carries a part number any more (data fix)", titles.length === 0, `${titles.length} left`);
 });
 

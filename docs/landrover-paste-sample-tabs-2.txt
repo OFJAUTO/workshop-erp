@@ -1,0 +1,7 @@
+WipNo	Product	Description	Quantity	Unit Price(AED)	Total	LineNo	Availability
+45512	LR123456	FRONT BRAKE PAD SET	1	7,849.00	7,849.00	1	available
+45512	LR098765	BRAKE DISC FRONT	2	1,250.50	2,501.00	2	1 day-1 psc
+45512	LR555111	WEAR SENSOR FRONT	1	1,503.00	1,503.00	3	back order
+				Gross Amount	11,853.00
+				Vat	592.65
+				Net AED	12,445.65

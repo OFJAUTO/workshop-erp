@@ -20,11 +20,12 @@ begin
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
+  delete from public.price_import_lines where import_id in (select id from public.price_imports where job_id = any(job_ids));
   for t in select table_name from information_schema.columns where table_schema = 'public' and column_name = 'job_id' and table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE') and table_name <> 'jobs' loop
     execute format('delete from public.%I where job_id = any($1)', t) using job_ids;
   end loop;
   delete from public.notifications where job_id = any(job_ids);
-  delete from public.audit_log where (new_data->>'job_id')::uuid = any(job_ids) or (old_data->>'job_id')::uuid = any(job_ids) or (new_data->>'id')::uuid = any(job_ids) or (old_data->>'id')::uuid = any(job_ids) or record_id = any(job_ids::text[]);
+  delete from public.audit_log where (new_data->>'job_id') = any(job_ids::text[]) or (old_data->>'job_id') = any(job_ids::text[]) or (new_data->>'id') = any(job_ids::text[]) or (old_data->>'id') = any(job_ids::text[]) or record_id = any(job_ids::text[]);
   delete from public.jobs where id = any(job_ids);
   delete from public.declined_work where vehicle_id = any(veh_ids);
   delete from public.vehicles where id = any(veh_ids);
@@ -54,12 +55,13 @@ begin
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
+  delete from public.price_import_lines where import_id in (select id from public.price_imports where job_id = any(job_ids));
   update public.job_items set qr_code = null where job_id = any(job_ids);
   for t in select table_name from information_schema.columns where table_schema = 'public' and column_name = 'job_id' and table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE') and table_name <> 'jobs' loop
     execute format('delete from public.%I where job_id = any($1)', t) using job_ids;
   end loop;
   delete from public.notifications where job_id = any(job_ids);
-  delete from public.audit_log where (new_data->>'job_id')::uuid = any(job_ids) or (old_data->>'job_id')::uuid = any(job_ids) or (new_data->>'id')::uuid = any(job_ids) or (old_data->>'id')::uuid = any(job_ids) or record_id = any(job_ids::text[]);
+  delete from public.audit_log where (new_data->>'job_id') = any(job_ids::text[]) or (old_data->>'job_id') = any(job_ids::text[]) or (new_data->>'id') = any(job_ids::text[]) or (old_data->>'id') = any(job_ids::text[]) or record_id = any(job_ids::text[]);
   delete from public.jobs where id = any(job_ids);
   delete from public.declined_work where vehicle_id = any(veh_ids);
   delete from public.qr_links where vehicle_id = any(veh_ids);

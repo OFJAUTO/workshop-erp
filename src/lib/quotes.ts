@@ -178,6 +178,8 @@ export type PartItem = {
   /** A supplier discount above the owner's limit waits for his one-tap approval. */
   discount_approval_status?: "pending" | "approved" | "refused" | null;
   client_key?: string | null;
+  /** The supplier's own words on availability when they do not fit a date ("Back order", "Supplier to confirm"). */
+  availability_note?: string | null;
   quantity: number;
   diagram_path: string | null;
   supplier: string | null;

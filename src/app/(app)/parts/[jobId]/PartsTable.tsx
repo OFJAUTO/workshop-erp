@@ -12,6 +12,8 @@ import { PartPicker } from "@/components/PartPicker";
 import { positionsWords, type CatalogueRow } from "@/lib/parts-list";
 import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, splitPart } from "../actions";
 import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
+import { bulkDeleteParts, undoBulkDelete } from "../bulk-actions";
+import { undoImport } from "../import-actions";
 
 export type TableRow = {
   key: string;
@@ -70,11 +72,21 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[] }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[] }) {
+  const router = useRouter();
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
   // "+ Add a part the technician did not list": the categorised picker.
   const [adding, setAdding] = useState(false);
+  // Bulk delete: the ticked rows, the question before it, and the minute of Undo after it.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<null | { count: number; kept: number; keys: TableRow[] | null }>(null);
+  const [undo, setUndo] = useState<null | { batch: string; count: number; kept: number }>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [importGone, setImportGone] = useState(false);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
   // "Show only unpriced" is a snapshot: the rows shown stay put while they are being finished.
   const [onlyUnpriced, setOnlyUnpriced] = useState<Set<string> | null>(null);
   const [listOpen, setListOpen] = useState(false);
@@ -164,6 +176,69 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   }
   const notFinished = summary.counts.not_finished;
 
+  /** Rows that can be ticked and deleted: live rows (not already removed). */
+  const deletable = rows.filter((r) => !r.removed);
+  const allTicked = deletable.length > 0 && deletable.every((r) => selected.has(r.key));
+  function toggleAll() {
+    setSelected(allTicked ? new Set() : new Set(deletable.map((r) => r.key)));
+  }
+  /** "Delete all": the ticked rows, or every unordered row of the job when none is ticked. One question, then it goes. */
+  function askDelete() {
+    const ticked = deletable.filter((r) => selected.has(r.key));
+    const targets = ticked.length ? ticked : deletable;
+    const kept = targets.filter((r) => r.locked).length;
+    const count = targets.length - kept;
+    setBulkError(null);
+    setConfirmDelete({ count, kept, keys: ticked.length ? ticked : null });
+  }
+  async function doDelete() {
+    const c = confirmDelete;
+    if (!c) return;
+    setConfirmDelete(null);
+    setBulkBusy(true);
+    const keys = c.keys ? { partIds: c.keys.map((r) => r.partId).filter((x): x is string => !!x), requestIds: c.keys.filter((r) => !r.partId && r.requestId).map((r) => r.requestId as string) } : null;
+    const localOnly = (c.keys ?? deletable).filter((r) => !r.partId && !r.requestId);
+    const res: { error?: string; deleted?: number; kept?: number; batch?: string | null } = keys && !keys.partIds.length && !keys.requestIds.length ? { deleted: 0, kept: 0, batch: null } : await bulkDeleteParts(jobId, keys);
+    setBulkBusy(false);
+    if (res.error) {
+      setBulkError(res.error);
+      return;
+    }
+    const goneKeys = new Set<string>([...(c.keys ?? deletable).filter((r) => !r.locked).map((r) => r.key), ...localOnly.map((r) => r.key)]);
+    // The rows vanish at once; nothing else moves.
+    setRows((p) => p.filter((r) => !goneKeys.has(r.key)));
+    setSelected(new Set());
+    const deleted = (res.deleted ?? 0) + localOnly.length;
+    if (res.batch && (res.deleted ?? 0) > 0) {
+      setUndo({ batch: res.batch, count: deleted, kept: res.kept ?? 0 });
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      undoTimer.current = setTimeout(() => setUndo(null), 60_000);
+    } else setUndo(deleted || res.kept ? { batch: "", count: deleted, kept: res.kept ?? 0 } : null);
+  }
+  async function undoDelete() {
+    const u = undo;
+    if (!u || !u.batch) return;
+    setBulkBusy(true);
+    const r = await undoBulkDelete(jobId, u.batch);
+    setBulkBusy(false);
+    if (r.error) setBulkError(r.error);
+    else {
+      setUndo(null);
+      refreshWhenIdle(() => router.refresh());
+    }
+  }
+  async function undoLastImport() {
+    if (!lastImport) return;
+    setBulkBusy(true);
+    const r = await undoImport(jobId, lastImport.id);
+    setBulkBusy(false);
+    if (r.error) setBulkError(r.error);
+    else {
+      setImportGone(true);
+      refreshWhenIdle(() => router.refresh());
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -171,17 +246,37 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           <span className="text-sm font-bold" data-pricing-counter>{summary.text}</span>
           <span className="h-1.5 w-full max-w-xs rounded-full bg-track overflow-hidden"><span className="block h-full bg-ink" style={{ width: `${summary.total ? Math.round((summary.done / summary.total) * 100) : 0}%` }} /></span>
         </div>
+        {canPrice ? (
+          <Button type="button" tone="danger" size="md" onClick={askDelete} disabled={bulkBusy || deletable.length === 0} data-delete-all>
+            {selected.size ? `Delete ${selected.size} ticked` : "Delete all"}
+          </Button>
+        ) : null}
+        {undo ? (
+          <span className="inline-flex min-h-10 items-center gap-2 rounded-control bg-ink px-3 text-sm font-semibold text-white" data-delete-toast>
+            {undo.count} part{undo.count === 1 ? "" : "s"} deleted{undo.kept ? ` · ${undo.kept} ordered part${undo.kept === 1 ? " was" : "s were"} kept` : ""}
+            {undo.batch ? <button type="button" onClick={() => void undoDelete()} className="rounded-control bg-white px-2.5 py-1 text-xs font-bold text-ink" data-undo-delete>Undo</button> : null}
+          </span>
+        ) : null}
+        {bulkError ? <span className="text-sm font-semibold text-red">{bulkError}</span> : null}
         <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
         <Button type="button" tone="secondary" size="md" onClick={() => setListOpen(true)}>Copy list for supplier</Button>
         {canPrice ? <a href={`/parts/${jobId}/import`} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-import-prices>Import prices</a> : null}
+        {canPrice && lastImport && !importGone ? (
+          <button type="button" onClick={() => void undoLastImport()} disabled={bulkBusy} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" title={`${lastImport.count} line${lastImport.count === 1 ? "" : "s"} imported ${formatDateTime(lastImport.at)}`} data-undo-import>
+            Undo last import ({lastImport.count})
+          </button>
+        ) : null}
       </div>
       <div className="overflow-x-auto">
         <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
-          <span>Part</span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
+          <span className="flex items-center gap-1.5">
+            {canPrice ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
+            Part
+          </span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
-            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} attempted={attempted} removeReasons={removeReasons} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
+            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
           ))}
           {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
         </div>
@@ -190,6 +285,19 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
       {adding ? <PartPicker title="Add parts" catalogue={catalogue} selected={[]} itemKey={null} source="custom" onDone={(entries) => addPicked(entries.map((e) => ({ name: e.name, qty: e.qty, positions: e.positions, catalogue_id: e.catalogue_id })))} onClose={() => setAdding(false)} /> : null}
       <datalist id="part-pool">{catalogue.map((c) => <option key={c.id} value={c.name} />)}</datalist>
       {listOpen ? <SupplierList rows={rows} car={car} vin={vin} openingLine={openingLine} onClose={() => setListOpen(false)} /> : null}
+      {confirmDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={() => setConfirmDelete(null)}>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-delete-confirm>
+            <span className="text-lg font-extrabold">{confirmDelete.count ? `Delete ${confirmDelete.count} part${confirmDelete.count === 1 ? "" : "s"}?` : "Nothing to delete"}</span>
+            {confirmDelete.kept ? <p className="text-sm text-muted">{confirmDelete.kept} ordered part{confirmDelete.kept === 1 ? " is" : "s are"} kept: once ordered, received or fitted a part is never deleted here.</p> : null}
+            {confirmDelete.count ? <p className="text-xs text-muted">The rows disappear at once and come off the quotation. Undo is there for a minute.</p> : null}
+            <div className="flex flex-wrap gap-2">
+              {confirmDelete.count ? <Button type="button" size="md" tone="danger" onClick={() => void doDelete()} data-delete-confirm-yes>Delete</Button> : null}
+              <Button type="button" tone="ghost" size="md" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {showBar && onPricingDone ? (
         <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
@@ -220,7 +328,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   );
 }
 
-function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, removeReasons, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; canPrice: boolean; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
+function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; canPrice: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
   const router = useRouter();
   const [v, setV] = useState<RowValues>(row.values);
   const [name, setName] = useState(row.name);
@@ -371,6 +479,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
       {/* Part: the name (tap to correct it through the picker); a long name wraps onto two lines inside the same height */}
       <div className="col-span-2 md:col-span-1 h-9 flex items-center gap-1.5 min-w-0">
+        {canPrice && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
         <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`h-9 min-w-0 flex-1 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? undefined : `${name} · tap to correct the name`} data-part-name>
           <span className="block line-clamp-2 text-[13px] leading-[1.15]">{name}</span>

@@ -18,9 +18,16 @@ export async function clearTestDataAction(_state: FormState, formData: FormData)
     const r = await clearTestData({ id: staff.id, display_name: staff.display_name });
     const rows = Object.values(r.deleted).reduce((a, b) => a + b, 0);
     const files = Object.values(r.filesDeleted).reduce((a, b) => a + b, 0);
-    const report = [`Backup: storage bucket "${r.backupPath}" (${r.backedUpRows} rows).`, `Deleted ${rows} rows: ${Object.entries(r.deleted).filter(([, n]) => n > 0).map(([t, n]) => `${t} ${n}`).join(", ") || "nothing"}.`, `Deleted ${files} files: ${Object.entries(r.filesDeleted).filter(([, n]) => n > 0).map(([b, n]) => `${b} ${n}`).join(", ") || "none"}.`, "Numbering starts again at 00001."].join("\n");
+    const lines = [
+      r.backupPath ? `Backup: storage bucket "${r.backupPath}" (${r.backedUpRows} rows in ${r.backupFiles} compressed files; the change log is not backed up, it stays).` : "Backup: none could be saved (testing phase, the clear went ahead).",
+      ...(r.backupWarnings.length ? [`Not backed up: ${r.backupWarnings.join("; ")}.`] : []),
+      `Deleted ${rows} rows: ${Object.entries(r.deleted).filter(([, n]) => n > 0).map(([t, n]) => `${t} ${n}`).join(", ") || "nothing"}.`,
+      `Deleted ${files} files: ${Object.entries(r.filesDeleted).filter(([, n]) => n > 0).map(([b, n]) => `${b} ${n}`).join(", ") || "none"}.`,
+      ...(r.fileWarnings.length ? [`Some files could not be removed: ${r.fileWarnings.join("; ")}. Press the button again to carry on.`] : []),
+      "Numbering starts again at 00001.",
+    ];
     revalidatePath("/", "layout");
-    return { success: "Test data cleared.", values: { report } };
+    return { success: r.fileWarnings.length ? "Test data cleared, with files left over (see below)." : "Test data cleared.", values: { report: lines.join("\n") } };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not clear the test data.", values: { confirm } };
   }

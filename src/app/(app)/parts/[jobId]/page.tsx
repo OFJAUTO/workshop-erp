@@ -37,7 +37,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
-  const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }, insp, catalogue] = await Promise.all([
+  const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }, insp, catalogue, { data: lastImportRow }] = await Promise.all([
     admin.from("jobs").select("id, job_number, status, is_open, parts_pricing_done_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
@@ -46,8 +46,11 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     admin.from("staff").select("id, display_name").eq("is_active", true),
     loadInspection(jobId),
     loadCatalogue(),
+    // The last price import still in force, for "Undo last import".
+    admin.from("price_imports").select("id, applied_count, created_at").eq("job_id", jobId).is("undone_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (!job) notFound();
+  const lastImport = lastImportRow ? { id: lastImportRow.id as string, count: Number(lastImportRow.applied_count) || 0, at: lastImportRow.created_at as string } : null;
   type V = { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null };
   const v = job.vehicle as unknown as V;
   const requests = (reqRows ?? []) as unknown as PartRequest[];
@@ -65,7 +68,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const daysOf = (p: PartItem) => daysFromDate(p.delivery_date, today);
   const orderLabel = (p: PartItem) => (p.order_status === "none" ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
   // The request's positions and note; a part added by Parts (no request) shows its own positions.
-  const infoOf = (r: PartRequest | null, p?: PartItem) => (r ? [r.positions?.length ? positionsWords(r.positions) : "", r.note ?? ""].filter(Boolean).join(" · ") || null : p ? [p.positions?.length ? positionsWords(p.positions) : "", "Added by Parts"].filter(Boolean).join(" · ") : null);
+  const infoOf = (r: PartRequest | null, p?: PartItem) => [r ? [r.positions?.length ? positionsWords(r.positions) : "", r.note ?? ""].filter(Boolean).join(" · ") : p ? [p.positions?.length ? positionsWords(p.positions) : "", "Added by Parts"].filter(Boolean).join(" · ") : "", p?.availability_note ?? ""].filter(Boolean).join(" · ") || null;
   const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
     key,
     requestId: p.part_request_id,
@@ -139,7 +142,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       <Card className="flex flex-col gap-2 overflow-visible">
-        <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} removeReasons={reasonsFor(settings, "remove_part")} />
+        <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} removeReasons={reasonsFor(settings, "remove_part")} />
       </Card>
       {canPrice ? <div className="h-20" /> : null}
       {canPrice && inPlanning ? <PartsBar planning={{ unplanned: unplanned.length, planned: !!job.plan_parts_done_at, onAllInStock: allInStock.bind(null, jobId), onPartsPlanned: partsPlanned.bind(null, jobId) }} /> : null}

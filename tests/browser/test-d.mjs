@@ -182,8 +182,13 @@ await section("U2 number boxes", async () => {
   for (const t of TYPED) {
     const r = await typeKeys(hours, t);
     check(`U2 quotation hours box: "${t}" typed key by key stays "${t}"`, r.ok, r.seen.join("|"));
-    await sleep(2600);
-    const db = (await sql("select hours from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active order by position limit 1", [quotationId]))[0];
+    // The figure goes to the server about a second after typing stops and the save takes a moment: wait for it rather than a fixed moment.
+    let db = null;
+    for (let i = 0; i < 20; i++) {
+      await sleep(500);
+      db = (await sql("select hours from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active order by position limit 1", [quotationId]))[0];
+      if (Number(db?.hours) === Number(EXPECT[t])) break;
+    }
     check(`U2 quotation hours box: "${t}" saved as ${EXPECT[t]}`, Number(db?.hours) === Number(EXPECT[t]), String(db?.hours));
     await adv.page.reload({ waitUntil: "load" });
     await sleep(1500);
@@ -315,7 +320,11 @@ await section("U3 one part state", async () => {
   // Not available from the row's menu.
   await rowOf("E2e sensor").getByRole("button", { name: "More for this part" }).click();
   await page.getByRole("button", { name: "Not available" }).click();
-  await sleep(4000);
+  // The action runs on the server and the page refreshes afterwards: wait for the row's state rather than a fixed moment.
+  for (let i = 0; i < 40; i++) {
+    if ((await rowOf("E2e sensor").getAttribute("data-row-state")) === "not_available") break;
+    await sleep(500);
+  }
   const sensorDb = (await sql("select status from public.part_requests where job_id = $1 and label ilike 'E2e sensor'", [jobId]))[0];
   check("U3: Not available is its own state (never blocks)", (await rowOf("E2e sensor").getAttribute("data-row-state")) === "not_available", `${await rowOf("E2e sensor").getAttribute("data-row-state")} db=${JSON.stringify(sensorDb)}`);
   await fill(rowOf("E2e hose"), { pn: "HOSE-1", list: "50", avail: "in_stock" });

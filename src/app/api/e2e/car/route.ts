@@ -11,6 +11,9 @@ export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
+  // Each call makes its own plate (the active plate is unique), unless the caller names one.
+  const body = (await request.json().catch(() => ({}))) as { plate?: string };
+  const plate = String(body.plate ?? (Date.now() % 100000)).slice(0, 8);
   const admin = createAdminClient();
   const [{ data: owner }, { data: make }] = await Promise.all([
     admin.from("staff").select("id").eq("role_id", "owner").eq("is_active", true).limit(1).maybeSingle(),
@@ -19,7 +22,7 @@ export async function POST(request: NextRequest) {
   if (!owner || !make) return NextResponse.json({ error: "Need an owner and a make." }, { status: 400 });
   const { data: customer, error: ce } = await admin.from("customers").insert({ customer_type: "individual", full_name: "Check Customer", phone: "+971500000001", created_by: owner.id, updated_by: owner.id }).select("id, customer_number").single();
   if (ce || !customer) return NextResponse.json({ error: ce?.message ?? "customer" }, { status: 500 });
-  const { data: vehicle, error: ve } = await admin.from("vehicles").insert({ customer_id: customer.id, plate_country: "UAE", plate_emirate: "Dubai", plate_code: "C", plate_number: "1", has_plate: true, make_id: make.id, created_by: owner.id, updated_by: owner.id }).select("id").single();
+  const { data: vehicle, error: ve } = await admin.from("vehicles").insert({ customer_id: customer.id, plate_country: "UAE", plate_emirate: "Dubai", plate_code: "C", plate_number: plate, has_plate: true, make_id: make.id, created_by: owner.id, updated_by: owner.id }).select("id").single();
   if (ve || !vehicle) return NextResponse.json({ error: ve?.message ?? "vehicle" }, { status: 500 });
   const { data: job, error: je } = await admin.from("jobs").insert({ vehicle_id: vehicle.id, customer_id: customer.id, priority: "normal", department: "mechanical", gated_in_by: owner.id, created_by: owner.id, updated_by: owner.id }).select("id, job_number").single();
   if (je || !job) return NextResponse.json({ error: je?.message ?? "job" }, { status: 500 });

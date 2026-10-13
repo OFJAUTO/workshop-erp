@@ -4,8 +4,8 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Notice, Textarea } from "@/components/ui";
 import type { SupplierOption } from "@/lib/parts-rows";
-import { IMPORT_FIELD_LABELS, checkTotals, linesFromRows, nameSimilarity, suggestMatches, type ApplyLine, type ColumnMapping, type ImportField, type ImportLine, type ImportResult } from "@/lib/price-import";
-import { applyImport, parseImportText, parseImportUpload, saveImportMapping } from "../../import-actions";
+import { MAPPING_CHOICES, checkTotals, guessMappingFromData, guessValuesPerRow, linesFromRows, nameSimilarity, suggestMatches, type ApplyLine, type ColumnMapping, type ImportField, type ImportLine, type ImportResult } from "@/lib/price-import";
+import { applyImport, parseImportText, parseImportUpload } from "../../import-actions";
 
 export type ImportTarget = { key: string; partId: string | null; requestId: string | null; name: string; original: string | null; partNumber: string | null; state: string; qty: string };
 
@@ -13,7 +13,6 @@ type Source = { kind: "file" | "paste" | "image"; label: string; images: string[
 type Decision = { target: string; confirmed: boolean; suggested: { id: string; by: "number" | "name"; score: number } | null };
 type Way = "file" | "paste" | "image";
 
-const FIELDS: ImportField[] = ["partNumber", "description", "qty", "list", "net", "total", "availability", "vin", "ignore"];
 const money = (n: number | null) => (n === null ? "" : n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
 /**
@@ -32,7 +31,8 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping>({});
-  const [mappingSaved, setMappingSaved] = useState(false);
+  // One-value-per-line text with no headings: how many values make one part (guessed, changeable).
+  const [perRow, setPerRow] = useState<number | null>(null);
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState(false);
   const [applied, setApplied] = useState<{ applied: number; failed: { name: string; error: string }[] } | null>(null);
@@ -44,8 +44,8 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
   function receive(r: ImportResult, src: Source) {
     setResult(r);
     setSource(src);
-    setMapping(r.mapping);
-    setMappingSaved(false);
+    // Unknown columns: a first guess from the data, changed with one tap on the mapping screen.
+    setMapping(r.format === "unknown" && Object.keys(r.mapping).length === 0 ? guessMappingFromData(r.rows) : r.mapping);
     setVinOk(false);
     setApplied(null);
     const d: Record<string, Decision> = {};
@@ -78,11 +78,11 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
     }
     receive(res.result, { kind: "file", label: (res.fileNames ?? []).join(", "), images: [] });
   }
-  async function sendText(t: string) {
+  async function sendText(t: string, valuesPerRow: number | null = perRow) {
     if (!t.trim()) return;
     setError(null);
     setBusy("Reading the text…");
-    const res = await parseImportText(jobId, t);
+    const res = await parseImportText(jobId, t, valuesPerRow);
     setBusy(null);
     if (res.error || !res.result) {
       setError(res.error ?? "Could not read the text.");
@@ -148,18 +148,11 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
     } else void sendFiles(files);
   }
 
-  /** The mapping step: the columns as Parts named them, read again on the spot. */
+  /** The mapping step's Import: the columns as Parts named them, read again on the spot; the mapping is kept for the supplier on Apply. */
   function applyMapping() {
     if (!result) return;
-    const body = result.format === "unknown" ? result.rows : result.rows;
-    const { lines, found, vin: fileVin } = linesFromRows(body, mapping, "m");
+    const { lines, found, vin: fileVin } = linesFromRows(result.rows, mapping, "m");
     receive({ ...result, format: "mapped", mapping, lines, totals: checkTotals(lines, found), vin: fileVin ?? result.vin, warnings: lines.length ? [] : ["No part lines were found with this mapping."] }, source ?? { kind: "file", label: "file", images: [] });
-  }
-  async function saveMapping() {
-    if (!result || !supplierId) return;
-    const res = await saveImportMapping(supplierId, result.headings, mapping);
-    if (res.error) setError(res.error);
-    else setMappingSaved(true);
   }
 
   const lines = result?.lines ?? [];
@@ -189,14 +182,14 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
     });
     setBusy("Applying…");
     start(async () => {
-      const res = await applyImport(jobId, { supplierId: supplierId || null, defaultType, source: source?.label ?? "import", lines: payload });
+      const res = await applyImport(jobId, { supplierId: supplierId || null, defaultType, source: source?.label ?? "import", format: result.format, mapping: result.format === "mapped" ? { headings: result.headings, mapping: result.mapping } : null, lines: payload });
       setBusy(null);
       if (res.error) {
         setError(res.error);
         return;
       }
       setApplied({ applied: res.applied ?? 0, failed: res.failed ?? [] });
-      if (!(res.failed ?? []).length) router.push(`/parts/${jobId}?message=${encodeURIComponent(`${res.applied} price${res.applied === 1 ? "" : "s"} imported.`)}`);
+      if (!(res.failed ?? []).length) router.push(`/parts/${jobId}?message=${encodeURIComponent(`${res.applied} price${res.applied === 1 ? "" : "s"} imported. Undo last import is in the row above the table.`)}`);
     });
   }
 
@@ -204,7 +197,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
     <button key={w} type="button" onClick={() => setWay(w)} aria-pressed={way === w} className={`min-h-11 rounded-control px-4 text-sm font-bold ${way === w ? "bg-ink text-white" : "border border-line-strong bg-white"}`} data-way={w}>{label}</button>
   );
   const chip = (text: string, tone: "green" | "amber" | "grey") => <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-bold whitespace-nowrap ${tone === "green" ? "bg-green-soft text-green" : tone === "amber" ? "bg-amber-soft text-amber" : "bg-chip text-muted"}`}>{text}</span>;
-  const availabilityChip = (l: ImportLine) => (l.availability ? (l.availability.kind === "in_stock" ? chip("In stock", "green") : l.availability.kind === "days" ? chip(l.availability.days === 1 ? "Next day" : `${l.availability.days} days`, "grey") : chip("Supplier to confirm", "amber")) : null);
+  const availabilityChip = (l: ImportLine) => (l.availability ? (l.availability.kind === "same_day" ? chip("Same day", "green") : l.availability.kind === "days" ? chip(l.availability.days === 1 ? "Next day" : `${l.availability.days} days`, "grey") : l.availability.kind === "back_order" ? chip("Back order", "amber") : chip("Supplier to confirm", "amber")) : null);
 
   return (
     <div className="flex flex-col gap-4" onPaste={onPaste} data-import-wizard>
@@ -247,40 +240,52 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
         {error ? <p className="text-sm font-semibold text-red" data-import-error>{error}</p> : null}
       </div>
 
-      {/* Mapping step: the columns were not recognised */}
-      {result && result.format === "unknown" ? (
-        <div className="rounded-card border border-ink bg-white p-4 flex flex-col gap-3" data-mapping-step>
-          <span className="text-base font-extrabold">This format is new. Which column is which?</span>
-          <p className="text-xs text-muted">Choose the meaning of each column once; it is saved for the supplier and used next time.</p>
-          <div className="overflow-x-auto">
-            <table className="text-sm">
-              <thead>
-                <tr>{(result.headings.length ? result.headings : result.rows[0] ?? []).map((h, i) => <th key={i} className="px-2 py-1 text-left font-bold border-b border-line whitespace-nowrap">{h || `Column ${i + 1}`}</th>)}</tr>
-                <tr>
-                  {(result.headings.length ? result.headings : result.rows[0] ?? []).map((_, i) => (
-                    <th key={i} className="px-2 py-1">
-                      <select value={(Object.entries(mapping).find(([, v]) => v === i)?.[0] as ImportField | undefined) ?? "ignore"} onChange={(e) => { const f = e.target.value as ImportField; setMapping((m) => { const next: ColumnMapping = {}; for (const [k, v] of Object.entries(m)) if (v !== i && k !== f) (next as Record<string, number>)[k] = v as number; if (f !== "ignore") next[f] = i; return next; }); }} className="min-h-10 rounded-control border border-line-strong bg-white px-2 text-xs" aria-label={`Column ${i + 1} meaning`}>
-                        {FIELDS.map((f) => <option key={f} value={f}>{IMPORT_FIELD_LABELS[f]}</option>)}
-                      </select>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {result.rows.slice(0, 4).map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} className="px-2 py-1 text-muted whitespace-nowrap">{c}</td>)}</tr>)}
-              </tbody>
-            </table>
+      {/* Mapping step: the columns were not recognised. The first five lines, a dropdown above each column, one Import button. */}
+      {result && result.format === "unknown" ? (() => {
+        const width = Math.max(result.headings.length, ...result.rows.map((r) => r.length), 1);
+        const cols = Array.from({ length: width }, (_, i) => i);
+        const fieldOf = (i: number) => (Object.entries(mapping).find(([, v]) => v === i)?.[0] as ImportField | undefined) ?? "ignore";
+        const setField = (i: number, f: ImportField) => setMapping((m) => { const next: ColumnMapping = {}; for (const [k, v] of Object.entries(m)) if (v !== i && k !== f) (next as Record<string, number>)[k] = v as number; if (f !== "ignore") next[f] = i; return next; });
+        const named = result.headings.some((h) => h && !/^Column \d+$/.test(h));
+        const singleColumn = width <= 1 && source?.kind === "paste";
+        const guess = perRow ?? guessValuesPerRow(text) ?? 4;
+        return (
+          <div className="rounded-card border border-ink bg-white p-4 flex flex-col gap-3" data-mapping-step>
+            <span className="text-base font-extrabold">Which column is which?</span>
+            <p className="text-xs text-muted">The first lines as they were read. A heading that is wrong: tap it and choose another. Then Import.</p>
+            {singleColumn ? (
+              <label className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-semibold">Values per part</span>
+                <input type="number" min={2} max={12} value={guess} onChange={(e) => { const n = Math.max(2, Math.min(12, Number(e.target.value) || 2)); setPerRow(n); void sendText(text, n); }} className="min-h-11 w-20 rounded-control border border-line-strong px-2 text-center" aria-label="Values per part" data-values-per-row />
+                <span className="text-xs text-muted">One value per line: how many lines make one part.</span>
+              </label>
+            ) : null}
+            <div className="overflow-x-auto">
+              <table className="text-sm" data-mapping-table>
+                <thead>
+                  <tr>
+                    {cols.map((i) => (
+                      <th key={i} className="px-1.5 py-1 text-left">
+                        <select value={fieldOf(i)} onChange={(e) => setField(i, e.target.value as ImportField)} className={`min-h-11 rounded-control border px-2 text-xs font-bold ${fieldOf(i) === "ignore" ? "border-line bg-chip text-muted" : "border-ink bg-white"}`} aria-label={`Column ${i + 1} meaning`} data-mapping-select>
+                          {MAPPING_CHOICES.map((c) => <option key={c.field} value={c.field}>{c.label}</option>)}
+                        </select>
+                      </th>
+                    ))}
+                  </tr>
+                  {named ? <tr>{cols.map((i) => <th key={i} className="px-2 py-1 text-left text-[11px] font-semibold text-muted border-b border-line whitespace-nowrap">{result.headings[i] ?? ""}</th>)}</tr> : null}
+                </thead>
+                <tbody>
+                  {result.rows.slice(0, 5).map((r, ri) => <tr key={ri} data-mapping-row>{cols.map((ci) => <td key={ci} className="px-2 py-1 whitespace-nowrap border-b border-line">{r[ci] ?? ""}</td>)}</tr>)}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" size="lg" onClick={applyMapping} disabled={(mapping.partNumber === undefined && mapping.description === undefined) || mapping.net === undefined} data-apply-mapping>Import</Button>
+              {mapping.net === undefined ? <span className="text-xs font-semibold text-red">Choose which column is the price.</span> : mapping.partNumber === undefined && mapping.description === undefined ? <span className="text-xs font-semibold text-red">Choose the part number or the name.</span> : <span className="text-xs text-muted">{result.rows.length} line{result.rows.length === 1 ? "" : "s"} will be read. The mapping is remembered for the supplier when you apply.</span>}
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="lg" onClick={applyMapping} disabled={mapping.partNumber === undefined && mapping.description === undefined} data-apply-mapping>Read with this mapping</Button>
-            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="min-h-12 rounded-control border border-line-strong bg-white px-3 text-sm" aria-label="Supplier for the mapping">
-              <option value="">Supplier…</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <Button type="button" tone="secondary" size="lg" onClick={() => void saveMapping()} disabled={!supplierId || mappingSaved} data-save-mapping>{mappingSaved ? "✓ Saved for this supplier" : "Save for this supplier"}</Button>
-          </div>
-        </div>
-      ) : null}
+        );
+      })() : null}
 
       {/* The check screen */}
       {result && result.format !== "unknown" ? (

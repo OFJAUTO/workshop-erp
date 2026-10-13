@@ -9,7 +9,12 @@ export type ImportField = "partNumber" | "description" | "qty" | "list" | "net" 
 export type ColumnMapping = Partial<Record<ImportField, number>>;
 export type ImportFormat = "b2bconnect" | "landrover" | "generic" | "mapped" | "unknown";
 
-export type ImportAvailability = { kind: "in_stock" | "days" | "confirm"; days: number | null; text: string };
+/**
+ * The supplier's words on availability. "same_day": the supplier has it ("in stock", "available"), so it is ordered
+ * today and here today; "days": a lead time; "back_order": on back order with the supplier; "confirm": unknown
+ * ("will update"). Never a price.
+ */
+export type ImportAvailability = { kind: "same_day" | "days" | "back_order" | "confirm"; days: number | null; text: string };
 
 export type ImportLine = {
   key: string;
@@ -104,18 +109,28 @@ export function parseQty(s: string | null | undefined): number | null {
   return n !== null && n > 0 ? n : null;
 }
 
-/** The supplier's words for availability as our choice: In stock, n days, or "Supplier to confirm". */
+/**
+ * The supplier's words for availability as our choice: "in stock" or "available" = same day, "1 day-1 psc" = 1 day,
+ * "2 days" = 2 days, "back order" = back order, "will update" or anything unclear = unknown (Supplier to confirm).
+ */
 export function parseAvailability(s: string | null | undefined): ImportAvailability | null {
   const text = String(s ?? "").trim();
   if (!text) return null;
   const t = text.toLowerCase();
-  if (/in ?stock|ex[- ]?stock|available now|^available$|same day|immediate|ready/.test(t)) return { kind: "in_stock", days: null, text };
+  if (/back ?order|b\/o\b|backorder/.test(t)) return { kind: "back_order", days: null, text };
+  if (/in ?stock|ex[- ]?stock|available|avail\b|same day|immediate|ready|yes/.test(t)) return { kind: "same_day", days: null, text };
   if (/next day|tomorrow/.test(t)) return { kind: "days", days: 1, text };
+  // "1 day", "1 day-1 psc", "2-3 days", "3 working days": the number of days (the last of a range).
   const m = t.match(/(\d+)\s*(?:-\s*(\d+)\s*)?(?:working\s*|business\s*)?(day|days|d|wd)\b/);
   if (m) return { kind: "days", days: Number(m[2] ?? m[1]), text };
   const w = t.match(/(\d+)\s*(week|weeks|wk|wks)\b/);
   if (w) return { kind: "days", days: Number(w[1]) * 7, text };
   return { kind: "confirm", days: null, text };
+}
+
+/** A part number with every space and dash taken out, for matching: "A 167 330 68 00" and "A1673306800" are the same part. */
+export function compactPartNumber(s: string | null | undefined): string {
+  return String(s ?? "").replace(/[\s\-._/]/g, "").toUpperCase();
 }
 
 /** Which of our fields each heading is, by its words. Unknown headings are left out (ignored). */
@@ -228,9 +243,14 @@ export function readTable(rows: string[][], opts: { supplierHint?: string | null
   let headerIdx = clean.findIndex((r) => Object.keys(mapHeadings(r)).length >= 3);
   if (headerIdx === -1) headerIdx = clean.findIndex((r) => r.filter((c) => c !== "").length >= 3);
   if (headerIdx === -1) return { format: "unknown", supplierHint: opts.supplierHint ?? null, headings: [], rows: clean, mapping: {}, lines: [], totals: { found: [], sumLines: null, expected: null, match: null }, vin: null, warnings: ["Nothing that looks like a table was found."] };
-  const headings = clean[headerIdx];
-  const body = clean.slice(headerIdx + 1).filter((r) => r.some((c) => c !== ""));
+  let headings = clean[headerIdx];
+  let body = clean.slice(headerIdx + 1).filter((r) => r.some((c) => c !== ""));
   let mapping = mapHeadings(headings);
+  if (Object.keys(mapping).length === 0) {
+    // No heading row at all (values only): every row is data and the columns are named by number for the mapping step.
+    headings = headings.map((_, i) => `Column ${i + 1}`);
+    body = clean.slice(headerIdx).filter((r) => r.some((c) => c !== ""));
+  }
   let format = detectFormat(headings, mapping);
   if (format === "unknown" && opts.savedMapping && sameHeadings(opts.savedMapping.headings, headings)) {
     mapping = opts.savedMapping.mapping;
@@ -265,50 +285,75 @@ function duplicates(lines: ImportLine[]): string[] {
 }
 
 /**
- * Text pasted from an email or copied from a spreadsheet. Tab-separated lines are a table at once. Otherwise the
- * one-value-per-line layout: the headings first, then the values in groups of the heading count, then lines of
- * spaces, then "Gross Amount", "Vat", "Net AED" each followed by its value.
+ * Text pasted from an email or copied from a spreadsheet. Tab-separated lines are a table at once (blank lines
+ * ignored). Otherwise the one-value-per-line layout, as Outlook or Gmail give it as plain text: the headings first,
+ * then the values in groups of the heading count, blank lines anywhere ignored, and the totals at the bottom
+ * ("Gross Amount", "Vat", "Net AED"...) each followed by its value, which are never parts.
  */
-export function parsePaste(text: string): string[][] {
+export function parsePaste(text: string, valuesPerRow: number | null = null): string[][] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const tabbed = lines.filter((l) => l.includes("\t")).length;
   if (tabbed >= 2) return lines.filter((l) => l.trim() !== "").map((l) => l.split("\t").map((c) => c.trim()));
   // A table drawn with several spaces between the columns (an email in a fixed font).
   const spaced = lines.filter((l) => /\S\s{2,}\S/.test(l)).length;
   if (spaced >= 2 && spaced >= lines.filter((l) => l.trim()).length / 2) return lines.filter((l) => l.trim() !== "").map((l) => l.trim().split(/\s{2,}/).map((c) => c.trim()));
-  return oneValuePerLine(lines);
+  return oneValuePerLine(lines, valuesPerRow);
 }
 
-function oneValuePerLine(lines: string[]): string[][] {
-  const trimmed = lines.map((l) => l.trim());
-  // Headings: the leading run of lines that read as headings, none of them a number.
+/** How many values make one part line in a one-value-per-line paste: the heading run, else the repeating pattern of numbers and words. */
+export function guessValuesPerRow(text: string): number | null {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n").map((l) => l.trim()).filter((l) => l !== "");
   let count = 0;
-  while (count < trimmed.length && trimmed[count] !== "" && parseNumber(trimmed[count]) === null && isHeadingWord(trimmed[count])) count++;
-  if (count < 2) {
-    // No heading run: every line becomes a row of one cell; the mapping step sorts it out.
-    return trimmed.filter(Boolean).map((l) => [l]);
+  while (count < lines.length && parseNumber(lines[count]) === null && isHeadingWord(lines[count])) count++;
+  if (count >= 2) return count;
+  // No heading run: the period after which the shape (number or text) of the lines repeats.
+  const body = lines.filter((l) => !TOTAL_LABELS.test(l));
+  const shape = body.map((l) => (parseNumber(l) !== null ? "n" : "t")).join("");
+  for (let n = 3; n <= 12; n++) {
+    if (body.length < n * 2) break;
+    let ok = 0;
+    let total = 0;
+    for (let i = 0; i + n < shape.length; i++) {
+      total++;
+      if (shape[i] === shape[i + n]) ok++;
+    }
+    if (total && ok / total >= 0.9) return n;
   }
-  const headings = trimmed.slice(0, count);
-  const rows: string[][] = [headings];
-  let i = count;
+  return null;
+}
+
+function oneValuePerLine(lines: string[], valuesPerRow: number | null): string[][] {
+  // Blank lines (Outlook and Gmail put one between every value) are nothing.
+  const trimmed = lines.map((l) => l.trim()).filter((l) => l !== "");
+  let count = 0;
+  while (count < trimmed.length && parseNumber(trimmed[count]) === null && isHeadingWord(trimmed[count])) count++;
+  const hasHeadings = count >= 2;
+  const per = hasHeadings ? count : (valuesPerRow ?? guessValuesPerRow(trimmed.join("\n")));
+  if (!per || per < 2) {
+    // Nothing to go on: every line becomes a row of one cell; the mapping step asks how many values make a part.
+    return trimmed.map((l) => [l]);
+  }
+  const rows: string[][] = hasHeadings ? [trimmed.slice(0, count)] : [];
+  let i = hasHeadings ? count : 0;
   let group: string[] = [];
   while (i < trimmed.length) {
     const l = trimmed[i];
-    // A blank line, or a totals label, ends the part lines.
-    if (l === "" || TOTAL_LABELS.test(l)) {
+    // A totals label ends the part lines; its value is on the same line or the next.
+    if (TOTAL_LABELS.test(l) || /^(gross amount|vat|net aed|sub ?total|grand total|total)\b/i.test(l) && parseNumber(trimmed[i + 1] ?? "") !== null && group.length === 0) {
       if (group.length) rows.push(group);
       group = [];
-      if (TOTAL_LABELS.test(l)) {
-        const value = trimmed[i + 1] ?? "";
-        rows.push([l, value]);
+      const inline = l.match(/^(.*?)[\s:]+([-\d.,]+)$/);
+      if (inline && parseNumber(inline[2]) !== null && TOTAL_LABELS.test(inline[1].trim())) {
+        rows.push([inline[1].trim(), inline[2]]);
+        i += 1;
+      } else {
+        rows.push([l.replace(/:$/, ""), trimmed[i + 1] ?? ""]);
         i += 2;
-        continue;
       }
-      i++;
       continue;
     }
     group.push(l);
-    if (group.length === count) {
+    if (group.length === per) {
       rows.push(group);
       group = [];
     }
@@ -321,8 +366,49 @@ function oneValuePerLine(lines: string[]): string[][] {
 function isHeadingWord(s: string): boolean {
   const n = normaliseHeading(s);
   if (!n || n.length > 40) return false;
-  return (Object.keys(SYNONYMS) as (keyof typeof SYNONYMS)[]).some((f) => SYNONYMS[f].some((syn) => n === syn || n.startsWith(syn + " ") || n.startsWith(syn + "("))) || /^(wip ?no|line ?no|sr ?no|s ?no|#|no|ref|remarks?|notes?|currency|brand|make|model|uom|unit)$/.test(n);
+  return (Object.keys(SYNONYMS) as (keyof typeof SYNONYMS)[]).some((f) => SYNONYMS[f].some((syn) => n === syn || n.startsWith(syn + " ") || n.startsWith(syn + "("))) || /^(wip ?no|wipno|line ?no|lineno|sr ?no|s ?no|#|no|ref|remarks?|notes?|currency|brand|make|model|uom|unit)$/.test(n);
 }
+
+/**
+ * A first guess at the columns of a table with no usable headings, from the data itself: part numbers are codes
+ * with digits, the name is the longest text, quantities are small whole numbers, the price has decimals, and the
+ * availability column holds the supplier's words. Parts change any of it with one tap.
+ */
+export function guessMappingFromData(rows: string[][]): ColumnMapping {
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  if (!width) return {};
+  const cols = Array.from({ length: width }, (_, i) => rows.map((r) => String(r[i] ?? "").trim()).filter(Boolean));
+  const share = (vals: string[], test: (v: string) => boolean) => (vals.length ? vals.filter(test).length / vals.length : 0);
+  const mapping: ColumnMapping = {};
+  const taken = new Set<number>();
+  const pick = (field: Exclude<ImportField, "ignore">, score: (vals: string[], i: number) => number, min = 0.5) => {
+    let best = -1;
+    let bestScore = 0;
+    cols.forEach((vals, i) => {
+      if (taken.has(i) || !vals.length) return;
+      const s = score(vals, i);
+      if (s > bestScore) { bestScore = s; best = i; }
+    });
+    if (best >= 0 && bestScore >= min) { mapping[field] = best; taken.add(best); }
+  };
+  pick("availability", (v) => share(v, (x) => parseAvailability(x) !== null && parseNumber(x) === null && /stock|avail|day|week|order|update|tbc|confirm/i.test(x)));
+  // A code: letters and digits with at least one digit, no word of three letters or more ("LR123456", "A 167 330 68 00", "X1").
+  pick("partNumber", (v) => share(v, (x) => /^[A-Z0-9][A-Z0-9 .\-/]*$/i.test(x) && /\d/.test(x) && !/[A-Z]{3,}/i.test(x) && parseNumber(x) === null));
+  pick("net", (v) => share(v, (x) => parseNumber(x) !== null && /[.,]\d{2}$/.test(x)) * (1 + v.reduce((a, x) => a + (parseNumber(x) ?? 0), 0) / 1e9));
+  pick("qty", (v) => share(v, (x) => { const n = parseNumber(x); return n !== null && Number.isInteger(n) && n >= 1 && n <= 500; }));
+  pick("description", (v) => share(v, (x) => /[a-z]{3,}/i.test(x) && parseNumber(x) === null) * (1 + v.reduce((a, x) => a + x.length, 0) / 1e6));
+  return mapping;
+}
+
+/** The six meanings the mapping screen offers, in its order. */
+export const MAPPING_CHOICES: { field: ImportField; label: string }[] = [
+  { field: "partNumber", label: "Part number" },
+  { field: "description", label: "Name" },
+  { field: "qty", label: "Qty" },
+  { field: "net", label: "Price" },
+  { field: "availability", label: "Availability" },
+  { field: "ignore", label: "Ignore" },
+];
 
 /** Letters and digits only; a name is close to another when most of its two-letter pairs are shared. */
 export function nameSimilarity(a: string, b: string): number {
@@ -355,7 +441,8 @@ export type MatchTarget = { id: string; name: string; original: string | null; p
 /** The best row on the car's list for an imported line: the same part number first, else the closest name. */
 export function suggestMatch(line: ImportLine, targets: MatchTarget[]): { id: string; by: "number" | "name"; score: number } | null {
   if (line.partNumber) {
-    const same = targets.find((t) => normalisePartNumber(t.partNumber) === line.partNumber);
+    const wanted = compactPartNumber(line.partNumber);
+    const same = targets.find((t) => t.partNumber && compactPartNumber(t.partNumber) === wanted);
     if (same) return { id: same.id, by: "number", score: 1 };
   }
   if (!line.description) return null;

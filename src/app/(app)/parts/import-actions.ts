@@ -1,15 +1,15 @@
 "use server";
 
 import * as XLSX from "xlsx";
+import { revalidatePath } from "next/cache";
 import { getCurrentStaff } from "@/lib/auth";
-import { dubaiDate } from "@/lib/jobs";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult } from "@/lib/price-import";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { autoSavePartRow, type RowSave } from "./actions";
+import { autoSavePartRow, syncLineForPart, type RowSave } from "./actions";
 
 type SavedMapping = { headings: string[]; mapping: ColumnMapping };
 
@@ -71,12 +71,12 @@ export async function parseImportUpload(jobId: string, formData: FormData): Prom
   return { result: merge(results), fileNames: names };
 }
 
-/** Text pasted from an email or copied out of a spreadsheet. */
-export async function parseImportText(jobId: string, text: string): Promise<{ error?: string; result?: ImportResult }> {
+/** Text pasted from an email or copied out of a spreadsheet; `valuesPerRow` when Parts told us how many values make a line. */
+export async function parseImportText(jobId: string, text: string, valuesPerRow: number | null = null): Promise<{ error?: string; result?: ImportResult }> {
   if (!(await partsStaff())) return { error: "Not allowed." };
   const clean = String(text ?? "").slice(0, 200_000);
   if (!clean.trim()) return { error: "Paste the supplier's text first." };
-  const rows = parsePaste(clean);
+  const rows = parsePaste(clean, valuesPerRow);
   return { result: withSaved(rows, await savedMappings()) };
 }
 
@@ -110,13 +110,19 @@ export async function saveImportMapping(supplierId: string, headings: string[], 
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+/** The part columns an import may change; saved before and after so Undo can put them back. */
+const SNAPSHOT = "id, description, part_number, part_type, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, confirmed_quantity, availability_note, is_active";
+
+export type ApplyResult = { error?: string; applied?: number; failed?: { name: string; error: string }[]; importId?: string };
 
 /**
  * Apply: every confirmed line goes through the same save as a hand-typed row (autoSavePartRow), so the supplier's
  * standard discount, the owner's approval limit, the row states and Pricing done all apply. Figures the import did
- * not bring keep the row's current values; a "Supplier to confirm" availability leaves the box as it is.
+ * not bring keep the row's current values. The supplier's availability words become our choice (same day, n days)
+ * or a note ("Back order", "Supplier to confirm") that never touches the price. Everything the import added or
+ * changed is written down under one import, so "Undo last import" can take exactly that back.
  */
-export async function applyImport(jobId: string, payload: { supplierId: string | null; defaultType: string | null; source: string; lines: ApplyLine[] }): Promise<{ error?: string; applied?: number; failed?: { name: string; error: string }[] }> {
+export async function applyImport(jobId: string, payload: { supplierId: string | null; defaultType: string | null; source: string; format?: string | null; lines: ApplyLine[]; mapping?: { headings: string[]; mapping: ColumnMapping } | null }): Promise<ApplyResult> {
   const staff = await partsStaff();
   if (!staff) return { error: "Not allowed." };
   const admin = createAdminClient();
@@ -128,13 +134,16 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
     const { data: s } = await admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("id", payload.supplierId).maybeSingle();
     if (!s) return { error: "Supplier not found." };
     supplier = { id: s.id as string, name: s.name as string, discount: Number(s.default_discount_percent) || 0, byType: (s.discount_by_type as Record<string, number> | null) ?? {} };
+    // A mapping Parts set by hand is remembered for this supplier.
+    if (payload.mapping && Object.keys(payload.mapping.mapping).length) await saveImportMapping(supplier.id, payload.mapping.headings, payload.mapping.mapping);
   }
-  const today = dubaiDate();
-  void today;
+  const { data: imp } = await admin.from("price_imports").insert({ job_id: jobId, supplier_id: supplier?.id ?? null, source: payload.source.slice(0, 200), format: payload.format ?? null, line_count: payload.lines.length, created_by: staff.id, updated_by: staff.id }).select("id").single();
+  const importId = (imp?.id as string | undefined) ?? null;
   const empty: RowValues = { part_number: "", part_type: types[0] ?? "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
   let applied = 0;
   const failed: { name: string; error: string }[] = [];
   const stamp = Date.now();
+  const snapshot = async (partId: string) => (await admin.from("part_items").select(SNAPSHOT).eq("id", partId).maybeSingle()).data ?? null;
   for (const line of payload.lines) {
     if (line.target === "skip") continue;
     const existing = line.target === "new" ? null : pricing.rows.find((r) => (line.target !== "new" && line.target !== "skip" && line.target.partId ? r.partId === line.target.partId : line.target !== "new" && line.target !== "skip" && !!line.target.requestId && r.requestId === line.target.requestId && !r.partId)) ?? null;
@@ -153,7 +162,11 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       net = r2(list * (1 - discount / 100));
     }
     if (discount === null && list !== null && net !== null && list > 0) discount = r2((1 - net / list) * 100);
-    const avail = line.availability?.kind === "in_stock" ? { availability: "in_stock", days: "" } : line.availability?.kind === "days" && line.availability.days !== null ? { availability: "to_order", days: String(line.availability.days) } : { availability: base.availability, days: base.days };
+    const a = line.availability;
+    // "in stock" / "available" at the supplier = ordered today, here today (Same day); n days = to order; the rest is a note.
+    const avail = a?.kind === "same_day" ? { availability: "to_order", days: "0" } : a?.kind === "days" && a.days !== null ? { availability: "to_order", days: String(a.days) } : { availability: base.availability, days: base.days };
+    const note = a?.kind === "back_order" ? "Back order at the supplier" : a?.kind === "confirm" ? `Supplier to confirm${a.text && !/will update|tbc|tba/i.test(a.text) ? ` (${a.text.slice(0, 60)})` : ""}` : null;
+    const before = existing?.partId ? await snapshot(existing.partId) : null;
     const row: RowSave = {
       requestId: existing?.requestId ?? null,
       partId: existing?.partId ?? null,
@@ -170,9 +183,56 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       quantity: line.qty ?? base.qty,
     };
     const res = await autoSavePartRow(jobId, row);
-    if (res.error) failed.push({ name: line.name, error: res.error });
-    else applied++;
+    if (res.error || !res.partId) {
+      failed.push({ name: line.name, error: res.error ?? "Could not save." });
+      continue;
+    }
+    applied++;
+    if (note !== null || a?.kind === "same_day" || a?.kind === "days") await admin.from("part_items").update({ availability_note: note, updated_by: staff.id }).eq("id", res.partId);
+    if (importId) {
+      const after = await snapshot(res.partId);
+      await admin.from("price_import_lines").insert({ import_id: importId, part_id: res.partId, request_id: existing?.requestId ?? null, created: !existing?.partId, before, after });
+    }
   }
+  if (importId) await admin.from("price_imports").update({ applied_count: applied, updated_by: staff.id }).eq("id", importId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_imported", note: `${applied} price${applied === 1 ? "" : "s"} imported from ${payload.source || "a supplier file"}${supplier ? ` (${supplier.name})` : ""} by ${staff.display_name}${failed.length ? `; ${failed.length} failed` : ""}`, created_by: staff.id });
-  return { applied, failed };
+  revalidatePath(`/parts/${jobId}`);
+  return { applied, failed, importId: importId ?? undefined };
+}
+
+/**
+ * "Undo last import": only what that import did. Parts it created go inactive (they vanish from the list and the
+ * quotation); parts it changed get their earlier figures back. Nothing else on the job is touched.
+ */
+export async function undoImport(jobId: string, importId: string): Promise<{ error?: string; restored?: number; removed?: number }> {
+  const staff = await partsStaff();
+  if (!staff) return { error: "Not allowed." };
+  const admin = createAdminClient();
+  const { data: imp } = await admin.from("price_imports").select("id, job_id, undone_at").eq("id", importId).maybeSingle();
+  if (!imp || imp.job_id !== jobId) return { error: "Import not found." };
+  if (imp.undone_at) return { error: "This import was already undone." };
+  const { data: lines } = await admin.from("price_import_lines").select("part_id, request_id, created, before").eq("import_id", importId);
+  let restored = 0;
+  let removed = 0;
+  const now = new Date().toISOString();
+  for (const l of (lines ?? []) as { part_id: string | null; request_id: string | null; created: boolean; before: Record<string, unknown> | null }[]) {
+    if (!l.part_id) continue;
+    if (l.created) {
+      // The part did not exist before the import: it goes, and its request opens again.
+      await admin.from("part_items").update({ is_active: false, deleted_at: now, deleted_by: staff.id, updated_by: staff.id }).eq("id", l.part_id);
+      if (l.request_id) await admin.from("part_requests").update({ status: "open", updated_by: staff.id }).eq("id", l.request_id).in("status", ["listed", "done"]);
+      removed++;
+    } else if (l.before) {
+      const b = l.before;
+      await admin.from("part_items").update({
+        description: b.description, part_number: b.part_number, part_type: b.part_type, list_price_aed: b.list_price_aed, discount_percent: b.discount_percent, cost_aed: b.cost_aed, supplier: b.supplier, availability: b.availability, delivery_date: b.delivery_date, confirmed_quantity: b.confirmed_quantity, availability_note: b.availability_note ?? null, updated_by: staff.id,
+      }).eq("id", l.part_id);
+      restored++;
+    }
+    await syncLineForPart(jobId, l.part_id, staff.id);
+  }
+  await admin.from("price_imports").update({ undone_at: now, undone_by: staff.id, updated_by: staff.id }).eq("id", importId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_import_undone", note: `Import undone by ${staff.display_name}: ${removed} added part${removed === 1 ? "" : "s"} removed, ${restored} changed part${restored === 1 ? "" : "s"} put back`, created_by: staff.id });
+  revalidatePath(`/parts/${jobId}`);
+  return { restored, removed };
 }
