@@ -8,7 +8,9 @@ import { PART_TYPE_LABELS } from "@/lib/quotes";
 import { AVAILABILITY_CHOICES, availabilityChoice, availabilityFromChoice, availabilityWords, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
-import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, splitPart } from "../actions";
+import { PartPicker } from "@/components/PartPicker";
+import { positionsWords, type CatalogueRow } from "@/lib/parts-list";
+import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, splitPart } from "../actions";
 import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 
 export type TableRow = {
@@ -38,18 +40,25 @@ export type TableRow = {
   removed: { by: string; reason: string } | null;
   /** A supplier discount above the owner's limit, waiting for his approval. */
   waitingApproval: boolean;
+  /** A new row from the picker: its positions go to the server with the first save. */
+  positions?: string[];
 };
 
 type Action = (formData: FormData) => void | Promise<void>;
 
 /**
- * The columns, sized to their content and starting from the left. On a very wide screen everything sits on one line;
- * on a laptop the part number and the type take a second line inside the row. A third line (the status line) holds
- * the notes and the "Not finished" tag, so a row never changes height whatever its state.
+ * The columns, sized to their content and starting from the left. The Part column is capped at the width of a
+ * typical name ("Upper control arm"), longer names wrap onto a second line inside the same height. The part number
+ * box shows 22 characters with their spaces in full, next to Copy; the Supplier and Availability dropdowns show their
+ * full text. On a laptop (1366 px) the part number and the type take a second line inside the row; from 1720 px
+ * everything sits on one line. A third line (the status line) holds the notes and the "Not finished" tag, so a row
+ * never changes height whatever its state.
  */
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(9rem,1fr)_6rem_4.75rem_3.75rem_5.25rem_7.5rem_9.5rem_2.5rem] 2xl:grid-cols-[minmax(9rem,1fr)_6rem_10rem_12.5rem_4.75rem_3.75rem_5.25rem_8.5rem_9.5rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
-const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 2xl:col-span-1 2xl:order-none";
-const STATUS_LINE = "col-span-2 md:col-span-8 2xl:col-span-10 md:order-3";
+// Written out in full (no string building) so Tailwind sees every class. The one-line layout starts at 110rem (1760 px).
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(10rem,11rem)_6rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] min-[110rem]:grid-cols-[minmax(10rem,11rem)_6rem_17.5rem_11rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
+const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
+const STATUS_LINE = "col-span-2 md:col-span-8 min-[110rem]:col-span-10 md:order-3";
+const ONE_LINE_ONLY = "hidden min-[110rem]:block";
 const EMPTY: RowValues = { part_number: "", part_type: "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
 const num = (s: string) => Number(String(s).replace(",", ".")) || 0;
 const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, { unavailable: r.unavailable, removed: !!r.removed, waitingApproval: r.waitingApproval });
@@ -61,9 +70,11 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; catalogue?: string[]; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[] }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[] }) {
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
+  // "+ Add a part the technician did not list": the categorised picker.
+  const [adding, setAdding] = useState(false);
   // "Show only unpriced" is a snapshot: the rows shown stay put while they are being finished.
   const [onlyUnpriced, setOnlyUnpriced] = useState<Set<string> | null>(null);
   const [listOpen, setListOpen] = useState(false);
@@ -117,10 +128,17 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     const empty = Array.from(el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")).find((c) => !c.disabled && c.value.trim() === "" && c.getAttribute("aria-label") !== "Brand" && c.offsetParent !== null);
     (marked ?? empty)?.focus();
   }
-  function addLoose() {
-    const name = window.prompt("Which part? Type its name.");
-    if (!name?.trim()) return;
-    setRows((p) => [...p, { key: `new:${Date.now()}`, requestId: null, partId: null, name: name.trim(), original: null, techQty: 1, info: "Added by Parts", values: { ...EMPTY, part_type: types[0] ?? "" }, optionGroup: null, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: false, removed: null, waitingApproval: false }]);
+  /** The picker's Done: one new row per part picked, with its quantity and positions; custom names are counted for the owner. */
+  function addPicked(entries: { name: string; qty: number; positions: string[]; catalogue_id: string | null }[]) {
+    setAdding(false);
+    if (!entries.length) return;
+    const stamp = Date.now();
+    setRows((p) => [
+      ...p,
+      ...entries.map((e, i) => ({ key: `new:${stamp}-${i}`, requestId: null, partId: null, name: e.name, original: null, techQty: e.qty, info: [e.positions.length ? positionsWords(e.positions) : "", "Added by Parts"].filter(Boolean).join(" · "), values: { ...EMPTY, part_type: types[0] ?? "", qty: String(e.qty) }, positions: e.positions, optionGroup: null, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: false, removed: null, waitingApproval: false }) as TableRow),
+    ]);
+    const custom = entries.filter((e) => !e.catalogue_id).map((e) => e.name);
+    if (custom.length) void noteCustomPartNames(custom);
   }
   function addOption(base: TableRow) {
     setRows((p) => {
@@ -155,10 +173,11 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
         <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
         <Button type="button" tone="secondary" size="md" onClick={() => setListOpen(true)}>Copy list for supplier</Button>
+        {canPrice ? <a href={`/parts/${jobId}/import`} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-import-prices>Import prices</a> : null}
       </div>
       <div className="overflow-x-auto">
         <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
-          <span>Part</span><span>Qty</span><span className="hidden 2xl:block">Part number</span><span className="hidden 2xl:block">Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
+          <span>Part</span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
@@ -167,8 +186,9 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
         </div>
       </div>
-      {canPrice ? <Button type="button" tone="secondary" size="md" onClick={addLoose} className="self-start">+ Add a part the technician did not list</Button> : null}
-      <datalist id="part-pool">{catalogue.map((c) => <option key={c} value={c} />)}</datalist>
+      {canPrice ? <Button type="button" tone="secondary" size="md" onClick={() => setAdding(true)} className="self-start" data-add-part>+ Add a part the technician did not list</Button> : null}
+      {adding ? <PartPicker title="Add parts" catalogue={catalogue} selected={[]} itemKey={null} source="custom" onDone={(entries) => addPicked(entries.map((e) => ({ name: e.name, qty: e.qty, positions: e.positions, catalogue_id: e.catalogue_id })))} onClose={() => setAdding(false)} /> : null}
+      <datalist id="part-pool">{catalogue.map((c) => <option key={c.id} value={c.name} />)}</datalist>
       {listOpen ? <SupplierList rows={rows} car={car} vin={vin} openingLine={openingLine} onClose={() => setListOpen(false)} /> : null}
       {showBar && onPricingDone ? (
         <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
@@ -200,14 +220,17 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   );
 }
 
-function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, removeReasons, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: string[]; canPrice: boolean; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
+function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, removeReasons, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; canPrice: boolean; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
   const router = useRouter();
   const [v, setV] = useState<RowValues>(row.values);
   const [name, setName] = useState(row.name);
   const [partId, setPartId] = useState<string | null>(row.partId);
   const [focused, setFocused] = useState(false);
   const [menu, setMenu] = useState<null | "down" | "up">(null);
+  // "Edit part name": the categorised picker in rename mode; one tap picks the new name.
   const [editingName, setEditingName] = useState(false);
+  // The technician's words, kept on the row from the moment the name changes (the server stores them on save).
+  const [origin] = useState(() => row.original ?? row.name);
   const [otherMode, setOtherMode] = useState(() => availabilityChoice(row.values) === "other");
   const [copied, setCopied] = useState(false);
   const [split, setSplit] = useState(false);
@@ -226,7 +249,15 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const optionOf = (row as TableRow & { optionOf?: string }).optionOf ?? null;
-  void catalogue;
+  /** The picker's answer: the new name goes to the row and is saved; a custom name is counted for the owner. */
+  function renameTo(newName: string, pool: CatalogueRow | null) {
+    setEditingName(false);
+    const clean = newName.trim();
+    if (!clean || clean === latest.current.name) return;
+    queue(latest.current.v, clean);
+    flushNow();
+    if (!pool) void noteCustomPartNames([clean]);
+  }
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
@@ -281,7 +312,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
   async function persist(next: RowValues, nextName: string) {
     const run = chain.current.then(async () => {
       setSaving(true);
-      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty });
+      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty, positions: row.positions });
       setSaving(false);
       if (res.error) {
         setError(res.error);
@@ -332,20 +363,20 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
   const box = (f: string, extra = "") => `h-9 min-h-9 text-sm ${extra} ${missingField(f) ? "border-red-bar" : ""}`;
   const select = (f: string) => `h-9 w-full min-w-0 rounded-control border bg-white px-1.5 text-sm ${missingField(f) ? "border-red-bar" : "border-line-strong"}`;
   const textCell = (t: string, extra = "") => <span className={`h-9 flex items-center min-w-0 truncate text-sm ${extra}`} title={t}>{t}</span>;
-  const notes = [row.removed ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, row.original && row.original !== name ? `Technician wrote: ${row.original}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
+  const wrote = row.original ?? (row.requestId ? origin : null);
+  const notes = [row.removed ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, wrote && wrote !== name ? `Technician wrote: ${wrote}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
   const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
 
   return (
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
-      {/* Part: the name (tap to correct it) */}
+      {/* Part: the name (tap to correct it through the picker); a long name wraps onto two lines inside the same height */}
       <div className="col-span-2 md:col-span-1 h-9 flex items-center gap-1.5 min-w-0">
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
-        {editingName && !readOnly ? (
-          <Input value={name} onChange={(e) => queue(latest.current.v, e.target.value)} onBlur={() => setEditingName(false)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditingName(false); flushNow(); } }} list="part-pool" aria-label="Part name" className="h-9 min-h-9 w-full font-bold" textCase="sentence" autoFocus />
-        ) : (
-          <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`h-9 min-w-0 flex-1 truncate text-left font-bold disabled:cursor-default ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? undefined : `${name} · tap to correct the name`}>{name}</button>
-        )}
+        <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`h-9 min-w-0 flex-1 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? undefined : `${name} · tap to correct the name`} data-part-name>
+          <span className="block line-clamp-2 text-[13px] leading-[1.15]">{name}</span>
+        </button>
         {row.diagramUrl ? <a href={row.diagramUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold underline underline-offset-4">Diagram</a> : null}
+        {editingName && !readOnly ? <PartPicker title={`Correct the name: ${name}`} catalogue={catalogue} selected={[]} itemKey={null} mode="rename" onPick={renameTo} onClose={() => setEditingName(false)} /> : null}
       </div>
       {/* Qty: − and +, and the box itself */}
       <span className="h-9 inline-flex items-center gap-0.5">
@@ -402,18 +433,20 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
         >
           <option value="">Supplier…</option>
           {!supplier && v.supplier ? <option value="__text">{v.supplier}</option> : null}
-          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}{s.discount ? ` · ${s.discount}%` : ""}</option>)}
+          {/* The name only, so it shows in full; the standard discount lands in the Disc box when the supplier is picked */}
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           <option value="__add">+ Add a supplier…</option>
         </select>
       )}
       {/* Availability: one dropdown, the days box beside it only for Other */}
       {readOnly ? textCell(availabilityWords(v.availability, v.days)) : (
         <span className="h-9 flex items-center gap-1 min-w-0">
-          <select value={choice} onChange={(e) => changeAvailability(e.target.value as AvailabilityChoice, e.currentTarget)} className={`${select(v.availability === "to_order" ? "days" : "availability")} basis-[62%]`} aria-label="Availability">
+          <select value={choice} onChange={(e) => changeAvailability(e.target.value as AvailabilityChoice, e.currentTarget)} className={`${select(v.availability === "to_order" ? "days" : "availability")} flex-1`} aria-label="Availability">
             <option value="">Availability…</option>
             {AVAILABILITY_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
-          <Input value={v.days} onChange={(e) => change({ days: e.target.value })} inputMode="numeric" placeholder="days" className={`h-9 min-h-9 basis-[38%] min-w-0 px-1 text-xs text-center ${choice === "other" ? "" : "invisible"} ${missingField("days") ? "border-red-bar" : ""}`} aria-label="Days until it arrives" tabIndex={choice === "other" ? undefined : -1} />
+          {/* The days box is there only for Other…, so the dropdown shows its full text the rest of the time (the row's height never changes) */}
+          {choice === "other" ? <Input value={v.days} onChange={(e) => change({ days: e.target.value })} inputMode="numeric" placeholder="days" className={`h-9 min-h-9 w-14 shrink-0 px-1 text-xs text-center ${missingField("days") ? "border-red-bar" : ""}`} aria-label="Days until it arrives" /> : null}
         </span>
       )}
       {/* The three-dot menu: narrow, always visible, opens upwards near the bottom */}

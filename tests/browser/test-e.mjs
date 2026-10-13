@@ -132,7 +132,7 @@ await section("2-6 inspection form", async () => {
   if (await disc.count()) {
     await disc.getByRole("button", { name: "Bad" }).click();
     await sleep(150);
-    await disc.getByRole("button", { name: "Close to minimum" }).click();
+    await disc.locator("button", { hasText: /^Close to minimum$/ }).first().click(); // the disc condition chip (a learned suggestion chip may carry the same words)
     await sleep(300);
     const text = (await disc.textContent()) ?? "";
     check("6: the remark is written from the choices and the box stays folded", /Remark: Close to minimum/i.test(text) && (await disc.getByRole("button", { name: "Edit the remark" }).count()) === 1, text.replace(/\s+/g, " ").slice(0, 200));

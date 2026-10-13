@@ -19,7 +19,8 @@ function docLine(l: InvoiceLineRow, vatPercent: number): DocLine {
   return {
     description: l.description,
     details: l.hours !== null ? null : l.details,
-    partNumber: l.part_number,
+    // Part numbers stay off every customer document (the LPO below is the supplier's copy and keeps them).
+    partNumber: null,
     qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
     rate: l.unit_price,
     amount: l.amount_aed,

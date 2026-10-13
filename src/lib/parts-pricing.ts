@@ -9,13 +9,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * blockers, the job card) goes through here, so one definition of "priced" holds everywhere. Removed rows ("not
  * needed") stay in the list, greyed, and count for nothing.
  */
-export const PRICING_PART_SELECT = "id, part_request_id, description, part_number, part_type, brand, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status";
+export const PRICING_PART_SELECT = "id, part_request_id, description, original_description, part_number, part_type, brand, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status";
 export const PRICING_REQUEST_SELECT = "id, label, status, quantity, closed_reason, created_at, removed_at, removed_by, removed_reason";
 
 export type PricingPart = {
   id: string;
   part_request_id: string | null;
   description: string;
+  /** The technician's words, when Parts corrected the name. */
+  original_description?: string | null;
   part_number: string | null;
   part_type: string | null;
   brand: string | null;

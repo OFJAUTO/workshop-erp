@@ -1,18 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PAIR_CHOICES, PART_POSITIONS, SINGLE_POSITIONS, goesWithOffers, newEntryId, offerEntry, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { CATEGORY_ORDER, PAIR_CHOICES, PART_POSITIONS, SINGLE_POSITIONS, goesWithOffers, newEntryId, offerEntry, sortCategories, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 
 /** A part sold per set is asked Front or Rear; the quantity counts sets. */
 const SET_POSITIONS = ["Front", "Rear"] as const;
 
 /**
- * "+ Parts": a centre window over the owner's parts pool. Several parts are ticked, each with its
- * quantity and, where it matters, the position. A paired part (control arms, discs...) asks Front pair,
- * Rear pair or All four, with "One side only…" for a single corner. Parts that go with a picked one
- * (a wear sensor with brake pads) are offered under the list, never added by themselves. Suggested parts
- * for the finding come first, then the most used, then the categories; a search box finds anything; a part
- * not in the pool is added as a custom part. The window stays open for several taps; one Done button.
+ * The one parts picker, used wherever a part is chosen: the technician's inspection, the Parts desk and the
+ * advisor's "+ Add a part". A centre window over the owner's parts pool: categories on the left (Servicing,
+ * Brakes, Wheels and tyres, Suspension and steering, Engine, Fuel and exhaust, Cooling, Air conditioning,
+ * Transmission and driveline, Electrical, Other), the parts of that category on the right, a search box on top.
+ *
+ * Picking: several parts are tapped, each turns light green with a tick, with its quantity and, only where it
+ * matters, the position (a paired part asks Front pair, Rear pair or All four, with "One side only…"); parts that
+ * go with a picked one are offered under the list, never added by themselves; one Done button.
+ * Renaming (mode "rename"): one tap picks the new name and closes.
+ * Manual is always there: "Custom part" at the bottom, and a search with no match offers "Use '<typed>' as a custom part".
  */
 export function PartPicker({
   title,
@@ -21,7 +25,9 @@ export function PartPicker({
   suggested = [],
   itemKey,
   source = "item",
+  mode = "pick",
   onDone,
+  onPick,
   onClose,
 }: {
   title: string;
@@ -32,7 +38,11 @@ export function PartPicker({
   suggested?: CatalogueRow[];
   itemKey: string | null;
   source?: PartsListEntry["source"];
-  onDone: (entries: PartsListEntry[]) => void;
+  /** "pick": several parts with quantity and position, then Done. "rename": one tap chooses a name. */
+  mode?: "pick" | "rename";
+  onDone?: (entries: PartsListEntry[]) => void;
+  /** Rename mode: the chosen pool part (or a custom name with no pool row). */
+  onPick?: (name: string, row: CatalogueRow | null) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -40,7 +50,10 @@ export function PartPicker({
   const [picked, setPicked] = useState<Map<string, PartsListEntry>>(() => new Map(selected.map((e) => [keyOf(e), e])));
   // Paired parts whose single corners were asked for with "One side only…".
   const [singles, setSingles] = useState<Set<string>>(new Set());
-  const categories = useMemo(() => Array.from(new Set(catalogue.map((c) => c.category))), [catalogue]);
+  // "Custom part" at the bottom: a box to type the name.
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customText, setCustomText] = useState("");
+  const categories = useMemo(() => sortCategories(Array.from(new Set(catalogue.map((c) => c.category)))), [catalogue]);
   const mostUsed = useMemo(() => [...catalogue].sort((a, b) => b.usage_count - a.usage_count).slice(0, 12), [catalogue]);
   const q = query.trim().toLowerCase();
   const shown: CatalogueRow[] = q
@@ -54,8 +67,13 @@ export function PartPicker({
   const customPicked = Array.from(picked.values()).filter((e) => !e.catalogue_id && !shown.some((c) => keyOf(e) === c.id));
   const exact = q ? catalogue.some((c) => c.name.toLowerCase() === q) : true;
   const offers = goesWithOffers(Array.from(picked.values()), catalogue);
+  const renaming = mode === "rename";
 
   function toggle(row: CatalogueRow) {
+    if (renaming) {
+      onPick?.(row.name, row.id.startsWith("custom:") ? null : row);
+      return;
+    }
     setPicked((prev) => {
       const next = new Map(prev);
       if (next.has(row.id)) next.delete(row.id);
@@ -63,12 +81,18 @@ export function PartPicker({
       return next;
     });
   }
-  function addCustom() {
-    const name = query.trim().slice(0, 120);
+  function addCustom(raw: string) {
+    const name = raw.trim().slice(0, 120);
     if (!name) return;
+    if (renaming) {
+      onPick?.(name, null);
+      return;
+    }
     const key = `custom:${name.toLowerCase()}`;
     setPicked((prev) => new Map(prev).set(key, { id: newEntryId(), catalogue_id: null, name, qty: 1, positions: [], item_key: itemKey, source, note: null, unit: "pc" }));
     setQuery("");
+    setCustomText("");
+    setCustomOpen(false);
   }
   function update(key: string, patch: Partial<PartsListEntry>) {
     setPicked((prev) => {
@@ -98,7 +122,7 @@ export function PartPicker({
   }
 
   const tabBtn = (id: string, label: string) => (
-    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm font-semibold whitespace-nowrap ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`}>
+    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm font-semibold whitespace-nowrap ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`} data-category={id}>
       {label}
     </button>
   );
@@ -109,13 +133,13 @@ export function PartPicker({
     const pairOn = (choice: (typeof PAIR_CHOICES)[number]) => !!entry && entry.positions.length === choice.positions.length && choice.positions.every((p) => entry.positions.includes(p));
     const showSingles = singles.has(key) || (!!entry && entry.positions.length > 0 && !PAIR_CHOICES.some(pairOn));
     return (
-      <div key={c.id} className={`rounded-control border ${entry ? "border-green bg-green-soft" : "border-line"} flex flex-col`}>
-        <button type="button" onClick={() => toggle(c as CatalogueRow)} aria-pressed={!!entry} className="min-h-12 flex items-center gap-3 px-3 py-2 text-left">
-          <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-extrabold ${entry ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>{entry ? "✓" : ""}</span>
+      <div key={c.id} className={`rounded-control border ${entry ? "border-green bg-green-soft" : "border-line"} flex flex-col`} data-part-row={c.name}>
+        <button type="button" onClick={() => toggle(c as CatalogueRow)} aria-pressed={renaming ? undefined : !!entry} className="min-h-12 flex items-center gap-3 px-3 py-2 text-left">
+          {!renaming ? <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-extrabold ${entry ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>{entry ? "✓" : ""}</span> : null}
           <span className="font-semibold">{c.name}</span>
           <span className="ml-auto text-xs text-muted">{c.category}</span>
         </button>
-        {entry ? (
+        {entry && !renaming ? (
           <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
             <span className="inline-flex items-center rounded-control border border-line-strong bg-white">
               <button type="button" aria-label="One less" onClick={() => update(key, { qty: Math.max(1, entry.qty - 1) })} className="min-h-10 w-10 text-lg font-bold">−</button>
@@ -146,31 +170,31 @@ export function PartPicker({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={title} onClick={onClose} data-part-picker={mode}>
       <div className="w-full max-w-2xl rounded-card bg-white p-5 flex flex-col gap-3 shadow-xl max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-lg font-extrabold">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button>
         </div>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type to find a part…" autoFocus spellCheck lang="en" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && q && !exact) { e.preventDefault(); addCustom(query); } }} placeholder="Type to find a part…" autoFocus spellCheck lang="en" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" aria-label="Find a part" />
         <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-3 min-h-0 flex-1">
-          <div className="flex sm:flex-col gap-1 overflow-auto">
+          <div className="flex sm:flex-col gap-1 overflow-auto" data-categories>
             {suggested.length ? tabBtn("suggested", "Suggested") : null}
             {tabBtn("most", "Most used")}
             {categories.map((c) => tabBtn(c, c))}
           </div>
-          <div className="overflow-auto flex flex-col gap-1.5">
+          <div className="overflow-auto flex flex-col gap-1.5" data-part-list>
             {shown.length === 0 && !q ? <p className="text-sm text-muted p-2">Pick a category, or start typing.</p> : null}
             {shown.map((c) => row(c, picked.get(c.id)))}
-            {customPicked.map((e) => row({ id: keyOf(e), name: e.name, needs_position: true, category: "Custom" }, e))}
+            {!renaming ? customPicked.map((e) => row({ id: keyOf(e), name: e.name, needs_position: true, category: "Custom" }, e)) : null}
             {q && !exact ? (
-              <button type="button" onClick={addCustom} className="min-h-12 rounded-control border border-dashed border-line-strong px-3 text-left text-sm font-bold">
-                + Add &quot;{query.trim()}&quot; as a custom part
+              <button type="button" onClick={() => addCustom(query)} className="min-h-12 rounded-control border border-dashed border-line-strong px-3 text-left text-sm font-bold" data-use-custom>
+                Use &quot;{query.trim()}&quot; as a custom part
               </button>
             ) : null}
           </div>
         </div>
-        {offers.length ? (
+        {offers.length && !renaming ? (
           <div className="flex flex-wrap items-center gap-1.5 rounded-control bg-chip p-2 text-xs" data-goes-with>
             <span className="font-semibold">Goes with:</span>
             {offers.map((o) => (
@@ -178,11 +202,29 @@ export function PartPicker({
             ))}
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
-          <span className="text-sm text-muted">{picked.size ? `${picked.size} part${picked.size === 1 ? "" : "s"} picked. Keep tapping, then Done.` : "Nothing picked yet"}</span>
-          <button type="button" onClick={() => onDone(Array.from(picked.values()))} className="min-h-12 rounded-control bg-ink px-6 text-base font-bold text-white">
-            Done
-          </button>
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          {customOpen ? (
+            <div className="flex flex-wrap items-center gap-2" data-custom-part>
+              <input value={customText} onChange={(e) => setCustomText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(customText); } }} placeholder="Part name, in your own words" autoFocus spellCheck lang="en" className="min-h-11 flex-1 min-w-[12rem] rounded-control border border-line-strong px-3 text-sm outline-none focus:border-ink" aria-label="Custom part name" />
+              <button type="button" onClick={() => addCustom(customText)} disabled={!customText.trim()} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-40">{renaming ? "Use this name" : "Add"}</button>
+              <button type="button" onClick={() => setCustomOpen(false)} className="min-h-11 rounded-control px-3 text-sm font-semibold text-muted">Cancel</button>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-2">
+            {!customOpen ? (
+              <button type="button" onClick={() => { setCustomText(query.trim()); setCustomOpen(true); }} className="min-h-11 rounded-control border border-dashed border-line-strong px-3 text-sm font-bold" data-custom-part-button>Custom part</button>
+            ) : <span />}
+            {renaming ? (
+              <span className="text-sm text-muted">Tap the new name.</span>
+            ) : (
+              <>
+                <span className="text-sm text-muted ml-auto">{picked.size ? `${picked.size} part${picked.size === 1 ? "" : "s"} picked. Keep tapping, then Done.` : "Nothing picked yet"}</span>
+                <button type="button" onClick={() => onDone?.(Array.from(picked.values()))} className="min-h-12 rounded-control bg-ink px-6 text-base font-bold text-white">
+                  Done
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -192,3 +234,5 @@ export function PartPicker({
 function keyOf(e: PartsListEntry) {
   return e.catalogue_id ?? `custom:${e.name.toLowerCase()}`;
 }
+
+export { CATEGORY_ORDER };

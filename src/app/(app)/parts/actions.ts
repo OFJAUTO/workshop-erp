@@ -45,7 +45,8 @@ export async function syncLineForPart(jobId: string, partId: string, by: string)
   ]);
   if (!pRaw) return;
   const p = toPart(pRaw as Record<string, unknown>);
-  const title = p.part_number ? `${p.description} (${p.part_number})` : p.description;
+  // The name only: part numbers never reach a customer document (they live on the part item for the LPO and the supplier list).
+  const title = p.description;
   const shared = { title, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, positions: p.positions ?? null, updated_by: by };
   if (p.confirm_status === "rejected" || !p.is_active) {
     if (line) await admin.from("quotation_lines").update({ is_active: false, updated_by: by }).eq("id", line.id);
@@ -310,7 +311,24 @@ export async function removePart(partId: string) {
    Evening of 11 October 2026: the Parts table saves itself row by row.
    --------------------------------------------------------------------------- */
 
-export type RowSave = { requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number };
+export type RowSave = { requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[] };
+
+/**
+ * A custom part name typed by Parts (not in the owner's pool) is counted, so names used more than once are
+ * offered to the owner in Settings > Parts list, exactly like the technician's custom parts.
+ */
+export async function noteCustomPartNames(names: string[]): Promise<void> {
+  const staff = await getCurrentStaff();
+  if (!staff || !names.length) return;
+  const settings = await getSettings();
+  const pool = { ...((settings.part_pool_custom ?? {}) as Record<string, number>) };
+  for (const raw of names) {
+    const name = raw.trim().slice(0, 120);
+    if (!name) continue;
+    pool[name] = (Number(pool[name]) || 0) + 1;
+  }
+  await createAdminClient().from("settings").upsert({ key: "part_pool_custom", value: pool, label: "Custom parts used", description: "Custom part names typed by staff, with counts, offered to the owner to add to the pool." }, { onConflict: "key" });
+}
 
 const numOrNull = (v: string | number | undefined | null) => {
   if (v === undefined || v === null) return null;
@@ -446,6 +464,8 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
       if (Math.abs(quantity - (Number(req.quantity) || 1)) > 0.001) qtyChange = { from: Number(req.quantity) || 1, to: quantity };
     }
     if (!description) return { error: "Type the part name." };
+    // A part added by Parts from the picker brings its positions along.
+    if (!row.optionOf && !requestId && Array.isArray(row.positions)) positions = row.positions.map((p) => String(p).slice(0, 40)).filter(Boolean).slice(0, 8);
     const { data: req2 } = requestId ? await admin.from("part_requests").select("label, quantity").eq("id", requestId).maybeSingle() : { data: null };
     const { data: created, error } = await admin
       .from("part_items")

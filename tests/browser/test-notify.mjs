@@ -5,6 +5,16 @@
 //   node --env-file=.env.local tests/browser/test-notify.mjs
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted } from "./pw-lib.mjs";
 
+/** Ticks a technician; one already on a car asks "Assign anyway?" first (depends on the live workshop). */
+async function tickTech(page, box) {
+  if (await box.isChecked()) return;
+  await box.click({ force: true });
+  await new Promise((r) => setTimeout(r, 250));
+  const yes = page.getByRole("button", { name: "Yes, assign" });
+  if (await yes.count()) { await yes.first().click(); await new Promise((r) => setTimeout(r, 250)); }
+  if (!(await box.isChecked())) await box.check({ force: true });
+}
+
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 14 * 60 * 1000).unref();
 cleanupDb();
@@ -57,7 +67,7 @@ try {
     const box = page.locator(`input[name=technician][value='${techId}']`).first();
     const values = await page.locator("input[name=technician]").evaluateAll((els) => els.map((e) => e.getAttribute("value")));
     check("assign page lists the free technician", (await box.count()) === 1, `tech ${techId} · boxes ${values.join(",")} · ${page.url()}`);
-    await box.check({ force: true });
+    await tickTech(page, box);
     await page.locator("label:has(input[name=road_test][value=needed])").first().click();
     await page.getByRole("button", { name: "Assign" }).first().click();
     await submitted(page);
@@ -234,7 +244,7 @@ try {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}`);
     const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    if (await box.count()) await box.check({ force: true });
+    if (await box.count()) await tickTech(page, box);
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(new Date().toISOString().slice(0, 10));
     await page.getByRole("button", { name: "Release to workshop" }).click();

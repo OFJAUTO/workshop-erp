@@ -1,0 +1,40 @@
+Product
+Description
+Quantity
+Unit Price(AED)
+Availability
+WipNo
+Total
+LineNo
+LR123456
+FRONT BRAKE PAD SET
+1
+7,849.00
+In stock
+45512
+7,849.00
+1
+LR098765
+BRAKE DISC FRONT
+2
+1,250.50
+1 day
+45512
+2,501.00
+2
+LR555111
+WEAR SENSOR FRONT
+1
+1,503.00
+will update
+45512
+1,503.00
+3
+
+
+Gross Amount
+11,853.00
+Vat
+592.65
+Net AED
+12,445.65

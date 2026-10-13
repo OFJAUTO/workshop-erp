@@ -135,10 +135,12 @@ await section("3-12-13 Parts table", async () => {
   const told = await sql("select s.role_id from public.notifications n join public.staff s on s.id = n.staff_id where n.id > $1 and n.job_id = $2", [mark, jobId]);
   check("advisor and workshop manager told of the quantity change (12)", told.some((t) => t.role_id === "service_advisor") && told.some((t) => t.role_id === "workshop_manager"), JSON.stringify(told));
   // 13: the name, with the technician's words kept.
+  // Since 13 October the name is corrected through the categorised picker: "Custom part" at the bottom takes a typed name.
   await page.getByRole("button", { name: "Brake pads", exact: true }).first().click();
-  const nameBox = page.locator("input[aria-label='Part name']").first();
-  await nameBox.fill("Front brake pads, set");
-  await nameBox.press("Enter");
+  const picker = page.locator("[data-part-picker='rename']");
+  await picker.locator("[data-custom-part-button]").click();
+  await picker.locator("input[aria-label='Custom part name']").fill("Front brake pads, set");
+  await picker.getByRole("button", { name: "Use this name" }).click();
   await sleep(2500);
   const renamed = await sql("select description, original_description from public.part_items where job_id = $1 and original_description = 'Brake pads'", [jobId]);
   check("name corrected, technician's words kept (13)", renamed[0]?.description === "Front brake pads, set" && renamed[0]?.original_description === "Brake pads", JSON.stringify(renamed));

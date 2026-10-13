@@ -3,33 +3,45 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui";
-import { uploadFile } from "@/lib/upload-client";
+import { PhotoButton } from "./PhotoButton";
+import type { Checklist } from "@/lib/media";
+import { reportUploadFailure, uploadFile } from "@/lib/upload-client";
 
 const FILL = "#e6e7ea";
 const MAX_ZOOM = 4;
 const OUT_W = 960;
 const OUT_H = 600;
 
+type Phase = "idle" | "uploading" | "failed" | "saved";
+
 /**
  * The car picture for the dashboard tile, cropped on the spot: a frame in the tile's shape (16:10),
- * pinch and drag on a phone, slider and drag on a PC, then "Use photo". Tapping the finished item
- * opens the crop again with the current picture. Nothing here sits inside a form, so no slider value
- * can ever block a save.
+ * pinch and drag on a phone, slider and drag on a PC, then "Use photo". The cropped picture stays on the
+ * item as a preview with "Uploading…" until the server confirms the saved file; only then is it Done. A
+ * failed or interrupted upload shows red with the preview and Retry, never a quiet "Waiting". Closing the
+ * crop with a photo in it asks "Use this photo as it is?" instead of throwing it away. Tapping the finished
+ * item opens the crop again with the current picture.
  */
-export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car picture (for our dashboard)" }: { jobId: string; token?: string; done: boolean; currentUrl?: string | null; label?: string }) {
+export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car picture (for our dashboard)", attempted = false, onChecklist }: { jobId: string; token?: string; done: boolean; currentUrl?: string | null; label?: string; /** Someone tried to finish the gate-in: a missing picture shows in red. */ attempted?: boolean; /** The server's fresh checklist once the file is recorded. */ onChecklist?: (c: Partial<Checklist>) => void }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [progress, setProgress] = useState<number | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
+  const [askClose, setAskClose] = useState(false);
   const [loadingCurrent, setLoadingCurrent] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const previewRef = useRef<string | null>(null);
+  useEffect(() => { previewRef.current = preview; }, [preview]);
+  useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
 
   const minZoom = img ? Math.min(OUT_W / img.naturalWidth, OUT_H / img.naturalHeight) / Math.max(OUT_W / img.naturalWidth, OUT_H / img.naturalHeight) : 1;
   const clampZoom = useCallback((z: number) => Math.min(MAX_ZOOM, Math.max(minZoom, z)), [minZoom]);
@@ -49,7 +61,7 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     [img, zoom, offset, clampZoom],
   );
 
-  // Preview
+  // Preview inside the crop frame
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !img) return;
@@ -70,21 +82,22 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     setError(null);
   };
 
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
+  function onFiles(files: File[]) {
+    const file = files[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => show(image);
-    image.onerror = () => setError("That photo could not be opened. Try another one.");
+    image.onerror = () => {
+      setError("That photo could not be opened. Try another one.");
+      reportUploadFailure({ jobId, kind: "car_picture", step: "decode", error: `Could not decode ${file.type || "image"} (${file.size} bytes)`, token, sizeBytes: file.size, contentType: file.type });
+    };
     image.src = url;
   }
 
   /** Opens the crop with the current picture, so it can be re-framed without a new photo. */
   function openWithCurrent() {
     setOpen(true);
-    setSaved(false);
     if (!currentUrl || !done) return;
     setLoadingCurrent(true);
     const image = new Image();
@@ -92,6 +105,21 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     image.onload = () => { setLoadingCurrent(false); show(image); };
     image.onerror = () => { setLoadingCurrent(false); setImg(null); };
     image.src = currentUrl;
+  }
+
+  /** Closing the crop with a photo in it: ask before throwing the photo away. */
+  function requestClose() {
+    if (img && !loadingCurrent) {
+      setAskClose(true);
+      return;
+    }
+    setOpen(false);
+    setImg(null);
+  }
+  function discard() {
+    setAskClose(false);
+    setOpen(false);
+    setImg(null);
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -123,6 +151,27 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     if (pointers.current.size < 2) pinch.current = null;
   }
 
+  /** The upload itself: the preview stays on the item until the server says the file is recorded and counted. */
+  async function send(blob: Blob) {
+    setPhase("uploading");
+    setProgress(0);
+    setError(null);
+    try {
+      const checklist = (await uploadFile(jobId, "car_picture", new File([blob], "car.jpg", { type: "image/jpeg" }), "image/jpeg", setProgress, { token })) as Partial<Checklist>;
+      if (checklist.carPicture !== true) {
+        reportUploadFailure({ jobId, kind: "car_picture", step: "register", error: "Sent and recorded, but the checklist did not count the car picture", token, sizeBytes: blob.size, contentType: "image/jpeg" });
+        throw new Error("The picture was sent but the gate-in did not count it. Tap Retry.");
+      }
+      setPhase("saved");
+      setPendingBlob(null);
+      onChecklist?.(checklist);
+      router.refresh();
+    } catch (err) {
+      setPhase("failed");
+      setError(err instanceof Error ? err.message : "Upload failed.");
+    }
+  }
+
   async function usePhoto() {
     if (!img) return;
     const out = document.createElement("canvas");
@@ -140,48 +189,71 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     } catch {
       blob = null;
     }
-    if (!blob) { setError("The current picture cannot be re-cropped here. Take or choose a new photo."); return; }
-    setError(null);
-    setProgress(0);
-    try {
-      await uploadFile(jobId, "car_picture", new File([blob], "car.jpg", { type: "image/jpeg" }), "image/jpeg", setProgress, { token });
-      setSaved(true);
-      setOpen(false);
-      setImg(null);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      setProgress(null);
+    if (!blob) {
+      setError("The current picture cannot be re-cropped here. Take or choose a new photo.");
+      reportUploadFailure({ jobId, kind: "car_picture", step: "decode", error: "Canvas could not produce the cropped JPEG", token });
+      return;
     }
+    setAskClose(false);
+    setOpen(false);
+    setImg(null);
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setPreview(URL.createObjectURL(blob));
+    setPendingBlob(blob);
+    await send(blob);
   }
 
-  const finished = done || saved;
+  const saved = phase === "saved";
+  const finished = (done || saved) && phase !== "failed" && phase !== "uploading";
+  const uploading = phase === "uploading";
+  const failed = phase === "failed";
+  const red = failed || (attempted && !finished && !uploading);
   const previewW = 360;
   const previewH = Math.round((previewW * OUT_H) / OUT_W);
   const sliderValue = Math.round(((clampZoom(zoom) - minZoom) / (MAX_ZOOM - minZoom)) * 100);
+  const text = uploading
+    ? `Uploading… ${Math.round(progress * 100)}%`
+    : failed
+      ? (error ?? "Couldn't save the picture.")
+      : finished
+        ? "Done. Tap to replace."
+        : attempted
+          ? "Missing. Tap to take the photo."
+          : "Front three-quarter view. Tap to take a photo, then frame it.";
 
   return (
-    <div className="flex flex-col gap-2">
-      <button type="button" onClick={() => (open ? setOpen(false) : openWithCurrent())} className={`flex min-h-16 w-full items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${finished ? "border-green bg-green-soft" : "border-line-strong bg-white"}`}>
-        <span className="flex flex-col">
-          <span className="font-bold">{label}</span>
-          <span className="text-xs text-muted">{finished ? "Done. Tap to replace." : "Front three-quarter view. Tap to take a photo, then frame it."}</span>
+    <div className="flex flex-col gap-2" data-media-item="car_picture" data-missing={finished ? "false" : "true"} data-media-status={uploading ? "uploading" : failed ? "failed" : finished ? "done" : "waiting"}>
+      <button type="button" data-car-tile onClick={() => (open ? requestClose() : openWithCurrent())} disabled={uploading} className={`flex min-h-16 w-full items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${finished ? "border-green bg-green-soft" : red ? "border-red-bar bg-red-soft" : uploading ? "border-amber-bar bg-amber-soft" : "border-line-strong bg-white"}`}>
+        <span className="flex items-center gap-3 min-w-0">
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview} alt="" className={`h-12 w-[4.8rem] shrink-0 rounded-md object-cover ${failed ? "opacity-70" : ""}`} data-car-preview />
+          ) : null}
+          <span className="flex flex-col min-w-0">
+            <span className="font-bold">{label}</span>
+            <span className={`text-xs ${failed ? "font-semibold text-red" : "text-muted"}`}>{text}</span>
+          </span>
         </span>
-        <span className={`text-2xl font-bold ${finished ? "text-green" : "text-faint"}`}>{finished ? "✓" : "+"}</span>
+        <span className={`text-2xl font-bold ${finished ? "text-green" : red ? "text-red" : "text-faint"}`}>{finished ? "✓" : uploading ? "…" : red ? "!" : "+"}</span>
       </button>
+      {uploading ? (
+        <div className="h-2 rounded-full bg-track overflow-hidden">
+          <div className="h-full bg-ink transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+        </div>
+      ) : null}
+      {failed && pendingBlob ? (
+        <Button type="button" size="md" className="self-start" onClick={() => void send(pendingBlob)} data-retry>Retry</Button>
+      ) : null}
       {open ? (
-        <div className="rounded-card border border-ink p-3 flex flex-col gap-3">
+        <div className="rounded-card border border-ink p-3 flex flex-col gap-3" data-car-crop>
           <div className="flex flex-wrap gap-2">
-            <label className="inline-flex">
-              <input type="file" accept="image/*" capture="environment" onChange={onFile} className="sr-only" />
-              <span className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white cursor-pointer">Take a photo</span>
-            </label>
-            <label className="inline-flex">
-              <input type="file" accept="image/*" onChange={onFile} className="sr-only" />
-              <span className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold cursor-pointer">From gallery</span>
-            </label>
-            <Button type="button" tone="ghost" size="md" onClick={() => { setOpen(false); setImg(null); }}>Cancel</Button>
+            <PhotoButton source="camera" className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white" title="Car picture" onFiles={onFiles} onProblem={(m) => reportUploadFailure({ jobId, kind: "car_picture", step: "camera", error: m, token })}>
+              Take a photo
+            </PhotoButton>
+            <PhotoButton source="gallery" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" title="Car picture" onFiles={onFiles}>
+              From gallery
+            </PhotoButton>
+            <Button type="button" tone="ghost" size="md" onClick={requestClose}>Cancel</Button>
           </div>
           {loadingCurrent ? <p className="text-xs text-muted">Loading the current picture…</p> : null}
           {img ? (
@@ -195,10 +267,20 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
                 <Button type="button" tone="ghost" size="md" onClick={() => { setZoom(minZoom); setOffset({ x: 0, y: 0 }); }}>Fit whole photo</Button>
               </div>
               <p className="text-xs text-muted">Drag to move, pinch or use the slider to zoom. The frame is the dashboard tile.</p>
-              <Button type="button" size="lg" onClick={usePhoto} disabled={progress !== null}>{progress !== null ? `Saving… ${Math.round(progress * 100)}%` : "Use photo"}</Button>
+              <Button type="button" size="lg" onClick={usePhoto}>Use photo</Button>
             </>
           ) : null}
-          {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
+          {askClose ? (
+            <div className="rounded-card border border-line-strong bg-chip p-3 flex flex-col gap-2" data-ask-close>
+              <span className="text-sm font-bold">Use this photo as it is?</span>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="md" onClick={usePhoto}>Use as it is</Button>
+                <Button type="button" tone="ghost" size="md" onClick={discard}>Discard the photo</Button>
+                <Button type="button" tone="ghost" size="md" onClick={() => setAskClose(false)}>Keep framing</Button>
+              </div>
+            </div>
+          ) : null}
+          {error && !failed ? <p className="text-sm font-semibold text-red">{error}</p> : null}
         </div>
       ) : null}
     </div>

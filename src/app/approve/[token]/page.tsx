@@ -12,6 +12,7 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
+import { CustomerVideos } from "@/components/CustomerVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,15 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   }
 
   const advisor = await advisorContact(admin, [req.sent_by, job.gated_in_by]);
+  // The videos go to their own player: fresh addresses on Play, and a "getting ready" slot for one still on its way.
+  const videoRows = media
+    .filter((m) => m.kind === "video" || m.kind === "video_exterior" || m.kind === "video_interior")
+    .map((m) => ({ id: m.id, kind: m.kind, url: mediaUrls.get(m.storage_path) ?? "", duration_s: m.duration_s, taken_at: m.taken_at }))
+    .filter((v) => v.url);
+  const videosComplete = videoRows.some((v) => v.kind === "video") || (videoRows.some((v) => v.kind === "video_exterior") && videoRows.some((v) => v.kind === "video_interior"));
+  // A server page: rendered once per request, the clock is read once (the players renew their addresses from it).
+  // eslint-disable-next-line react-hooks/purity
+  const signedAt = Date.now();
   const dirty = gateIn.cleanliness === "dirty" || gateIn.cleanliness === "very_dirty";
   const approved = !!req.approved_at;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
@@ -117,7 +127,10 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       </section>
       <section className="flex flex-col gap-1">
         <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
-        <div className="py-1"><MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} damageNote={gateIn.damage_note} stacked /></div>
+        <div className="py-1 flex flex-col gap-4">
+          <CustomerVideos token={token} initial={videoRows} expected={videoRows.some((v) => v.kind === "video") ? ["video"] : ["video_exterior", "video_interior"]} complete={videosComplete} signedAt={signedAt} />
+          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} damageNote={gateIn.damage_note} stacked hideVideos />
+        </div>
         {dirty ? <p className="text-xs font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
         {gateIn.dash_cam ? <p className="text-xs font-semibold">Dash cam fitted: it will be disconnected as per the terms and conditions.</p> : null}
       </section>

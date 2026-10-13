@@ -27,12 +27,13 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     const unit = lineUnitPrice(l);
     const vat = round2(amount * (vatPct / 100));
     const part = partOf(l.part_item_id);
+    // Part numbers are never shown to the customer; an old title that still carries one in brackets loses it here.
     const number = part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null);
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
       description: withPositions(title, l.positions),
       details: [l.line_type === "part" ? partTypeText(l) : null, l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.details].filter(Boolean).join(" · ") || null,
-      partNumber: number,
+      partNumber: null,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
       amount,

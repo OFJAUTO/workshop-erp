@@ -12,6 +12,7 @@ import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
+import { missingItems } from "@/lib/media-checklist";
 import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
 import { PART_SELECT, loadQuoteSummary, toPart } from "@/lib/quote-data";
@@ -243,7 +244,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <>
             {canEditGateIn && !check.complete && !loose ? (
               <LinkButton href={`/jobs/${id}/media`} size="lg">
-                Add video and photos
+                {(() => { const m = missingItems(check); return m.length === 1 ? `Finish gate-in: ${m[0].name} missing` : `Finish gate-in: ${m.length} items missing (${m.map((x) => x.name).join(", ")})`; })()}
               </LinkButton>
             ) : null}
             {canGateOut ? (

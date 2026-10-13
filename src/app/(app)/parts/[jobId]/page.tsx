@@ -64,7 +64,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const today = dubaiDate();
   const daysOf = (p: PartItem) => daysFromDate(p.delivery_date, today);
   const orderLabel = (p: PartItem) => (p.order_status === "none" ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
-  const infoOf = (r: PartRequest | null) => (r ? [r.positions?.length ? positionsWords(r.positions) : "", r.note ?? ""].filter(Boolean).join(" · ") || null : null);
+  // The request's positions and note; a part added by Parts (no request) shows its own positions.
+  const infoOf = (r: PartRequest | null, p?: PartItem) => (r ? [r.positions?.length ? positionsWords(r.positions) : "", r.note ?? ""].filter(Boolean).join(" · ") || null : p ? [p.positions?.length ? positionsWords(p.positions) : "", "Added by Parts"].filter(Boolean).join(" · ") : null);
   const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
     key,
     requestId: p.part_request_id,
@@ -72,7 +73,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     name: p.description,
     original: p.original_description ?? null,
     techQty: Number(p.quantity) || 1,
-    info: infoOf(r),
+    info: infoOf(r, p),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
     values: valuesOfPart(p, today),
     removed: p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
@@ -138,7 +139,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       <Card className="flex flex-col gap-2 overflow-visible">
-        <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue.map((c) => c.name)} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} removeReasons={reasonsFor(settings, "remove_part")} />
+        <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} removeReasons={reasonsFor(settings, "remove_part")} />
       </Card>
       {canPrice ? <div className="h-20" /> : null}
       {canPrice && inPlanning ? <PartsBar planning={{ unplanned: unplanned.length, planned: !!job.plan_parts_done_at, onAllInStock: allInStock.bind(null, jobId), onPartsPlanned: partsPlanned.bind(null, jobId) }} /> : null}

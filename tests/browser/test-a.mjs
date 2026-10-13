@@ -71,9 +71,12 @@ await section("A1-A2 inspection", async () => {
   const mediaAfter = await page.locator("img[alt='Photo']").count();
   const err = await page.locator("p.text-red").allTextContents();
   check("photo uploaded from the gallery (A1)", mediaAfter > mediaBefore, err.join(" | ").slice(0, 160));
-  const cam = page.locator("label:has-text('+ Photo')").first();
+  // Since 13 October "+ Photo" is a real button: on a touch device it opens the camera inside the page, on a PC the chooser.
+  const cam = page.locator("button:has-text('+ Photo')").first();
   const [chooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 5000 }).catch(() => null), cam.tap()]);
-  check("+ Photo opens the camera chooser (A1)", !!chooser);
+  const cameraOpen = (await page.locator("[data-camera]").count()) > 0;
+  check("+ Photo opens the camera directly (A1)", !!chooser || cameraOpen, chooser ? "chooser" : cameraOpen ? "in-page camera" : "nothing");
+  if (cameraOpen) await page.locator("[data-camera] button[aria-label='Close the camera']").click().catch(() => null);
   const afterUpload = await page.evaluate(() => window.scrollY);
   check("page did not jump after the upload (A2)", afterUpload > 100, String(afterUpload));
   await browser.close();
@@ -289,7 +292,8 @@ await section("PDF checks", async () => {
     const rt = await textOf(`/api/pdf/report/${rtok}`);
     check("report PDF without Technician, Prepared by or Needs (C6, C7)", !/HTTP/.test(rt) && !/Technician\b|Needs:|Prepared by/.test(rt), rt.match(/Technician[^\n]*|Needs:[^\n]*|Prepared by[^\n]*/)?.[0] ?? rt.slice(0, 30));
   } else check("report link for the PDF test", false, JSON.stringify(ins.json ?? ins.text).slice(0, 120));
-  const lpo = await sql("select id from public.purchase_orders order by created_at desc limit 1");
+  // The newest approved LPO: one still waiting for approval has no PDF yet (423), and the live workshop may have one.
+  const lpo = await sql("select id from public.purchase_orders where status <> 'pending_approval' order by created_at desc limit 1");
   if (lpo[0]) {
     const lt = await textOf(`/api/pdf/po/${lpo[0].id}`, true);
     const flat = lt.replace(/\s+/g, "");

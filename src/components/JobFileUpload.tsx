@@ -1,50 +1,73 @@
 "use client";
 
-import { useState } from "react";
-import { putWithProgress } from "@/lib/upload-client";
+import { useRef, useState } from "react";
+import { PhotoButton } from "./PhotoButton";
+import { putWithProgress, reportUploadFailure, type UploadStep } from "@/lib/upload-client";
 
 export type JobFile = { id: string; path: string; url: string | null; caption?: string | null; contentType?: string | null };
 
+const STEP_TIMEOUT_MS = 60_000;
+
 async function uploadOne(jobId: string, kind: string, refId: string | null, file: File, onProgress: (p: number) => void): Promise<JobFile> {
   const type = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
-  const prep = await fetch("/api/files/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, contentType: type }) });
-  const p = (await prep.json()) as { path?: string; url?: string; error?: string };
-  if (!prep.ok || !p.path || !p.url) throw new Error(p.error ?? "Could not prepare the upload.");
-  await putWithProgress(p.url, file, type, onProgress);
-  const reg = await fetch("/api/files/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind, refId, path: p.path, contentType: type, caption: type === "application/pdf" ? file.name.slice(0, 120) : undefined }) });
-  const r = (await reg.json()) as { ok?: boolean; id?: string; url?: string | null; error?: string };
-  if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
-  return { id: r.id, path: p.path, url: r.url ?? null, caption: type === "application/pdf" ? file.name : null, contentType: type };
+  let step: UploadStep = "prepare";
+  try {
+    const prep = await fetch("/api/files/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, contentType: type }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+    const p = (await prep.json()) as { path?: string; url?: string; error?: string };
+    if (!prep.ok || !p.path || !p.url) throw new Error(p.error ?? "Could not prepare the upload.");
+    step = "upload";
+    await putWithProgress(p.url, file, type, onProgress);
+    step = "register";
+    const reg = await fetch("/api/files/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind, refId, path: p.path, contentType: type, caption: type === "application/pdf" ? file.name.slice(0, 120) : undefined }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+    const r = (await reg.json()) as { ok?: boolean; id?: string; url?: string | null; error?: string };
+    if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
+    return { id: r.id, path: p.path, url: r.url ?? null, caption: type === "application/pdf" ? file.name : null, contentType: type };
+  } catch (err) {
+    reportUploadFailure({ jobId, kind: `job_${kind}`, step, error: err, sizeBytes: file.size, contentType: type, extra: { refId } });
+    throw err;
+  }
 }
 
 /**
- * Photos (phone camera or PC) or a PDF attached to a job: work photos per line, the wash, the
- * delivery, a supplier invoice scan, the QC post-scan. Uploads straight to storage with progress.
+ * Photos (the camera inside the page on a phone or tablet, the picker on a PC) or a PDF attached to a job: work
+ * photos per line, the wash, the delivery, a supplier invoice scan, the QC post-scan. Uploads straight to storage
+ * with progress; a failure is logged with the device and shown with Retry, and the button always comes back.
  */
 export function JobFileUpload({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, compact = false }: { jobId: string; kind: string; refId?: string | null; files: JobFile[]; accept?: "photo" | "pdf" | "any"; label?: string; disabled?: boolean; onAdded?: (f: JobFile) => void; compact?: boolean }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const acceptAttr = accept === "pdf" ? "application/pdf,image/*" : accept === "any" ? "image/*,video/*,application/pdf" : "image/*";
+  const [failed, setFailed] = useState<File[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const acceptAttr = accept === "pdf" ? "application/pdf,image/*" : "image/*,video/*,application/pdf";
 
-  async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const list = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  async function handleFiles(list: File[]) {
+    if (!list.length) return;
     setError(null);
-    for (const file of list) {
-      setProgress(0);
-      try {
-        const added = await uploadOne(jobId, kind, refId, file, setProgress);
-        onAdded?.(added);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed.");
-      } finally {
-        setProgress(null);
+    setFailed([]);
+    const notDone: File[] = [];
+    try {
+      for (const file of list) {
+        setProgress(0);
+        try {
+          const added = await uploadOne(jobId, kind, refId, file, setProgress);
+          onAdded?.(added);
+        } catch (err) {
+          notDone.push(file);
+          setError(err instanceof Error ? err.message : "Upload failed.");
+        }
       }
+    } finally {
+      setProgress(null);
     }
+    setFailed(notDone);
   }
 
+  const busy = progress !== null;
+  const btn = `inline-flex ${compact ? "min-h-10" : "min-h-12"} w-fit items-center gap-2 rounded-control border border-line-strong bg-white px-4 text-sm font-bold ${busy ? "opacity-60" : "cursor-pointer"}`;
+  const text = progress !== null ? `Uploading… ${Math.round(progress * 100)}%` : (label ?? (accept === "pdf" ? "Attach PDF or photo" : "Add photo"));
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-job-file-upload>
       {files.length ? (
         <div className="flex flex-wrap gap-2">
           {files.map((f) =>
@@ -58,12 +81,26 @@ export function JobFileUpload({ jobId, kind, refId = null, files, accept = "phot
         </div>
       ) : null}
       {!disabled ? (
-        <label className={`inline-flex ${compact ? "min-h-10" : "min-h-12"} w-fit cursor-pointer items-center gap-2 rounded-control border border-line-strong bg-white px-4 text-sm font-bold`}>
-          <input type="file" accept={acceptAttr} capture={accept === "photo" ? "environment" : undefined} multiple={accept !== "pdf"} onChange={onChange} className="sr-only" disabled={progress !== null} />
-          {progress !== null ? `Uploading… ${Math.round(progress * 100)}%` : (label ?? (accept === "pdf" ? "Attach PDF or photo" : "Add photo"))}
-        </label>
+        <div className="flex flex-wrap gap-2">
+          {accept === "photo" ? (
+            <>
+              <PhotoButton source="camera" multiple disabled={busy} className={btn} title={label ?? "Add photo"} onFiles={(f) => void handleFiles(f)} onProblem={(m) => reportUploadFailure({ jobId, kind: `job_${kind}`, step: "camera", error: m })}>
+                {text}
+              </PhotoButton>
+              <PhotoButton source="gallery" multiple disabled={busy} className={`${btn} text-xs`} title="From gallery" onFiles={(f) => void handleFiles(f)}>
+                From gallery
+              </PhotoButton>
+            </>
+          ) : (
+            <>
+              <input ref={fileRef} type="file" accept={acceptAttr} multiple={accept !== "pdf"} onChange={(e) => { const list = Array.from(e.target.files ?? []); e.target.value = ""; void handleFiles(list); }} className="sr-only" tabIndex={-1} aria-hidden />
+              <button type="button" disabled={busy} onClick={() => { const el = fileRef.current; if (el) { el.value = ""; el.click(); } }} className={btn}>{text}</button>
+            </>
+          )}
+        </div>
       ) : null}
       {error ? <p className="text-xs font-semibold text-red">{error}</p> : null}
+      {failed.length && !busy ? <button type="button" onClick={() => void handleFiles(failed)} className="self-start min-h-10 rounded-control bg-ink px-3 text-sm font-bold text-white" data-retry>Retry{failed.length > 1 ? ` (${failed.length} files)` : ""}</button> : null}
     </div>
   );
 }

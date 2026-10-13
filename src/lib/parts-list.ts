@@ -35,6 +35,17 @@ export type CatalogueRow = {
   goes_with?: string[];
 };
 
+/** The owner's order of the pool's categories in every picker; a category not listed goes at the end, alphabetically. */
+export const CATEGORY_ORDER = ["Servicing", "Brakes", "Wheels and tyres", "Suspension and steering", "Engine", "Fuel and exhaust", "Cooling", "Air conditioning", "Transmission and driveline", "Electrical", "Other"] as const;
+
+export function sortCategories(categories: string[]): string[] {
+  const rank = (c: string) => {
+    const i = CATEGORY_ORDER.findIndex((o) => o.toLowerCase() === c.toLowerCase());
+    return i === -1 ? CATEGORY_ORDER.length : i;
+  };
+  return [...categories].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
 export const PART_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right", "Front", "Rear", "Left", "Right"] as const;
 export const SINGLE_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right"] as const;
 /** The big buttons for a paired part or job: the positions and the quantity that goes with them. */

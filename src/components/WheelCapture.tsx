@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MediaCapture } from "./MediaCapture";
 import { saveMediaDetails } from "@/lib/upload-client";
-import type { WheelState } from "@/lib/media";
+import type { Checklist, WheelState } from "@/lib/media";
 import { WHEEL_CONDITIONS, WHEEL_CONDITION_LABELS, cleanWheelConditions } from "@/lib/wheels";
 
 /**
@@ -17,12 +17,17 @@ export function WheelCapture({
   step,
   enabled,
   token,
+  attempted = false,
+  onChecklist,
 }: {
   jobId: string;
   wheel: WheelState;
   step: number;
   enabled: boolean;
   token?: string;
+  /** Someone tried to finish the gate-in: a missing photo or condition shows in red. */
+  attempted?: boolean;
+  onChecklist?: (c: Partial<Checklist>) => void;
 }) {
   const router = useRouter();
   const [uploaded, setUploaded] = useState(false);
@@ -67,8 +72,11 @@ export function WheelCapture({
     }
   }
 
+  const complete = hasPhoto && saved && picked.length > 0;
+  const conditionMissing = hasPhoto && !complete;
+
   return (
-    <div className={`flex flex-col gap-2 rounded-card border p-3 ${hasPhoto && saved && picked.length > 0 ? "border-green bg-green-soft/40" : "border-line"}`}>
+    <div data-media-item={wheel.kind} data-missing={complete ? "false" : "true"} className={`flex flex-col gap-2 rounded-card border p-3 ${complete ? "border-green bg-green-soft/40" : attempted && conditionMissing ? "border-red-bar bg-red-soft/40" : "border-line"}`}>
       <MediaCapture
         jobId={jobId}
         kind={wheel.kind}
@@ -77,6 +85,9 @@ export function WheelCapture({
         disabled={!enabled}
         hint={enabled ? "Tap to take the wheel photo" : "Take the wheels in order"}
         token={token}
+        attempted={attempted}
+        itemKey={null}
+        onChecklist={onChecklist}
         onUploaded={() => {
           setUploaded(true);
           // A new photo needs its condition chosen again.
@@ -86,7 +97,7 @@ export function WheelCapture({
       />
       {hasPhoto ? (
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-muted">Condition (required, tap all that apply)</span>
+          <span className={`text-xs font-semibold ${attempted && conditionMissing ? "text-red" : "text-muted"}`}>Condition (required, tap all that apply)</span>
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {WHEEL_CONDITIONS.map((c) => {
               const on = picked.includes(c);
@@ -104,7 +115,7 @@ export function WheelCapture({
               );
             })}
           </div>
-          {error ? <p className="text-sm font-semibold text-red">{error}</p> : saved ? <p className="text-xs font-semibold text-green">Saved</p> : picked.length === 0 ? <p className="text-xs font-semibold text-amber">Choose the condition to finish this wheel.</p> : null}
+          {error ? <p className="text-sm font-semibold text-red">{error}</p> : saved ? <p className="text-xs font-semibold text-green">Saved</p> : picked.length === 0 ? <p className={`text-xs font-semibold ${attempted ? "text-red" : "text-amber"}`}>Choose the condition to finish this wheel.</p> : null}
         </div>
       ) : null}
     </div>

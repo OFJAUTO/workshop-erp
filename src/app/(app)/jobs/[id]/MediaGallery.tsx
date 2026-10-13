@@ -223,6 +223,7 @@ export function MediaGallery({
   damageNote,
   compact = false,
   stacked = false,
+  hideVideos = false,
 }: {
   media: GateInMediaRow[];
   urls: Record<string, string>;
@@ -231,11 +232,13 @@ export function MediaGallery({
   compact?: boolean;
   /** Phone-first: videos large, one under the other. */
   stacked?: boolean;
+  /** The customer page shows the videos through its own player (fresh addresses, "getting ready" slots). */
+  hideVideos?: boolean;
 }) {
   const [open, setOpen] = useState<number | null>(null);
-  if (media.length === 0 && !carPictureUrl) return <p className="text-sm text-muted">Nothing uploaded yet.</p>;
+  if (media.length === 0 && !carPictureUrl) return hideVideos ? null : <p className="text-sm text-muted">Nothing uploaded yet.</p>;
 
-  const videos = media.filter((m) => m.kind === "video_exterior" || m.kind === "video_interior" || m.kind === "video");
+  const videos = hideVideos ? [] : media.filter((m) => m.kind === "video_exterior" || m.kind === "video_interior" || m.kind === "video");
   const dashboard = media.filter((m) => m.kind === "dashboard_photo");
   const keys = media.filter((m) => m.kind === "keys_photo_front" || m.kind === "keys_photo_back" || m.kind === "keys_photo");
   // Newest photo of each wheel, in the order they were taken.

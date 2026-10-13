@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { FinishGateInButton } from "@/components/FinishGateInButton";
 import { MediaChecklist } from "@/components/MediaChecklist";
-import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
+import { Card, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { mediaChecklist } from "@/lib/media";
@@ -36,11 +37,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
       <PageHeader
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
         subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
-        actions={
-          <LinkButton href={gateInOnly ? "/gate-in" : `/jobs/${id}`} tone={check.complete ? "primary" : "secondary"} size="lg">
-            {check.complete ? (gateInOnly ? "Done, next car" : "Open job card") : "Finish later (video pending)"}
-          </LinkButton>
-        }
+        actions={<FinishGateInButton check={check} href={gateInOnly ? "/gate-in" : `/jobs/${id}`} completeLabel={gateInOnly ? "Done, next car" : "Open job card"} />}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

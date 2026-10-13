@@ -13,7 +13,8 @@
     "test:cleanup": "node --env-file=.env.local scripts/db-sql.mjs tests/e2e-cleanup.sql",
     "test:c": "node --env-file=.env.local tests/browser/test-c.mjs",
     "test:d": "node --env-file=.env.local tests/browser/test-d.mjs",
-    "test:e": "node --env-file=.env.local tests/browser/test-e.mjs"
+    "test:e": "node --env-file=.env.local tests/browser/test-e.mjs",
+    "test:f": "node --env-file=.env.local tests/browser/test-f.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",
@@ -25,6 +26,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
+    "xlsx": "^0.18.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {

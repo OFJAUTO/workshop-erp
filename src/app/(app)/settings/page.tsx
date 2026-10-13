@@ -90,6 +90,9 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/catalog" tone="secondary">
               Makes and models{pendingReview ? ` · ${pendingReview} to review` : ""}
             </LinkButton>
+            <LinkButton href="/settings/uploads" tone="secondary">
+              Failed uploads
+            </LinkButton>
           </>
         }
       />

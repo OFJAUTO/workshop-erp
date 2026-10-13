@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui";
-import { uploadFile, type UploadKind } from "@/lib/upload-client";
+import { devicePlatform } from "./CameraCapture";
+import { reportUploadFailure, uploadFile, type UploadKind } from "@/lib/upload-client";
 import type { Checklist } from "@/lib/media";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 
@@ -12,13 +13,16 @@ const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 
 type Phase = "idle" | "checking" | "uploading" | "processing" | "done" | "failed";
 
-/** Reads how long a video file is, using the browser's own player. */
+/** Reads how long a video file is, using the browser's own player. Gives up after eight seconds. */
 function readDuration(file: File): Promise<number | null> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const v = document.createElement("video");
     v.preload = "metadata";
+    let settled = false;
     const finish = (d: number | null) => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
       resolve(d);
     };
@@ -32,6 +36,8 @@ function readDuration(file: File): Promise<number | null> {
       }
     };
     v.onerror = () => finish(null);
+    // A format this browser cannot read never fires loadedmetadata: the upload goes ahead without the length.
+    setTimeout(() => finish(null), 8000);
     v.src = url;
   });
 }
@@ -47,6 +53,7 @@ export function VideoCapture({
   hint,
   token,
   done = false,
+  attempted = false,
   onChecklist,
 }: {
   jobId: string;
@@ -56,6 +63,8 @@ export function VideoCapture({
   token?: string;
   /** The server counts this video as done (the one truth: a green tick means exactly this). */
   done?: boolean;
+  /** Someone tried to finish the gate-in: a missing video shows in red. */
+  attempted?: boolean;
   /** The server's fresh checklist once the file is recorded. */
   onChecklist?: (c: Partial<Checklist>) => void;
 }) {
@@ -71,6 +80,8 @@ export function VideoCapture({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ file: File; duration: number | null } | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const ios = typeof navigator !== "undefined" && (devicePlatform() === "iphone" || devicePlatform() === "ipad");
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -100,12 +111,15 @@ export function VideoCapture({
     setError(null);
     try {
       const type = (p.file.type || "video/mp4").split(";")[0];
-      setPhase("uploading");
       const checklist = (await uploadFile(jobId, kind, p.file, type, (x) => { setProgress(x); if (x >= 1) setPhase("processing"); }, { duration: p.duration ? Math.round(p.duration) : undefined, token })) as Partial<Checklist>;
-      setPending(null);
       const counted = kind === "video_exterior" ? checklist.videoExterior : kind === "video_interior" ? checklist.videoInterior : undefined;
+      if (counted === false) {
+        reportUploadFailure({ jobId, kind, step: "register", error: "Sent and recorded, but the checklist did not count the video", token, sizeBytes: p.file.size, contentType: type });
+        throw new Error("The video was sent but the gate-in did not count it. Tap Retry.");
+      }
+      setPending(null);
       onChecklist?.(checklist);
-      setPhase(counted === false ? "processing" : "done");
+      setPhase("done");
       refreshWhenIdle(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
@@ -115,26 +129,29 @@ export function VideoCapture({
 
   const finished = phase === "done";
   const busy = phase === "checking" || phase === "uploading" || phase === "processing";
+  const red = phase === "failed" || (attempted && !finished && !busy);
 
   return (
-    <div className={`flex flex-col gap-3 rounded-card border-2 p-4 ${finished ? "border-green bg-green-soft" : phase === "failed" ? "border-red-bar bg-red-soft" : phase === "processing" ? "border-amber-bar bg-amber-soft" : "border-line-strong bg-white"}`}>
+    <div data-media-item={kind} data-missing={finished ? "false" : "true"} data-media-status={phase} className={`flex flex-col gap-3 rounded-card border-2 p-4 ${finished ? "border-green bg-green-soft" : red ? "border-red-bar bg-red-soft" : phase === "processing" || phase === "uploading" ? "border-amber-bar bg-amber-soft" : "border-line-strong bg-white"}`}>
       <div className="flex items-center justify-between gap-3">
         <span className="flex flex-col">
           <span className="font-bold">{label}</span>
           <span className="text-xs text-muted">
             {hint} Up to {MAX_VIDEO_SECONDS / 60} minutes.
           </span>
+          {attempted && !finished && !busy && phase !== "failed" ? <span className="text-xs font-semibold text-red">Missing. Record it below.</span> : null}
         </span>
-        <span className={`text-2xl font-bold ${finished ? "text-green" : "text-faint"}`}>{finished ? "✓" : "●"}</span>
+        <span className={`text-2xl font-bold ${finished ? "text-green" : red ? "text-red" : "text-faint"}`}>{finished ? "✓" : red ? "!" : "●"}</span>
       </div>
 
       {!busy ? (
-        <label className="block cursor-pointer">
-          <input type="file" accept="video/*" capture="environment" onChange={onFile} className="sr-only" />
-          <span className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished ? "border border-line-strong bg-white" : "bg-ink text-white"}`}>
+        <>
+          <input ref={inputRef} type="file" accept="video/*" capture="environment" onChange={onFile} className="sr-only" tabIndex={-1} aria-hidden />
+          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; el.click(); } }} className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished ? "border border-line-strong bg-white" : "bg-ink text-white"}`}>
             {finished ? "Record again" : "Record with the camera"}
-          </span>
-        </label>
+          </button>
+          {ios ? <p className="text-[11px] text-muted">iPhone or iPad: Settings › Camera › Formats › Most Compatible, so the customer&apos;s phone can play the video.</p> : null}
+        </>
       ) : null}
 
       {phase === "checking" ? <p className="text-sm text-muted">Checking the video…</p> : null}
@@ -153,7 +170,7 @@ export function VideoCapture({
       ) : null}
 
       {phase === "failed" && pending ? (
-        <Button size="lg" onClick={() => upload(pending)}>
+        <Button size="lg" onClick={() => upload(pending)} data-retry>
           Retry upload
         </Button>
       ) : null}

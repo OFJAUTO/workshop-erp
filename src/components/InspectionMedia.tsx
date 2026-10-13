@@ -1,24 +1,31 @@
 "use client";
 
-import { useState } from "react";
-import { putWithProgress } from "@/lib/upload-client";
+import { useRef, useState } from "react";
+import { PhotoButton } from "./PhotoButton";
+import { putWithProgress, reportUploadFailure, type UploadStep } from "@/lib/upload-client";
 
 export type InspectionFile = { id: string; kind: "photo" | "video" | "pdf"; url: string | null; caption?: string | null; isPrescan?: boolean };
 
 const MAX_VIDEO_SECONDS = 60;
 const MAX_PHOTO_PX = 2000;
 const RECODE_ABOVE_BYTES = 1_500_000;
+/** A server step that takes longer than this is given up and offered again. */
+const STEP_TIMEOUT_MS = 60_000;
 
 function readDuration(file: File): Promise<number | null> {
   return new Promise((resolve) => {
     const v = document.createElement("video");
     v.preload = "metadata";
-    v.onloadedmetadata = () => {
-      const d = v.duration;
+    let settled = false;
+    const finish = (d: number | null) => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(v.src);
-      resolve(Number.isFinite(d) ? d : null);
+      resolve(d);
     };
-    v.onerror = () => resolve(null);
+    v.onloadedmetadata = () => finish(Number.isFinite(v.duration) ? v.duration : null);
+    v.onerror = () => finish(null);
+    setTimeout(() => finish(null), 8000);
     v.src = URL.createObjectURL(file);
   });
 }
@@ -62,34 +69,47 @@ async function toJpeg(file: File): Promise<{ blob: Blob; type: string }> {
 async function uploadOne(inspectionId: string, file: File, where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }, onProgress: (p: number) => void) {
   let type = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
   const kind = type.startsWith("video/") ? "video" : type === "application/pdf" ? "pdf" : "photo";
-  let duration: number | null = null;
-  let body: Blob = file;
-  if (kind === "video") {
-    duration = await readDuration(file);
-    if (duration !== null && duration > MAX_VIDEO_SECONDS + 1) throw new Error(`That video is ${Math.round(duration)} seconds. The limit is ${MAX_VIDEO_SECONDS} seconds. Please record a shorter one.`);
-  } else if (kind === "photo") {
-    const re = await toJpeg(file);
-    body = re.blob;
-    type = re.type;
+  let step: UploadStep = "decode";
+  try {
+    let duration: number | null = null;
+    let body: Blob = file;
+    if (kind === "video") {
+      duration = await readDuration(file);
+      if (duration !== null && duration > MAX_VIDEO_SECONDS + 1) throw new Error(`That video is ${Math.round(duration)} seconds. The limit is ${MAX_VIDEO_SECONDS} seconds. Please record a shorter one.`);
+    } else if (kind === "photo") {
+      const re = await toJpeg(file);
+      body = re.blob;
+      type = re.type;
+    }
+    step = "prepare";
+    const prep = await fetch("/api/inspection-media/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inspectionId, contentType: type }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+    const p = (await prep.json().catch(() => ({}))) as { path?: string; url?: string; error?: string };
+    if (!prep.ok || !p.path || !p.url) throw new Error(p.error ?? "Could not prepare the upload.");
+    step = "upload";
+    await putWithProgress(p.url, body, type, onProgress);
+    step = "register";
+    const reg = await fetch("/api/inspection-media/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inspectionId, path: p.path, kind, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan, duration: duration ?? undefined, caption: kind === "pdf" ? file.name : undefined }),
+      signal: AbortSignal.timeout(STEP_TIMEOUT_MS),
+    });
+    const r = (await reg.json().catch(() => ({}))) as { ok?: boolean; id?: string; url?: string | null; error?: string };
+    if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
+    return { id: r.id, kind, url: r.url ?? null, caption: kind === "pdf" ? file.name : null, isPrescan: !!where.isPrescan } as InspectionFile;
+  } catch (err) {
+    reportUploadFailure({ inspectionId, kind: `inspection_${kind}`, step, error: err, sizeBytes: file.size, contentType: type, extra: { itemKey: where.itemKey ?? null, prescan: !!where.isPrescan } });
+    throw err;
   }
-  const prep = await fetch("/api/inspection-media/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inspectionId, contentType: type }) });
-  const p = (await prep.json().catch(() => ({}))) as { path?: string; url?: string; error?: string };
-  if (!prep.ok || !p.path || !p.url) throw new Error(p.error ?? "Could not prepare the upload.");
-  await putWithProgress(p.url, body, type, onProgress);
-  const reg = await fetch("/api/inspection-media/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ inspectionId, path: p.path, kind, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan, duration: duration ?? undefined, caption: kind === "pdf" ? file.name : undefined }),
-  });
-  const r = (await reg.json().catch(() => ({}))) as { ok?: boolean; id?: string; url?: string | null; error?: string };
-  if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
-  return { id: r.id, kind, url: r.url ?? null, caption: kind === "pdf" ? file.name : null, isPrescan: !!where.isPrescan } as InspectionFile;
 }
 
 /**
  * Photos, short videos (up to 60 seconds, with sound) or PDFs attached to one place in the
  * report: a checklist item, a customer request, the pre-scan slot or the report as a whole.
- * "Photo" opens the camera; "From gallery" picks saved photos (several at once).
+ * "+ Photo" opens the camera inside the page on a phone or tablet (never the camera app, so the page
+ * cannot reload behind it); "+ From gallery" picks saved photos (several at once). Every button is a
+ * real button; a camera the browser has blocked shows the steps to allow it. A failed upload is
+ * logged with the device and the step and shown with Retry.
  */
 export function InspectionMedia({
   inspectionId,
@@ -111,33 +131,54 @@ export function InspectionMedia({
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [failed, setFailed] = useState<File[]>([]);
+  const videoRef = useRef<HTMLInputElement>(null);
+  const pdfRef = useRef<HTMLInputElement>(null);
 
-  async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const list = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  async function handleFiles(list: File[]) {
     if (!list.length) return;
     setError(null);
+    setFailed([]);
+    const notDone: File[] = [];
     let i = 0;
-    for (const file of list) {
-      i++;
-      setBusyLabel(list.length > 1 ? `Uploading ${i} of ${list.length}` : "Uploading");
-      setProgress(0);
-      try {
-        const added = await uploadOne(inspectionId, file, where, setProgress);
-        onAdded?.(added);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed.");
+    try {
+      for (const file of list) {
+        i++;
+        setBusyLabel(list.length > 1 ? `Uploading ${i} of ${list.length}` : "Uploading");
+        setProgress(0);
+        try {
+          const added = await uploadOne(inspectionId, file, where, setProgress);
+          onAdded?.(added);
+        } catch (err) {
+          notDone.push(file);
+          setError(err instanceof Error ? err.message : "Upload failed.");
+        }
       }
+    } finally {
+      // Whatever happened, the buttons come back: a hung upload can never leave them dead.
+      setProgress(null);
+      setBusyLabel(null);
     }
-    setProgress(null);
-    setBusyLabel(null);
+    setFailed(notDone);
+  }
+  function pick(ref: React.RefObject<HTMLInputElement | null>) {
+    const el = ref.current;
+    if (!el) return;
+    el.value = "";
+    el.click();
+  }
+  function onInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    void handleFiles(list);
   }
 
   const busy = progress !== null;
   const btn = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-line-strong bg-white px-3 text-sm font-semibold ${disabled || busy ? "opacity-50" : "cursor-pointer hover:border-ink"}`;
+  const logProblem = (m: string) => reportUploadFailure({ inspectionId, kind: "inspection_photo", step: "camera", error: m, extra: { itemKey: where.itemKey ?? null } });
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-inspection-media>
       {files.length ? (
         <div className={`flex flex-wrap gap-2 ${compact ? "" : ""}`}>
           {files.map((f) =>
@@ -157,37 +198,34 @@ export function InspectionMedia({
       {!disabled ? (
         <div className="flex flex-wrap gap-2">
           {accept === "pdf" ? (
-            <label className={btn}>
-              <input type="file" accept="application/pdf,.pdf" multiple onChange={onChange} className="sr-only" disabled={busy} />
-              + Add PDF
-            </label>
+            <>
+              <input ref={pdfRef} type="file" accept="application/pdf,.pdf" multiple onChange={onInput} className="sr-only" tabIndex={-1} aria-hidden />
+              <button type="button" onClick={() => pick(pdfRef)} disabled={busy} className={btn}>+ Add PDF</button>
+            </>
           ) : (
             <>
-              <label className={btn}>
-                <input type="file" accept="image/*" capture="environment" onChange={onChange} className="sr-only" disabled={busy} />
-                + Photo
-              </label>
-              <label className={btn}>
-                <input type="file" accept="image/*,.heic,.heif" multiple onChange={onChange} className="sr-only" disabled={busy} />
-                + From gallery
-              </label>
-              <label className={btn}>
-                <input type="file" accept="video/*" capture="environment" onChange={onChange} className="sr-only" disabled={busy} />
-                + Video (60 s)
-              </label>
+              <PhotoButton source="camera" disabled={busy} className={btn} title="Photo" onFiles={(f) => void handleFiles(f)} onProblem={logProblem}>+ Photo</PhotoButton>
+              <PhotoButton source="gallery" multiple disabled={busy} className={btn} title="From gallery" onFiles={(f) => void handleFiles(f)}>+ From gallery</PhotoButton>
+              <input ref={videoRef} type="file" accept="video/*" capture="environment" onChange={onInput} className="sr-only" tabIndex={-1} aria-hidden />
+              <button type="button" onClick={() => pick(videoRef)} disabled={busy} className={btn}>+ Video (60 s)</button>
             </>
           )}
         </div>
       ) : null}
       {progress !== null ? (
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-muted">{busyLabel}…</span>
+          <span className="text-xs font-semibold text-muted">{busyLabel}… {Math.round(progress * 100)}%</span>
           <div className="h-2 rounded-full bg-track overflow-hidden">
             <div className="h-full bg-ink transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
         </div>
       ) : null}
       {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
+      {failed.length && !busy ? (
+        <button type="button" onClick={() => void handleFiles(failed)} className="self-start min-h-10 rounded-control bg-ink px-3 text-sm font-bold text-white" data-retry>
+          Retry{failed.length > 1 ? ` (${failed.length} files)` : ""}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -55,7 +55,7 @@ async function syncPartLines(quotationId: string, jobId: string, by: string, min
     quotation_id: quotationId,
     position: position++,
     line_type: "part",
-    title: p.part_number ? `${p.description} (${p.part_number})` : p.description,
+    title: p.description,
     details: null,
     group_label: p.part_request_id ? (labelOf.get(p.part_request_id) ?? "Parts") : "Parts",
     source_type: "manual",

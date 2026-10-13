@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./ui";
+import { PhotoButton } from "./PhotoButton";
 
 type Shape = "circle" | "wide";
 
@@ -121,8 +122,7 @@ export function ImageCropper({
     return () => clearInterval(t);
   });
 
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function loadFile(file: File | undefined) {
     if (!file) return;
     const url = URL.createObjectURL(file);
     const image = new Image();
@@ -175,12 +175,17 @@ export function ImageCropper({
   return (
     <div className="flex flex-col gap-3">
       <input type="file" name={name} ref={hiddenRef} className="hidden" tabIndex={-1} aria-hidden />
-      <label className="inline-flex">
-        <input type="file" accept="image/*" capture={capture} onChange={onFile} className="sr-only" form="__not_part_of_any_form" />
-        <span className="inline-flex items-center justify-center min-h-11 px-5 rounded-control border border-line-strong bg-white text-sm font-bold cursor-pointer hover:bg-canvas">
+      {/* A real button: the camera inside the page on a phone or tablet, the picker on a PC; From gallery beside it. */}
+      <div className="flex flex-wrap gap-2">
+        <PhotoButton source={capture ? "camera" : "gallery"} className="inline-flex items-center justify-center min-h-11 px-5 rounded-control border border-line-strong bg-white text-sm font-bold cursor-pointer hover:bg-canvas" title={label} onFiles={(files) => loadFile(files[0])}>
           {img ? "Choose a different photo" : label}
-        </span>
-      </label>
+        </PhotoButton>
+        {capture ? (
+          <PhotoButton source="gallery" className="inline-flex items-center justify-center min-h-11 px-4 rounded-control border border-line bg-white text-sm font-semibold cursor-pointer hover:bg-canvas" title="From gallery" onFiles={(files) => loadFile(files[0])}>
+            From gallery
+          </PhotoButton>
+        ) : null}
+      </div>
 
       {img ? (
         <>

@@ -38,7 +38,7 @@ export const STATUSES = [
 export type JobStatus = (typeof STATUSES)[number];
 
 export const STATUS_LABELS: Record<JobStatus, string> = {
-  gate_in_pending: "Gate-in incomplete, video pending",
+  gate_in_pending: "Gate-in incomplete",
   pending_approval: "Waiting for customer to approve the job card",
   pending_inspection: "Pending inspection",
   pending_road_test: "Pending road test",
