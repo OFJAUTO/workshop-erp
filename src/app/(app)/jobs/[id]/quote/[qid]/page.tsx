@@ -76,6 +76,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   ]);
   const workDone = !!jobRow && (!jobRow.is_open || ["pending_qc", "pending_wash", "ready", "in_delivery", "closed"].includes(String(jobRow.status)));
   const clockedHours = workDone ? Math.round(((sessions ?? []).reduce((a, s) => a + (Number(s.minutes) || 0), 0) / 60) * 100) / 100 : null;
+  // Bodyshop packages: the last price typed for each (a hint only).
+  const { data: lastRows } = await createAdminClient().from("quotation_lines").select("service_id, unit_price").eq("line_type", "package").not("service_id", "is", null).not("unit_price", "is", null).gt("unit_price", 0).order("created_at", { ascending: false }).limit(600);
+  const lastPrices: Record<string, number> = {};
+  for (const r of lastRows ?? []) if (r.service_id && lastPrices[r.service_id] === undefined) lastPrices[r.service_id] = Number(r.unit_price);
   const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string)) : null;
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
@@ -107,6 +111,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     reasons: { part_discount: reasonsFor(settings, "part_discount") },
     commissionPeople: ((settings.commission_people ?? []) as string[]).map(String),
     clockedHours,
+    lastPrices,
   };
   const tone = q.status === "approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
   const urgentCount = bundle.lines.filter((l) => l.urgency === "urgent" && !isHidden(l)).length;

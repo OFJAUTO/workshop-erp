@@ -15,6 +15,7 @@ export async function registerThisTablet(formData: FormData) {
   const kind = String(formData.get("kind") ?? "shared");
   const location = String(formData.get("location") ?? "workshop");
   const staffId = String(formData.get("staff_id") ?? "");
+  const section = String(formData.get("section") ?? "");
   if (name.length < 2) redirect("/tablet/register?error=" + encodeURIComponent("Give the device a name."));
   if (!["shared", "personal"].includes(kind)) redirect("/tablet/register?error=" + encodeURIComponent("Choose shared or personal."));
   if (kind === "shared" && !["workshop", "bodyshop", "office"].includes(location)) {
@@ -35,6 +36,7 @@ export async function registerThisTablet(formData: FormData) {
     kind,
     location: kind === "personal" ? "personal" : location,
     staff_id: kind === "personal" ? staffId : null,
+    section: kind === "shared" && ["ppf", "paint", "detailing", "strip_refit"].includes(section) ? section : null,
     token_hash: hashDeviceToken(token),
     registered_by: owner.id,
     created_by: owner.id,

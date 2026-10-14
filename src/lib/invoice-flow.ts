@@ -30,7 +30,7 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   const rows = ((existing ?? []) as Record<string, unknown>[]).map(toInvoice);
   const tax = rows.find((i) => i.kind === "tax_invoice");
   if (tax) return tax;
-  const pro = rows.find((i) => i.kind === "proforma");
+  const pro = rows.find((i) => i.kind === "proforma" && !i.deposit_for_quotation_id);
   if (pro) return pro;
 
   const draft = await buildInvoiceDraft(jobId, settings);
@@ -76,6 +76,12 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   );
   // Deposits recorded before the proforma count against it.
   await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);
+  // A bodyshop deposit proforma folds into this one: its payments move across and it drops out of the balance.
+  const { data: deposits } = await admin.from("invoices").select("id").eq("job_id", jobId).eq("kind", "proforma").eq("is_active", true).is("converted_to", null).not("deposit_for_quotation_id", "is", null).neq("id", inv.id);
+  for (const d of deposits ?? []) {
+    await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("invoice_id", d.id).eq("is_active", true);
+    await admin.from("invoices").update({ converted_to: inv.id, updated_by: by }).eq("id", d.id);
+  }
   await admin.from("jobs").update({ ready_token: token }).eq("id", jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "proforma_issued", note: `${number} prepared: ${money(draft.totals.total)}${actor ? ` (${actor.display_name})` : ""}`, created_by: by });
   await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { type: "invoice_issued", title: `Proforma ready to send · ${job.job_number}`, body: `${number}, ${money(draft.totals.total)}. Send it to the customer: the bank details and Pay now are on the page.`, jobId, href: `/jobs/${jobId}` });
@@ -91,7 +97,7 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
  */
 export async function convertProformaIfPaid(jobId: string, by: string | null, settings: Settings, opts: { force?: { reason: string } } = {}): Promise<InvoiceRow | null> {
   const admin = createAdminClient();
-  const { data: proRaw } = await admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).order("issued_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: proRaw } = await admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).order("issued_at", { ascending: false }).limit(1).maybeSingle();
   if (!proRaw) return null;
   const pro = toInvoice(proRaw as Record<string, unknown>);
   const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", pro.id).eq("is_active", true);

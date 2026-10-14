@@ -90,6 +90,15 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "left_job", label: "A technician left a job", locked: true },
   { type: "handover", label: "Parts handed over or returned", locked: true },
   { type: "job_summary", label: "Job summary after QC (owner and manager)", locked: true },
+  { type: "bodyshop_heads_up", label: "Bodyshop: a car is coming to your section, or is with you now", locked: true },
+  { type: "bodyshop_late", label: "Bodyshop: a stage ran late and the handover moved", locked: true },
+  { type: "bodyshop_due_out", label: "Bodyshop: a car is due out tomorrow", locked: true },
+  { type: "bodyshop_signoff", label: "Bodyshop: the release sign-off is needed, or complete", locked: true },
+  { type: "bodyshop_not_ready", label: "Bodyshop: a car was sent back as not ready", locked: true },
+  { type: "bodyshop_handover_moved", label: "Bodyshop: the handover date changed", locked: true },
+  { type: "bodyshop_left", label: "Bodyshop: a car has left the workshop", locked: true },
+  { type: "bodyshop_electrical", label: "Bodyshop: an electrical reset for the electricians", locked: true },
+  { type: "bodyshop_booked", label: "Bodyshop: a quotation was approved before the car arrived", locked: true },
   { type: "comeback", label: "A comeback job needs a cause or the owner's decision", locked: true },
   { type: "payment_void", label: "A receipt was voided or an overpayment approved (owner)", locked: true },
   { type: "payment_verify", label: "A payment recorded by an advisor to verify (accounts)", locked: true },
@@ -102,7 +111,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */
-export const HANDOVER_TYPES = new Set(["parts_not_received", "parts_exchange", "job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
+export const HANDOVER_TYPES = new Set(["bodyshop_signoff", "bodyshop_due_out", "bodyshop_left", "bodyshop_not_ready", "bodyshop_handover_moved", "parts_not_received", "parts_exchange", "job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
 

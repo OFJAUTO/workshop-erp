@@ -10,6 +10,9 @@ import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { jobBalance } from "@/lib/invoice-data";
+import { approvedKinds, signoffState } from "@/lib/bodyshop";
+import { SIGNOFF_LABELS, addDaysIso } from "@/lib/bodyshop-kinds";
+import { dubaiDate } from "@/lib/jobs";
 import { askReleaseApproval, collectItems, gateOutJob, markDelivered } from "../../gate-out-actions";
 import { loadJobItems } from "@/lib/loose-items";
 import { CollectItemsForm } from "./CollectItemsForm";
@@ -36,12 +39,20 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const keysPhotos = card.media.filter((m) => m.kind === "keys_photo_front" || m.kind === "keys_photo_back" || m.kind === "keys_photo");
   const job = card.job;
   const blocked = bal.state === "no_invoice" || bal.balance > 0;
+  // Bodyshop: the sign-off state, and the final check visit for a PPF car (7 to 14 days, the Settings default).
+  const bodyshop = job.department === "bodyshop";
+  const signoff = bodyshop ? await signoffState(id) : null;
+  const kinds = bodyshop ? (await approvedKinds(id)).kinds : [];
+  // A server page: the date is read once.
+  const today = dubaiDate();
+  const finalCheck = bodyshop && (kinds.includes("ppf") || kinds.includes("coloured_ppf")) ? { defaultDate: addDaysIso(today, Math.min(14, Math.max(7, Number(settings.bodyshop_final_check_days) || 10))), min: addDaysIso(today, 7), max: addDaysIso(today, 14) } : null;
 
   return (
     <>
       <PageHeader title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {signoff && signoff.hasStages && !signoff.complete ? <Notice tone="info">Release sign-off still needed from {signoff.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. The handover stays locked until all have signed on the bodyshop page.</Notice> : null}
       {job.status !== "ready" && job.status !== "pending_payment" && job.status !== "in_delivery" ? <Notice tone="info">{loose ? "The items are" : "This car is"} not marked ready yet ({STATUS_LABELS[job.status]}). Gate-out is still allowed and will be logged.</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -58,7 +69,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             </Card>
           ) : (
             <Card>
-              <GateOutForm jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+              <GateOutForm finalCheck={finalCheck} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           )}
         </div>

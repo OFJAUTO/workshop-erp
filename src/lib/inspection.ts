@@ -51,7 +51,7 @@ export type JobDepartment = (typeof JOB_DEPARTMENTS)[number]["value"];
 /** Which side of the workshop a staff department belongs to. */
 export function sideOfDepartment(departmentId: string | null | undefined): "mechanical" | "bodyshop" | null {
   if (departmentId === "mechanical") return "mechanical";
-  if (departmentId === "bodyshop" || departmentId === "paint" || departmentId === "ppf_tint") return "bodyshop";
+  if (departmentId === "bodyshop" || departmentId === "paint" || departmentId === "ppf_tint" || departmentId === "detailing") return "bodyshop";
   return null;
 }
 

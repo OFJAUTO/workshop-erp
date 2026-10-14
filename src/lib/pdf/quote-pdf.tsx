@@ -10,7 +10,8 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { DocumentTail, InfoBoxes, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, qtyText, styles, type SectionLine } from "./template";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { DocumentTail, GREY, InfoBoxes, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
 
 /**
  * The customer's quotation or estimate on the document template: the header, two grey boxes, three bordered boxes
@@ -24,6 +25,11 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const vatPct = Number(q.vat_percent) || 5;
   const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l));
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
+  // Bodyshop packages: the PPF warranty line and the old-film note under the services.
+  const svcIds = Array.from(new Set(lines.map((l) => l.service_id).filter((x): x is string => !!x)));
+  const { data: svcRows } = svcIds.length ? await createAdminClient().from("services").select("id, bodyshop_kind").in("id", svcIds) : { data: [] as { id: string; bodyshop_kind: string | null }[] };
+  const kindSet = new Set((svcRows ?? []).map((s) => s.bodyshop_kind).filter((k): k is string => !!k));
+  const bodyshopNotes = [kindSet.has("ppf") || kindSet.has("coloured_ppf") ? `${String(settings.ppf_brand_name || "OFJ PPF")} · ${Number(settings.ppf_warranty_years) || 10}-year warranty: a written certificate comes with the car at handover.` : null, kindSet.has("ppf_removal") ? String(settings.ppf_removal_note || "") : null].filter((x): x is string => !!x);
   const partOf = (id: string | null) => (id ? bundle.parts.find((p) => p.id === id) : undefined);
   const today = dubaiDate();
   const toDoc = (l: (typeof lines)[number]): SectionLine => {
@@ -72,6 +78,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
         ]}
       />
       <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" />
+      {bodyshopNotes.map((note) => <Text key={note} style={{ fontSize: px(9.5), color: GREY, marginTop: px(-4), marginBottom: px(8) }}>{note}</Text>)}
       {parts.length ? <SectionBox title="Parts" lines={parts} subtotalLabel="Parts subtotal" /> : null}
       {others.length ? <SectionBox title="Other charges" lines={others} subtotalLabel="Other charges subtotal" /> : null}
       <DocumentTail

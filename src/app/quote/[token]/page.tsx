@@ -61,6 +61,12 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
 
   // Internal lines, unused options and parts left off never reach the customer.
   const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l) && !l.left_off);
+  // Bodyshop packages on the quotation: the PPF warranty block and the old-film acknowledgement.
+  const svcIds = Array.from(new Set(lines.map((l) => l.service_id).filter((x): x is string => !!x)));
+  const { data: svcKinds } = svcIds.length ? await admin.from("services").select("id, bodyshop_kind").in("id", svcIds) : { data: [] as { id: string; bodyshop_kind: string | null }[] };
+  const kinds = new Set((svcKinds ?? []).map((s) => s.bodyshop_kind).filter((k): k is string => !!k));
+  const hasPpf = kinds.has("ppf") || kinds.has("coloured_ppf");
+  const hasRemoval = kinds.has("ppf_removal");
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const customerName = q.sent_to_name ?? customer?.company_name ?? customer?.full_name ?? "Customer";
   const carName = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
@@ -105,7 +111,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         meta={meta}
         boxes={boxes}
         view={{ href: `/api/pdf/quote/${token}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)" }}
-        action={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} /> : null}
+        action={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} /> : null}
         contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} label="Questions or changes?" />}
       >
         {statusNotes}
@@ -116,6 +122,13 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
           {totals.deposit ? <span className="text-xs text-[#5F6368]">Deposit required on approval: {aed(totals.deposit)}</span> : null}
         </div>
+        {hasPpf ? (
+          <div className="rounded-lg border border-[#D4D4D8] px-4 py-3 flex flex-col gap-0.5" data-ppf-warranty>
+            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{String(settings.ppf_brand_name || "OFJ PPF")} · {Number(settings.ppf_warranty_years) || 10}-year warranty</span>
+            <span className="text-sm">Our own film, installed by our team, with a written warranty certificate at handover.</span>
+          </div>
+        ) : null}
+        {hasRemoval ? <p className="text-sm text-[#5F6368]" data-removal-note>{String(settings.ppf_removal_note)}</p> : null}
       </CustomerFront>
     );
   }

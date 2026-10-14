@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -72,6 +72,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const admin = createAdminClient();
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
+  // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
+  if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
   const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
@@ -191,7 +193,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canRemind = canNote && waitingForAssignment && (waitedMinutes >= assignmentTarget || role === "owner");
 
   const inspectionState = (() => {
-    if (job.department === "bodyshop") return { text: "Bodyshop path (later phase)", tone: "neutral" as const };
+    if (job.department === "bodyshop") return { text: "No inspection on the bodyshop path: the stages are on the bodyshop page", tone: "neutral" as const };
     if (!insp) return stageIndex > 1 ? { text: "Skipped (moved manually)", tone: "neutral" as const } : { text: job.assigned_to ? "Assigned, not started" : "Not started", tone: "neutral" as const };
     if (insp.status === "approved") return { text: `Approved by ${inspection?.approver?.display_name ?? "the manager"}, ${formatDate(insp.approved_at)}, ${formatMinutes(insp.elapsed_minutes ?? inspectionMinutes)}, ${badCount} bad, ${avgCount} average`, tone: "green" as const };
     if (insp.status === "submitted") return { text: `Submitted by ${inspection?.technician?.display_name ?? "the technician"}, ${formatDate(insp.submitted_at)}, ${formatMinutes(insp.elapsed_minutes ?? inspectionMinutes)}, ${badCount} bad, ${avgCount} average${can(role, "approveInspections") ? " · waiting for you" : ""}`, tone: "amber" as const };
@@ -265,6 +267,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       />
 
       {message ? <Notice tone="success">{message}</Notice> : null}
+      {job.department === "bodyshop" ? (
+        <Card className="flex flex-wrap items-center gap-3 border-ink" data-bodyshop-link>
+          <SectionLabel>Bodyshop</SectionLabel>
+          <span className="text-sm">Stages and due dates, who is on the car, the removed items, the customer updates and the release sign-off are on the bodyshop page.</span>
+          <LinkButton href={`/bodyshop/${id}`} size="md" className="ml-auto">Open the bodyshop page</LinkButton>
+        </Card>
+      ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {isVip && vipNote ? (
         <Card className="border-ink flex flex-col gap-1">

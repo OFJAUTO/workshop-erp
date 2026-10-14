@@ -127,6 +127,8 @@ export type EditorSettings = {
   commissionPeople?: string[];
   /** The hours the technicians clocked on this job once the work is done; labour at cost switches to them. */
   clockedHours?: number | null;
+  /** Bodyshop packages have no fixed price: the last price typed for each, shown as a small hint. */
+  lastPrices?: Record<string, number>;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -263,7 +265,7 @@ export function QuoteEditor({
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuUp, setMenuUp] = useState(false);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, commission_to: quotation.commission_to ?? null, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null });
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
   const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
@@ -441,6 +443,12 @@ export function QuoteEditor({
   /** A picked service fills the row: the name and the pricing; a labour job keeps the hours for the advisor. */
   const applyService = (lineId: string, s: Service) => {
     const fixed = s.price_aed !== null;
+    // A bodyshop package: a service line with no price until the advisor types it (the last price shows as a hint).
+    if (!fixed && s.bodyshop_kind) {
+      patch(lineId, { title: s.name, service_id: s.id, line_type: "package", unit_price: null, price_per: "job", quantity: 1 }, true);
+      setFocusTarget({ id: lineId, field: "amount" });
+      return;
+    }
     patch(lineId, { title: s.name, service_id: s.id, line_type: fixed ? "package" : "labour", unit_price: fixed ? s.price_aed : null, price_per: fixed ? (s.price_per ?? "job") : null, quantity: fixed ? Math.max(1, Math.round(Number(s.usual_quantity) || 1)) : 1, ...(!fixed ? { hours: s.default_hours ?? null } : {}) }, true);
     setFocusTarget({ id: lineId, field: "amount" });
   };
@@ -528,6 +536,13 @@ export function QuoteEditor({
               onArrow={() => setPicker({ kind: isService ? "service" : "labour", replace: l.id })}
               onNext={() => setFocusTarget({ id: l.id, field: "amount" })}
             />
+            {svc?.bodyshop_kind === "coloured_ppf" || svc?.bodyshop_kind === "tint" || (isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id]) ? (
+              <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted" data-bodyshop-detail>
+                {svc?.bodyshop_kind === "coloured_ppf" ? (<><Input value={l.film_colour ?? ""} onChange={(e) => patch(l.id, { film_colour: e.target.value })} placeholder="Film colour" disabled={disabled} className="min-h-8 w-32 text-xs" textCase="title" aria-label="Film colour" data-film-colour /><Input value={l.film_code ?? ""} onChange={(e) => patch(l.id, { film_code: e.target.value })} placeholder="Code" disabled={disabled} className="min-h-8 w-24 text-xs" textCase="upper" aria-label="Film code" data-film-code /></>) : null}
+                {svc?.bodyshop_kind === "tint" ? (<label className="inline-flex items-center gap-1"><Input value={l.tint_percent ?? ""} onChange={(e) => patch(l.id, { tint_percent: e.target.value === "" ? null : Number(e.target.value) })} inputMode="numeric" placeholder="Shade" disabled={disabled} className="min-h-8 w-16 text-xs text-right" aria-label="Tint shade percent" data-tint-shade /><span>%</span></label>) : null}
+                {isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id] ? <span data-last-price>Last time {aed(settings.lastPrices[svc.id])}</span> : null}
+              </span>
+            ) : null}
             {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || rateChanged ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
                 {positions.length ? <span>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}
@@ -983,6 +998,7 @@ export function QuoteEditor({
                 <dt className="text-muted" data-labour-cost-label>Labour at cost ({hoursText(totals.labourCostHours)} {totals.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED {settings.technicianCostRate ?? 0})</dt><dd className="text-right">{aed(totals.labourCost)}</dd>
                 {totals.outsideCost ? <><dt className="text-muted">Outside work, our cost</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
+                <dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd>
                 <dt className="text-muted">Commission{header.commission_to ? ` (to ${header.commission_to})` : ""}</dt><dd className="text-right">{aed(totals.commission)}</dd>
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
                 <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>

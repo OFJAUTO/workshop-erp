@@ -14,6 +14,8 @@ import { DOC_KEYS, DOC_LABELS } from "@/lib/doc-reminder-defs";
 import { REASON_CONTEXTS } from "@/lib/reasons";
 
 const NUMBER_KEYS = [
+  "ppf_warranty_years",
+  "bodyshop_final_check_days",
   "tablet_idle_lock_seconds",
   "pin_max_attempts",
   "pin_lock_minutes",
@@ -74,6 +76,14 @@ const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_
 const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years"] as const;
 
 const TEXT_KEYS = [
+  "ppf_brand_name",
+  "ppf_warranty_text",
+  "ppf_care_text",
+  "ppf_removal_note",
+  "whatsapp_bodyshop_arrived_template",
+  "whatsapp_bodyshop_film_template",
+  "whatsapp_bodyshop_ready_template",
+  "whatsapp_final_check_template",
   "company_name",
   "company_trn",
   "terms_and_conditions",
@@ -116,6 +126,8 @@ const TEXT_KEYS = [
 
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   tablet_idle_lock_seconds: [30, 3600, "Tablet idle lock"],
+  ppf_warranty_years: [1, 30, "PPF warranty years"],
+  bodyshop_final_check_days: [1, 60, "Final check days after handover"],
   pin_max_attempts: [3, 10, "Wrong PINs before lock"],
   pin_lock_minutes: [1, 60, "PIN lock time"],
   keep_signed_in_days_staff: [1, 90, "Keep me signed in, office staff"],

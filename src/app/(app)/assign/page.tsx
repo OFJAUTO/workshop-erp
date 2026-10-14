@@ -15,6 +15,9 @@ import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { assignJob } from "../jobs/actions";
+import { electricalTasks } from "@/lib/bodyshop";
+import { electricalDoneAction } from "../bodyshop/actions";
+import { formatDate } from "@/lib/format";
 
 type Row = {
   id: string;
@@ -138,6 +141,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
     </div>
   );
 
+  const electrical = await electricalTasks();
   return (
     <>
       <LiveRefresh tables={["jobs", "gate_ins", "approval_requests"]} pollMs={60000} />
@@ -148,6 +152,20 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
         <SectionLabel right={`${loads.filter((l) => l.status === "free").length} free`}>Technicians, freest first</SectionLabel>
         <TechnicianPicker technicians={loads} pick={false} />
       </Card>
+      {electrical.length ? (
+        <Card className="flex flex-col gap-2 border-ink" data-electrical-tasks>
+          <SectionLabel right={`${electrical.length}`}>Electrical resets from the bodyshop</SectionLabel>
+          <ul className="divide-y divide-line">
+            {electrical.map(({ stage, job }) => (
+              <li key={stage.id} className="py-2 flex flex-wrap items-center gap-2">
+                <span className="font-extrabold tracking-[0.03em]">{job.vehicle ? formatPlate(job.vehicle) : job.job_number}</span>
+                <span className="text-sm text-muted">{[job.vehicle?.make?.name, job.vehicle?.model?.name].filter(Boolean).join(" ")} · {stage.status === "active" ? "ready for the electrician" : "coming after the refit"} · due {formatDate(stage.due_date)}</span>
+                {stage.status === "active" ? <form action={electricalDoneAction.bind(null, job.id, stage.id)} className="ml-auto"><Button type="submit" size="md">Done</Button></form> : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${ready.length}`}>Ready to assign (customer approved)</SectionLabel>
         <p className="text-xs text-muted">Target: {Number(settings.assignment_target_minutes) || 30} working minutes from the customer&apos;s approval. Past it the card turns amber, then red, and the owner is told.</p>

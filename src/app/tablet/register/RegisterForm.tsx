@@ -43,6 +43,22 @@ export function RegisterForm({
             ]}
           />
         </Field>
+      ) : null}
+      {kind === "shared" ? (
+        <Field label="Bodyshop section tablet" hint="A section tablet shows only that section's cars with PIN clocking. Leave empty for a normal shared tablet or a board.">
+          <ChoiceButtons
+            name="section"
+            columns={3}
+            defaultValue=""
+            options={[
+              { value: "", label: "No section" },
+              { value: "ppf", label: "PPF" },
+              { value: "paint", label: "Paint" },
+              { value: "detailing", label: "Detailing" },
+              { value: "strip_refit", label: "Strip and refit" },
+            ]}
+          />
+        </Field>
       ) : (
         <Field label="Assigned to">
           <Select name="staff_id" defaultValue="" required>

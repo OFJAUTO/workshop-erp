@@ -91,6 +91,10 @@ export type QuoteLine = {
   recovery_mention_free?: boolean;
   /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours the customer pays. */
   hours_estimate?: number | null;
+  /** Bodyshop lines: the film colour and code (coloured PPF), or the tint shade. */
+  film_colour?: string | null;
+  film_code?: string | null;
+  tint_percent?: number | null;
 };
 
 export type QuoteRow = {
@@ -164,6 +168,10 @@ export type QuoteRow = {
   commission_kind?: "aed" | "percent" | null;
   commission_value?: number | null;
   commission_aed?: number;
+  /** Bodyshop: film, paint and consumables, typed in the internal box; counts against profit. */
+  materials_cost_aed?: number;
+  removal_ack_at?: string | null;
+  removal_ack_name?: string | null;
   commission_paid_at?: string | null;
   commission_paid_by?: string | null;
   created_at: string;
@@ -181,6 +189,7 @@ export type QuoteHeaderForTotals = {
   discount_value?: number | null;
   commission_kind?: "aed" | "percent" | null;
   commission_value?: number | null;
+  materials_cost_aed?: number | null;
 };
 
 export type PartItem = {
@@ -265,7 +274,7 @@ export type PartRequest = {
   removed_reason?: string | null;
 };
 
-export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
+export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
 export type ServiceCategory = { id: string; name: string; position: number; is_active: boolean };
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -371,6 +380,8 @@ export type QuoteTotals = {
   labourHours: number;
   /** The workshop's estimate of the hours (per line, defaulting to the quoted hours). */
   labourEstimateHours: number;
+  /** Bodyshop materials (film, paint, consumables) from the internal box. */
+  materialsCost: number;
   /** The hours labour at cost is worked out from: the clocked hours once the work is done, else the estimate. */
   labourCostHours: number;
   labourCostBasis: "estimate" | "clocked";
@@ -463,7 +474,8 @@ export function quoteTotals(
   // Commission: a fixed amount, or a percentage of the total before VAT. Internal only.
   const cv = Number(q.commission_value) || 0;
   const commission = q.commission_kind === "percent" ? round2(net * (Math.max(0, cv) / 100)) : q.commission_kind === "aed" ? round2(Math.max(0, cv)) : 0;
-  const totalCost = round2(partsCost + labourCost + outsideCost + otherCost + bankCharge + commission);
+  const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
+  const totalCost = round2(partsCost + labourCost + outsideCost + otherCost + bankCharge + commission + materialsCost);
   const profit = round2(net - totalCost);
   const threshold = opts.depositThreshold ?? 0;
   const deposit = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
@@ -471,7 +483,7 @@ export function quoteTotals(
     subtotal, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
-    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, totalCost, profit,
+    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, materialsCost, totalCost, profit,
     labourMargin: round2(labourSell - discount - labourCost - outsideCost),
     deposit,
   };

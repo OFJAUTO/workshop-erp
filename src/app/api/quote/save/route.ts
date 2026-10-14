@@ -19,6 +19,10 @@ type LinePatch = {
   hours?: number | string | null;
   /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours. */
   hours_estimate?: number | string | null;
+  /** Bodyshop lines: film colour and code, or the tint shade. */
+  film_colour?: string | null;
+  film_code?: string | null;
+  tint_percent?: number | string | null;
   labour_rate?: number | string | null;
   discount_percent?: number | string;
   discount_reason?: string | null;
@@ -53,7 +57,7 @@ type Body = {
   /** keepParts: the job goes but its parts stay on the quotation, unlinked. */
   removeLine?: { id: string; keepParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
+  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ materials_cost_aed?: number | string | null; commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -151,6 +155,9 @@ export async function POST(request: NextRequest) {
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
     if (p.hours_estimate !== undefined) out.hours_estimate = p.hours_estimate === null || p.hours_estimate === "" ? null : parseHours(p.hours_estimate);
+    if (p.film_colour !== undefined) out.film_colour = p.film_colour ? String(p.film_colour).trim().slice(0, 60) || null : null;
+    if (p.film_code !== undefined) out.film_code = p.film_code ? String(p.film_code).trim().slice(0, 40) || null : null;
+    if (p.tint_percent !== undefined) { const tp = n(p.tint_percent); out.tint_percent = tp === null ? null : Math.min(100, Math.max(1, Math.round(tp))); }
     if (p.labour_rate !== undefined) {
       // The advisor can raise the hourly rate, never set it below the standard rate for this car. Only the owner can go lower.
       const rate = n(p.labour_rate);
@@ -320,7 +327,8 @@ export async function POST(request: NextRequest) {
     if (a.service_id) {
       const { data: svc } = await admin.from("services").select(SERVICE_SELECT).eq("id", String(a.service_id)).maybeSingle();
       if (!svc) return NextResponse.json({ error: "Service not found." }, { status: 404 });
-      type = svc.price_aed !== null ? "package" : "labour";
+      // A bodyshop package has no fixed price: a service line whose price the advisor types every time.
+      type = svc.price_aed !== null || svc.bodyshop_kind ? "package" : "labour";
       Object.assign(row, { quantity: type === "package" ? Math.max(1, Math.round(Number(svc.usual_quantity) || 1)) : 1, price_per: type === "package" ? (svc.price_per ?? "job") : null, line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
       // A job added for a finding keeps that finding, so its parts land under it.
       if (a.source_type && a.source_key && ["item", "tyre", "request"].includes(a.source_type)) Object.assign(row, { source_type: a.source_type, source_key: String(a.source_key).slice(0, 120) });
@@ -436,6 +444,7 @@ export async function POST(request: NextRequest) {
       else Object.assign(patch, { discount_kind: kind, discount_value: kind === "percent" ? Math.min(100, v) : v, discount_percent: 0 });
     }
     // Commission (internal only): who, and a fixed amount or a percentage of the total before VAT. New names join the Settings list.
+    if (h.materials_cost_aed !== undefined) patch.materials_cost_aed = Math.max(0, n(h.materials_cost_aed) ?? 0);
     if (h.commission_to !== undefined || h.commission_kind !== undefined || h.commission_value !== undefined) {
       const { data: curQ } = await admin.from("quotations").select("commission_to, commission_kind, commission_value").eq("id", q.id).maybeSingle();
       const to = h.commission_to === undefined ? ((curQ?.commission_to as string | null) ?? null) : h.commission_to ? String(h.commission_to).trim().slice(0, 80) : null;

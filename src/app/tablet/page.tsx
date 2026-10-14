@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PublicShell } from "@/components/Shell";
 import { Card } from "@/components/ui";
 import { getCurrentDevice } from "@/lib/devices";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function TabletPage() {
   const device = await getCurrentDevice();
+  // A bodyshop section tablet has its own screen: the section's cars and PIN clocking.
+  if (device?.section) redirect("/tablet/bodyshop");
 
   if (!device) {
     return (

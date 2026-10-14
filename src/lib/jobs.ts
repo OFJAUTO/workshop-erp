@@ -18,6 +18,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
 };
 
 export const STATUSES = [
+  "booked",
   "gate_in_pending",
   "pending_approval",
   "pending_inspection",
@@ -38,6 +39,7 @@ export const STATUSES = [
 export type JobStatus = (typeof STATUSES)[number];
 
 export const STATUS_LABELS: Record<JobStatus, string> = {
+  booked: "Booked, the car is not here yet",
   gate_in_pending: "Gate-in incomplete",
   pending_approval: "Waiting for customer to approve the job card",
   pending_inspection: "Pending inspection",
@@ -58,6 +60,7 @@ export const STATUS_LABELS: Record<JobStatus, string> = {
 
 /** Which step of the track each status sits on. */
 export const STATUS_STAGE: Record<JobStatus, Stage> = {
+  booked: "quote",
   gate_in_pending: "gate_in",
   pending_approval: "gate_in",
   pending_inspection: "inspection",

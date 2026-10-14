@@ -1,4 +1,5 @@
 import "server-only";
+import { bodyshopMonth, type BodyshopMonth } from "./bodyshop";
 import { addDays, dayStartIso } from "./calendar";
 import { jobBalance } from "./invoice-data";
 import { STAGES, STAGE_LABELS, STATUS_STAGE, dubaiDate, workingTimeOf, type JobStatus, type Stage } from "./jobs";
@@ -272,6 +273,8 @@ export type MonthlySummary = {
   /** Owner only: commissions on the jobs of the month, plus any still unpaid from before. Never on a customer document. */
   commissions: CommissionLine[];
   commissionsUnpaid: number;
+  /** The bodyshop: cars in progress and late, days per job, profit per car, materials against price. */
+  bodyshop: BodyshopMonth;
 };
 
 /** Everything gated out in the month, from the stored reports (built for any job that has none yet). */
@@ -369,6 +372,7 @@ export async function monthlySummary(settings: Settings, month: string): Promise
     jobs: reports.map((r) => ({ id: r.jobId, jobNumber: r.jobNumber, plate: r.plate, title: r.title, customer: r.customer.name, gatedOutAt: r.time.gatedOutAt, verdict: r.verdict, invoiced: r.money.invoiced, profit: r.money.profit, marginPercent: r.money.marginPercent, days: r.time.days, flags: r.flags.length, loose: r.loose })),
     commissions,
     commissionsUnpaid: round2(commissions.filter((c) => !c.paidAt).reduce((a, c) => a + c.amount, 0)),
+    bodyshop: await bodyshopMonth(settings, fromIso, toIso),
   };
 }
 

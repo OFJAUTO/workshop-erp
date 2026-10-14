@@ -1,5 +1,7 @@
 "use server";
 
+import { bookedJobOf } from "@/lib/bodyshop";
+
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -170,11 +172,13 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const comebackId = blankToNull(formData.get("comeback_of"));
   const { data: comebackJob } = comebackId ? await supabase.from("jobs").select("id, job_number, vehicle_id").eq("id", comebackId).eq("vehicle_id", vehicleId).maybeSingle() : { data: null };
   if (comebackId && !comebackJob) return { error: "That previous job does not belong to this car.", values };
-  const { data: job, error: jobError } = await supabase
-    .from("jobs")
-    .insert({ vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null })
-    .select("id, job_number")
-    .single();
+  // A bodyshop car quoted before it arrived: its booked job opens now instead of a new one (nothing is retyped).
+  const booked = await bookedJobOf(blankToNull(formData.get("appointment_id")), vehicleId);
+  const jobFields = { vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null };
+  const nowIso = new Date().toISOString();
+  const { data: job, error: jobError } = booked
+    ? await createAdminClient().from("jobs").update({ ...jobFields, status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", booked.id).select("id, job_number").single()
+    : await supabase.from("jobs").insert(jobFields).select("id, job_number").single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
 
   const { error: giError } = await supabase.from("gate_ins").insert({

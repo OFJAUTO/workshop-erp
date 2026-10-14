@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { bodyshopHourly } from "@/lib/bodyshop";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { addDays, dayStartIso, dubaiTimeOf } from "@/lib/calendar";
 import { dubaiDate, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
@@ -278,6 +279,15 @@ export async function GET(request: NextRequest) {
       await admin.from("jobs").update({ doc_reminders: done }).eq("id", j.id as string);
       report.docReminders = (report.docReminders ?? 0) + fresh.length;
     }
+  }
+
+  // 16. Bodyshop: a late stage pushes the later due dates and the handover (manager and advisor told); cars due out tomorrow are announced with the sign-offs needed.
+  try {
+    const b = await bodyshopHourly(settings);
+    report.bodyshopLate = b.late;
+    report.bodyshopDueOut = b.dueOut;
+  } catch {
+    report.bodyshopLate = -1;
   }
 
   // 13. On the 1st (the first run of a new month): last month's summary goes to the owner, once.

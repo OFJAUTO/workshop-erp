@@ -21,7 +21,7 @@ const staffSchema = z
     full_name: z.string().trim().min(2, "Enter the full name."),
     display_name: z.string().trim().min(1, "Enter the short name shown on screens."),
     role_id: z.enum(ALL_ROLES as [string, ...string[]], { message: "Choose a role." }),
-    department_id: z.enum(["mechanical", "bodyshop", "paint", "ppf_tint", "office"], { message: "Choose a department." }),
+    department_id: z.enum(["mechanical", "bodyshop", "paint", "ppf_tint", "detailing", "office"], { message: "Choose a department." }),
     employee_number: z.string().trim().optional(),
     login_type: z.enum(["password", "pin", "both"]).optional(),
     email: z.string().trim().toLowerCase().optional(),

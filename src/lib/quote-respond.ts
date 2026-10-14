@@ -73,6 +73,20 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   const { data: job } = await admin.from("jobs").select("id, job_number, status, department, assigned_to").eq("id", q.job_id).maybeSingle();
   if (!job) return { status };
 
+  // A bodyshop quotation answered before the car arrives: nothing moves in the workshop. Approved: the advisor books the
+  // arrival and the handover (and a deposit if wanted); declined: the advisor hears, no inspection fee.
+  if (job.status === "booked") {
+    if (answer.approve) {
+      await admin.from("jobs").update({ first_approval_at: now }).eq("id", job.id);
+      await admin.from("job_events").insert({ job_id: job.id, event_type: "quote_approved", note: `Quotation ${q.number} approved by ${answer.name} before the car arrived (${totalText} with VAT)`, created_by: answer.by ?? null });
+      await notifyStaff(advisors, { type: "bodyshop_booked", title: `Approved before arrival · ${job.job_number}`, body: `${answer.name} approved ${q.number} (${totalText}). Book the arrival and the handover date; request a deposit if you want one.`, jobId: job.id, href: `/bodyshop/${job.id}` });
+    } else {
+      await admin.from("job_events").insert({ job_id: job.id, event_type: "quote_declined", note: `Quotation ${q.number} declined by ${answer.name} before the car arrived`, created_by: answer.by ?? null });
+      await notifyStaff(advisors, { type: "quote_declined", title: `Quotation declined · ${job.job_number}`, body: `${answer.name} declined ${q.number}. Make a revised quotation or close the booking.`, jobId: job.id, href: `/bodyshop/${job.id}` });
+    }
+    return { status };
+  }
+
   if (!answer.approve) {
     // Nothing moves in the workshop: the advisor makes a revised quotation, or the car leaves with the inspection fee due.
     await admin.from("jobs").update({ inspection_fee_due: true }).eq("id", job.id);

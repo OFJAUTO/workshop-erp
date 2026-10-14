@@ -37,6 +37,36 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
         {stat("Profit", aedText(s.profit), s.marginPercent !== null ? `${s.marginPercent}% margin` : null)}
         {stat("On time", s.count ? `${Math.round((s.onTime / s.count) * 100)}%` : "–", s.count ? `${s.late} late · ${s.avgDays} days in the workshop on average` : null)}
       </div>
+      <Card className="flex flex-col gap-2" data-bodyshop-report>
+        <SectionLabel right={`${s.bodyshop.cars.length} handed over in ${s.label}`}>Bodyshop</SectionLabel>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+          <div><span className="block text-xs text-muted">In progress</span><span className="text-xl font-extrabold">{s.bodyshop.inProgress}</span></div>
+          <div><span className="block text-xs text-muted">Late today</span><span className={`text-xl font-extrabold ${s.bodyshop.late ? "text-red" : ""}`}>{s.bodyshop.late}</span></div>
+          <div><span className="block text-xs text-muted">Days per job</span><span className="text-xl font-extrabold">{s.bodyshop.avgDays ?? "–"}</span></div>
+          <div><span className="block text-xs text-muted">Profit</span><span className="text-xl font-extrabold">{aedText(s.bodyshop.profit)}</span></div>
+          <div><span className="block text-xs text-muted">Materials vs price</span><span className="text-xl font-extrabold">{s.bodyshop.materialsPercent !== null ? `${s.bodyshop.materialsPercent}%` : "–"}</span></div>
+        </div>
+        {s.bodyshop.cars.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Job</th><th className="py-1 pr-3">Car</th><th className="py-1 pr-3 text-right">Price</th><th className="py-1 pr-3 text-right">Materials</th><th className="py-1 pr-3 text-right">Labour</th><th className="py-1 pr-3 text-right">Commission</th><th className="py-1 text-right">Profit</th></tr></thead>
+              <tbody>
+                {s.bodyshop.cars.map((c) => (
+                  <tr key={c.jobId} className="border-t border-line">
+                    <td className="py-1.5 pr-3 whitespace-nowrap"><Link href={`/reports/jobs/${c.jobId}`} className="font-bold underline underline-offset-4">{c.jobNumber}</Link></td>
+                    <td className="py-1.5 pr-3">{c.plate}</td>
+                    <td className="py-1.5 pr-3 text-right whitespace-nowrap">{aedText(c.price)}</td>
+                    <td className="py-1.5 pr-3 text-right whitespace-nowrap">{aedText(c.materials)}</td>
+                    <td className="py-1.5 pr-3 text-right whitespace-nowrap">{aedText(c.labour)}</td>
+                    <td className="py-1.5 pr-3 text-right whitespace-nowrap">{aedText(c.commission + c.bank)}</td>
+                    <td className={`py-1.5 text-right whitespace-nowrap font-bold ${c.profit < 0 ? "text-red" : ""}`}>{aedText(c.profit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </Card>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="flex flex-col gap-2">
           <SectionLabel>Verdicts</SectionLabel>

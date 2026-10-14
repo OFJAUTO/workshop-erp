@@ -567,6 +567,24 @@ export function SettingsForm({
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_done_button" defaultChecked={!!flags.wash_board_done_button} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board has a Done button</span><span className="text-xs text-muted">Not built yet: for now the advisor marks the wash done. The switch is kept for later.</span></span></label>
           </Card>
 
+          <Card className="flex flex-col gap-4" data-settings-bodyshop>
+            <SectionLabel>Bodyshop</SectionLabel>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="PPF brand name"><Input name="ppf_brand_name" defaultValue={v.ppf_brand_name} /></Field>
+              <Field label="PPF warranty (years)"><Input name="ppf_warranty_years" defaultValue={v.ppf_warranty_years} inputMode="numeric" /></Field>
+              <Field label="Final check: days after handover" hint="7 to 14; the gate-out picks this day by default."><Input name="bodyshop_final_check_days" defaultValue={v.bodyshop_final_check_days} inputMode="numeric" /></Field>
+            </div>
+            <Field label="Warranty wording (on the certificate)"><Textarea name="ppf_warranty_text" defaultValue={v.ppf_warranty_text} rows={4} /></Field>
+            <Field label="Care instructions (handover page and certificate)"><Textarea name="ppf_care_text" defaultValue={v.ppf_care_text} rows={4} /></Field>
+            <Field label="Old PPF removal note (quotation)"><Textarea name="ppf_removal_note" defaultValue={v.ppf_removal_note} rows={2} /></Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="WhatsApp: your car has arrived"><Textarea name="whatsapp_bodyshop_arrived_template" defaultValue={v.whatsapp_bodyshop_arrived_template} rows={3} /></Field>
+              <Field label="WhatsApp: film is going on"><Textarea name="whatsapp_bodyshop_film_template" defaultValue={v.whatsapp_bodyshop_film_template} rows={3} /></Field>
+              <Field label="WhatsApp: ready for collection (handover link)"><Textarea name="whatsapp_bodyshop_ready_template" defaultValue={v.whatsapp_bodyshop_ready_template} rows={3} /></Field>
+              <Field label="WhatsApp: final check reminder"><Textarea name="whatsapp_final_check_template" defaultValue={v.whatsapp_final_check_template} rows={3} /></Field>
+            </div>
+          </Card>
+
           <Card className="flex flex-col gap-4">
             <SectionLabel>QC, car ready and follow-up</SectionLabel>
             <Field label="QC general checks" hint="One per line. Every car gets these after its own complaints, work lines and parts.">

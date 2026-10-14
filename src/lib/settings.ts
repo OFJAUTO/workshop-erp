@@ -187,6 +187,17 @@ const DEFAULTS = {
   whatsapp_reminder_template:
     "Dear [name], a reminder of your appointment at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
   whatsapp_approval_template: "[make model] ([plate]) has been received at OFJ Automotive. Please review the check-in and approve the inspection:\n[link]",
+  // The bodyshop (14 October 2026): the PPF warranty and care texts, the old-film note, the three customer updates, the final check.
+  ppf_brand_name: "OFJ PPF",
+  ppf_warranty_years: 10,
+  ppf_warranty_text: "OFJ PPF is warranted against yellowing, cracking, peeling, bubbling and delamination for ten years from the installation date, when the film is cared for as described in the care instructions. The warranty covers the film and its reinstallation; it does not cover damage from accidents, stones, chemicals, abrasion, improper washing or removal by a third party. Valid for the vehicle named on this certificate.",
+  ppf_care_text: "Wait 7 days before the first wash. Hand wash or touchless only; no automatic brushes. Use pH-neutral shampoo and microfibre only. Remove bird droppings, tree sap and insects as soon as you can. No wax or sealant with petroleum distillates; a PPF-safe sealant is fine. Keep pressure washers 50 cm away and off the film edges.",
+  ppf_removal_note: "We take great care removing old film, but paint underneath can occasionally lift.",
+  bodyshop_final_check_days: 10,
+  whatsapp_bodyshop_arrived_template: "[make model] ([plate]) has arrived at OFJ Automotive and is in good hands:\n[link]",
+  whatsapp_bodyshop_film_template: "Film is going on [make model] ([plate]):\n[link]",
+  whatsapp_bodyshop_ready_template: "[make model] ([plate]) is ready for collection. Your handover page, warranty and care instructions:\n[link]",
+  whatsapp_final_check_template: "Dear [name], a reminder of the final check of [make model] ([plate]) at OFJ Automotive tomorrow, [date] at [time]. Thank you, [advisor], OFJ Automotive",
 };
 
 export type Settings = typeof DEFAULTS;

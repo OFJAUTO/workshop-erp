@@ -41,6 +41,8 @@ export type DeviceRow = {
   registered_by: string | null;
   last_seen_at: string | null;
   last_staff_id: string | null;
+  /** A shared bodyshop section tablet: the section it belongs to. */
+  section?: "ppf" | "paint" | "detailing" | "strip_refit" | null;
 };
 
 export type CustomerRow = {

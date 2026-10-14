@@ -6,6 +6,7 @@ import { aed, hoursText, type Service, type ServiceCategory } from "@/lib/quotes
 import { addCategory, addService, adoptCustomJob, dismissCustomJob, moveCategory, moveService, removeCategory, removeService, renameCategory, saveService } from "./actions";
 import { getSettings } from "@/lib/settings";
 import { TYRE_POSITIONS, checklistItems, type ChecklistSection } from "@/lib/inspection";
+import { BODYSHOP_KINDS, BODYSHOP_KIND_LABELS } from "@/lib/bodyshop-kinds";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,12 @@ function ServiceFields({ s, categories, suggestOptions, defaultMode = "hours" }:
           {Object.entries(DEPT_LABELS).map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
+        </Select>
+      </Field>
+      <Field label="Bodyshop package" hint="Builds the stages on a bodyshop car; the advisor types the price every time (no fixed price, no car-size pricing).">
+        <Select name="bodyshop_kind" defaultValue={s?.bodyshop_kind ?? ""}>
+          <option value="">Not a bodyshop package</option>
+          {BODYSHOP_KINDS.map((k) => <option key={k} value={k}>{BODYSHOP_KIND_LABELS[k]}</option>)}
         </Select>
       </Field>
       <ServicePriceField priceAed={s?.price_aed ?? null} defaultHours={s?.default_hours ?? null} pricePer={s?.price_per ?? "job"} usualQuantity={s?.usual_quantity ?? 1} timeAllowance={s?.time_allowance_hours ?? null} defaultMode={defaultMode} />
@@ -60,7 +67,8 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
   await requirePermission("manageServices");
   const { message, error, list } = await searchParams;
   // Two lists with the same categories: Labour jobs (priced by hours) and Services (a fixed price per unit).
-  const showLabour = list !== "services";
+  const showBodyshop = list === "bodyshop";
+  const showLabour = !showBodyshop && list !== "services";
   const kindWord = showLabour ? "labour job" : "service";
   const [{ categories, services }, settings] = await Promise.all([loadServices(null), getSettings()]);
   const suggestOptions: SuggestOption[] = [
@@ -75,7 +83,8 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
       <PageHeader title="Labour jobs and services" subtitle='Two lists behind "+ Add line" on quotations and estimates: labour jobs priced by hours and services at a fixed price per unit, in the same categories.' actions={<LinkButton href="/settings" tone="secondary">Back to settings</LinkButton>} />
       <div className="grid grid-cols-2 gap-2 max-w-xl">
         <LinkButton href="/settings/services?list=labour" tone={showLabour ? "primary" : "secondary"} size="lg">Labour jobs (by hours)</LinkButton>
-        <LinkButton href="/settings/services?list=services" tone={showLabour ? "secondary" : "primary"} size="lg">Services (fixed price)</LinkButton>
+        <LinkButton href="/settings/services?list=services" tone={!showLabour && !showBodyshop ? "primary" : "secondary"} size="lg">Services (fixed price)</LinkButton>
+        <LinkButton href="/settings/services?list=bodyshop" tone={showBodyshop ? "primary" : "secondary"} size="lg">Bodyshop packages</LinkButton>
       </div>
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -108,7 +117,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
       </Card>
       {categories.length === 0 ? <Empty title="No categories yet" /> : null}
       {categories.map((c, ci) => {
-        const items = services.filter((s) => s.category_id === c.id && (showLabour ? s.price_aed === null : s.price_aed !== null));
+        const items = services.filter((s) => s.category_id === c.id && (showBodyshop ? !!s.bodyshop_kind : showLabour ? s.price_aed === null && !s.bodyshop_kind : s.price_aed !== null && !s.bodyshop_kind));
         return (
           <Card key={c.id} id={`cat-${c.id}`} className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">

@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
+import { afterBodyshopHandover, signoffState } from "@/lib/bodyshop";
+import { SIGNOFF_LABELS } from "@/lib/bodyshop-kinds";
 import { formValues, type FormState } from "@/lib/form-state";
 import { jobBalance } from "@/lib/invoice-data";
 import { STATUS_LABELS, type JobStatus, dubaiDate } from "@/lib/jobs";
@@ -56,6 +58,13 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   if (!["ready", "pending_payment"].includes(job.status)) {
     if (role !== "owner") return { error: "This car is not ready to leave yet: QC, the wash and the invoice come first.", values };
     await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, note: `Gated out by ${staff.display_name}, ${new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())}, while the car was still at ${STATUS_LABELS[job.status as JobStatus]}. Reason: owner override, before QC, the wash and the invoice`, created_by: staff.id });
+  }
+  // A bodyshop car leaves only after the release sign-off (the owner signs on behalf of anyone on the bodyshop page).
+  const { data: jd } = await admin.from("jobs").select("department").eq("id", jobId).maybeSingle();
+  const bodyshopCar = jd?.department === "bodyshop";
+  if (bodyshopCar) {
+    const st = await signoffState(jobId);
+    if (st.hasStages && !st.complete) return { error: `Release sign-off missing: waiting on ${st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. Sign it on the bodyshop page.`, values };
   }
   const { data: gi } = await admin.from("gate_ins").select("keys_count, keys_keychain, dash_cam, old_parts_return").eq("job_id", jobId).maybeSingle();
   if (!gi) return { error: "No gate-in record found.", values };
@@ -133,6 +142,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     { onConflict: "job_id" },
   );
   if (error) return { error: error.message, values };
+  if (bodyshopCar) await afterBodyshopHandover(jobId, blankToNull(formData.get("final_check_date")), staff);
   if (releaseBy) await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Release approved by ${staff.display_name} with ${bal.state === "no_invoice" ? "no invoice" : `AED ${bal.balance.toLocaleString("en-GB")} due`}: ${releaseReason}`, created_by: staff.id });
   if (overrideBy) await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Keys override by ${staff.display_name}: ${overrideReason}`, created_by: staff.id });
 

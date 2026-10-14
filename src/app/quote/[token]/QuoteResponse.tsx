@@ -8,7 +8,7 @@ import { aed } from "@/lib/quotes";
  * AED <total>?", with the terms and the customer's name, and records the amount approved. There is no
  * Declined button: the advisor marks a quotation declined after talking to the customer.
  */
-export function QuoteResponse({ token, customerName, total, declaration, declarationAr, isEstimate, terms, termsAr }: { token: string; customerName: string; total: number; declaration: string; declarationAr: string | null; isEstimate: boolean; terms: string; termsAr: string | null }) {
+export function QuoteResponse({ token, customerName, total, declaration, declarationAr, isEstimate, terms, termsAr, removalAck = null }: { token: string; customerName: string; total: number; declaration: string; declarationAr: string | null; isEstimate: boolean; terms: string; termsAr: string | null; /** Old PPF removal on the quotation: the customer ticks that they understand paint may lift. */ removalAck?: string | null }) {
   const [open, setOpen] = useState(false);
   const word = isEstimate ? "estimate" : "quotation";
   return (
@@ -32,6 +32,12 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
                 {declarationAr ? <span dir="rtl" lang="ar">{declarationAr}</span> : null}
               </span>
             </label>
+            {removalAck ? (
+              <label className="flex items-start gap-3 cursor-pointer" data-removal-ack>
+                <input type="checkbox" name="removal_ack" className="mt-1 h-5 w-5 accent-ink" required />
+                <span className="text-sm">I understand old film removal may lift paint. <span className="text-xs text-[#5F6368]">{removalAck}</span></span>
+              </label>
+            ) : null}
             <label className="flex flex-col gap-1">
               <span className="text-sm font-semibold">Your full name</span>
               <input name="approver_name" defaultValue={customerName} required minLength={2} spellCheck lang="en" autoCapitalize="words" className="min-h-12 rounded-lg border border-[#D4D4D8] px-3.5 text-base" autoComplete="name" />

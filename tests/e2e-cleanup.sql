@@ -10,6 +10,13 @@ begin
   select coalesce(array_agg(id), '{}') into job_ids from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%';
   select coalesce(array_agg(id), '{}') into cust_ids from public.customers where id::text like '22222222-0000-4000-8000-00000000e%';
   select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where id::text like '22222222-0000-4000-8000-00000000e%';
+  delete from public.bodyshop_clockings where job_id = any(job_ids);
+  delete from public.bodyshop_assignments where job_id = any(job_ids);
+  delete from public.bodyshop_signoffs where job_id = any(job_ids);
+  delete from public.bodyshop_removed_items where job_id = any(job_ids);
+  delete from public.bodyshop_updates where job_id = any(job_ids);
+  delete from public.bodyshop_stages where job_id = any(job_ids);
+  update public.jobs set final_check_appointment_id = null, bodyshop_after_photo_id = null where id = any(job_ids);
   delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids));
   delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
@@ -45,6 +52,13 @@ begin
   select coalesce(array_agg(id), '{}') into cust_ids from public.customers where phone like '+9715000000%' or full_name ilike 'e2e %';
   select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where customer_id = any(cust_ids);
   select coalesce(array_agg(id), '{}') into job_ids from public.jobs where customer_id = any(cust_ids) or vehicle_id = any(veh_ids);
+  delete from public.bodyshop_clockings where job_id = any(job_ids);
+  delete from public.bodyshop_assignments where job_id = any(job_ids);
+  delete from public.bodyshop_signoffs where job_id = any(job_ids);
+  delete from public.bodyshop_removed_items where job_id = any(job_ids);
+  delete from public.bodyshop_updates where job_id = any(job_ids);
+  delete from public.bodyshop_stages where job_id = any(job_ids);
+  update public.jobs set final_check_appointment_id = null, bodyshop_after_photo_id = null where id = any(job_ids);
   delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids));
   delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
@@ -83,3 +97,25 @@ delete from public.service_categories where name ilike 'e2e %';
 delete from public.notifications where type in ('owner_report') and job_id is null;
 set session_replication_role = default;
 select count(*) as left_over_services from public.services where name ilike 'e2e %';
+
+-- The bodyshop seed's people (team leaders and an installer made for the tests) and their logins.
+set session_replication_role = replica;
+do $$
+declare sids uuid[];
+begin
+  select coalesce(array_agg(id), '{}') into sids from public.staff where display_name ilike 'E2e %';
+  delete from public.notifications where staff_id = any(sids);
+  delete from public.notification_preferences where staff_id = any(sids);
+  delete from public.upload_failures where staff_id = any(sids);
+  delete from public.bodyshop_clockings where staff_id = any(sids);
+  delete from public.bodyshop_assignments where staff_id = any(sids);
+  delete from public.bodyshop_signoffs where staff_id = any(sids);
+  update public.devices set last_staff_id = null where last_staff_id = any(sids);
+  delete from public.staff_private where staff_id = any(sids);
+  delete from public.staff where id = any(sids);
+  delete from auth.identities where identity_data->>'email' like 'e2e-%@ofj.test';
+  delete from auth.users where email like 'e2e-%@ofj.test';
+end $$;
+-- Section tablets registered by the tests.
+delete from public.devices where name ilike 'E2e %';
+set session_replication_role = default;

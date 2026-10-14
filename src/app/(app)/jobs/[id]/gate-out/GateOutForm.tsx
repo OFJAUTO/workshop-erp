@@ -9,7 +9,7 @@ import { ChoiceButtons, Field, Input, Notice } from "@/components/ui";
 export type BalanceInfo = { state: "paid" | "part_paid" | "unpaid" | "cheque_pending" | "no_invoice" | "nothing"; balance: number; invoiceNumber: string | null };
 
 /** The gate-out form: how the car leaves, the checks before release, the handover. */
-export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldParts, canOverride, canApproveRelease, balance, reasons = { keys: [], release: [] } }: { jobId: string; action: FormAction; keysCount: number; keychain: boolean; dashCam: boolean; oldParts: boolean; canOverride: boolean; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for the keys override and for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
+export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldParts, canOverride, canApproveRelease, balance, reasons = { keys: [], release: [] }, finalCheck = null }: { /** A PPF car: the final check visit, 7 to 14 days after the handover. */ finalCheck?: { defaultDate: string; min: string; max: string } | null; jobId: string; action: FormAction; keysCount: number; keychain: boolean; dashCam: boolean; oldParts: boolean; canOverride: boolean; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for the keys override and for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
   const [method, setMethod] = useState<string>("customer");
   const [returned, setReturned] = useState<string>(String(keysCount));
   const [chain, setChain] = useState<string>(keychain ? "yes" : "no");
@@ -102,10 +102,17 @@ export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldPa
           </Field>
 
           {method !== "recovery" ? (
+            <>
+            {finalCheck ? (
+              <Field label="Final check visit (PPF): 7 to 14 days from today" hint="On the calendar, linked to this job, with a WhatsApp reminder the day before.">
+                <Input type="date" name="final_check_date" defaultValue={v.final_check_date ?? finalCheck.defaultDate} min={finalCheck.min} max={finalCheck.max} className="w-44" data-final-check />
+              </Field>
+            ) : null}
             <label className="flex items-center gap-3 min-h-12 rounded-control border border-ink bg-white px-4 cursor-pointer">
               <input type="checkbox" name="handover_confirmed" className="h-5 w-5 accent-ink" required />
               <span className="text-sm font-bold">Handover confirmed with the collecting person</span>
             </label>
+            </>
           ) : null}
 
           <Field label="Notes" optional>

@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { GATE_IN_BUCKET, loadGateInFlags, loadMedia, mediaChecklist } from "@/lib/media";
 import { authoriseUpload } from "@/lib/upload-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { startBodyshopWork } from "@/lib/bodyshop";
+import { getSettings } from "@/lib/settings";
 
 /** Step 2 of an upload: once the file is stored, record it against the job. */
 export async function POST(request: NextRequest) {
@@ -52,5 +54,10 @@ export async function POST(request: NextRequest) {
     }
   }
   const checklist = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
+  // A bodyshop car with an approved quotation: the stages start by themselves once the gate-in photos are complete.
+  if (checklist.complete) {
+    const { data: j } = await admin.from("jobs").select("department, status, bodyshop_started_at").eq("id", jobId).maybeSingle();
+    if (j?.department === "bodyshop" && !j.bodyshop_started_at && ["gate_in_pending", "pending_approval"].includes(String(j.status))) await startBodyshopWork(jobId, null, await getSettings()).catch(() => null);
+  }
   return NextResponse.json({ ok: true, checklist });
 }

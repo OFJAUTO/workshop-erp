@@ -11,6 +11,10 @@ import { ensureWorkLines } from "@/lib/work-data";
 import { openQcRound } from "@/lib/work-flow";
 import { ensureLooseMake } from "@/lib/loose-items";
 import { ensureQrLink } from "@/lib/stickers";
+import { randomBytes } from "node:crypto";
+import { assignPerson, clockIn, startBodyshopWork } from "@/lib/bodyshop";
+import { addDaysIso } from "@/lib/bodyshop-kinds";
+import { dubaiDate } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -24,6 +28,7 @@ export const maxDuration = 60;
 const ID = (n: string) => `22222222-0000-4000-8000-00000000e3${n}`;
 const CUST = ID("01"), VEH = ID("02"), JOB = ID("03"), GI = ID("04"), Q1 = ID("05"), PA = ID("06"), REQ1 = ID("07"), REQ2 = ID("08"), PR1 = ID("09");
 const LVEH = ID("20"), LJOB = ID("21"), LIT1 = ID("22"), LIT2 = ID("23"), LREQ = ID("24");
+const BVEH = ID("30"), BJOB = ID("31"), BQ = ID("32"), BGI = ID("33"), BAPPT = ID("34");
 
 export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
@@ -58,6 +63,79 @@ export async function POST(request: NextRequest) {
   const { data: make } = await admin.from("vehicle_makes").select("id").limit(1).maybeSingle();
   const now = new Date().toISOString();
   await admin.from("customers").upsert({ id: CUST, customer_type: "individual", full_name: "stage test customer", phone: "+971500000003", created_by: owner.id, updated_by: owner.id });
+  if (stage === "bodyshop") {
+    // A bodyshop car: quoted before arrival (Full PPF, tint, old PPF removal). "at": sent (link open for the customer),
+    // approved (booked, not here), in_work (gated in, stages running) or ready (work done, sign-off open).
+    const at = (body as { at?: string }).at ?? "in_work";
+    const today = dubaiDate();
+    // People: the bodyshop manager is the existing one; the three leaders and an installer are made for the tests (PIN 1234).
+    const ensurePerson = async (email: string, display_name: string, role_id: string, department_id: string) => {
+      const { data: have } = await admin.from("staff").select("id").eq("display_name", display_name).maybeSingle();
+      if (have) return have.id as string;
+      const { data: users } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      let userId = users?.users.find((u) => u.email === email)?.id;
+      if (!userId) {
+        const { data: made, error: mkErr } = await admin.auth.admin.createUser({ email, password: "E2e-" + randomBytes(6).toString("hex"), email_confirm: true });
+        if (mkErr) throw new Error("Could not make the test person " + display_name + ": " + mkErr.message);
+        userId = made.user?.id;
+      }
+      if (!userId) throw new Error("Could not make the test person " + display_name);
+      await admin.from("staff").upsert({ id: userId, full_name: display_name, display_name, role_id, department_id, login_type: "both", is_active: true, created_by: owner.id, updated_by: owner.id });
+      await admin.from("staff_private").upsert({ staff_id: userId, pin_hash: hashPin("1234"), email }, { onConflict: "staff_id" });
+      return userId;
+    };
+    const { data: mgrRow } = await admin.from("staff").select("id").eq("role_id", "workshop_manager").in("department_id", ["bodyshop", "paint", "ppf_tint", "detailing"]).eq("is_active", true).order("display_name").limit(1).maybeSingle();
+    const managerId = mgrRow?.id ?? (await ensurePerson("e2e-bodyshop-manager@ofj.test", "E2e Bodyshop Manager", "workshop_manager", "bodyshop"));
+    const ppfLeader = await ensurePerson("e2e-ppf-leader@ofj.test", "E2e PPF Leader", "team_leader", "ppf_tint");
+    const detailingLeader = await ensurePerson("e2e-detailing-leader@ofj.test", "E2e Detailing Leader", "team_leader", "detailing");
+    const paintLeader = await ensurePerson("e2e-paint-leader@ofj.test", "E2e Paint Leader", "team_leader", "paint");
+    const installer = await ensurePerson("e2e-installer@ofj.test", "E2e Installer", "technician", "ppf_tint");
+    const detailer = await ensurePerson("e2e-detailer@ofj.test", "E2e Detailer", "technician", "detailing");
+    await admin.from("vehicles").upsert({ id: BVEH, customer_id: CUST, plate_country: "UAE", plate_emirate: "Dubai", plate_code: "F", plate_number: "63000", has_plate: true, make_id: make?.id, vin: "WDC1234567E2E0001", model_year: 2025, colour: "Obsidian black", created_by: owner.id, updated_by: owner.id });
+    const handoverToken = "e2ehandover" + randomBytes(10).toString("hex");
+    const promised = addDaysIso(today, at === "ready" ? 1 : 4);
+    // A job seeded earlier keeps its gate-in stamp: the stamp trigger only lets it change while the job is booked.
+    const { data: haveJob } = await admin.from("jobs").select("gated_in_at, gated_in_by").eq("id", BJOB).maybeSingle();
+    const { error: bjErr } = await admin.from("jobs").upsert({ id: BJOB, vehicle_id: BVEH, customer_id: CUST, status: "booked", stage: "quote", is_open: false, department: "bodyshop", priority: "normal", gated_in_by: haveJob?.gated_in_by ?? advisor.id, gated_in_at: haveJob?.gated_in_at ?? now, booked_at: now, booked_arrival_at: now, promised_at: promised, bodyshop_handover_token: handoverToken, bodyshop_started_at: null, gated_out_at: null, created_by: advisor.id, updated_by: advisor.id });
+    if (bjErr) return NextResponse.json({ error: "jobs: " + bjErr.message }, { status: 500 });
+    await admin.from("bodyshop_stages").update({ is_active: false }).eq("job_id", BJOB);
+    const approvedNow = at !== "sent";
+    const qToken = newToken();
+    await admin.from("quotations").upsert({ id: BQ, kind: "quotation", number: "Q-STAGE-B", version: 1, job_id: BJOB, customer_id: CUST, vehicle_id: BVEH, status: approvedNow ? "approved" : "sent", token: qToken, sent_at: now, sent_by: advisor.id, sent_to_name: "Stage Customer", ...(approvedNow ? { responded_at: now, approver_name: "Stage Customer", approved_total_aed: 23100, removal_ack_at: now, removal_ack_name: "Stage Customer" } : {}), created_by: advisor.id, updated_by: advisor.id });
+    const { data: bLines } = await admin.from("quotation_lines").select("id").eq("quotation_id", BQ);
+    if (!(bLines ?? []).length) {
+      const { data: svcs } = await admin.from("services").select("id, name, bodyshop_kind").in("bodyshop_kind", ["ppf", "tint", "ppf_removal"]);
+      const svc = (k: string) => (svcs ?? []).find((s) => s.bodyshop_kind === k);
+      await admin.from("quotation_lines").insert([
+        { quotation_id: BQ, position: 0, line_type: "package", title: svc("ppf")?.name ?? "Full PPF", service_id: svc("ppf")?.id ?? null, price_per: "job", quantity: 1, unit_price: 18000, source_type: "manual", urgency: "recommended", created_by: advisor.id, updated_by: advisor.id },
+        { quotation_id: BQ, position: 1, line_type: "package", title: svc("tint")?.name ?? "Window tint", service_id: svc("tint")?.id ?? null, price_per: "job", quantity: 1, unit_price: 2500, tint_percent: 35, source_type: "manual", urgency: "recommended", created_by: advisor.id, updated_by: advisor.id },
+        { quotation_id: BQ, position: 2, line_type: "package", title: svc("ppf_removal")?.name ?? "Old PPF removal", service_id: svc("ppf_removal")?.id ?? null, price_per: "job", quantity: 1, unit_price: 1500, source_type: "manual", urgency: "recommended", created_by: advisor.id, updated_by: advisor.id },
+      ]);
+    }
+    await refreshQuoteTotals(BQ, settings, advisor.id);
+    await admin.from("appointments").upsert({ id: BAPPT, kind: "car_drop", department: "bodyshop", customer_id: CUST, vehicle_id: BVEH, job_id: BJOB, reason: "Bodyshop: Full PPF, tint, old PPF removal", starts_at: now, duration_minutes: 30, advisor_id: advisor.id, status: at === "sent" || at === "approved" ? "booked" : "arrived", created_by: advisor.id, updated_by: advisor.id });
+    const people = { manager: managerId, ppfLeader, detailingLeader, paintLeader, installer, detailer, advisor: advisor.id };
+    if (at === "sent" || at === "approved") return NextResponse.json({ jobId: BJOB, quotationId: BQ, token: qToken, handoverToken, promised, people });
+    // The car arrives: gate-in complete (legacy media rows), the stages start.
+    await admin.from("jobs").update({ status: "gate_in_pending", stage: "gate_in", is_open: true, stage_entered_at: now }).eq("id", BJOB);
+    await admin.from("gate_ins").upsert({ id: BGI, job_id: BJOB, arrived_by: "customer_drove", condition: "runs_drives", fuel_level: "half", cleanliness: "clean", mileage: 1200, keys_count: 1, wheels_required: false, major_damage: false, keys_keychain: false, old_parts_return: false, customer_requests: "Full PPF, tint, remove the old film", is_complete: true, created_by: owner.id, updated_by: owner.id });
+    const { data: bgm } = await admin.from("gate_in_media").select("id").eq("job_id", BJOB).limit(1);
+    if (!(bgm ?? []).length) await admin.from("gate_in_media").insert(["car_picture", "video", "dashboard_photo", "keys_photo"].map((kind) => ({ job_id: BJOB, kind, storage_path: `test/${BJOB}/${kind}.jpg`, uploaded_by: owner.id, created_by: owner.id, updated_by: owner.id })));
+    const started = await startBodyshopWork(BJOB, { id: managerId, display_name: "Bodyshop manager" }, settings);
+    if (started.error) return NextResponse.json({ error: "start: " + started.error }, { status: 500 });
+    await assignPerson(BJOB, installer, { id: ppfLeader, display_name: "E2e PPF Leader" });
+    await clockIn(BJOB, installer, "tablet", installer);
+    const { data: stageRows } = await admin.from("bodyshop_stages").select("id, key, label, section, due_date, status, position").eq("job_id", BJOB).eq("is_active", true).order("position");
+    if (at === "ready") {
+      // Every stage but the handover is done; the car is Ready and the sign-off is open.
+      for (const s of stageRows ?? []) if (s.key !== "handover") await admin.from("bodyshop_stages").update({ status: "done", done_at: now, done_by: managerId }).eq("id", s.id);
+      const h = (stageRows ?? []).find((s) => s.key === "handover");
+      if (h) await admin.from("bodyshop_stages").update({ status: "active", started_at: now }).eq("id", h.id);
+      await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, promised_at: promised }).eq("id", BJOB);
+      await ensureProforma(BJOB, { id: advisor.id, display_name: advisor.display_name }, settings).catch(() => null);
+    }
+    return NextResponse.json({ jobId: BJOB, quotationId: BQ, token: qToken, handoverToken, promised, people, stages: stageRows ?? [] });
+  }
   if (stage === "loose") {
     // Loose items at Quote, with two items and a request; the optional "at" moves it on (pending_qc or ready).
     const at = (body as { at?: string }).at ?? "pending_quote";

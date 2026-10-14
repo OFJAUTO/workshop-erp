@@ -6,7 +6,8 @@ export type RoleId =
   | "technician"
   | "parts"
   | "qc_inspector"
-  | "accounts";
+  | "accounts"
+  | "team_leader";
 
 export const ROLE_LABELS: Record<RoleId, string> = {
   owner: "Owner",
@@ -17,6 +18,7 @@ export const ROLE_LABELS: Record<RoleId, string> = {
   parts: "Parts",
   qc_inspector: "QC inspector",
   accounts: "Accounts",
+  team_leader: "Team leader",
 };
 
 export const ALL_ROLES = Object.keys(ROLE_LABELS) as RoleId[];
@@ -24,20 +26,21 @@ export const ALL_ROLES = Object.keys(ROLE_LABELS) as RoleId[];
 /** Everyone except the gate-in role, which sees the gate-in screen only. */
 export const OFFICE_AND_WORKSHOP: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in");
 /** Office roles: everyone except gate-in and technicians (technicians see My jobs and the Workshop list only). */
-export const OFFICE: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in" && r !== "technician");
+export const OFFICE: RoleId[] = ALL_ROLES.filter((r) => r !== "gate_in" && r !== "technician" && r !== "team_leader");
 /** Office roles minus the QC inspector, who sees road tests, approved reports and the workshop list only. */
 export const OFFICE_NO_QC: RoleId[] = OFFICE.filter((r) => r !== "qc_inspector");
 
 /** Roles whose logins are kept short because they see money. */
 export const SENSITIVE_ROLES: RoleId[] = ["owner", "accounts"];
 
-export type DepartmentId = "mechanical" | "bodyshop" | "paint" | "ppf_tint" | "office";
+export type DepartmentId = "mechanical" | "bodyshop" | "paint" | "ppf_tint" | "detailing" | "office";
 
 export const DEPARTMENT_LABELS: Record<DepartmentId, string> = {
   mechanical: "Mechanical",
   bodyshop: "Bodyshop",
   paint: "Paint",
   ppf_tint: "PPF and tint",
+  detailing: "Detailing and cleaning",
   office: "Office",
 };
 
@@ -97,7 +100,12 @@ export const PERMISSIONS = {
   viewWorkOrders: ["owner", "workshop_manager", "service_advisor", "accounts"],
   manageWork: ["owner", "workshop_manager"],
   doWork: ["owner", "technician"],
-  clockShift: ["owner", "technician", "workshop_manager", "qc_inspector", "parts"],
+  clockShift: ["owner", "technician", "workshop_manager", "qc_inspector", "parts", "team_leader"],
+  // The bodyshop (14 October 2026): the board and the job pages, the manager's controls, the leaders' section lists, the quote before arrival.
+  viewBodyshop: ["owner", "workshop_manager", "team_leader", "service_advisor", "accounts"],
+  manageBodyshop: ["owner", "workshop_manager"],
+  leadSection: ["owner", "workshop_manager", "team_leader"],
+  bodyshopQuote: ["owner", "service_advisor"],
   viewAttendance: ["owner", "workshop_manager", "accounts"],
   doQc: ["owner", "qc_inspector"],
   washCars: ["owner", "workshop_manager", "qc_inspector", "service_advisor"],
@@ -135,4 +143,5 @@ export const ROLE_PHASE1_SUMMARY: Record<RoleId, string[]> = {
   parts: ["Price requests, exact parts and costs; approved parts to order"],
   qc_inspector: ["Road tests, approved inspection reports (view only) and the workshop list"],
   accounts: ["See customers and cars"],
+  team_leader: ["Lead a bodyshop section: assign people to cars, mark stages done, sign the release"],
 };

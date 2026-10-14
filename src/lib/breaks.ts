@@ -5,7 +5,7 @@ export type BreakSettings = { break_mechanical?: unknown; break_bodyshop?: unkno
 
 /** The department's break, from Settings: bodyshop sides take the bodyshop one, everyone else the mechanical one. */
 export function departmentBreak(settings: BreakSettings, departmentId: string | null | undefined): BreakWindow | null {
-  const bodyshop = departmentId === "bodyshop" || departmentId === "paint" || departmentId === "ppf_tint";
+  const bodyshop = departmentId === "bodyshop" || departmentId === "paint" || departmentId === "ppf_tint" || departmentId === "detailing";
   return parseBreak(String((bodyshop ? settings.break_bodyshop : settings.break_mechanical) ?? "")) ?? (bodyshop ? { start: "13:30", end: "14:30" } : { start: "12:30", end: "13:30" });
 }
 
