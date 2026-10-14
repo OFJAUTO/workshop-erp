@@ -3,6 +3,8 @@
 import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff } from "@/lib/auth";
+import { ocrEnabled, ocrTable } from "@/lib/import-ocr";
+import { readPdfRows, renderPdfPages } from "@/lib/pdf-read";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult } from "@/lib/price-import";
@@ -40,16 +42,48 @@ function withSaved(rows: string[][], mappings: { supplierId: string; name: strin
   return result;
 }
 
-/** Excel or CSV files (one or several): every sheet is tried, the one with part lines is used. */
-export async function parseImportUpload(jobId: string, formData: FormData): Promise<{ error?: string; result?: ImportResult; fileNames?: string[] }> {
+/**
+ * Excel, CSV or PDF files (one or several). Spreadsheets: every sheet is tried, the one with part lines is used.
+ * PDFs: the text is read page by page into cells; a scanned PDF (a picture) goes through the screenshot reader
+ * page by page and comes back marked `scanned`, so every line must be ticked.
+ */
+export async function parseImportUpload(jobId: string, formData: FormData): Promise<{ error?: string; result?: ImportResult; fileNames?: string[]; scanned?: boolean }> {
   if (!(await partsStaff())) return { error: "Not allowed." };
   const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
   if (!files.length) return { error: "Choose a file first." };
   const mappings = await savedMappings();
   const results: ImportResult[] = [];
   const names: string[] = [];
+  let scanned = false;
   for (const file of files) {
     if (file.size > 15 * 1024 * 1024) return { error: `${file.name} is over 15 MB.` };
+    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+      const buf = Buffer.from(await file.arrayBuffer());
+      let read: Awaited<ReturnType<typeof readPdfRows>>;
+      try {
+        read = await readPdfRows(buf);
+      } catch {
+        return { error: `${file.name} could not be opened as a PDF.` };
+      }
+      if (!read.scanned) {
+        // The cells as the PDF laid them out; the plain lines when the cells did not line up.
+        const byCells = withSaved(read.pages.flat(), mappings);
+        const r = byCells.lines.length ? byCells : withSaved(parsePaste(read.text, null), mappings);
+        results.push({ ...r, vin: r.vin ?? read.vin });
+        names.push(`${file.name} (${read.pageCount} page${read.pageCount === 1 ? "" : "s"})`);
+        continue;
+      }
+      if (!ocrEnabled()) return { error: `${file.name} is a scan (a picture, no text). Reading scans needs the screenshot reader, which is not switched on yet. Ask the supplier for the file, or paste the text.` };
+      const pngs = await renderPdfPages(buf, 8);
+      for (const [i, png] of pngs.entries()) {
+        const o = await ocrTable(png, "image/png");
+        if (o.error || !o.result) return { error: `${file.name}, page ${i + 1}: ${o.error ?? "could not be read"}` };
+        results.push(o.result);
+      }
+      scanned = true;
+      names.push(`${file.name} (scan, ${pngs.length} page${pngs.length === 1 ? "" : "s"})`);
+      continue;
+    }
     let wb: XLSX.WorkBook;
     try {
       wb = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellText: true, cellDates: false });
@@ -68,7 +102,7 @@ export async function parseImportUpload(jobId: string, formData: FormData): Prom
     }
   }
   if (!results.length) return { error: "Nothing readable was found in the file." };
-  return { result: merge(results), fileNames: names };
+  return { result: merge(results), fileNames: names, scanned };
 }
 
 /** Text pasted from an email or copied out of a spreadsheet; `valuesPerRow` when Parts told us how many values make a line. */

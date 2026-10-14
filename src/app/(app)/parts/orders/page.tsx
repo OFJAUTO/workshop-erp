@@ -23,7 +23,8 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   const settings = await getSettings();
   const admin = createAdminClient();
   const { data } = await admin.from("purchase_orders").select(PO_SELECT).eq("is_active", true).order("created_at", { ascending: false }).limit(300);
-  const pos = ((data ?? []) as Record<string, unknown>[]).map(toPo);
+  // The main LPO (every supplier, one approval) shows while it waits or when refused; once approved its supplier LPOs carry the state.
+  const pos = ((data ?? []) as Record<string, unknown>[]).map(toPo).filter((p) => p.kind !== "main" || p.status === "pending_approval" || p.status === "cancelled");
   const jobIds = Array.from(new Set(pos.map((p) => p.job_id)));
   const [{ data: jobs }, { data: lines }] = await Promise.all([
     jobIds.length ? admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").in("id", jobIds) : Promise.resolve({ data: [] }),

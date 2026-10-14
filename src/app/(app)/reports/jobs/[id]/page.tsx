@@ -55,7 +55,8 @@ export default async function JobReportPage({ params }: { params: Promise<{ id: 
             { label: "Promised", value: r.time.promisedAt ? formatDate(r.time.promisedAt) : "No date promised" },
             { label: "Gated out", value: r.time.gatedOutAt ? formatDateTime(r.time.gatedOutAt) : "Still here" },
             { label: "In the workshop", value: `${r.time.days} day${r.time.days === 1 ? "" : "s"} · ${hoursText(r.time.workingHours)}` },
-            { label: "Hours charged", value: `${r.time.hoursCharged.toFixed(1)} h` },
+            { label: "Hours quoted", value: `${r.time.hoursCharged.toFixed(1)} h` },
+            { label: "Hours estimated", value: r.summary?.hoursEstimate !== undefined ? `${Number(r.summary.hoursEstimate).toFixed(1)} h (the advisor's estimate on the quotation)` : null },
             { label: "On the clock", value: hm(r.time.minutesUsed) },
             { label: "Late", value: r.time.daysLate ? <span className="font-bold text-red">{r.time.daysLate} day{r.time.daysLate === 1 ? "" : "s"}</span> : "On time" },
           ])} />

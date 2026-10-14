@@ -1,17 +1,15 @@
 import { CopyVin } from "@/components/CopyVin";
 import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { Badge, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { dubaiDate, formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
+import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { REQUEST_SELECT } from "@/lib/quote-data";
 import { PART_FULL_SELECT, toPartFull } from "@/lib/parts-data";
-import { availabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { type PartRequest } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { createPurchaseOrder } from "./order-actions";
 import { WaitingPanel } from "@/components/WaitingPanel";
 
 export const dynamic = "force-dynamic";
@@ -28,14 +26,12 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const settings = await getSettings();
   const wt = workingTimeOf(settings);
   const target = Number(settings.parts_pricing_target_hours) || 4;
-  const [{ data: reqRows }, { data: partRows }, { data: supplierRows }] = await Promise.all([
+  const [{ data: reqRows }, { data: partRows }] = await Promise.all([
     admin.from("part_requests").select(REQUEST_SELECT).eq("is_active", true).in("status", ["open"]).order("created_at"),
     admin.from("part_items").select(PART_FULL_SELECT).eq("is_active", true).order("created_at"),
-    admin.from("suppliers").select("id, name").eq("is_active", true).order("name"),
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
-  const supplierNames = Array.from(new Set([...(supplierRows ?? []).map((s) => s.name as string), ...parts.map((p) => p.supplier).filter((x): x is string => !!x)])).sort();
   const today = todayIso();
   const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)]));
   const { data: jobRows } = jobIds.length ? await admin.from("jobs").select("id, job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").in("id", jobIds) : { data: [] };
@@ -111,31 +107,20 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
 
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${toOrder.length}`}>To order (approved by the customer)</SectionLabel>
-        <p className="text-xs text-muted">Tick the parts for one supplier and raise an LPO. It goes to the owner or the head accountant for approval; it cannot be sent before that.</p>
+        <p className="text-xs text-muted">The approved parts are on the page of the car. One button there sends the LPO for approval; after the one-tap approval, one LPO per supplier appears with Copy, PDF and Ordered.</p>
         {toOrder.length === 0 ? <p className="text-sm text-muted">Nothing to order.</p> : null}
-        {byJob(toOrder).map((jobId) => (
-          <Card key={jobId} className="flex flex-col gap-2">
-            <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
-            <form action={createPurchaseOrder.bind(null, jobId)} className="flex flex-col gap-2">
-              <ul className="text-sm divide-y divide-line">
-                {toOrder.filter((p) => p.job_id === jobId).map((p) => (
-                  <li key={p.id} className="py-2 flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="part" value={p.id} defaultChecked className="h-5 w-5 accent-ink" /><span className="font-semibold">{p.description}</span></label>
-                    {p.part_number ? <span className="text-muted">{p.part_number}</span> : null}
-                    <span className="text-muted">× {p.confirmed_quantity ?? p.quantity} · AED {(p.cost_aed ?? 0).toFixed(2)} · {p.supplier ?? "no supplier"} · {availabilityWords(p.availability, daysFromDate(p.delivery_date, dubaiDate()))}</span>
-                    {p.advisor_added_label ? <Badge tone="outline">{p.advisor_added_label}</Badge> : null}
-                  </li>
-                ))}
-              </ul>
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier</span><Select name="supplier_id" defaultValue={(supplierRows ?? []).find((s) => s.name.toLowerCase() === (toOrder.find((p) => p.job_id === jobId)?.supplier ?? "").toLowerCase())?.id ?? ""} className="w-64"><option value="">New supplier: type the name</option>{(supplierRows ?? []).map((s) => <option key={s.id as string} value={s.id as string}>{s.name as string}</option>)}</Select><Input name="supplier" list="suppliers" defaultValue={toOrder.find((p) => p.job_id === jobId)?.supplier ?? ""} placeholder="Name of a new supplier" className="w-64" textCase="title" /></label>
-                <Input name="notes" placeholder="Note on the order (optional)" className="flex-1 min-w-48" />
-                <Button type="submit" size="md">Raise LPO</Button>
-              </div>
-            </form>
-          </Card>
-        ))}
-        <datalist id="suppliers">{supplierNames.map((s) => <option key={s} value={s} />)}</datalist>
+        {byJob(toOrder).map((jobId) => {
+          const items = toOrder.filter((p) => p.job_id === jobId);
+          const total = items.reduce((a, p) => a + (p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1), 0);
+          const supplierSet = Array.from(new Set(items.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
+          return (
+            <Card key={jobId} className="flex flex-wrap items-center gap-3">
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#lpo`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+              <span className="text-sm text-muted">{items.length} part{items.length === 1 ? "" : "s"} · {supplierSet.length ? `${supplierSet.length} supplier${supplierSet.length === 1 ? "" : "s"}` : "no supplier yet"} · AED {total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
+              <LinkButton href={`/parts/${jobId}#lpo`} size="md" className="ml-auto">Send LPO for approval</LinkButton>
+            </Card>
+          );
+        })}
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

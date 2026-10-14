@@ -23,6 +23,7 @@ import { ProfitPanel } from "./ProfitPanel";
 import { WaitingPanel } from "@/components/WaitingPanel";
 
 type Row = JobRow & {
+  parts_pricing_done_at?: string | null;
   vehicle: {
     photo_path: string | null;
     has_plate: boolean;
@@ -56,7 +57,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
+      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, parts_pricing_done_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true);
   const all = (data ?? []) as unknown as Row[];
@@ -135,6 +136,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       inspectionLabel: insp && insp.started_at && showInspectionTime ? `Inspection ${insp.status === "in_progress" ? "running " : ""}${formatMinutes(inspMinutes)}` : null,
       docAlert: (() => { const h = docHeadline(docAlerts.get(j.id) ?? []); return h ? { text: h.text, tone: h.tone } : null; })(),
       notSent: docNotSent(docAlerts.get(j.id) ?? []),
+      priced: !!j.parts_pricing_done_at && ["pending_quote", "pending_customer_approval"].includes(j.status),
       urgency: inspOver ? [0, ...urgencyRank(j, clock, vipIds.has(j.customer_id)).slice(1)] : [...urgencyRank(j, clock, vipIds.has(j.customer_id))],
     };
   });

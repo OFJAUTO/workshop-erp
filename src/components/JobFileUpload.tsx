@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Lightbox } from "./Lightbox";
 import { PhotoButton } from "./PhotoButton";
 import { putWithProgress, reportUploadFailure, type UploadStep } from "@/lib/upload-client";
 
@@ -37,7 +38,10 @@ export function JobFileUpload({ jobId, kind, refId = null, files, accept = "phot
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState<File[]>([]);
+  const [open, setOpen] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isPdf = (f: JobFile) => f.contentType === "application/pdf" || !!f.caption?.toLowerCase().endsWith(".pdf");
+  const slides = files.filter((f) => !isPdf(f) && f.url).map((f) => ({ key: f.id, url: f.url as string, label: f.caption ?? "Photo", kind: (f.contentType ?? "").startsWith("video/") ? ("video" as const) : ("image" as const) }));
   const acceptAttr = accept === "pdf" ? "application/pdf,image/*" : "image/*,video/*,application/pdf";
 
   async function handleFiles(list: File[]) {
@@ -71,11 +75,15 @@ export function JobFileUpload({ jobId, kind, refId = null, files, accept = "phot
       {files.length ? (
         <div className="flex flex-wrap gap-2">
           {files.map((f) =>
-            f.contentType === "application/pdf" || f.caption?.toLowerCase().endsWith(".pdf") ? (
+            isPdf(f) ? (
               <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-3 text-sm font-semibold">PDF · {f.caption ?? "file"}</a>
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer"><img src={f.url ?? ""} alt="Photo" className={`${compact ? "h-16 w-16" : "h-24 w-24"} rounded-control object-cover bg-chip`} /></a>
+              <button key={f.id} type="button" onClick={() => setOpen(slides.findIndex((s) => s.key === f.id))} className={`${compact ? "h-16 w-16" : "h-24 w-24"} overflow-hidden rounded-control bg-chip cursor-zoom-in`} aria-label="Enlarge">
+                {(f.contentType ?? "").startsWith("video/") ? <video src={f.url ?? undefined} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={f.url ?? ""} alt="Photo" className="h-full w-full object-cover" />
+                )}
+              </button>
             ),
           )}
         </div>
@@ -99,6 +107,7 @@ export function JobFileUpload({ jobId, kind, refId = null, files, accept = "phot
           )}
         </div>
       ) : null}
+      {open !== null && slides[open] ? <Lightbox slides={slides} index={open} onClose={() => setOpen(null)} onMove={setOpen} /> : null}
       {error ? <p className="text-xs font-semibold text-red">{error}</p> : null}
       {failed.length && !busy ? <button type="button" onClick={() => void handleFiles(failed)} className="self-start min-h-10 rounded-control bg-ink px-3 text-sm font-bold text-white" data-retry>Retry{failed.length > 1 ? ` (${failed.length} files)` : ""}</button> : null}
     </div>

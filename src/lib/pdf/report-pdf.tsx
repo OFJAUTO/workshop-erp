@@ -52,6 +52,8 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   const wanted: InspectionMediaRow[] = [];
   for (const i of attention) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === i.item_key)));
   if (batteryReplace) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.battery")));
+  for (const p of [...TYRE_POSITIONS, { key: "spare", label: "Spare" }]) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === `tyre.${p.key}`)));
+  wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.vent")));
   const buffers = new Map<string, Buffer>();
   await Promise.all(
     Array.from(new Set(wanted.map((w) => w.storage_path))).map(async (p) => {
@@ -119,6 +121,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
               {t.danger ? <Tag text="Dangerous" color={RED} /> : null}
             </View>
             <Text>{[t.tread ? `${t.tread} mm tread` : "", t.year ? `year ${t.year}` : "", t.reason ? `reason: ${t.reason.toLowerCase()}` : ""].filter(Boolean).join("   ·   ")}</Text>
+            <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === `tyre.${t.key}`))} />
           </View>
         ))}
         {batteryReplace ? (
@@ -188,7 +191,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
             </View>
           ) : null}
           {tyreRows.map((p) => (
-            <View key={p.key} style={styles.checkRow}>
+            <View key={p.key} style={[styles.checkRow, { flexWrap: "wrap" }]}>
               <Text style={[styles.lineTitle, { width: 90 }]}>{p.label}</Text>
               <Text style={{ width: 90 }}>
                 {m[`tyre_${p.key}_tread`] ? `${text(m[`tyre_${p.key}_tread`])} mm` : ""}
@@ -196,15 +199,17 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
               </Text>
               <Text style={[styles.small, { flex: 1 }]}>{text(m[`tyre_${p.key}_cond`]).split(",").filter(Boolean).map((c) => TYRE_CONDITIONS.find((x) => x.value === c)?.label ?? c).join(", ")}</Text>
               <Text style={styles.lineTitle}>{TYRE_ACTIONS.find((a) => a.value === m[`tyre_${p.key}_action`])?.label ?? ""}</Text>
+              {photoBuffers(bundle.media.filter((x) => x.item_key === `tyre.${p.key}`)).length && !tyres.some((t) => t.key === p.key) ? <View style={{ width: "100%" }}><Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === `tyre.${p.key}`))} /></View> : null}
             </View>
           ))}
           {measures.map((x) => (
-            <View key={x.key} style={styles.checkRow}>
+            <View key={x.key} style={[styles.checkRow, { flexWrap: "wrap" }]}>
               <Text style={[styles.lineTitle, { width: 180 }]}>{x.label}</Text>
               <Text>
                 {x.kind === "choice" ? (x.choices?.find((c) => c.value === String(m[x.key]))?.label ?? text(m[x.key])) : text(m[x.key])}
                 {x.unit ? ` ${x.unit}` : ""}
               </Text>
+              {x.key === "vent_temp" && photoBuffers(bundle.media.filter((y) => y.item_key === "measure.vent")).length ? <View style={{ width: "100%" }}><Photos photos={photoBuffers(bundle.media.filter((y) => y.item_key === "measure.vent"))} /></View> : null}
             </View>
           ))}
         </View>

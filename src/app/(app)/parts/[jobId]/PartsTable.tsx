@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Input } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
 import { PART_TYPE_LABELS } from "@/lib/quotes";
-import { AVAILABILITY_CHOICES, availabilityChoice, availabilityFromChoice, availabilityWords, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
+import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, availabilityChoice, availabilityFromChoice, availabilityWords, daysComplete, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
@@ -57,7 +57,7 @@ type Action = (formData: FormData) => void | Promise<void>;
  * never changes height whatever its state.
  */
 // Written out in full (no string building) so Tailwind sees every class. The one-line layout starts at 110rem (1760 px).
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(10rem,11rem)_6rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] min-[110rem]:grid-cols-[minmax(10rem,11rem)_6rem_17.5rem_11rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(10rem,11rem)_6rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] min-[110rem]:grid-cols-[minmax(10rem,11rem)_6rem_17.5rem_12.5rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
 const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
 const STATUS_LINE = "col-span-2 md:col-span-8 min-[110rem]:col-span-10 md:order-3";
 const ONE_LINE_ONLY = "hidden min-[110rem]:block";
@@ -72,7 +72,7 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [] }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[] }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
   const router = useRouter();
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
@@ -92,6 +92,11 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   const [listOpen, setListOpen] = useState(false);
   // "Pricing done" pressed with rows still open: they get a red outline until finished.
   const [attempted, setAttempted] = useState(false);
+  const [seenLock, setSeenLock] = useState(`${pricingLocked}|${reopenedAt ?? ""}`);
+  if (seenLock !== `${pricingLocked}|${reopenedAt ?? ""}`) {
+    setSeenLock(`${pricingLocked}|${reopenedAt ?? ""}`);
+    setAttempted(false);
+  }
   const [lastJump, setLastJump] = useState<string | null>(null);
   // Rows added or changed elsewhere arrive on refresh; this screen keeps its order and what it holds for a row being edited.
   const [seen, setSeen] = useState(initialRows);
@@ -246,7 +251,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           <span className="text-sm font-bold" data-pricing-counter>{summary.text}</span>
           <span className="h-1.5 w-full max-w-xs rounded-full bg-track overflow-hidden"><span className="block h-full bg-ink" style={{ width: `${summary.total ? Math.round((summary.done / summary.total) * 100) : 0}%` }} /></span>
         </div>
-        {canPrice ? (
+        {canPrice && !pricingLocked ? (
           <Button type="button" tone="danger" size="md" onClick={askDelete} disabled={bulkBusy || deletable.length === 0} data-delete-all>
             {selected.size ? `Delete ${selected.size} ticked` : "Delete all"}
           </Button>
@@ -260,8 +265,8 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         {bulkError ? <span className="text-sm font-semibold text-red">{bulkError}</span> : null}
         <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
         <Button type="button" tone="secondary" size="md" onClick={() => setListOpen(true)}>Copy list for supplier</Button>
-        {canPrice ? <a href={`/parts/${jobId}/import`} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-import-prices>Import prices</a> : null}
-        {canPrice && lastImport && !importGone ? (
+        {canPrice && !pricingLocked ? <a href={`/parts/${jobId}/import`} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-import-prices>Import prices</a> : null}
+        {canPrice && !pricingLocked && lastImport && !importGone ? (
           <button type="button" onClick={() => void undoLastImport()} disabled={bulkBusy} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" title={`${lastImport.count} line${lastImport.count === 1 ? "" : "s"} imported ${formatDateTime(lastImport.at)}`} data-undo-import>
             Undo last import ({lastImport.count})
           </button>
@@ -270,18 +275,18 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
       <div className="overflow-x-auto">
         <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
           <span className="flex items-center gap-1.5">
-            {canPrice ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
+            {canPrice && !pricingLocked ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
             Part
           </span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
-            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
+            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} pricingLocked={pricingLocked} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
           ))}
           {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
         </div>
       </div>
-      {canPrice ? <Button type="button" tone="secondary" size="md" onClick={() => setAdding(true)} className="self-start" data-add-part>+ Add a part the technician did not list</Button> : null}
+      {canPrice && !pricingLocked ? <Button type="button" tone="secondary" size="md" onClick={() => setAdding(true)} className="self-start" data-add-part>+ Add a part the technician did not list</Button> : null}
       {adding ? <PartPicker title="Add parts" catalogue={catalogue} selected={[]} itemKey={null} source="custom" onDone={(entries) => addPicked(entries.map((e) => ({ name: e.name, qty: e.qty, positions: e.positions, catalogue_id: e.catalogue_id })))} onClose={() => setAdding(false)} /> : null}
       <datalist id="part-pool">{catalogue.map((c) => <option key={c.id} value={c.name} />)}</datalist>
       {listOpen ? <SupplierList rows={rows} car={car} vin={vin} openingLine={openingLine} onClose={() => setListOpen(false)} /> : null}
@@ -298,10 +303,19 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           </div>
         </div>
       ) : null}
-      {showBar && onPricingDone ? (
+      {showBar && onPricingDone && pricingLocked ? (
         <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
-            {pricingDoneAt ? <span className="text-xs font-semibold text-green">✓ Sent to the advisor, {formatDateTime(pricingDoneAt)}</span> : null}
+            <span className="inline-flex min-h-10 items-center gap-2 rounded-control bg-green-soft px-3 text-sm font-bold text-green" data-pricing-locked>✓ Pricing done{pricingDoneAt ? ` · ${formatDateTime(pricingDoneAt)}` : ""}</span>
+            <span className="text-xs text-muted" data-bar-text>{summary.text}</span>
+            {onReopen ? <form action={onReopen} className="ml-auto"><button type="submit" className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-sm font-bold" data-pricing-edit>Edit</button></form> : null}
+          </div>
+        </div>
+      ) : null}
+      {showBar && onPricingDone && !pricingLocked ? (
+        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+            {reopenedAt ? <span className="text-xs font-semibold text-amber" data-pricing-editing>Editing: the advisor sees the old prices until you press Send updated prices</span> : pricingDoneAt ? <span className="text-xs font-semibold text-green">✓ Sent to the advisor, {formatDateTime(pricingDoneAt)}</span> : null}
             {attempted && summary.open ? (
               <span className="text-sm font-semibold text-red" data-bar-text>
                 {notFinished ? `${notFinished} part${notFinished === 1 ? "" : "s"} not finished` : ""}
@@ -314,11 +328,11 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {attempted && notFinished ? <button type="button" onClick={goNext} className="min-h-12 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">Go to next</button> : null}
               {summary.open === 0 ? (
-                <form action={onPricingDone}><input type="hidden" name="force" value="" /><button type="submit" className="min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">{pricingDoneAt ? "Pricing done again" : "Pricing done"}</button></form>
+                <form action={onPricingDone}><input type="hidden" name="force" value="" /><button type="submit" className="min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">{reopenedAt ? "Send updated prices" : pricingDoneAt ? "Pricing done again" : "Pricing done"}</button></form>
               ) : attempted ? (
-                <form action={onPricingDone}><input type="hidden" name="force" value="1" /><button type="submit" className="min-h-12 rounded-control bg-ink px-4 text-sm font-bold text-white">Send what you have</button></form>
+                <form action={onPricingDone}><input type="hidden" name="force" value="1" /><button type="submit" className="min-h-12 rounded-control bg-ink px-4 text-sm font-bold text-white">{reopenedAt ? "Send updated prices" : "Send what you have"}</button></form>
               ) : (
-                <button type="button" onClick={() => setAttempted(true)} className="min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">{pricingDoneAt ? "Pricing done again" : "Pricing done"}</button>
+                <button type="button" onClick={() => setAttempted(true)} className="min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">{reopenedAt ? "Send updated prices" : pricingDoneAt ? "Pricing done again" : "Pricing done"}</button>
               )}
             </div>
           </div>
@@ -328,7 +342,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   );
 }
 
-function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; canPrice: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
+function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; canPrice: boolean; pricingLocked: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
   const router = useRouter();
   const [v, setV] = useState<RowValues>(row.values);
   const [name, setName] = useState(row.name);
@@ -339,7 +353,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
   const [editingName, setEditingName] = useState(false);
   // The technician's words, kept on the row from the moment the name changes (the server stores them on save).
   const [origin] = useState(() => row.original ?? row.name);
-  const [otherMode, setOtherMode] = useState(() => availabilityChoice(row.values) === "other");
+  const [otherMode, setOtherMode] = useState(() => availabilityChoice(row.values) === "other" && !daysComplete(row.values.days));
   const [copied, setCopied] = useState(false);
   const [split, setSplit] = useState(false);
   // "Remove: not needed": which kind of row is being removed, and the few seconds of Undo after it.
@@ -380,7 +394,10 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
   const standardNote = standard !== null && v.discount.trim() !== "" && Math.abs(Number(v.discount.replace(",", ".")) - standard) > 0.001 ? `Standard ${standard}%, changed to ${v.discount}%` : "";
   const qty = num(v.qty) || 1;
   const qtyChanged = Math.abs(qty - row.techQty) > 0.001;
-  const choice = availabilityChoice(v, otherMode);
+  const baseChoice = availabilityChoice(v, otherMode);
+  // Days typed under "Other…" (say 15) become their own choice, "15 days", in the one box; the days box shows only while typing.
+  const customDays = baseChoice === "other" && !otherMode && daysComplete(v.days) ? v.days.trim() : null;
+  const choice = customDays ? (`d${customDays}` as AvailabilityChoice) : baseChoice;
   const missingField = (f: string) => red && missing.some((m) => m.field === f);
 
   function queue(nextV: RowValues, nextName: string) {
@@ -454,7 +471,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
       setTimeout(() => setCopied(false), 1500);
     } catch {}
   };
-  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed;
+  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || pricingLocked;
   const removeTarget = partId ? { partId } : { requestId: row.requestId };
   const doRemove = (kind: "part" | "request" | "ordered", reason: string) => {
     const fd = new FormData();
@@ -505,11 +522,11 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
       <span className={`${SECOND_LINE} h-9 flex items-center gap-1 min-w-0`}>
         {readOnly ? textCell(v.part_type ? (PART_TYPE_LABELS[v.part_type] ?? v.part_type) + (v.brand ? ` · ${v.brand}` : "") : "") : (
           <>
-            <select value={v.part_type} onChange={(e) => changeType(e.target.value)} className={`${select("part_type")} basis-[46%]`} aria-label="Type">
+            <select value={v.part_type} onChange={(e) => changeType(e.target.value)} className={`${select("part_type")} basis-[58%] min-w-[6.5rem]`} aria-label="Type">
               <option value="">Type…</option>
               {types.map((t) => <option key={t} value={t}>{PART_TYPE_LABELS[t] ?? t}</option>)}
             </select>
-            <Input value={v.brand} onChange={(e) => change({ brand: e.target.value })} placeholder="Brand" className={`h-9 min-h-9 basis-[54%] min-w-0 px-2 text-xs ${v.part_type && v.part_type !== "genuine" ? "" : "invisible"}`} textCase="title" aria-label="Brand" tabIndex={v.part_type && v.part_type !== "genuine" ? undefined : -1} />
+            <Input value={v.brand} onChange={(e) => change({ brand: e.target.value })} placeholder="Brand" className={`h-9 min-h-9 basis-[42%] min-w-0 px-2 text-xs ${v.part_type && v.part_type !== "genuine" ? "" : "invisible"}`} textCase="title" aria-label="Brand" tabIndex={v.part_type && v.part_type !== "genuine" ? undefined : -1} />
           </>
         )}
       </span>
@@ -530,10 +547,11 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
       {/* Supplier: from the list, with Add a supplier at the bottom */}
       {readOnly ? textCell(v.supplier) : (
         <select
-          value={supplier ? supplier.id : v.supplier ? "__text" : ""}
+          value={isOurStock(v.supplier) ? "__stock" : supplier ? supplier.id : v.supplier ? "__text" : ""}
           onChange={(e) => {
             const val = e.target.value;
             if (val === "__add") void onAddSupplier().then((s) => { if (s) changeSupplier(s, s.name); });
+            else if (val === "__stock") { setOtherMode(false); change({ supplier: OUR_STOCK, availability: "in_stock", days: "" }); }
             else if (val === "") changeSupplier(undefined, "");
             else if (val !== "__text") { const s = suppliers.find((x) => x.id === val); if (s) changeSupplier(s, s.name); }
           }}
@@ -541,7 +559,8 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
           aria-label="Supplier"
         >
           <option value="">Supplier…</option>
-          {!supplier && v.supplier ? <option value="__text">{v.supplier}</option> : null}
+          <option value="__stock">{OUR_STOCK}</option>
+          {!supplier && v.supplier && !isOurStock(v.supplier) ? <option value="__text">{v.supplier}</option> : null}
           {/* The name only, so it shows in full; the standard discount lands in the Disc box when the supplier is picked */}
           {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           <option value="__add">+ Add a supplier…</option>
@@ -552,10 +571,10 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, attempted, rem
         <span className="h-9 flex items-center gap-1 min-w-0">
           <select value={choice} onChange={(e) => changeAvailability(e.target.value as AvailabilityChoice, e.currentTarget)} className={`${select(v.availability === "to_order" ? "days" : "availability")} flex-1`} aria-label="Availability">
             <option value="">Availability…</option>
-            {AVAILABILITY_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {AVAILABILITY_CHOICES.map((c) => (c.value === "other" ? [customDays ? <option key="custom" value={`d${customDays}`}>{availabilityWords("to_order", customDays)}</option> : null, <option key={c.value} value={c.value}>{c.label}</option>] : <option key={c.value} value={c.value}>{c.label}</option>))}
           </select>
           {/* The days box is there only for Other…, so the dropdown shows its full text the rest of the time (the row's height never changes) */}
-          {choice === "other" ? <Input value={v.days} onChange={(e) => change({ days: e.target.value })} inputMode="numeric" placeholder="days" className={`h-9 min-h-9 w-14 shrink-0 px-1 text-xs text-center ${missingField("days") ? "border-red-bar" : ""}`} aria-label="Days until it arrives" /> : null}
+          {choice === "other" ? <Input value={v.days} onChange={(e) => change({ days: e.target.value })} onBlur={() => { if (daysComplete(latest.current.v.days)) setOtherMode(false); }} inputMode="numeric" placeholder="days" className={`h-9 min-h-9 w-14 shrink-0 px-1 text-xs text-center ${missingField("days") ? "border-red-bar" : ""}`} aria-label="Days until it arrives" /> : null}
         </span>
       )}
       {/* The three-dot menu: narrow, always visible, opens upwards near the bottom */}

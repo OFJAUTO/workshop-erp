@@ -4,7 +4,7 @@ import { formatWait, workingMinutesSince, type JobStatus } from "@/lib/jobs";
 import type { Planning } from "@/lib/planning";
 import type { RoleId } from "@/lib/roles";
 import type { WorkingTime } from "@/lib/working-time";
-import { allInStock, confirmPromisedDate, partsPlanned, releaseToWorkshop, remindPlanning } from "../planning-actions";
+import { confirmPromisedDate, releaseToWorkshop, remindPlanning } from "../planning-actions";
 
 const RING = { grey: "ring-line bg-chip", amber: "ring-amber-bar bg-amber-soft", green: "ring-green bg-green-soft" } as const;
 
@@ -49,13 +49,8 @@ export function PlanningCard({ jobId, status, plan, role, viewingAs, wt, technic
 
       {turn === "parts" && canParts && inPlanning ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <LinkButton href={`/parts/${jobId}`} size="md">Plan the parts: in stock or to order</LinkButton>
-          {plan.unplanned.length ? (
-            <form action={allInStock.bind(null, jobId)}><Button type="submit" tone="secondary" size="md">All in stock</Button></form>
-          ) : (
-            <form action={partsPlanned.bind(null, jobId)}><Button type="submit" tone="secondary" size="md">Parts planned</Button></form>
-          )}
-          {plan.unplanned.length ? <span className="text-xs text-muted">{plan.unplanned.length} part{plan.unplanned.length === 1 ? "" : "s"} still to decide.</span> : null}
+          <LinkButton href={`/parts/${jobId}#lpo`} size="md">Open Parts: the LPO</LinkButton>
+          <span className="text-xs text-muted">{plan.circles[0].line}</span>
         </div>
       ) : null}
 

@@ -18,7 +18,7 @@ export function JobSummaryCard({ jobId, job, role, viewingAs }: { jobId: string;
   const canComment = (role === "owner" || role === "workshop_manager") && !viewingAs;
   const seesProfit = role === "owner";
   const rows: [string, string][] = [
-    ["Hours", `${s.hoursCharged} h charged · ${hm(s.minutesUsed)} used · ${s.hoursCharged > 0 ? `${s.minutesUsed - s.hoursCharged * 60 >= 0 ? "+" : "−"}${hm(Math.abs(s.minutesUsed - s.hoursCharged * 60))}` : "no hours quoted"}`],
+    ["Hours", `${s.hoursCharged} h quoted · ${s.hoursEstimate !== undefined ? `${s.hoursEstimate} h estimated · ` : ""}${hm(s.minutesUsed)} clocked · ${s.hoursCharged > 0 ? `${s.minutesUsed - s.hoursCharged * 60 >= 0 ? "+" : "−"}${hm(Math.abs(s.minutesUsed - s.hoursCharged * 60))}` : "no hours quoted"}`],
     ...(s.budgetHours ? ([["Time budget", `${s.budgetHours} h set by the manager (charged ${s.hoursCharged} h): ${s.budgetReason ?? ""}`]] as [string, string][]) : []),
     ["Per technician", s.perTechnician.map((t) => `${t.name} ${hm(t.minutes)}`).join(" · ") || "nobody clocked"],
     ["On time", s.promisedAt ? (s.daysLate ? `${s.daysLate} day${s.daysLate === 1 ? "" : "s"} late (promised ${formatDate(s.promisedAt)})` : `Yes, promised ${formatDate(s.promisedAt)}`) : "No promised date"],

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { Lightbox } from "./Lightbox";
 import { PhotoButton } from "./PhotoButton";
 import { putWithProgress, reportUploadFailure, type UploadStep } from "@/lib/upload-client";
 
@@ -103,13 +104,22 @@ async function uploadOne(inspectionId: string, file: File, where: { itemKey?: st
   }
 }
 
+/** A small camera, drawn inline so it is sharp everywhere. */
+function CameraIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.2l1.1-1.7c.3-.5.8-.8 1.4-.8h3.6c.6 0 1.1.3 1.4.8L16.3 6h1.2A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8Z" />
+      <circle cx="12" cy="12.5" r="3.2" />
+    </svg>
+  );
+}
+
 /**
- * Photos, short videos (up to 60 seconds, with sound) or PDFs attached to one place in the
- * report: a checklist item, a customer request, the pre-scan slot or the report as a whole.
- * "+ Photo" opens the camera inside the page on a phone or tablet (never the camera app, so the page
- * cannot reload behind it); "+ From gallery" picks saved photos (several at once). Every button is a
- * real button; a camera the browser has blocked shows the steps to allow it. A failed upload is
- * logged with the device and the step and shown with Retry.
+ * Photos, short videos (up to 60 seconds, with sound) or PDFs attached to one place in the report: a checklist item,
+ * a tyre, the A/C reading, the pre-scan slot or the report as a whole. One neat row: Photo (the camera inside the
+ * page on a phone or tablet), Gallery, Video, and whatever the caller slots in beside them (the phone QR). Tapping a
+ * thumbnail opens the full-screen viewer on this tab; the X takes a file off again. "iconOnly": a small camera icon
+ * that opens the camera straight away, for the tyres and the A/C box, with the thumbnails beside it.
  */
 export function InspectionMedia({
   inspectionId,
@@ -118,7 +128,11 @@ export function InspectionMedia({
   accept = "photo_video",
   disabled = false,
   compact = false,
+  iconOnly = false,
+  label,
+  extra = null,
   onAdded,
+  onRemoved,
 }: {
   inspectionId: string;
   files: InspectionFile[];
@@ -126,12 +140,21 @@ export function InspectionMedia({
   accept?: "photo_video" | "pdf";
   disabled?: boolean;
   compact?: boolean;
+  /** A small camera icon only (several photos allowed), for the tyres and the A/C reading. */
+  iconOnly?: boolean;
+  /** The icon button's title ("Front left tyre photo"). */
+  label?: string;
+  /** Something that belongs in the same row (the "Photo from my phone" QR button). */
+  extra?: ReactNode;
   onAdded?: (f: InspectionFile) => void;
+  onRemoved?: (id: string) => void;
 }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [failed, setFailed] = useState<File[]>([]);
+  const [open, setOpen] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const pdfRef = useRef<HTMLInputElement>(null);
 
@@ -172,31 +195,82 @@ export function InspectionMedia({
     e.target.value = "";
     void handleFiles(list);
   }
+  async function remove(id: string) {
+    setRemoving(id);
+    try {
+      const res = await fetch("/api/inspection-media/remove", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inspectionId, id }) });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error ?? "Could not remove it.");
+      onRemoved?.(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove it.");
+    } finally {
+      setRemoving(null);
+    }
+  }
 
   const busy = progress !== null;
   const btn = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-line-strong bg-white px-3 text-sm font-semibold ${disabled || busy ? "opacity-50" : "cursor-pointer hover:border-ink"}`;
   const logProblem = (m: string) => reportUploadFailure({ inspectionId, kind: "inspection_photo", step: "camera", error: m, extra: { itemKey: where.itemKey ?? null } });
+  // Every photo and video of this place, in one viewer.
+  const slides = files.filter((f) => f.kind !== "pdf" && f.url).map((f) => ({ key: f.id, url: f.url as string, label: f.caption ?? (f.kind === "video" ? "Video" : "Photo"), kind: f.kind === "video" ? ("video" as const) : ("image" as const) }));
+  const thumb = iconOnly ? "h-12 w-12" : compact ? "h-16 w-16" : "h-24 w-24";
+
+  const thumbs = files.length ? (
+    <div className="flex flex-wrap gap-2">
+      {files.map((f) =>
+        f.kind === "pdf" ? (
+          <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-control border border-line bg-chip px-3 text-sm font-semibold">
+            PDF · {f.caption ?? "scan report"}
+          </a>
+        ) : (
+          <span key={f.id} className="relative inline-block" data-inspection-thumb>
+            <button type="button" onClick={() => setOpen(slides.findIndex((s) => s.key === f.id))} className={`${thumb} overflow-hidden rounded-control bg-chip cursor-zoom-in block`} aria-label={f.kind === "video" ? "Play the video" : "Enlarge the photo"}>
+              {f.kind === "video" ? (
+                <span className="relative block h-full w-full bg-black">
+                  <video src={f.url ?? undefined} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                  <span className="absolute inset-0 flex items-center justify-center text-white text-xl">▶</span>
+                </span>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={f.url ?? ""} alt={f.caption ?? "Photo"} className="h-full w-full object-cover" loading="lazy" />
+              )}
+            </button>
+            {!disabled ? (
+              <button type="button" onClick={() => void remove(f.id)} disabled={removing === f.id} className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white shadow" aria-label="Remove this file" data-remove-file>
+                {removing === f.id ? "…" : "✕"}
+              </button>
+            ) : null}
+          </span>
+        ),
+      )}
+    </div>
+  ) : null;
+
+  const viewer = open !== null && slides[open] ? <Lightbox slides={slides} index={open} onClose={() => setOpen(null)} onMove={setOpen} /> : null;
+
+  if (iconOnly) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2" data-inspection-media data-icon-media>
+        {!disabled ? (
+          <PhotoButton source="camera" multiple disabled={busy} className={`inline-flex h-11 w-11 items-center justify-center rounded-control border border-line-strong bg-white text-ink ${busy ? "opacity-50" : "hover:border-ink"}`} title={label ?? "Photo"} onFiles={(f) => void handleFiles(f)} onProblem={logProblem}>
+            <CameraIcon />
+            <span className="sr-only">{label ?? "Photo"}</span>
+          </PhotoButton>
+        ) : null}
+        {busy ? <span className="text-[11px] font-semibold text-muted">{busyLabel}… {Math.round((progress ?? 0) * 100)}%</span> : null}
+        {thumbs}
+        {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
+        {viewer}
+      </span>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2" data-inspection-media>
-      {files.length ? (
-        <div className={`flex flex-wrap gap-2 ${compact ? "" : ""}`}>
-          {files.map((f) =>
-            f.kind === "pdf" ? (
-              <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-control border border-line bg-chip px-3 text-sm font-semibold">
-                PDF · {f.caption ?? "scan report"}
-              </a>
-            ) : f.kind === "video" ? (
-              <video key={f.id} src={f.url ?? undefined} controls playsInline preload="metadata" className="h-24 w-36 rounded-control bg-black object-cover" />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer"><img src={f.url ?? ""} alt={f.caption ?? "Photo"} className="h-24 w-24 rounded-control object-cover bg-chip" /></a>
-            ),
-          )}
-        </div>
-      ) : null}
+      {thumbs}
       {!disabled ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {accept === "pdf" ? (
             <>
               <input ref={pdfRef} type="file" accept="application/pdf,.pdf" multiple onChange={onInput} className="sr-only" tabIndex={-1} aria-hidden />
@@ -204,10 +278,11 @@ export function InspectionMedia({
             </>
           ) : (
             <>
-              <PhotoButton source="camera" disabled={busy} className={btn} title="Photo" onFiles={(f) => void handleFiles(f)} onProblem={logProblem}>+ Photo</PhotoButton>
-              <PhotoButton source="gallery" multiple disabled={busy} className={btn} title="From gallery" onFiles={(f) => void handleFiles(f)}>+ From gallery</PhotoButton>
+              <PhotoButton source="camera" disabled={busy} className={btn} title="Photo" onFiles={(f) => void handleFiles(f)} onProblem={logProblem}><CameraIcon className="h-4 w-4" /> Photo</PhotoButton>
+              <PhotoButton source="gallery" multiple disabled={busy} className={btn} title="Gallery" onFiles={(f) => void handleFiles(f)}>Gallery</PhotoButton>
               <input ref={videoRef} type="file" accept="video/*" capture="environment" onChange={onInput} className="sr-only" tabIndex={-1} aria-hidden />
-              <button type="button" onClick={() => pick(videoRef)} disabled={busy} className={btn}>+ Video (60 s)</button>
+              <button type="button" onClick={() => pick(videoRef)} disabled={busy} className={btn} title="A video of up to 60 seconds">Video</button>
+              {extra}
             </>
           )}
         </div>
@@ -226,6 +301,7 @@ export function InspectionMedia({
           Retry{failed.length > 1 ? ` (${failed.length} files)` : ""}
         </button>
       ) : null}
+      {viewer}
     </div>
   );
 }

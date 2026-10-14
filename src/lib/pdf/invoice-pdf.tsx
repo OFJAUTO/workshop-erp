@@ -10,22 +10,19 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { DocumentTail, InfoBoxes, LinesTable, PdfDocument, PoLinesTable, TitleRow, TotalsBlock, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type StatusBox } from "./template";
+import { DocumentTail, InfoBoxes, LinesTable, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
 const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", credit_note: "Credit note no." } as const;
 
-function docLine(l: InvoiceLineRow, vatPercent: number): DocLine {
+/** One invoice line in the section box: description, a small grey line of details, qty, rate, amount. Never a part number. */
+function docLine(l: InvoiceLineRow): SectionLine {
   return {
     description: l.description,
     details: l.hours !== null ? null : l.details,
-    // Part numbers stay off every customer document (the LPO below is the supplier's copy and keeps them).
-    partNumber: null,
     qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
     rate: l.unit_price,
     amount: l.amount_aed,
-    vat: l.vat_aed || round2(l.amount_aed * (vatPercent / 100)),
-    total: l.total_aed || round2(l.amount_aed * (1 + vatPercent / 100)),
     complimentary: l.amount_aed === 0,
   };
 }
@@ -62,9 +59,14 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const { invoice, lines, payments, job } = bundle;
   const currency = currencyOf(settings);
   const vatPercent = invoice.taxable_aed ? round2((invoice.vat_aed / invoice.taxable_aed) * 100) || 5 : 5;
-  const services = lines.filter((l) => l.section === "services").map((l) => docLine(l, vatPercent));
-  const fees = lines.filter((l) => l.section === "fees").map((l) => docLine(l, vatPercent));
-  const parts = lines.filter((l) => l.section === "parts").map((l) => docLine(l, vatPercent));
+  const services = lines.filter((l) => l.section === "services").map(docLine);
+  const fees = lines.filter((l) => l.section === "fees").map(docLine);
+  const parts = lines.filter((l) => l.section === "parts").map(docLine);
+  const sum = (ls: SectionLine[]) => round2(ls.reduce((a, l) => a + l.amount, 0));
+  // The labour discount as a percentage when it divides cleanly, else the amount alone.
+  const labourSum = sum(services);
+  const pct = invoice.discount_aed && labourSum ? round2((invoice.discount_aed / labourSum) * 100) : 0;
+  const discountLabel = pct && Math.abs(pct - Math.round(pct)) < 0.011 ? `Labour discount (${Math.round(pct)}%)` : "Labour discount";
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
   const company = companyOf(settings);
@@ -82,25 +84,35 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         ]}
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
-      <LinesTable title="Services" lines={[...services, ...fees]} currency={currency} vatPercent={vatPercent} subtotalLabel="Services subtotal" discount={invoice.discount_aed ? { label: "Discount on labour and services", amount: invoice.discount_aed } : null} />
-      {parts.length ? <LinesTable title="Spare parts" lines={parts} currency={currency} vatPercent={vatPercent} subtotalLabel="Spare parts subtotal" startAt={services.length + fees.length + 1} /> : null}
+      <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" />
+      {parts.length ? <SectionBox title="Parts" lines={parts} subtotalLabel="Parts subtotal" /> : null}
+      {fees.length ? <SectionBox title="Other charges" lines={fees} subtotalLabel="Other charges subtotal" /> : null}
       <DocumentTail
         words={amountInWords(invoice.total_aed)}
         payments={live.map((p) => ({ date: formatDate(p.received_at), method: METHOD_LABELS[p.method] + (p.method === "cheque" && p.cheque_status !== "cleared" ? " (pending)" : ""), amount: p.amount_aed, note: p.method === "cheque" ? p.cheque_number : p.reference }))}
         bank={!isCredit && bal.state !== "paid" ? company.bank : null}
         totals={
-          <TotalsBlock
+          <TotalsBox
             currency={currency}
-            rows={[
-              { label: "Gross amount", value: invoice.subtotal_aed },
-              ...(invoice.discount_aed ? [{ label: "Discount", value: invoice.discount_aed, bold: true, negative: true }] : []),
-              ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed, bold: true, negative: true }] : []),
-              ...(rounding ? [{ label: rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(rounding), negative: rounding < 0 }] : []),
-              { label: "Taxable amount", value: invoice.taxable_aed },
-              { label: `VAT ${vatPercent}%`, value: invoice.vat_aed },
+            sections={[
+              { label: "Labour and services", value: labourSum },
+              { label: "Parts", value: sum(parts) },
+              ...(fees.length ? [{ label: "Other charges", value: sum(fees) }] : []),
             ]}
-            total={{ label: isCredit ? "Credit total" : "Total", value: invoice.total_aed }}
-            after={!isCredit && bal.paid ? [{ label: "Paid", value: bal.paid, negative: true }] : []}
+            green={[
+              ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []),
+              ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []),
+              ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : []),
+            ]}
+            net={invoice.taxable_aed}
+            vatPercent={vatPercent}
+            vat={invoice.vat_aed}
+            total={invoice.total_aed}
+            totalLabel={isCredit ? "Credit total" : "Grand total"}
+            after={[
+              ...(rounding > 0 ? [{ label: "Rounding", value: rounding }] : []),
+              ...(!isCredit && bal.paid ? [{ label: "Paid", value: bal.paid, negative: true }] : []),
+            ]}
             status={statusBoxFor(invoice, live)}
           />
         }

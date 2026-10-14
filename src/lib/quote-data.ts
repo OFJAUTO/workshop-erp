@@ -13,8 +13,8 @@ import { rowState } from "./parts-rows";
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, expected_payment_method, editing_by, editing_at, created_at, created_by, updated_at";
-export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, recovery_paid_by, recovery_mention_free, markup_confirmed, price_per, positions, left_off, recovery_type";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, expected_payment_method, editing_by, editing_at, discount_kind, discount_value, commission_to, commission_kind, commission_value, commission_aed, commission_paid_at, commission_paid_by, created_at, created_by, updated_at";
+export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, recovery_paid_by, recovery_mention_free, markup_confirmed, price_per, positions, left_off, recovery_type, hours_estimate";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active, position_ask, suggest_for";
 export const PART_SELECT = "id, job_id, part_request_id, part_number, description, original_description, list_price_aed, discount_percent, quantity_changed_at, removed_at, removed_by, removed_reason, discount_approval_status, client_key, availability_note, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
 export const REQUEST_SELECT = "id, job_id, inspection_id, source_type, source_key, label, requested_text, status, is_active, created_at, quantity, unit, closed_reason, positions, note, catalogue_id";
@@ -28,8 +28,8 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
   }
   return out;
 }
-const LINE_NUM: (keyof QuoteLine)[] = ["position", "quantity", "unit_cost", "markup_percent", "unit_price", "hours", "labour_rate", "discount_percent", "line_total", "recovery_trips"];
-const QUOTE_NUM: (keyof QuoteRow)[] = ["version", "discount_percent", "vat_percent", "subtotal_aed", "discount_aed", "vat_aed", "total_aed", "approved_total_aed", "deposit_aed", "validity_days", "rounded_total_aed", "estimated_days"];
+const LINE_NUM: (keyof QuoteLine)[] = ["position", "quantity", "unit_cost", "markup_percent", "unit_price", "hours", "labour_rate", "discount_percent", "line_total", "recovery_trips", "hours_estimate"];
+const QUOTE_NUM: (keyof QuoteRow)[] = ["version", "discount_percent", "vat_percent", "subtotal_aed", "discount_aed", "vat_aed", "total_aed", "approved_total_aed", "deposit_aed", "validity_days", "rounded_total_aed", "estimated_days", "discount_value", "commission_value", "commission_aed"];
 const PART_NUM: (keyof PartItem)[] = ["quantity", "cost_aed", "confirmed_quantity", "list_price_aed", "discount_percent"];
 
 export const toLine = (r: Record<string, unknown>) => num(r as unknown as QuoteLine, LINE_NUM);
@@ -109,11 +109,12 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
  * The approved quotations of a job that count for work, parts and the invoice: one per quotation
  * number, the newest approved version. An older approved version that was revised is not counted twice.
  */
-export async function approvedQuotations(jobId: string): Promise<{ id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number }[]> {
-  const { data } = await createAdminClient().from("quotations").select("id, number, version, discount_percent, vat_percent, deposit_aed, created_at").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).eq("status", "approved").order("created_at");
-  const best = new Map<string, { id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number }>();
-  for (const q of (data ?? []) as { id: string; number: string; version: number | string; discount_percent: number | string; vat_percent: number | string; deposit_aed: number | string | null }[]) {
-    const row = { id: q.id, number: q.number, version: Number(q.version) || 1, discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, deposit_aed: Number(q.deposit_aed) || 0 };
+export type ApprovedQuote = { id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number; discount_kind: "percent" | "aed" | null; discount_value: number | null };
+export async function approvedQuotations(jobId: string): Promise<ApprovedQuote[]> {
+  const { data } = await createAdminClient().from("quotations").select("id, number, version, discount_percent, vat_percent, deposit_aed, created_at, discount_kind, discount_value").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).eq("status", "approved").order("created_at");
+  const best = new Map<string, ApprovedQuote>();
+  for (const q of (data ?? []) as { id: string; number: string; version: number | string; discount_percent: number | string; vat_percent: number | string; deposit_aed: number | string | null; discount_kind?: string | null; discount_value?: number | string | null }[]) {
+    const row: ApprovedQuote = { id: q.id, number: q.number, version: Number(q.version) || 1, discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, deposit_aed: Number(q.deposit_aed) || 0, discount_kind: q.discount_kind === "percent" || q.discount_kind === "aed" ? q.discount_kind : null, discount_value: q.discount_value === null || q.discount_value === undefined ? null : Number(q.discount_value) };
     const have = best.get(q.number);
     if (!have || have.version < row.version) best.set(q.number, row);
   }
@@ -290,7 +291,7 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
 export async function refreshQuoteTotals(quotationId: string, settings: Settings, by: string, opts: { reopen?: boolean } = {}) {
   const admin = createAdminClient();
   const [{ data: q }, { data: lines }] = await Promise.all([
-    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at, rounded_total_aed, expected_payment_method").eq("id", quotationId).maybeSingle(),
+    admin.from("quotations").select("id, discount_percent, vat_percent, status, completed_at, rounded_total_aed, expected_payment_method, discount_kind, discount_value, commission_kind, commission_value").eq("id", quotationId).maybeSingle(),
     admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", quotationId).eq("is_active", true),
   ]);
   if (!q) return;
@@ -298,7 +299,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   const stamp = by || null;
   // A change after the total was rounded and the quotation completed reopens it: the rounding is chosen again at Send.
   const reopening = !!opts.reopen && !!q.completed_at;
-  const qArgs = { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, rounded_total_aed: reopening || q.rounded_total_aed === null ? null : Number(q.rounded_total_aed) };
+  const qArgs = { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, rounded_total_aed: reopening || q.rounded_total_aed === null ? null : Number(q.rounded_total_aed), discount_kind: (q.discount_kind as "percent" | "aed" | null) ?? null, discount_value: q.discount_value === null || q.discount_value === undefined ? null : Number(q.discount_value), commission_kind: (q.commission_kind as "aed" | "percent" | null) ?? null, commission_value: q.commission_value === null || q.commission_value === undefined ? null : Number(q.commission_value) };
   // The automatic bank charge: one hidden Fee line at the set percentage of the total including VAT.
   // Never shown to the customer, counted as a cost against profit, corrected by the real charge at payment.
   if (q.status === "draft" || q.status === "pending_owner") {
@@ -326,7 +327,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   }
   const responded = q.status === "approved";
   const totals = quoteTotals(ls, qArgs, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
-  const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, updated_by: stamp };
+  const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, commission_aed: totals.commission, updated_by: stamp };
   if (responded) patch.approved_total_aed = quoteTotals(ls, qArgs, { onlyApproved: true }).total;
   // A change after "Quotation complete" reopens it: the advisor checks it again before sending.
   if (reopening) Object.assign(patch, { completed_at: null, completed_by: null, rounded_total_aed: null });

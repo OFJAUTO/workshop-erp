@@ -33,9 +33,9 @@ export function Shell({
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
       <aside className="bg-sidebar text-white flex flex-row md:flex-col items-center md:items-stretch gap-3 md:gap-6 px-4 py-3 md:px-5 md:py-6 md:w-60 md:shrink-0 md:h-screen md:sticky md:top-0 overflow-x-auto md:overflow-y-auto">
-        <div className="flex items-center justify-between gap-2 shrink-0">
-          <Link href="/home" className="shrink-0 flex items-center" aria-label="Home">
-            <Logo onDark className="h-9 md:h-12" />
+        <div className="flex items-center justify-center gap-2 shrink-0 md:mb-2">
+          <Link href="/home" className="shrink-0 flex items-center justify-center md:w-full" aria-label="Home">
+            <Logo onDark className="h-11 md:h-15" />
           </Link>
         </div>
         {nav.length ? <SidebarNav items={nav} /> : null}
@@ -94,8 +94,8 @@ export function Shell({
 export function PublicShell({ note, children }: { note?: ReactNode; children: ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
-      <aside className="bg-sidebar text-white flex flex-row md:flex-col items-center md:items-start gap-3 px-4 py-3 md:px-5 md:py-6 md:w-60 md:shrink-0 md:h-screen md:sticky md:top-0">
-        <Logo onDark className="h-9 md:h-12" />
+      <aside className="bg-sidebar text-white flex flex-row md:flex-col items-center gap-3 px-4 py-3 md:px-5 md:py-6 md:w-60 md:shrink-0 md:h-screen md:sticky md:top-0">
+        <Logo onDark className="h-11 md:h-15" />
         {note ? <span className="text-xs text-white/70 md:mt-2">{note}</span> : null}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col">{children}</main>

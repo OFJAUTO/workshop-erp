@@ -1,7 +1,7 @@
 import "server-only";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { amountInWords, round2 } from "@/lib/money";
+import { amountInWords } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
 import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
@@ -10,9 +10,13 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { DocumentTail, InfoBoxes, LinesTable, PdfDocument, TitleRow, TotalsBlock, companyOf, currencyOf, qtyText, styles, type DocLine } from "./template";
+import { DocumentTail, InfoBoxes, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, qtyText, styles, type SectionLine } from "./template";
 
-/** The customer's quotation or estimate on the document template: no internal costs, margins, hidden lines or bank charges. */
+/**
+ * The customer's quotation or estimate on the document template: the header, two grey boxes, three bordered boxes
+ * (Labour and services, Parts, Other charges) numbered from 1 each, the totals box with the labour discount and the
+ * round-off in bold green. No internal costs, margins, commission, hidden lines, bank charges or part numbers.
+ */
 export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): Promise<Buffer> {
   const { quotation: q, customer, vehicle, job } = bundle;
   const isEstimate = q.kind === "estimate";
@@ -22,23 +26,20 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const partOf = (id: string | null) => (id ? bundle.parts.find((p) => p.id === id) : undefined);
   const today = dubaiDate();
-  const toDoc = (l: (typeof lines)[number]): DocLine => {
+  const toDoc = (l: (typeof lines)[number]): SectionLine => {
     const amount = lineTotal(l);
     const unit = lineUnitPrice(l);
-    const vat = round2(amount * (vatPct / 100));
     const part = partOf(l.part_item_id);
     // Part numbers are never shown to the customer; an old title that still carries one in brackets loses it here.
     const number = part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null);
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
       description: withPositions(title, l.positions),
-      details: [l.line_type === "part" ? partTypeText(l) : null, l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.details].filter(Boolean).join(" · ") || null,
-      partNumber: null,
+      // A part: its availability in plain words (Today, Tomorrow, In 2 days) as the small grey line, then its type.
+      details: [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details].filter(Boolean).join(" · ") || null,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
       amount,
-      vat,
-      total: round2(amount + vat),
       complimentary: amount === 0,
       tag: l.urgency === "urgent" && !isEstimate ? "Urgent" : null,
     };
@@ -51,6 +52,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const [logo, qr] = await Promise.all([loadLogo(), q.token ? qrPng(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : Promise.resolve(null)]);
   const carName = vehicle ? [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ") : "";
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
+  const discountLabel = q.discount_kind === "percent" ? `Labour discount (${q.discount_value}%)` : q.discount_kind === "aed" ? "Labour discount" : `Discount (${q.discount_percent}%)`;
 
   const doc = (
     <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={[]} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
@@ -69,24 +71,32 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items" } : { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), lines: [vehicle?.variant ?? null, vehicle?.vin ? `VIN ${vehicle.vin}` : null] },
         ]}
       />
-      <LinesTable title="Labour and services" lines={services} currency={currency} vatPercent={vatPct} subtotalLabel="Labour and services subtotal" discount={totals.discount ? { label: `Discount ${q.discount_percent}% on labour and services`, amount: totals.discount } : null} />
-      {parts.length ? <LinesTable title="Parts" lines={parts} currency={currency} vatPercent={vatPct} subtotalLabel="Parts subtotal" startAt={services.length + 1} /> : null}
-      {others.length ? <LinesTable title="Other charges" lines={others} currency={currency} vatPercent={vatPct} subtotalLabel="Other charges subtotal" startAt={services.length + parts.length + 1} /> : null}
+      <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" />
+      {parts.length ? <SectionBox title="Parts" lines={parts} subtotalLabel="Parts subtotal" /> : null}
+      {others.length ? <SectionBox title="Other charges" lines={others} subtotalLabel="Other charges subtotal" /> : null}
       <DocumentTail
         words={amountInWords(totals.total)}
         bank={isEstimate ? null : company.bank}
         totals={
-          <TotalsBlock
+          <TotalsBox
             currency={currency}
-            rows={[
-              { label: "Gross amount", value: totals.subtotal },
-              ...(totals.discount ? [{ label: "Discount", value: totals.discount, bold: true, negative: true }] : []),
-              ...(totals.rounding ? [{ label: totals.rounding < 0 ? "Discount (rounding)" : "Rounding", value: Math.abs(totals.rounding), negative: totals.rounding < 0 }] : []),
-              { label: "Taxable amount", value: totals.net },
-              { label: `VAT ${vatPct}%`, value: totals.vat },
+            sections={[
+              { label: "Labour and services", value: totals.labourSell },
+              { label: "Parts", value: totals.partsSell },
+              ...(others.length ? [{ label: "Other charges", value: totals.otherSell }] : []),
             ]}
-            total={{ label: "Total", value: totals.total }}
-            after={totals.deposit ? [{ label: "Deposit required", value: totals.deposit, bold: true }] : []}
+            green={[
+              ...(totals.discount ? [{ label: discountLabel, value: totals.discount }] : []),
+              ...(totals.rounding < 0 ? [{ label: "Round-off", value: Math.abs(totals.rounding) }] : []),
+            ]}
+            net={totals.net}
+            vatPercent={vatPct}
+            vat={totals.vat}
+            total={totals.total}
+            after={[
+              ...(totals.rounding > 0 ? [{ label: "Rounding", value: totals.rounding }] : []),
+              ...(totals.deposit ? [{ label: "Deposit required", value: totals.deposit, bold: true }] : []),
+            ]}
             status={{ title: isEstimate ? "Estimate total" : "Quotation total", value: totals.total, note: q.promised_at && !isEstimate ? `Promised date ${formatDate(q.promised_at)}` : isEstimate ? "Final price confirmed once the vehicle is with us" : null }}
           />
         }

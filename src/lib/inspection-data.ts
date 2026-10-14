@@ -140,7 +140,7 @@ export async function loadInspection(jobId: string, path: "mechanical" | "bodysh
   const [{ data: items }, { data: findings }, { data: media }, { data: changes }, { data: tech }, { data: approver }] = await Promise.all([
     admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original, dangerous, dangerous_reason, leak_severity, leak_repair, fluid_qty, fluid_unit, fluid_grade, fluid_spec, disc_condition, disc_action, disc_thickness, disc_minimum, parts_rows, style").eq("inspection_id", inspection.id).order("position"),
     admin.from("inspection_findings").select("id, inspection_id, job_request_id, found, needs, status, edited_by, edited_at, original").eq("inspection_id", inspection.id),
-    admin.from("inspection_media").select("id, inspection_id, item_key, job_request_id, kind, is_prescan, storage_path, caption, duration_s, taken_at, uploaded_by").eq("inspection_id", inspection.id).order("taken_at"),
+    admin.from("inspection_media").select("id, inspection_id, item_key, job_request_id, kind, is_prescan, storage_path, caption, duration_s, taken_at, uploaded_by").eq("inspection_id", inspection.id).is("removed_at", null).order("taken_at"),
     admin
       .from("inspection_change_requests")
       .select("id, inspection_id, requested_by, reason, status, decided_by, decided_at, decision_note, created_at, requester:staff!inspection_change_requests_requested_by_fkey(display_name), decider:staff!inspection_change_requests_decided_by_fkey(display_name)")

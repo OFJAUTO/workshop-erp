@@ -543,3 +543,142 @@ export function qtyText(quantity: number, hours?: number | null) {
   if (hours !== null && hours !== undefined) return `${(Math.round(hours * 10) / 10).toFixed(1)} h`;
   return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(2);
 }
+
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * The 14 October layout: three bordered boxes (Labour and services, Parts, Other charges), each with a pale heading
+ * bar (the title in small caps, the line count on the right, no icons), the columns #, Description, Qty, Rate, Amount
+ * (no VAT or total per line), numbers that start at 1 in every box, and a pale subtotal row; then the totals box on
+ * the right with the labour discount and the round-off in bold green. Used by the quotation, the estimate, the
+ * proforma and the tax invoice: only the title and the numbers change between them.
+ * ------------------------------------------------------------------------------------------------------------------ */
+
+export type SectionLine = { description: string; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; tag?: string | null };
+
+const sec = StyleSheet.create({
+  box: { borderWidth: 1, borderColor: RULE, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
+  bar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: PALE, paddingVertical: px(7), paddingHorizontal: px(12) },
+  barTitle: { fontSize: px(9.5), fontWeight: 700, color: INK, letterSpacing: 0.9, textTransform: "uppercase" },
+  barCount: { fontSize: px(9.5), fontWeight: 600, color: GREY },
+  head: { flexDirection: "row", paddingVertical: px(5), paddingHorizontal: px(12), borderBottomWidth: 1, borderBottomColor: LINE, fontSize: px(9), fontWeight: 700, color: GREY, textTransform: "uppercase", letterSpacing: 0.6 },
+  row: { flexDirection: "row", paddingVertical: px(7), paddingHorizontal: px(12), borderBottomWidth: 1, borderBottomColor: LINE },
+  sub: { flexDirection: "row", backgroundColor: PALE, paddingVertical: px(7), paddingHorizontal: px(12), fontWeight: 700 },
+  no: { width: px(22), color: GREY },
+  desc: { flex: 1, paddingRight: px(8) },
+  qty: { width: px(54), textAlign: "right" },
+  rate: { width: px(84), textAlign: "right" },
+  amt: { width: px(96), textAlign: "right" },
+  totals: { width: px(262), borderWidth: 1, borderColor: RULE, borderRadius: px(8), paddingVertical: px(10), paddingHorizontal: px(14) },
+  tRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: px(3) },
+  tLabel: { color: GREY },
+  tGreen: { fontWeight: 800, color: GREEN },
+  tRule: { borderTopWidth: 1, borderTopColor: RULE, marginTop: px(4), marginBottom: px(4) },
+  tGrand: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: px(2), borderTopColor: INK, marginTop: px(4), paddingTop: px(8), fontSize: px(15), fontWeight: 800 },
+});
+
+/** One bordered box of lines with its heading bar and subtotal row. Lines are numbered from 1 inside the box. */
+export function SectionBox({ title, lines, subtotalLabel }: { title: string; lines: SectionLine[]; subtotalLabel: string }) {
+  const sum = lines.reduce((a, l) => a + l.amount, 0);
+  return (
+    <View style={sec.box}>
+      <View style={sec.bar} fixed>
+        <Text style={sec.barTitle}>{title}</Text>
+        <Text style={sec.barCount}>{lines.length} line{lines.length === 1 ? "" : "s"}</Text>
+      </View>
+      <View style={sec.head} fixed>
+        <Text style={sec.no}>#</Text>
+        <Text style={sec.desc}>Description</Text>
+        <Text style={sec.qty}>Qty</Text>
+        <Text style={sec.rate}>Rate</Text>
+        <Text style={sec.amt}>Amount</Text>
+      </View>
+      {lines.length === 0 ? (
+        <View style={sec.row}>
+          <Text style={[sec.desc, { color: GREY }]}>None</Text>
+        </View>
+      ) : null}
+      {lines.map((l, i) => (
+        <View key={i} style={sec.row} wrap={false}>
+          <Text style={sec.no}>{i + 1}</Text>
+          <View style={sec.desc}>
+            <Text style={styles.lineTitle}>{l.description}</Text>
+            {l.tag ? <Text style={[styles.tag, { color: GREY }]}>{l.tag.toUpperCase()}</Text> : null}
+            {l.details ? <Text style={[styles.lineDetails, { fontSize: px(10.5) }]}>{l.details}</Text> : null}
+          </View>
+          <Text style={sec.qty}>{l.qty}</Text>
+          {l.complimentary ? (
+            <Text style={[sec.rate, { width: px(84 + 96), color: GREY }]}>Complimentary</Text>
+          ) : (
+            <>
+              <Text style={sec.rate}>{moneyDigits(l.rate)}</Text>
+              <Text style={[sec.amt, { fontWeight: 600 }]}>{moneyDigits(l.amount)}</Text>
+            </>
+          )}
+        </View>
+      ))}
+      <View style={sec.sub} wrap={false}>
+        <Text style={sec.no}>{""}</Text>
+        <Text style={sec.desc}>{subtotalLabel}</Text>
+        <Text style={sec.qty}>{""}</Text>
+        <Text style={sec.rate}>{""}</Text>
+        <Text style={sec.amt}>{moneyDigits(sum)}</Text>
+      </View>
+    </View>
+  );
+}
+
+export type MoneyRow = { label: string; value: number };
+
+/**
+ * The totals box, aligned right: the three sections, then the labour discount and the round-off in bold green, a
+ * thin line, the subtotal before VAT, VAT, and the grand total in bold and larger. Any rows after it (Paid, Balance)
+ * and the status box follow.
+ */
+export function TotalsBox({ sections, green = [], net, vatPercent, vat, total, totalLabel = "Grand total", after = [], status, currency }: { sections: MoneyRow[]; green?: MoneyRow[]; net: number; vatPercent: number; vat: number; total: number; totalLabel?: string; after?: TotalRow[]; status?: StatusBox | null; currency: Currency }) {
+  return (
+    <View style={{ width: px(262) }} wrap={false}>
+      <View style={sec.totals}>
+        {sections.map((r) => (
+          <View key={r.label} style={sec.tRow}>
+            <Text style={sec.tLabel}>{r.label}</Text>
+            <Text>{moneyDigits(r.value)}</Text>
+          </View>
+        ))}
+        {green.filter((r) => r.value).map((r) => (
+          <View key={r.label} style={sec.tRow}>
+            <Text style={sec.tGreen}>{r.label}</Text>
+            <Text style={sec.tGreen}>− {currency === "aed" ? "AED " : ""}{moneyDigits(r.value)}</Text>
+          </View>
+        ))}
+        <View style={sec.tRule} />
+        <View style={sec.tRow}>
+          <Text style={sec.tLabel}>Subtotal before VAT</Text>
+          <Text>{moneyDigits(net)}</Text>
+        </View>
+        <View style={sec.tRow}>
+          <Text style={sec.tLabel}>VAT {vatPercent}%</Text>
+          <Text>{moneyDigits(vat)}</Text>
+        </View>
+        <View style={sec.tGrand}>
+          <Text>{totalLabel}{currency === "aed" ? " AED" : ""}</Text>
+          {currency === "aed" ? <Text>{moneyDigits(total)}</Text> : <Amount value={total} currency={currency} size={px(15)} weight={800} />}
+        </View>
+        {after.map((r) => (
+          <View key={r.label} style={sec.tRow}>
+            <Text style={r.bold ? styles.tBold : sec.tLabel}>{r.label}</Text>
+            <Text style={r.bold ? styles.tBold : {}}>{r.negative ? "−" : ""}{moneyDigits(r.value)}</Text>
+          </View>
+        ))}
+      </View>
+      {status ? (
+        <View style={[styles.statusBox, { marginTop: px(10) }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statusTitle}>{status.title}</Text>
+            {status.note ? <Text style={styles.statusNote}>{status.note}</Text> : null}
+          </View>
+          {status.value !== null && status.value !== undefined ? <Amount value={status.value} currency={currency === "symbol" ? "symbol" : "aed"} size={px(16)} weight={800} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}

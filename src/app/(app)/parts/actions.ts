@@ -14,6 +14,7 @@ import { PARTS_BUCKET, PART_SELECT, minMarkupFor, refreshQuoteTotals, toPart, pa
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { formatPlate } from "@/lib/types";
 
 function refresh(jobId: string) {
   revalidatePath("/parts");
@@ -24,7 +25,7 @@ function refresh(jobId: string) {
 }
 
 async function jobOf(jobId: string) {
-  const { data } = await createAdminClient().from("jobs").select("id, job_number, department, assigned_to, gated_in_by, is_open, vehicle_id").eq("id", jobId).maybeSingle();
+  const { data } = await createAdminClient().from("jobs").select("id, job_number, department, assigned_to, gated_in_by, is_open, vehicle_id, parts_pricing_done_at, parts_pricing_reopened_at").eq("id", jobId).maybeSingle();
   return data;
 }
 
@@ -570,14 +571,38 @@ export async function pricingDone(jobId: string, formData: FormData) {
   const firstText = first ? `${first.name}: ${rowMissing(first.values).map((m) => m.long).join(", ") || "not finished"}` : null;
   if (open && String(formData.get("force") ?? "") !== "1") redirect(`/parts/${jobId}?error=${encodeURIComponent(`${open} part${open === 1 ? " is" : "s are"} not finished${firstText ? ` (${firstText})` : ""}. Finish them, or choose Send what you have.`)}`);
   const now = new Date().toISOString();
-  await admin.from("jobs").update({ parts_pricing_done_at: now, parts_pricing_done_by: staff.id, updated_by: staff.id }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `Pricing done by ${staff.display_name} (${summary.text})`, created_by: staff.id });
+  // "Send updated prices": Edit was pressed after Pricing done; the advisor hears that the prices changed on this car.
+  const reopened = !!job.parts_pricing_reopened_at;
+  await admin.from("jobs").update({ parts_pricing_done_at: now, parts_pricing_done_by: staff.id, parts_pricing_reopened_at: null, parts_pricing_reopened_by: null, updated_by: staff.id }).eq("id", jobId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `${reopened ? "Updated prices sent" : "Pricing done"} by ${staff.display_name} (${summary.text})`, created_by: staff.id });
   const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
   const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
-  await notifyStaff(ids, { type: "parts_priced", title: `Parts pricing done · ${job.job_number}`, body: open ? `${staff.display_name} sent what Parts have: ${summary.text}. The quotation is yours.` : `Every part is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
+  if (reopened) {
+    const { data: jv } = await admin.from("jobs").select("vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle();
+    const veh = (jv?.vehicle as unknown as (Parameters<typeof formatPlate>[0] & { make: { name: string } | null; model: { name: string } | null }) | null) ?? null;
+    const car = veh ? `${formatPlate(veh)} ${[veh.make?.name, veh.model?.name].filter(Boolean).join(" ")}`.trim() : job.job_number;
+    const { data: sentQs } = await admin.from("quotations").select("number").eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
+    const sent = (sentQs ?? []).map((q) => q.number);
+    await notifyStaff(ids, { type: "parts_priced", title: `Prices changed on ${car}`, body: `${staff.display_name} sent updated prices (${summary.text}).${sent.length ? ` ${sent.join(", ")} was already sent to the customer: check it and send a revised version if needed.` : " Check the quotation."}`, jobId, href: `/jobs/${jobId}` });
+  } else {
+    await notifyStaff(ids, { type: "parts_priced", title: `Parts pricing done · ${job.job_number}`, body: open ? `${staff.display_name} sent what Parts have: ${summary.text}. The quotation is yours.` : `Every part is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
+  }
   refresh(jobId);
   revalidatePath(`/jobs/${jobId}/quote`, "layout");
-  redirect(`/parts/${jobId}?message=${encodeURIComponent("Sent to the advisor.")}`);
+  redirect(`/parts/${jobId}?message=${encodeURIComponent(reopened ? "Updated prices sent to the advisor." : "Sent to the advisor.")}`);
+}
+
+/** "Edit" after Pricing done: the rows open again; the bar then offers "Send updated prices". A quotation already sent is pointed out. */
+export async function reopenPricing(jobId: string) {
+  const staff = await requirePermission("priceParts");
+  const admin = createAdminClient();
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) redirect(`/parts/${jobId}?error=${encodeURIComponent("This job is closed.")}`);
+  await admin.from("jobs").update({ parts_pricing_reopened_at: new Date().toISOString(), parts_pricing_reopened_by: staff.id, updated_by: staff.id }).eq("id", jobId);
+  const { data: sentQs } = await admin.from("quotations").select("number").eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
+  const sent = (sentQs ?? []).map((q) => q.number);
+  refresh(jobId);
+  redirect(`/parts/${jobId}?message=${encodeURIComponent(sent.length ? `Editing. ${sent.join(", ")} was already sent to the customer: every change flags it and the advisor is told. Press Send updated prices when done.` : "Editing. Press Send updated prices when done.")}`);
 }
 
 /** A catalogue diagram on a priced part, from the row's menu. */

@@ -39,6 +39,8 @@ export type DashRow = {
   docAlert: { text: string; tone: "muted" | "amber" | "red" | "green" } | null;
   /** A document past its first limit: counted in the Pending row as "Not sent". */
   notSent: boolean;
+  /** Parts pressed Pricing done and the quotation is still being built or waits for the customer. */
+  priced: boolean;
 };
 
 const SORTS = [
@@ -257,6 +259,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
                       {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
+                      {j.priced ? <Badge tone="green">Priced</Badge> : null}
                     </span>
                     <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
                   </div>

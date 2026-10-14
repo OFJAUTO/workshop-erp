@@ -1,20 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Badge, Card, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { VERDICT_LABELS } from "@/lib/job-summary";
 import { monthlySummary } from "@/lib/owner-report";
 import { getSettings } from "@/lib/settings";
+import { markCommissionPaid } from "../commission-actions";
 import { ReportTabs, aedText, monthParam, verdictTone } from "../ReportTabs";
 
 export const dynamic = "force-dynamic";
 
 /** The owner's month on one page: how many, how much, how good, and what to look at. */
-export default async function MonthlyReportPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function MonthlyReportPage({ searchParams }: { searchParams: Promise<{ month?: string; message?: string }> }) {
   const staff = await requireStaff();
   if (staff.role_id !== "owner") redirect("/dashboard");
-  const { month: m } = await searchParams;
+  const { month: m, message } = await searchParams;
   const month = monthParam(m);
   const settings = await getSettings();
   const s = await monthlySummary(settings, month);
@@ -29,6 +30,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
     <>
       <PageHeader title="Reports" subtitle="Written by the system at gate-out; nothing here is typed by anyone." />
       <ReportTabs current="/reports/monthly" month={month} pdfHref={`/api/pdf/monthly?month=${month}`} />
+      {message ? <Notice tone="success">{message}</Notice> : null}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {stat("Gated out", `${s.count}`, s.loose ? `${s.cars} cars, ${s.loose} loose` : null)}
         {stat("Invoiced before VAT", aedText(s.invoiced))}
@@ -76,6 +78,29 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
             </table>
           </div>
         )}
+      </Card>
+      <Card id="commissions" className="flex flex-col gap-2" data-commissions>
+        <SectionLabel right={s.commissionsUnpaid ? `${aedText(s.commissionsUnpaid)} not paid` : `${s.commissions.length}`}>Commissions</SectionLabel>
+        {s.commissions.length === 0 ? <p className="text-sm text-muted">No commissions on the jobs of this month.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Job</th><th className="py-1 pr-3">Car</th><th className="py-1 pr-3">To</th><th className="py-1 pr-3 text-right">Amount</th><th className="py-1 pr-3">Status</th><th className="py-1" /></tr></thead>
+              <tbody>
+                {s.commissions.map((c) => (
+                  <tr key={c.quotationId} className="border-t border-line" data-commission={c.number}>
+                    <td className="py-1.5 pr-3 whitespace-nowrap"><Link href={`/reports/jobs/${c.jobId}`} className="font-bold underline underline-offset-4">{c.jobNumber}</Link>{c.inMonth ? "" : <span className="block text-xs text-muted">earlier month</span>}</td>
+                    <td className="py-1.5 pr-3">{c.plate}<span className="block text-xs text-muted">{c.number}</span></td>
+                    <td className="py-1.5 pr-3">{c.to || "–"}</td>
+                    <td className="py-1.5 pr-3 text-right whitespace-nowrap font-semibold">{aedText(c.amount)}</td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">{c.paidAt ? <Badge tone="green">Paid {formatDate(c.paidAt)}</Badge> : <Badge tone="amber">Not paid</Badge>}</td>
+                    <td className="py-1.5 text-right">{c.paidAt ? null : <form action={markCommissionPaid.bind(null, c.quotationId)}><input type="hidden" name="month" value={month} /><Button type="submit" size="md" data-mark-paid>Mark paid</Button></form>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-xs text-muted">Commissions count against the profit of the quotation and never appear on anything the customer sees. Unpaid ones from earlier months stay here until marked paid.</p>
       </Card>
     </>
   );

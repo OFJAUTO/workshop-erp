@@ -1,7 +1,7 @@
 import "server-only";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
-import { isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
+import { isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -184,6 +184,8 @@ export type DraftTotals = {
   /** The discount the customer approved on the quotation (labour and services only). */
   discount: number;
   discountPercent: number;
+  /** "Labour discount (10%)" as the quotation showed it. */
+  discountLabel: string | null;
   /** The adjustment that lands the invoice on the quotation's rounded total; the VAT line takes it. */
   rounding: number;
   taxable: number;
@@ -219,13 +221,15 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
   const lines: DraftLine[] = [];
   let discount = 0;
   let discountBase = 0;
+  let discountLabel: string | null = null;
   let quotedTotal = 0;
   let anyRounded = false;
   for (const q of qs) {
     // Parts returned to the supplier come off the bill.
     const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
-    const base = round2(qLines.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
-    const d = round2(base * ((Number(q.discount_percent) || 0) / 100));
+    // The labour discount as the quotation had it (our own labour lines; older quotations: labour and services).
+    const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value });
+    if (d > 0 && !discountLabel) discountLabel = q.discount_kind === "percent" ? `Labour discount (${q.discount_value}%)` : q.discount_kind === "aed" ? "Labour discount" : `Discount (${q.discount_percent}%)`;
     discount += d;
     discountBase += base;
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));
@@ -259,7 +263,7 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
   const vat = round2(total - taxable);
   return {
     lines: out,
-    totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, rounding, taxable, vat, total, warrantyCredit },
+    totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, discountLabel, rounding, taxable, vat, total, warrantyCredit },
     quotationNumbers: Array.from(new Set(qs.map((q) => q.number))),
     vatPercent,
   };

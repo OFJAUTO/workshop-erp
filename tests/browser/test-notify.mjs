@@ -227,18 +227,37 @@ try {
   }
   await told("8 quotation approved by the customer", m, jobId, [{ id: advisorId, label: "the advisor" }, { role: "parts", label: "Parts" }]);
 
-  // 9. Planning: Parts plan, the manager releases, the advisor confirms the date.
-  m = await mark();
+  // 9. Planning: Parts send the LPO for approval when something is to order (the owner approves with one tap, Parts press
+  // Ordered); parts all from stock finish the Parts step at approval. The mark from step 8 is kept: the manager's "Plan
+  // the work" comes either at approval (stock) or at Ordered (LPO).
   {
     const { browser, page } = await browserForId(partsId);
     await go(page, `${base}/parts/${jobId}`);
-    const all = page.getByRole("button", { name: "All in stock" });
-    if (await all.count()) { await all.click(); await submitted(page); }
-    const planned = page.getByRole("button", { name: /^Parts planned/ });
-    if (await planned.count()) { await planned.click(); await submitted(page); }
+    const send = page.locator("[data-send-lpo]");
+    if (await send.count()) {
+      await send.click();
+      await submitted(page);
+      const main = (await sql("select id from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' order by created_at desc limit 1", [jobId]))[0];
+      check("9 LPO sent for approval", !!main);
+      if (main) {
+        const o = await browserFor("owner");
+        await go(o.page, `${base}/parts/orders/${main.id}`);
+        if (await o.page.locator("textarea[name='override_reason']").count()) await o.page.locator("textarea[name='override_reason']").fill("E2e test: deposit override");
+        await o.page.getByRole("button", { name: "Approve", exact: true }).click();
+        await submitted(o.page);
+        await o.browser.close();
+        await go(page, `${base}/parts/${jobId}`);
+        while (await page.locator("[data-lpo-ordered]").count()) {
+          const before = page.url();
+          await page.locator("[data-lpo-ordered]").first().click();
+          await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null);
+          await sleep(800);
+        }
+      }
+    }
     await browser.close();
   }
-  await told("9a parts planned", m, jobId, [{ role: "workshop_manager", id: MANAGER_MECH, label: "the workshop manager" }]);
+  await told("9a parts step done (stock at approval, or LPO ordered)", m, jobId, [{ role: "workshop_manager", id: MANAGER_MECH, label: "the workshop manager" }]);
   m = await mark();
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
@@ -247,6 +266,9 @@ try {
     if (await box.count()) await tickTech(page, box);
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(new Date().toISOString().slice(0, 10));
+    // Parts still on order: the manager starts with the available parts.
+    const force = page.locator("input[name='force']");
+    if (await force.count()) await force.check();
     await page.getByRole("button", { name: "Release to workshop" }).click();
     await submitted(page);
     await browser.close();

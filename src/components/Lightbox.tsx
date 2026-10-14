@@ -2,9 +2,12 @@
 
 import { useEffect, useRef } from "react";
 
-export type LightboxSlide = { key: string; url: string; label: string; detail?: string };
+export type LightboxSlide = { key: string; url: string; label: string; detail?: string; /** A video plays inside the viewer; the default is a photo. */ kind?: "image" | "video" };
 
-/** Full-size photo viewer for every page: swipe or use the arrows to move, tap outside, the X or Escape to close. Never a new tab. */
+/**
+ * The one full-screen viewer for every photo and video in the app, on the same tab, never a new one: left and right
+ * arrows, swipe on a phone or tablet, "2 of 5", close with the X, the Escape key or a tap outside. Videos play in it.
+ */
 export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxSlide[]; index: number; onClose: () => void; onMove: (next: number) => void }) {
   const touchX = useRef<number | null>(null);
   const slide = slides[index];
@@ -33,7 +36,8 @@ export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxS
       role="dialog"
       aria-modal="true"
       aria-label={slide.label}
-      className="fixed inset-0 z-50 flex flex-col bg-black/95 text-white"
+      className="fixed inset-0 z-[80] flex flex-col bg-black/95 text-white"
+      data-lightbox
       onClick={onClose}
       onTouchStart={(e) => {
         touchX.current = e.touches[0]?.clientX ?? null;
@@ -54,8 +58,8 @@ export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxS
           {slide.detail ? <span className="text-xs text-white/70 truncate">{slide.detail}</span> : null}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-white/70">
-            {index + 1} / {slides.length}
+          <span className="text-xs text-white/70" data-lightbox-count>
+            {index + 1} of {slides.length}
           </span>
           <button type="button" onClick={onClose} className="min-h-11 min-w-11 rounded-lg border border-white/30 px-3 text-sm font-bold" aria-label="Close">
             ✕
@@ -63,21 +67,25 @@ export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxS
         </div>
       </div>
       <div className="relative flex-1 min-h-0 flex items-center justify-center px-2 pb-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={slide.url} alt={slide.label} className="max-h-full max-w-full object-contain select-none" onClick={(e) => e.stopPropagation()} draggable={false} />
+        {slide.kind === "video" ? (
+          <video key={slide.key} src={slide.url} controls autoPlay playsInline className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={slide.url} alt={slide.label} className="max-h-full max-w-full object-contain select-none" onClick={(e) => e.stopPropagation()} draggable={false} />
+        )}
         {hasPrev ? (
-          <button type="button" onClick={(e) => { e.stopPropagation(); onMove(index - 1); }} className="absolute left-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30" aria-label="Previous photo">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onMove(index - 1); }} className="absolute left-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30" aria-label="Previous">
             ‹
           </button>
         ) : null}
         {hasNext ? (
-          <button type="button" onClick={(e) => { e.stopPropagation(); onMove(index + 1); }} className="absolute right-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30" aria-label="Next photo">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onMove(index + 1); }} className="absolute right-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30" aria-label="Next">
             ›
           </button>
         ) : null}
       </div>
       <p className="pb-3 text-center text-xs text-white/60">
-        <span className="[@media(hover:hover)]:hidden">Swipe for the next photo</span>
+        <span className="[@media(hover:hover)]:hidden">Swipe for the next one</span>
         <span className="hidden [@media(hover:hover)]:inline">Use the arrows or the arrow keys</span>
       </p>
     </div>

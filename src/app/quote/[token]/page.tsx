@@ -112,6 +112,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">
           <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{isEstimate ? "Estimate total" : "Total"} including VAT</span>
           <span className="text-3xl font-extrabold">{aed(totals.total)}</span>
+          {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{q.discount_kind === "percent" ? `Labour discount (${q.discount_value}%)` : q.discount_kind === "aed" ? "Labour discount" : `Discount (${q.discount_percent}%)`}: − {aed(totals.discount)}</span> : null}
+          {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
           {totals.deposit ? <span className="text-xs text-[#5F6368]">Deposit required on approval: {aed(totals.deposit)}</span> : null}
         </div>
       </CustomerFront>

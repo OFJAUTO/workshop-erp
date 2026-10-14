@@ -246,6 +246,9 @@ export function monthRange(month: string) {
 
 export type PersonLine = { name: string; jobs: number; minutes: number; hoursCharged: number; efficiencyPercent: number | null; qcSendbacks: number; managerSendbacks: number; pausesNotAccepted: number; invoiced: number; profit: number; discount: number; talk: number };
 
+/** One commission owed on an approved quotation: on a job of the month, or still unpaid from an earlier month. */
+export type CommissionLine = { quotationId: string; number: string; jobId: string; jobNumber: string; plate: string; to: string; amount: number; paidAt: string | null; approvedAt: string | null; inMonth: boolean };
+
 export type MonthlySummary = {
   month: string;
   label: string;
@@ -266,6 +269,9 @@ export type MonthlySummary = {
   qc: PersonLine[];
   flags: { text: string; count: number }[];
   jobs: { id: string; jobNumber: string; plate: string; title: string; customer: string; gatedOutAt: string | null; verdict: Verdict; invoiced: number; profit: number | null; marginPercent: number | null; days: number; flags: number; loose: boolean }[];
+  /** Owner only: commissions on the jobs of the month, plus any still unpaid from before. Never on a customer document. */
+  commissions: CommissionLine[];
+  commissionsUnpaid: number;
 };
 
 /** Everything gated out in the month, from the stored reports (built for any job that has none yet). */
@@ -329,6 +335,17 @@ export async function monthlySummary(settings: Settings, month: string): Promise
       qcs.set(r.people.qc, l);
     }
   }
+  // Commissions: on the jobs gated out this month, and every unpaid one from any month so nothing is forgotten.
+  const monthJobIds = reports.map((r) => r.jobId);
+  const { data: comRows } = await admin.from("quotations").select("id, number, job_id, commission_to, commission_aed, commission_paid_at, responded_at").eq("is_active", true).eq("status", "approved").gt("commission_aed", 0).or(`commission_paid_at.is.null${monthJobIds.length ? `,job_id.in.(${monthJobIds.join(",")})` : ""}`).order("responded_at", { ascending: false }).limit(300);
+  const comJobIds = Array.from(new Set((comRows ?? []).map((c) => c.job_id as string).filter((id) => id && !monthJobIds.includes(id))));
+  const { data: comJobs } = comJobIds.length ? await admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number)").in("id", comJobIds) : { data: [] as { id: string; job_number: string; vehicle: unknown }[] };
+  const commissions: CommissionLine[] = (comRows ?? []).filter((c) => c.job_id).map((c) => {
+    const r = reports.find((x) => x.jobId === c.job_id);
+    const j = (comJobs ?? []).find((x) => x.id === c.job_id);
+    const v = j?.vehicle as Parameters<typeof formatPlate>[0] | null | undefined;
+    return { quotationId: c.id as string, number: c.number as string, jobId: c.job_id as string, jobNumber: r?.jobNumber ?? j?.job_number ?? "", plate: r?.plate ?? (v ? formatPlate(v) : ""), to: (c.commission_to as string | null) ?? "", amount: round2(Number(c.commission_aed) || 0), paidAt: (c.commission_paid_at as string | null) ?? null, approvedAt: (c.responded_at as string | null) ?? null, inMonth: !!r };
+  }).sort((a, b) => Number(!!a.paidAt) - Number(!!b.paidAt) || (b.approvedAt ?? "").localeCompare(a.approvedAt ?? ""));
   const finish = (m: Map<string, PersonLine>) => Array.from(m.values()).map((l) => ({ ...l, hoursCharged: round2(l.hoursCharged), invoiced: round2(l.invoiced), profit: round2(l.profit), discount: round2(l.discount), efficiencyPercent: l.minutes > 0 && l.hoursCharged > 0 ? Math.round(((l.hoursCharged * 60) / l.minutes) * 100) : null })).sort((a, b) => b.jobs - a.jobs || a.name.localeCompare(b.name));
   return {
     month,
@@ -350,6 +367,8 @@ export async function monthlySummary(settings: Settings, month: string): Promise
     qc: finish(qcs),
     flags: Array.from(flagCount.entries()).map(([text, count]) => ({ text, count })).sort((a, b) => b.count - a.count).slice(0, 12),
     jobs: reports.map((r) => ({ id: r.jobId, jobNumber: r.jobNumber, plate: r.plate, title: r.title, customer: r.customer.name, gatedOutAt: r.time.gatedOutAt, verdict: r.verdict, invoiced: r.money.invoiced, profit: r.money.profit, marginPercent: r.money.marginPercent, days: r.time.days, flags: r.flags.length, loose: r.loose })),
+    commissions,
+    commissionsUnpaid: round2(commissions.filter((c) => !c.paidAt).reduce((a, c) => a + c.amount, 0)),
   };
 }
 

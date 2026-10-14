@@ -60,9 +60,9 @@ export function LinkButton({
   );
 }
 
-export function Card({ children, className = "", id }: { children: ReactNode; className?: string; id?: string }) {
+export function Card({ children, className = "", id, ...rest }: { children: ReactNode; className?: string; id?: string } & Omit<React.HTMLAttributes<HTMLDivElement>, "children" | "className" | "id">) {
   return (
-    <div id={id} className={`bg-white border border-line rounded-card p-5 ${className}`}>{children}</div>
+    <div id={id} className={`bg-white border border-line rounded-card p-5 ${className}`} {...rest}>{children}</div>
   );
 }
 

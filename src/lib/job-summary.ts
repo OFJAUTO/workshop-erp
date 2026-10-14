@@ -12,7 +12,10 @@ export type Verdict = "good" | "acceptable" | "talk";
 export const VERDICT_LABELS: Record<Verdict, string> = { good: "Good", acceptable: "Acceptable", talk: "Needs a talk" };
 
 export type JobSummary = {
+  /** Hours quoted to the customer (the work lines). */
   hoursCharged: number;
+  /** The hours the advisor estimated the work would take (the "est." box on the quotation), when the job has one. */
+  hoursEstimate?: number;
   /** The manager's time budget when it differs from the hours charged, with the reason. */
   budgetHours?: number | null;
   budgetReason?: string | null;
@@ -76,16 +79,19 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
   const rate = Number((settings.technician_cost_rate_by_department as Record<string, number> | undefined)?.[job?.department ?? ""] ?? settings.technician_cost_rate_aed) || 0;
   let quotedProfit: number | null = null;
   let actualProfit: number | null = null;
+  let hoursEstimate = 0;
   if (quotes.length) {
     const all = ((qLines ?? []) as Record<string, unknown>[]).map(toLine);
     let quoted = 0;
     let revenue = 0;
     let otherCost = 0;
     let partsCostQuoted = 0;
+    let estimate = 0;
     for (const q of quotes) {
       const qls = all.filter((l) => l.quotation_id === q.id && !isUnchosen(l));
       const t = quoteTotals(qls, { discount_percent: q.discount_percent, vat_percent: q.vat_percent }, { technicianCostRate: rate, bankChargePercent: Number(settings.bank_charge_fee_percent) || 0 });
       quoted += t.profit;
+      estimate += t.labourEstimateHours;
       revenue += t.net;
       partsCostQuoted += t.partsCost;
       otherCost += t.otherCost + t.bankCharge;
@@ -96,6 +102,7 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
     const partsCostActual = round2(partRows.reduce((a, p) => a + (p.final_cost_aed ?? p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1), 0)) || partsCostQuoted;
     quotedProfit = round2(quoted);
     actualProfit = round2(revenue - partsCostActual - otherCost - (minutesUsed / 60) * rate);
+    hoursEstimate = round2(estimate);
   }
   const reasons: string[] = [];
   const overBy = hoursAllowed > 0 ? minutesUsed / (hoursAllowed * 60) : 0;
@@ -116,6 +123,7 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
   void pos;
   return {
     hoursCharged,
+    hoursEstimate,
     budgetHours,
     budgetReason: budgetHours !== null ? (job?.budget_reason ?? null) : null,
     minutesUsed,
@@ -140,7 +148,7 @@ export async function recordJobSummary(jobId: string, jobNumber: string, departm
   const s = await buildJobSummary(jobId, settings);
   await admin.from("jobs").update({ summary: s, summary_verdict: s.verdict, summary_at: new Date().toISOString() }).eq("id", jobId);
   const hm = (m: number) => `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, "0")} min`;
-  const body = `${VERDICT_LABELS[s.verdict]}. Hours ${s.hoursCharged} charged, ${hm(s.minutesUsed)} used${s.daysLate ? `, ${s.daysLate} day${s.daysLate === 1 ? "" : "s"} late` : ", on time"}, QC round${s.qcRounds === 1 ? "" : "s"} ${s.qcRounds}.${s.reasons.length ? ` ${s.reasons.join("; ")}.` : ""}`;
+  const body = `${VERDICT_LABELS[s.verdict]}. Hours ${s.hoursCharged} quoted, ${s.hoursEstimate ?? 0} estimated, ${hm(s.minutesUsed)} clocked${s.daysLate ? `, ${s.daysLate} day${s.daysLate === 1 ? "" : "s"} late` : ", on time"}, QC round${s.qcRounds === 1 ? "" : "s"} ${s.qcRounds}.${s.reasons.length ? ` ${s.reasons.join("; ")}.` : ""}`;
   const n = { type: "job_summary", title: `Job summary · ${jobNumber}`, body, jobId, href: `/jobs/${jobId}#summary` };
   await notifyRoles(["owner"], n);
   await notifyManagers(department, n);

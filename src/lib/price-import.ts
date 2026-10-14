@@ -69,7 +69,7 @@ const SYNONYMS: Record<Exclude<ImportField, "ignore">, string[]> = {
   vin: ["vin", "chassis", "chassis no", "vin number"],
 };
 
-const TOTAL_LABELS = /^(gross amount|gross|sub ?total|subtotal|net aed|net amount|net total|total( aed)?|vat|tax|grand total|amount due|total due|total before vat|total incl\.? vat|total excl\.? vat)\s*:?$/i;
+const TOTAL_LABELS = /^(gross amount|gross|sub ?total|subtotal|net aed|net amount|net total|total( aed)?|vat(\s*\d+(\.\d+)?\s*%)?|tax(\s*\d+(\.\d+)?\s*%)?|grand total|amount due|total due|total before vat|total incl\.? vat|total excl\.? vat)\s*:?$/i;
 
 export function normaliseHeading(h: string): string {
   return h.replace(/\*/g, "").replace(/[_\-:.]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
@@ -201,6 +201,8 @@ export function linesFromRows(rows: string[][], mapping: ColumnMapping, keyPrefi
     const total = parseNumber(cell(row, mapping.total));
     const rowVin = cell(row, mapping.vin).replace(/\s+/g, "").toUpperCase() || null;
     if (rowVin && rowVin.length >= 11) vin = vin ?? rowVin;
+    // A page footer, a title or a stray word has no quantity and no price: not a part line.
+    if (qty === null && list === null && net === null && total === null && !(partNumber && description)) return;
     const discount = list && net !== null && list > 0 ? Math.round((1 - net / list) * 10000) / 100 : null;
     lines.push({
       key: `${keyPrefix}${idx}`,
@@ -226,7 +228,7 @@ export function checkTotals(lines: ImportLine[], found: { label: string; value: 
   const sumLines = values.length && values.every((v) => v !== null) ? Math.round(values.reduce((a, b) => a + (b ?? 0), 0) * 100) / 100 : null;
   // The total before VAT: "Gross Amount" (Land Rover), "Subtotal", "Total before VAT", "Net amount"; else a plain "Total" when there is no VAT line.
   const pick = (re: RegExp) => found.find((f) => re.test(f.label))?.value ?? null;
-  const vat = pick(/^(vat|tax)$/i);
+  const vat = pick(/^(vat|tax)(\s*\d+(\.\d+)?\s*%)?$/i);
   let expected = pick(/^(gross amount|gross|sub ?total|subtotal|total before vat|total excl\.? vat|net amount|net total)$/i);
   if (expected === null) {
     const total = pick(/^(total( aed)?|grand total|amount due|total due|net aed)$/i);

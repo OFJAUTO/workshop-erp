@@ -23,6 +23,10 @@ export type RowValues = {
 };
 
 export type SupplierOption = { id: string; name: string; discount: number; byType: Record<string, number> };
+/** The supplier Parts pick for a part on our own shelf: in stock, never on an LPO. */
+export const OUR_STOCK = "Our stock";
+/** The saved supplier text is tidied into title case ("Our Stock"), so the check ignores case. */
+export const isOurStock = (name: string | null | undefined) => (name ?? "").trim().toLowerCase() === OUR_STOCK.toLowerCase();
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 

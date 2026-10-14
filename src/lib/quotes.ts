@@ -89,6 +89,8 @@ export type QuoteLine = {
   recovery_paid_by?: "us" | "customer" | null;
   /** A recovery we pay for, shown to the customer at AED 0 as "free of charge". */
   recovery_mention_free?: boolean;
+  /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours the customer pays. */
+  hours_estimate?: number | null;
 };
 
 export type QuoteRow = {
@@ -154,9 +156,31 @@ export type QuoteRow = {
   /** One person edits at a time: who holds the quotation and the last heartbeat. */
   editing_by: string | null;
   editing_at: string | null;
+  /** The labour discount (our own labour lines only): a percentage or a fixed amount. Null kind = the old rule (labour and services). */
+  discount_kind?: "percent" | "aed" | null;
+  discount_value?: number | null;
+  /** Commission we pay someone: internal, never shown to a customer. */
+  commission_to?: string | null;
+  commission_kind?: "aed" | "percent" | null;
+  commission_value?: number | null;
+  commission_aed?: number;
+  commission_paid_at?: string | null;
+  commission_paid_by?: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
+};
+
+/** The header fields the totals need, as the editor and the server both hold them. */
+export type QuoteHeaderForTotals = {
+  discount_percent: number;
+  vat_percent: number;
+  payment_by_card?: boolean;
+  rounded_total_aed?: number | null;
+  discount_kind?: "percent" | "aed" | null;
+  discount_value?: number | null;
+  commission_kind?: "aed" | "percent" | null;
+  commission_value?: number | null;
 };
 
 export type PartItem = {
@@ -300,20 +324,27 @@ export function lineTotal(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_co
   return round2(linePrice(l) * (1 - (l.discount_percent ?? 0) / 100));
 }
 
-/** What the line cost us: parts, other with a cost, recovery. */
+/** What the line cost us: parts, other with a cost, recovery, and the "our cost" of work done outside (fixed-price services). */
 export function lineCost(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost"> & { fee_kind?: string | null }): number {
   if (l.line_type === "part" || l.line_type === "other" || l.line_type === "recovery") return round2((l.unit_cost ?? 0) * (l.quantity || 1));
   if (l.line_type === "fee" && l.fee_kind === "bank_charge") return round2(l.unit_cost ?? 0);
+  if (l.line_type === "package" || l.line_type === "fee") return round2((l.unit_cost ?? 0) * (l.quantity || 1));
   return 0;
+}
+
+/** A fixed-price line done outside (lathe work, an authorised injector service): its internal cost, never shown to the customer. */
+export function isOutsideWork(l: Pick<QuoteLine, "line_type"> & { fee_kind?: string | null }) {
+  return l.line_type === "package" || (l.line_type === "fee" && l.fee_kind !== "bank_charge");
 }
 
 /** The lowest net price allowed for a line with a cost: cost plus the minimum markup, after every discount. */
 export function floorPrice(l: Pick<QuoteLine, "unit_cost" | "quantity">, minMarkup: number) {
   return round2((l.unit_cost ?? 0) * (1 + minMarkup / 100) * (l.quantity || 1));
 }
-/** Why a line with a cost breaks the floor, or null. */
+/** Why a line with a cost breaks the floor, or null. A markup the owner set below the minimum (confirmed) is allowed. */
 export function floorProblem(l: QuoteLine, minMarkup: number): string | null {
   if (!hasCostFloor(l) || isHidden(l)) return null;
+  if (l.markup_confirmed && (l.markup_percent ?? 0) < minMarkup) return null;
   const net = lineTotal(l);
   const floor = floorPrice(l, minMarkup);
   if (net + 0.005 < floor) return `net price ${aed(net)} is below cost plus the minimum markup of ${minMarkup}% (${aed(floor)})`;
@@ -323,8 +354,9 @@ export function floorProblem(l: QuoteLine, minMarkup: number): string | null {
 export type QuoteTotals = {
   subtotal: number;
   discountBase: number;
+  /** The labour discount (our own labour lines), or the old labour-and-services discount on older quotations. */
   discount: number;
-  /** The adjustment to the pre-VAT amount when the total was rounded to whole dirhams. */
+  /** The round-off: the adjustment to the pre-VAT amount so the grand total lands on a whole number. Negative = off. */
   rounding: number;
   net: number;
   vat: number;
@@ -332,9 +364,19 @@ export type QuoteTotals = {
   partsCost: number;
   partsSell: number;
   partsMargin: number;
+  /** Part lines still without a price from Parts: the parts margin is incomplete while any remain. */
+  partsUnpriced: number;
   labourSell: number;
+  /** The hours the customer pays for. */
   labourHours: number;
+  /** The workshop's estimate of the hours (per line, defaulting to the quoted hours). */
+  labourEstimateHours: number;
+  /** The hours labour at cost is worked out from: the clocked hours once the work is done, else the estimate. */
+  labourCostHours: number;
+  labourCostBasis: "estimate" | "clocked";
   labourCost: number;
+  /** Fixed-price work done outside (lathe, injector service...): its internal "our cost". */
+  outsideCost: number;
   /** Recovery, Other and fee lines the customer pays for. */
   otherSell: number;
   /** What those lines, hidden or shown, cost us. */
@@ -343,6 +385,9 @@ export type QuoteTotals = {
   /** What the recovery lines cost us (part of otherCost). */
   recoveryCost: number;
   bankCharge: number;
+  /** Commission we pay someone: internal only. */
+  commission: number;
+  totalCost: number;
   profit: number;
   labourMargin: number;
   deposit: number;
@@ -350,25 +395,39 @@ export type QuoteTotals = {
 
 /** Which block of the quotation a line sits in: labour and services, parts, or other charges. */
 export function blockOf(l: Pick<QuoteLine, "line_type">): "labour" | "parts" | "other" {
-  if (l.line_type === "part") return "parts";
   if (l.line_type === "labour" || l.line_type === "package") return "labour";
+  if (l.line_type === "part") return "parts";
   return "other";
 }
 
+/** The labour discount's base: our own labour lines (hours), never outside fixed-price services, parts or other charges. */
+export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer">) {
+  return l.line_type === "labour" && !isHidden(l);
+}
+
 /**
- * Totals for the lines that count. The customer's figures leave hidden lines out; profit takes in
- * every cost, including hidden lines and the bank charge. A rounded total (chosen when sending)
- * adjusts the pre-VAT amount so the VAT line and the total agree.
+ * The labour discount before the round-off: a percentage or a fixed amount of our own labour lines. Quotations
+ * from before the rule (no discount kind) keep the old percentage of labour and services.
  */
+export function labourDiscountOf(counted: QuoteLine[], q: QuoteHeaderForTotals): { base: number; discount: number } {
+  if (q.discount_kind) {
+    const base = round2(counted.filter(takesLabourDiscount).reduce((a, l) => a + lineTotal(l), 0));
+    const v = Number(q.discount_value) || 0;
+    const discount = q.discount_kind === "percent" ? round2(base * (Math.min(100, Math.max(0, v)) / 100)) : round2(Math.min(base, Math.max(0, v)));
+    return { base, discount };
+  }
+  const base = round2(counted.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
+  return { base, discount: round2(base * ((q.discount_percent ?? 0) / 100)) };
+}
+
 export function quoteTotals(
   lines: QuoteLine[],
-  q: { discount_percent: number; vat_percent: number; payment_by_card?: boolean; rounded_total_aed?: number | null },
-  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number } = {},
+  q: QuoteHeaderForTotals,
+  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null } = {},
 ): QuoteTotals {
   const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
-  const discountBase = round2(counted.filter(takesTotalDiscount).reduce((a, l) => a + lineTotal(l), 0));
-  const discount = round2(discountBase * ((q.discount_percent ?? 0) / 100));
+  const { base: discountBase, discount } = labourDiscountOf(counted, q);
   const pct = (q.vat_percent ?? 5) / 100;
   let net = round2(subtotal - discount);
   let vat = round2(net * pct);
@@ -383,10 +442,16 @@ export function quoteTotals(
   const parts = counted.filter((l) => blockOf(l) === "parts");
   const partsCost = round2(parts.reduce((a, l) => a + lineCost(l), 0));
   const partsSell = round2(parts.reduce((a, l) => a + lineTotal(l), 0));
+  const partsUnpriced = parts.filter((l) => l.unit_cost === null || l.unit_cost === undefined).length;
   const labour = counted.filter((l) => blockOf(l) === "labour");
-  const labourHours = round1(labour.filter((l) => l.line_type === "labour").reduce((a, l) => a + (l.hours ?? 0), 0));
+  const labourLines = labour.filter((l) => l.line_type === "labour");
+  const labourHours = round2(labourLines.reduce((a, l) => a + (l.hours ?? 0), 0));
+  const labourEstimateHours = round2(labourLines.reduce((a, l) => a + (l.hours_estimate ?? l.hours ?? 0), 0));
+  const clocked = opts.clockedHours !== undefined && opts.clockedHours !== null && opts.clockedHours > 0 ? round2(opts.clockedHours) : null;
+  const labourCostHours = clocked ?? labourEstimateHours;
   const labourSell = round2(labour.reduce((a, l) => a + lineTotal(l), 0));
-  const labourCost = round2(labourHours * (opts.technicianCostRate ?? 0));
+  const labourCost = round2(labourCostHours * (opts.technicianCostRate ?? 0));
+  const outsideCost = round2(labour.filter((l) => isOutsideWork(l)).reduce((a, l) => a + lineCost(l), 0));
   const other = counted.filter((l) => blockOf(l) === "other" && !l.fee_kind);
   const otherSell = round2(other.filter((l) => !isHidden(l)).reduce((a, l) => a + lineTotal(l), 0));
   const otherCost = round2(other.reduce((a, l) => a + lineCost(l), 0));
@@ -395,10 +460,21 @@ export function quoteTotals(
   // The bank charge: the rate times the total including VAT when a rate is given (live, on the screen); otherwise
   // the automatic hidden Fee line the server keeps, or the old estimate from the card tick.
   const bankCharge = opts.bankChargePercent !== undefined && opts.bankChargePercent > 0 ? round2(total * (opts.bankChargePercent / 100)) : feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? 0 : 0;
-  const profit = round2(net - partsCost - labourCost - otherCost - bankCharge);
+  // Commission: a fixed amount, or a percentage of the total before VAT. Internal only.
+  const cv = Number(q.commission_value) || 0;
+  const commission = q.commission_kind === "percent" ? round2(net * (Math.max(0, cv) / 100)) : q.commission_kind === "aed" ? round2(Math.max(0, cv)) : 0;
+  const totalCost = round2(partsCost + labourCost + outsideCost + otherCost + bankCharge + commission);
+  const profit = round2(net - totalCost);
   const threshold = opts.depositThreshold ?? 0;
   const deposit = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
-  return { subtotal, discountBase, discount, rounding, net, vat, total, partsCost, partsSell, partsMargin: round2(partsSell - partsCost), labourSell, labourHours, labourCost, otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, profit, labourMargin: round2(labourSell - labourCost), deposit };
+  return {
+    subtotal, discountBase, discount, rounding, net, vat, total,
+    partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
+    labourSell, labourHours, labourEstimateHours, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
+    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, totalCost, profit,
+    labourMargin: round2(labourSell - discount - labourCost - outsideCost),
+    deposit,
+  };
 }
 
 export type SendBlocker = { key: string; label: string };

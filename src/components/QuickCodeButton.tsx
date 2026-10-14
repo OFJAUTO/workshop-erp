@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
  * "Continue on my phone": a QR code that signs the same person in on their phone for one minute,
  * single use, straight to this car's screen. A countdown shows how long it is good for; "New code" makes another.
  */
-export function QuickCodeButton({ jobId, target, label = "Continue on my phone", compact = false }: { jobId: string; target: string; label?: string; compact?: boolean }) {
+export function QuickCodeButton({ jobId, target, label = "Continue on my phone", compact = false, icon = false }: { jobId: string; target: string; label?: string; compact?: boolean; /** A small phone icon in a row of buttons, with the label as its title. */ icon?: boolean }) {
   const [code, setCode] = useState<{ qr: string; url: string; expiresAt: number } | null>(null);
   const [left, setLeft] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -36,7 +36,15 @@ export function QuickCodeButton({ jobId, target, label = "Continue on my phone",
 
   return (
     <div className="flex flex-col gap-2">
-      {!code || expired ? (
+      {(!code || expired) && icon ? (
+        <button type="button" disabled={busy} onClick={make} title={expired ? "New code" : label} aria-label={label} className="inline-flex h-11 w-11 items-center justify-center rounded-control border border-line-strong bg-white text-ink hover:border-ink disabled:opacity-50" data-phone-photo>
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="7" y="2.5" width="10" height="19" rx="2" />
+            <path d="M11 18.5h2" />
+          </svg>
+        </button>
+      ) : null}
+      {(!code || expired) && !icon ? (
         <button type="button" disabled={busy} onClick={make} className={`inline-flex ${compact ? "min-h-9 px-2 text-xs" : "min-h-11 px-3 text-sm"} items-center justify-center gap-1.5 rounded-control border border-line-strong bg-white font-semibold hover:border-ink`}>
           {busy ? "Making the code…" : expired ? "New code" : label}
         </button>

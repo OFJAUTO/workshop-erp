@@ -11,7 +11,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { aed, blockOf, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { aed, blockOf, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -123,6 +123,10 @@ export type EditorSettings = {
   workingTime: WorkingTime;
   /** One-tap reasons from Settings, by place (the owner's discount on a part). */
   reasons?: Record<string, string[]>;
+  /** People we pay commission to (Settings), for the one-tap choices in the internal box. */
+  commissionPeople?: string[];
+  /** The hours the technicians clocked on this job once the work is done; labour at cost switches to them. */
+  clockedHours?: number | null;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -259,7 +263,11 @@ export function QuoteEditor({
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuUp, setMenuUp] = useState(false);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure" });
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, commission_to: quotation.commission_to ?? null, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null });
+  const [discountOpen, setDiscountOpen] = useState(false);
+  // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
+  const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
+  const flagMin = (id: string) => { setMinFlags((s) => new Set(s).add(id)); setTimeout(() => setMinFlags((s) => { const x = new Set(s); x.delete(id); return x; }), 4000); };
   const [attempted, setAttempted] = useState(false);
   const [picker, setPicker] = useState<null | { kind: PickerKind; replace?: string; sourceType?: "item" | "tyre" | "request" | null; sourceKey?: string | null; label?: string }>(null);
   const [partPicker, setPartPicker] = useState(false);
@@ -394,7 +402,7 @@ export function QuoteEditor({
   // The estimated bank charge follows how the customer is expected to pay: card or "not sure" at the card rate, the payment link at its rate, cash, cheque and bank transfer at nothing.
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate });
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null });
   const labourLines = lines.filter((l) => l.is_active && blockOf(l) === "labour");
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
@@ -405,7 +413,6 @@ export function QuoteEditor({
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
   const completed = !!completedAt;
-  const highMarkups = partLines.filter((l) => !isUnchosen(l) && (l.markup_percent ?? 0) >= settings.markupWarn);
   // Parts that go with a quoted part (a wear sensor with brake pads): offered to the advisor, never added by themselves.
   const partOffers = isQuotation && !disabled
     ? goesWithOffers(
@@ -487,7 +494,7 @@ export function QuoteEditor({
   };
 
   /* ----- one labour or service row: name box, the amount box, the total, the three-dot menu ----- */
-  const labourRow = (l: QuoteLine) => {
+  const labourRow = (l: QuoteLine, index: number) => {
     const done = finishedLine(l);
     const total = lineTotal(l);
     const blocked = attempted && blockers.some((b) => b.key === `line-${l.id}`);
@@ -506,6 +513,7 @@ export function QuoteEditor({
     return (
       <div key={l.id} id={`item-line-${l.id}`} className="flex flex-col">
         <div className="flex items-center gap-2 py-1.5 px-2 text-sm">
+          <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${done ? "bg-green text-white" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
           <div className="flex-1 min-w-0 flex flex-col gap-0.5">
             <NameBox
@@ -535,6 +543,12 @@ export function QuoteEditor({
             <span className="inline-flex items-center gap-1">
               <Input id={`amount-${l.id}`} data-amount value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); hoursBlur(l, e.currentTarget.value); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="0" className={amountBox(blocked && !(l.hours && l.hours > 0) ? "border-red-bar" : "")} />
               <span className="text-[11px] font-semibold text-muted">h</span>
+              {showProfit ? (
+                <label className="inline-flex items-center gap-1 ml-1" title="The workshop's estimate of the hours: labour at cost is worked out from it (then from the hours clocked)">
+                  <span className="text-[10px] font-semibold text-muted">est.</span>
+                  <Input value={num(l.hours_estimate ?? l.hours)} onChange={(e) => patch(l.id, { hours_estimate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const v = e.target.value.replace(",", "."); if (v === "") return; const h = Math.max(0.1, Math.round(Number(v) * 100) / 100); if (h !== (l.hours_estimate ?? l.hours)) patch(l.id, { hours_estimate: h }, true); }} inputMode="decimal" disabled={disabled} aria-label="Estimated hours" className="w-14 text-right min-h-10 px-1 text-xs" data-estimate />
+                </label>
+              ) : null}
             </span>
           ) : (
             <>
@@ -542,6 +556,12 @@ export function QuoteEditor({
                 <Input id={`amount-${l.id}`} data-amount value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label={perUnit ? `Price per ${l.price_per}` : "Price"} placeholder="0" className={`w-24 text-right min-h-10 px-1 ${blocked && !(l.unit_price && l.unit_price > 0) ? "border-red-bar" : ""}`} />
                 <span className="text-[11px] font-semibold text-muted">AED</span>
               </span>
+              {showProfit && isService ? (
+                <label className="inline-flex items-center gap-1" title="What this outside work costs us: never shown to the customer, counted against profit">
+                  <span className="text-[10px] font-semibold text-muted">our cost</span>
+                  <Input value={num(l.unit_cost)} placeholder="0" onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our cost" className="w-16 text-right min-h-10 px-1 text-xs" data-our-cost />
+                </label>
+              ) : null}
               {showQty ? (
                 <span className="inline-flex items-center justify-end gap-1">
                   <button type="button" disabled={disabled || (l.quantity || 1) <= 1} onClick={() => patch(l.id, { quantity: Math.max(1, (l.quantity || 1) - 1) }, true)} className="h-10 w-10 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One less">−</button>
@@ -606,7 +626,7 @@ export function QuoteEditor({
   };
 
   /* ----- recovery: who pays first; then type, trips, cost per trip and provider; the price only when the customer pays ----- */
-  const recoveryRow = (l: QuoteLine) => {
+  const recoveryRow = (l: QuoteLine, index = 0) => {
     const total = lineTotal(l);
     const blocked = attempted && blockers.some((b) => b.key === `line-${l.id}`);
     const paidBy: "us" | "customer" = l.recovery_paid_by ?? (l.visible_to_customer === false ? "us" : "customer");
@@ -622,6 +642,7 @@ export function QuoteEditor({
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-2 rounded-control border border-line px-3 py-2 ${paidBy === "us" ? "bg-chip" : "bg-white"}`}>
         <div className="flex flex-wrap items-end gap-3 text-sm">
+          <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className="font-bold self-center">Recovery</span>
           <span className={boxLabel}>Who pays?<span className="flex gap-1">
             <button type="button" disabled={disabled} onClick={() => setPaidBy("us")} className={chip(paidBy === "us")}>Us</button>
@@ -661,7 +682,7 @@ export function QuoteEditor({
   };
 
   /* ----- any other charge: one labelled row ----- */
-  const otherRow = (l: QuoteLine) => {
+  const otherRow = (l: QuoteLine, index = 0) => {
     const hidden = isHidden(l);
     const total = lineTotal(l);
     const blocked = attempted && blockers.some((b) => b.key === `line-${l.id}`);
@@ -670,6 +691,7 @@ export function QuoteEditor({
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-1.5 rounded-control border border-line px-3 py-2 ${hidden ? "bg-chip" : "bg-white"}`}>
         <div className="flex flex-wrap items-end gap-3 text-sm">
+          <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <label className={`${boxLabel} flex-1 min-w-48`}>Charge<Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is it for?" aria-label="Charge" className={`min-h-9 font-semibold ${blocked && !l.title.trim() ? "border-red-bar" : ""}`} textCase="sentence" /></label>
           <label className={boxLabel}>Cost (optional)<Input value={num(l.unit_cost)} onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} aria-label="Cost" className="w-24 text-right min-h-9" /></label>
           {costed ? (
@@ -694,7 +716,6 @@ export function QuoteEditor({
 
   const margin = totals.net > 0 ? (totals.profit / totals.net) * 100 : 0;
   const marginTone = totals.profit < 0 ? "text-red" : margin >= (settings.goodMarginPercent ?? 25) ? "text-green" : "text-amber";
-  const totalCost = totals.partsCost + totals.labourCost + totals.otherCost + totals.bankCharge;
   const progressText = `${labourDone} of ${namedLabour.length} line${namedLabour.length === 1 ? "" : "s"} done${wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}`;
   const scrollToFirstBlocker = () => {
     setAttempted(true);
@@ -759,7 +780,7 @@ export function QuoteEditor({
           <SectionLabel right={progressText.split(" · ")[0]}>Labour and services</SectionLabel>
           <div className="rounded-control border border-line">
             <div className="divide-y divide-line">
-              {labourLines.map(labourRow)}
+              {labourLines.map((l, i) => labourRow(l, i))}
               {draft ? (
                 <div className="flex items-center gap-2 px-2 py-2 text-sm">
                   <span className="inline-flex h-5 w-5 shrink-0 rounded-full border border-line-strong" aria-hidden />
@@ -782,6 +803,9 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button type="button" size="md" onClick={() => setDraft("choose")} disabled={draft === "saving"}>+ Add line</Button>
               {isQuotation ? <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)}>+ Add a part</Button> : null}
+              <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green" : ""}>
+                {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
+              </Button>
             </div>
           ) : null}
           {workshopEstimate && workshopEstimate.hours !== null ? (
@@ -805,6 +829,7 @@ export function QuoteEditor({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
+                    <th className="py-1 pr-2">#</th>
                     <th className="py-1 pr-2">Part</th>
                     <th className="py-1 pr-2">Availability</th>
                     <th className="py-1 pr-2 text-right">Qty</th>
@@ -816,7 +841,7 @@ export function QuoteEditor({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {partLines.map((l) => {
+                  {partLines.map((l, idx) => {
                     const part = partOf(l);
                     const leftOff = !!l.left_off;
                     const optionOff = !!l.option_group && l.chosen === false;
@@ -826,9 +851,10 @@ export function QuoteEditor({
                     const belowFloor = !unchosen && total + 0.005 < floor;
                     const blocked = attempted && blockers.some((b) => b.key === `line-${l.id}`);
                     const markup = l.markup_percent ?? 0;
-                    const high = markup >= settings.markupWarn;
+                    const veryHigh = markup >= settings.markupConfirm;
                     return (
-                      <tr key={l.id} id={`item-line-${l.id}`} className={unchosen ? "opacity-50" : ""}>
+                      <tr key={l.id} id={`item-line-${l.id}`} className={`${unchosen ? "opacity-50" : ""} ${!unchosen && veryHigh ? "bg-amber-soft/40" : ""}`} data-part-line>
+                        <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{idx + 1}</td>
                         <td className="py-2 pr-2 align-top min-w-0">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
                           <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
@@ -840,7 +866,7 @@ export function QuoteEditor({
                           <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-[11px] text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {part?.cost_aed === null && !leftOff ? <Badge tone="amber">Waiting for the price</Badge> : null}
-                            {high && !unchosen ? <Badge tone={markup >= settings.markupConfirm ? "red" : "amber"}>{markup >= settings.markupConfirm ? (l.markup_confirmed ? "Very high markup, confirmed" : "Confirm the markup") : "High markup, check before sending"}</Badge> : null}
+                            {veryHigh && !unchosen ? <Badge tone="amber">{l.markup_confirmed ? `Markup ${markup}%, confirmed` : "Confirm the markup"}</Badge> : null}
                             {optionOff ? <span>Option, not used</span> : null}
                           </div>
                         </td>
@@ -848,7 +874,8 @@ export function QuoteEditor({
                         <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.unit_cost === null ? "" : aed(l.unit_cost)}</td>
                         <td className="py-2 pr-2 align-top text-right">
-                          <Input value={num(l.markup_percent)} onChange={(e) => patch(l.id, { markup_percent: e.target.value === "" ? null : Number(e.target.value) })} onBlur={(e) => { const v = Number(e.target.value); if (!Number.isFinite(v) || v < settings.minMarkup) patch(l.id, { markup_percent: settings.minMarkup }, true); }} inputMode="decimal" disabled={disabled || unchosen} className={`w-20 text-right min-h-9 ${markup < settings.minMarkup || belowFloor || blocked ? "border-red-bar" : high ? "border-amber-bar" : ""}`} aria-label="Markup percent" />
+                          <Input value={num(l.markup_percent)} onChange={(e) => patch(l.id, { markup_percent: e.target.value === "" ? null : Number(e.target.value) })} onBlur={(e) => { const v = Number(e.target.value.replace(",", ".")); if (!Number.isFinite(v) || v < settings.minMarkup) { if (isOwner && Number.isFinite(v) && v >= 0 && e.target.value !== "") { patch(l.id, { markup_percent: v }, true); return; } patch(l.id, { markup_percent: settings.minMarkup }, true); flagMin(l.id); } }} inputMode="decimal" disabled={disabled || unchosen} className={`w-20 text-right min-h-9 ${(markup < settings.minMarkup && !isOwner) || belowFloor || blocked ? "border-red-bar" : veryHigh ? "border-amber-bar" : ""}`} aria-label="Markup percent" />
+                          <span className={`block text-[11px] font-bold text-red ${minFlags.has(l.id) ? "" : "hidden"}`} data-min-markup>Minimum {settings.minMarkup}%</span>
                         </td>
                         <td className="py-2 pr-2 align-top text-right">{aed(lineUnitPrice(l))}</td>
                         <td className="py-2 pr-2 align-top text-right font-bold">
@@ -906,8 +933,10 @@ export function QuoteEditor({
                   </div>
                 );
               }
-              if (l.line_type === "recovery") return recoveryRow(l);
-              return otherRow(l);
+              // Other charges count from 1 again (the hidden bank charge is not a line).
+              const idx = otherLines.filter((x) => !x.fee_kind).indexOf(l);
+              if (l.line_type === "recovery") return recoveryRow(l, idx);
+              return otherRow(l, idx);
             })}
           </div>
           {!disabled ? (
@@ -929,16 +958,14 @@ export function QuoteEditor({
             <dt className="text-muted">Labour and services</dt><dd className="text-right">{aed(totals.labourSell)}</dd>
             <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
             <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
-            {isOwner && !disabled ? (
-              <><dt className="text-muted">Discount on labour and services</dt><dd className="text-right"><span className="inline-flex items-center gap-1"><Input value={num(header.discount_percent)} onChange={(e) => setHeaderField({ discount_percent: Number(e.target.value) || 0 })} inputMode="decimal" className="w-16 text-right min-h-9" aria-label="Discount percent" /> %</span></dd></>
-            ) : null}
-            {totals.discount ? <><dt className="font-bold">Discount {q.discount_percent}%</dt><dd className="text-right font-bold">− {aed(totals.discount)}</dd></> : null}
-            {totals.rounding ? <><dt className="text-muted">{totals.rounding < 0 ? "Discount (rounding)" : "Rounding"}</dt><dd className="text-right">{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
+            {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>Labour discount{q.discount_kind === "percent" ? ` (${q.discount_value}%)` : q.discount_kind ? "" : ` (${q.discount_percent}%)`}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
+            {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"} data-roundoff-row>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
+            <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
             <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
             <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold">{aed(totals.total)}</dd>
             {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold">{aed(totals.deposit)}</dd></> : null}
           </dl>
-          {(header.discount_percent ?? 0) > settings.discountLimit ? <p className="text-xs font-semibold text-amber">Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
+          {settings.discountLimit > 0 && totals.discountBase > 0 && (totals.discount / totals.discountBase) * 100 > settings.discountLimit + 0.001 ? <p className="text-xs font-semibold text-amber">Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
           {showProfit ? (
             <div className="flex flex-col gap-1 rounded-control bg-chip p-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Internal (not shown to the customer)</span>
@@ -951,21 +978,30 @@ export function QuoteEditor({
                 </div>
                 <span className="text-[11px] text-muted">Sets the estimated bank charge only. The customer may still pay any way; the real charge replaces it at payment.</span>
               </div>
-              <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs">
+              <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs" data-internal-box>
                 <dt className="text-muted">Parts cost</dt><dd className="text-right">{aed(totals.partsCost)}</dd>
-                <dt className="text-muted">Labour at cost ({hoursText(totals.labourHours)} × AED {settings.technicianCostRate ?? 0})</dt><dd className="text-right">{aed(totals.labourCost)}</dd>
+                <dt className="text-muted" data-labour-cost-label>Labour at cost ({hoursText(totals.labourCostHours)} {totals.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED {settings.technicianCostRate ?? 0})</dt><dd className="text-right">{aed(totals.labourCost)}</dd>
+                {totals.outsideCost ? <><dt className="text-muted">Outside work, our cost</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
+                <dt className="text-muted">Commission{header.commission_to ? ` (to ${header.commission_to})` : ""}</dt><dd className="text-right">{aed(totals.commission)}</dd>
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
                 <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
-                <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totalCost)}</dd>
+                <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totals.totalCost)}</dd>
                 <dt className="font-bold">Profit before VAT</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
                 <dt className="text-muted">Labour margin</dt><dd className="text-right">{aed(totals.labourMargin)}</dd>
-                <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}</dd>
+                <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-[11px] font-semibold text-amber" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
               </dl>
+              <CommissionBox
+                who={header.commission_to ?? ""}
+                kind={header.commission_kind ?? "aed"}
+                value={header.commission_value}
+                people={settings.commissionPeople ?? []}
+                disabled={disabled}
+                onChange={(f) => setHeaderField(f, true)}
+              />
             </div>
           ) : null}
           {isQuotation ? <p className="text-xs text-muted">Estimated: about {estimatedDays} working day{estimatedDays === 1 ? "" : "s"} after approval. The firm date is set in planning.</p> : null}
-          {highMarkups.length ? <p className="text-xs font-semibold text-amber">{highMarkups.length} part{highMarkups.length === 1 ? "" : "s"} with a high markup: check before sending.</p> : null}
         </Card>
 
         {wait && isQuotation && !sent ? (
@@ -1058,14 +1094,23 @@ export function QuoteEditor({
           onClose={() => setPartPicker(false)}
         />
       ) : null}
+      {discountOpen ? (
+        <LabourDiscountDialog
+          kind={header.discount_kind ?? "percent"}
+          value={header.discount_value}
+          base={totals.discountBase}
+          onClose={() => setDiscountOpen(false)}
+          onApply={(kind, value) => { setHeaderField({ discount_kind: value > 0 ? kind : null, discount_value: value > 0 ? value : null, discount_percent: 0 }, true); setDiscountOpen(false); }}
+        />
+      ) : null}
       {confirming ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
-            <span className="text-lg font-extrabold text-red">{confirming.message}</span>
-            <p className="text-sm text-muted">A markup this high is unusual. It stays flagged on the quotation until it is sent.</p>
+            <span className="text-lg font-extrabold">{confirming.message}</span>
+            <p className="text-sm text-muted">Yes, keep it: the line stays amber and is not asked about again. Change: the figure goes back to what it was.</p>
             <div className="flex gap-2">
-              <Button type="button" size="lg" onClick={() => { const op = confirming.op as { patchLine?: Record<string, unknown> }; if (op.patchLine) save({ patchLine: { ...op.patchLine, markup_confirmed: true } }); setConfirming(null); }}>Yes, correct</Button>
-              <Button type="button" tone="secondary" size="lg" onClick={() => { setConfirming(null); router.refresh(); }}>No, go back</Button>
+              <Button type="button" size="lg" onClick={() => { const op = confirming.op as { patchLine?: Record<string, unknown> }; if (op.patchLine) save({ patchLine: { ...op.patchLine, markup_confirmed: true } }); setConfirming(null); }} data-confirm-markup>Yes, keep it</Button>
+              <Button type="button" tone="secondary" size="lg" onClick={() => { setConfirming(null); router.refresh(); }}>Change</Button>
             </div>
           </div>
         </div>
@@ -1165,6 +1210,90 @@ function OwnerPartDiscount({ percent, reason, options = [], onChange }: { percen
         {waiting ? <span className="text-amber font-semibold pb-3">Tap or write the reason to apply it.</span> : null}
       </div>
       <ReasonChips name="discount_reason" label="Reason (logged)" options={options} defaultValue={why} placeholder="required" onValue={(v) => { setWhy(v); send(pct, v); }} />
+    </div>
+  );
+}
+
+
+/**
+ * "Discount": one box and a % | AED toggle. It comes off our own labour lines (hours) only, before VAT, before the
+ * round-off; parts, outside fixed-price services and other charges are never discounted here.
+ */
+function LabourDiscountDialog({ kind: initialKind, value: initialValue, base, onClose, onApply }: { kind: "percent" | "aed"; value: number | null | undefined; base: number; onClose: () => void; onApply: (kind: "percent" | "aed", value: number) => void }) {
+  const [kind, setKind] = useState<"percent" | "aed">(initialKind);
+  const [text, setText] = useState(initialValue ? String(initialValue) : "");
+  const boxRef = useRef<HTMLDivElement>(null);
+  const v = Number(text.replace(",", ".")) || 0;
+  /** Apply reads the box itself: the number box hands its figure on a moment after typing stops, and a quick tap must not lose it. */
+  const current = () => Number((boxRef.current?.querySelector("input")?.value ?? text).replace(",", ".")) || 0;
+  const amount = kind === "percent" ? round2(base * (Math.min(100, Math.max(0, v)) / 100)) : round2(Math.min(base, Math.max(0, v)));
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={onClose}>
+      <div ref={boxRef} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-labour-discount-dialog>
+        <span className="text-lg font-extrabold">Labour discount</span>
+        <p className="text-xs text-muted">On our own labour lines only ({aed(base)} of labour). Not on parts, outside services or other charges. Taken off before VAT, then the round-off.</p>
+        <div className="flex items-center gap-2">
+          <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="0" autoFocus aria-label="Discount amount" className="w-28 text-right min-h-11" />
+          <span className="inline-flex rounded-control border border-line-strong overflow-hidden">
+            <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-11 px-4 text-sm font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>%</button>
+            <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-11 px-4 text-sm font-bold ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
+          </span>
+        </div>
+        <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off the labour` : "No discount"}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="md" onClick={() => onApply(kind, current())}>Apply</Button>
+          {initialValue ? <Button type="button" tone="secondary" size="md" onClick={() => onApply(kind, 0)}>Remove the discount</Button> : null}
+          <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Commission in the internal box: who (one tap from the Settings list, or a typed name that joins it) and how much
+ * (fixed AED or a percentage of the total before VAT). Never shown to a customer anywhere.
+ */
+function CommissionBox({ who, kind, value, people, disabled, onChange }: { who: string; kind: "aed" | "percent"; value: number | null | undefined; people: string[]; disabled: boolean; onChange: (f: { commission_to?: string | null; commission_kind?: "aed" | "percent" | null; commission_value?: number | null }) => void }) {
+  const [typing, setTyping] = useState(false);
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState(value ? String(value) : "");
+  const [seenValue, setSeenValue] = useState(value);
+  if (seenValue !== value) {
+    // A saved figure arriving from the server replaces the box only when it is a real figure that differs from what is typed; an
+    // empty answer (the name saved before any amount) never wipes a number someone is typing.
+    setSeenValue(value);
+    if (value && Number(amount.replace(",", ".")) !== value) setAmount(String(value));
+  }
+  const names = Array.from(new Set([...people, ...(who ? [who] : [])]));
+  const commit = (next: { to?: string | null; kind?: "aed" | "percent"; value?: number | null }) => onChange({ commission_to: next.to === undefined ? (who || null) : next.to, commission_kind: next.kind ?? kind, commission_value: next.value === undefined ? (Number(amount.replace(",", ".")) || null) : next.value });
+  /** The figure as it stands in the box (the number box hands it on a moment after typing stops, or on Enter here). */
+  const commitRaw = (raw: string) => commit({ value: Number(raw.replace(",", ".")) || null });
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-line pt-2 mt-1" data-commission-box>
+      <span className="text-[11px] font-semibold text-muted">Commission (internal, never on anything the customer sees)</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {names.map((p) => (
+          <button key={p} type="button" disabled={disabled} onClick={() => commit({ to: who === p ? null : p })} aria-pressed={who === p} className={`min-h-8 rounded-control border px-2.5 text-[11px] font-bold ${who === p ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-commission-person>{who === p ? "✓ " : ""}{p}</button>
+        ))}
+        {typing ? (
+          <span className="inline-flex items-center gap-1">
+            <Input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (name.trim()) commit({ to: name.trim() }); setTyping(false); setName(""); } }} placeholder="Name" autoFocus className="min-h-8 w-32 text-xs" textCase="title" aria-label="Commission to" />
+            <button type="button" onClick={() => { if (name.trim()) commit({ to: name.trim() }); setTyping(false); setName(""); }} className="min-h-8 rounded-control bg-ink px-2 text-[11px] font-bold text-white">Add</button>
+          </span>
+        ) : (
+          <button type="button" disabled={disabled} onClick={() => setTyping(true)} className="min-h-8 rounded-control border border-dashed border-line-strong px-2.5 text-[11px] font-bold">+ Name</button>
+        )}
+      </div>
+      {who ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input value={amount} onChange={(e) => { setAmount(e.target.value); commitRaw(e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setAmount(e.currentTarget.value); commitRaw(e.currentTarget.value); } }} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Commission amount" className="w-24 text-right min-h-9 text-xs" data-commission-amount />
+          <span className="inline-flex rounded-control border border-line-strong overflow-hidden">
+            <button type="button" disabled={disabled} onClick={() => commit({ kind: "aed" })} aria-pressed={kind === "aed"} className={`min-h-9 px-3 text-[11px] font-bold ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
+            <button type="button" disabled={disabled} onClick={() => commit({ kind: "percent" })} aria-pressed={kind === "percent"} className={`min-h-9 px-3 text-[11px] font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>% of total before VAT</button>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Lightbox, type LightboxSlide } from "@/components/Lightbox";
 import { formatDateTime } from "@/lib/format";
 import type { GateInMediaRow } from "@/lib/types";
 import { WHEEL_KINDS, WHEEL_LABELS, isWheelKind, wheelConditionText } from "@/lib/wheels";
@@ -25,7 +26,7 @@ const KIND_LABEL: Record<GateInMediaRow["kind"], string> = {
   item_collect_photo: "Item collected, photo",
 };
 
-type Slide = { key: string; url: string; label: string; detail?: string };
+type Slide = LightboxSlide;
 
 /**
  * A video with a real frame as its preview picture instead of a black box. The browser is
@@ -76,7 +77,7 @@ function VideoPreview({ url }: { url: string }) {
     };
   }, [url]);
 
-  return <video ref={ref} src={`${url}#t=0.5`} poster={poster ?? undefined} controls playsInline preload="metadata" className="w-full rounded-card bg-black aspect-video" />;
+  return <video ref={ref} src={`${url}#t=0.5`} poster={poster ?? undefined} muted playsInline preload="metadata" className="w-full rounded-card bg-black aspect-video pointer-events-none" />;
 }
 
 function captionFor(p: GateInMediaRow, compact: boolean) {
@@ -112,102 +113,6 @@ function Thumb({
       )}
       <figcaption className={`${small ? "text-[11px] leading-tight" : "text-xs"} text-muted`}>{caption}</figcaption>
     </figure>
-  );
-}
-
-/** Full-size viewer: swipe or use the arrows to move between photos, tap outside or press Escape to close. */
-function Lightbox({ slides, index, onClose, onMove }: { slides: Slide[]; index: number; onClose: () => void; onMove: (next: number) => void }) {
-  const touchX = useRef<number | null>(null);
-  const slide = slides[index];
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowRight") onMove(Math.min(slides.length - 1, index + 1));
-      if (e.key === "ArrowLeft") onMove(Math.max(0, index - 1));
-    }
-    window.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
-    };
-  }, [index, slides.length, onClose, onMove]);
-
-  if (!slide) return null;
-  const hasPrev = index > 0;
-  const hasNext = index < slides.length - 1;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={slide.label}
-      className="fixed inset-0 z-50 flex flex-col bg-black/95 text-white"
-      onClick={onClose}
-      onTouchStart={(e) => {
-        touchX.current = e.touches[0]?.clientX ?? null;
-      }}
-      onTouchEnd={(e) => {
-        const start = touchX.current;
-        touchX.current = null;
-        const end = e.changedTouches[0]?.clientX;
-        if (start == null || end == null) return;
-        const dx = end - start;
-        if (dx < -40 && hasNext) onMove(index + 1);
-        if (dx > 40 && hasPrev) onMove(index - 1);
-      }}
-    >
-      <div className="flex items-center justify-between gap-3 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-        <div className="flex flex-col min-w-0">
-          <span className="text-sm font-bold truncate">{slide.label}</span>
-          {slide.detail ? <span className="text-xs text-white/70 truncate">{slide.detail}</span> : null}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-white/70">
-            {index + 1} / {slides.length}
-          </span>
-          <button type="button" onClick={onClose} className="min-h-11 min-w-11 rounded-control border border-white/30 px-3 text-sm font-bold" aria-label="Close">
-            ✕
-          </button>
-        </div>
-      </div>
-      <div className="relative flex-1 min-h-0 flex items-center justify-center px-2 pb-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={slide.url} alt={slide.label} className="max-h-full max-w-full object-contain select-none" onClick={(e) => e.stopPropagation()} draggable={false} />
-        {hasPrev ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onMove(index - 1);
-            }}
-            className="absolute left-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30"
-            aria-label="Previous photo"
-          >
-            ‹
-          </button>
-        ) : null}
-        {hasNext ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onMove(index + 1);
-            }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30"
-            aria-label="Next photo"
-          >
-            ›
-          </button>
-        ) : null}
-      </div>
-      <p className="pb-3 text-center text-xs text-white/60">
-        <span className="[@media(hover:hover)]:hidden">Swipe for the next photo</span>
-        <span className="hidden [@media(hover:hover)]:inline">Use the arrows or the arrow keys</span>
-      </p>
-    </div>
   );
 }
 
@@ -250,15 +155,16 @@ export function MediaGallery({
   // One ordered list of everything that can be enlarged, so swiping moves through all of it.
   const slides: Slide[] = [];
   const slideIndex = new Map<string, number>();
-  function add(key: string, url: string | undefined, label: string, detail?: string): Slide | null {
+  function add(key: string, url: string | undefined, label: string, detail?: string, kind: "image" | "video" = "image"): Slide | null {
     if (!url) return null;
-    const s = { key, url, label, detail };
+    const s: Slide = { key, url, label, detail, kind };
     slideIndex.set(key, slides.length);
     slides.push(s);
     return s;
   }
   const carSlide = carPictureUrl ? add("car", carPictureUrl, "Car picture") : null;
   const rowSlide = (p: GateInMediaRow) => add(p.id, urls[p.storage_path], KIND_LABEL[p.kind], captionFor(p, compact));
+  const videoSlides = videos.map((v) => add(v.id, urls[v.storage_path], KIND_LABEL[v.kind], captionFor(v, compact), "video"));
   const dashboardSlides = dashboard.map(rowSlide);
   const keysSlides = keys.map(rowSlide);
   const wheelSlides = wheels.map(rowSlide);
@@ -286,11 +192,16 @@ export function MediaGallery({
 
       {videos.length ? (
         <div className={`grid gap-4 ${compact || stacked ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2"}`}>
-          {videos.map((v) => {
+          {videos.map((v, i) => {
             const url = urls[v.storage_path];
             return (
               <figure key={v.id} className="flex flex-col gap-1">
-                {url ? <VideoPreview url={url} /> : <div className="aspect-video rounded-card bg-chip" />}
+                {url ? (
+                  <button type="button" onClick={() => openSlide(videoSlides[i])} className="relative block w-full overflow-hidden rounded-card" aria-label="Play the video">
+                    <VideoPreview url={url} />
+                    <span className="absolute inset-0 flex items-center justify-center text-white text-3xl drop-shadow">▶</span>
+                  </button>
+                ) : <div className="aspect-video rounded-card bg-chip" />}
                 <figcaption className="text-xs font-semibold">
                   {KIND_LABEL[v.kind]}
                   {v.duration_s ? ` · ${v.duration_s}s` : ""}

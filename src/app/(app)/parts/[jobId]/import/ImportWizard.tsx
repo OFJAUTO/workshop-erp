@@ -11,7 +11,7 @@ export type ImportTarget = { key: string; partId: string | null; requestId: stri
 
 type Source = { kind: "file" | "paste" | "image"; label: string; images: string[] };
 type Decision = { target: string; confirmed: boolean; suggested: { id: string; by: "number" | "name"; score: number } | null };
-type Way = "file" | "paste" | "image";
+type Way = "file" | "paste" | "image" | "pdf";
 
 const money = (n: number | null) => (n === null ? "" : n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
@@ -39,6 +39,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
   const [, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
+  const pdfRef = useRef<HTMLInputElement>(null);
 
   /** A parsed result arrives: matches are suggested, the supplier pre-selected from the file's own words. */
   function receive(r: ImportResult, src: Source) {
@@ -76,7 +77,8 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
       setError(res.error ?? "Could not read the file.");
       return;
     }
-    receive(res.result, { kind: "file", label: (res.fileNames ?? []).join(", "), images: [] });
+    // A scanned PDF went through the picture reader: every line must be ticked, like a screenshot.
+    receive(res.result, { kind: res.scanned ? "image" : "file", label: (res.fileNames ?? []).join(", "), images: [] });
   }
   async function sendText(t: string, valuesPerRow: number | null = perRow) {
     if (!t.trim()) return;
@@ -203,13 +205,21 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
     <div className="flex flex-col gap-4" onPaste={onPaste} data-import-wizard>
       {/* The way in */}
       <div className="rounded-card border border-line bg-white p-4 flex flex-col gap-3">
-        <div className="flex flex-wrap gap-2">{wayBtn("file", "Upload file")}{wayBtn("paste", "Paste from email")}{wayBtn("image", "Upload screenshot")}</div>
+        <div className="flex flex-wrap gap-2">{wayBtn("file", "Upload file")}{wayBtn("paste", "Paste from email")}{wayBtn("image", "Upload screenshot")}{wayBtn("pdf", "Upload PDF")}</div>
         {way === "file" ? (
           <div onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} className={`rounded-card border-2 border-dashed p-6 flex flex-col items-center gap-2 text-center ${dragging ? "border-ink bg-chip" : "border-line-strong"}`} data-drop-zone>
             <p className="text-sm font-semibold">Drop an Excel or CSV file here (one or several), or</p>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; void sendFiles(files); }} data-file-input />
             <Button type="button" size="lg" onClick={() => fileRef.current?.click()} disabled={!!busy}>Choose file</Button>
             <p className="text-xs text-muted">Mercedes B2BConnect files are recognised by themselves. Other suppliers: the columns are mapped once and remembered.</p>
+          </div>
+        ) : null}
+        {way === "pdf" ? (
+          <div onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} className={`rounded-card border-2 border-dashed p-6 flex flex-col items-center gap-2 text-center ${dragging ? "border-ink bg-chip" : "border-line-strong"}`} data-drop-zone>
+            <p className="text-sm font-semibold">Drop the PDF from the supplier here (one or several), or</p>
+            <input ref={pdfRef} type="file" accept="application/pdf,.pdf" multiple className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; void sendFiles(files); }} data-pdf-input />
+            <Button type="button" size="lg" onClick={() => pdfRef.current?.click()} disabled={!!busy}>Choose PDF</Button>
+            <p className="text-xs text-muted">A PDF with text is read page by page; totals are left out. A scanned PDF (a picture) goes through the screenshot reader{ocrEnabled ? "" : ", which is not switched on yet"}.</p>
           </div>
         ) : null}
         {way === "paste" ? (

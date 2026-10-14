@@ -51,6 +51,13 @@ export async function renderMonthlyPdf(s: MonthlySummary, settings: Settings): P
       <Row head cells={[{ text: "Date", w: 60 }, { text: "Job", w: 70 }, { text: "Car", w: 150 }, { text: "Verdict", w: 80 }, { text: "Invoiced", w: 90, right: true }, { text: "Profit", w: 90, right: true }, { text: "Days", w: 40, right: true }]} />
       {s.jobs.map((j) => <Row key={j.id} tone={j.profit !== null && j.profit < 0 ? RED : undefined} cells={[{ text: formatDate(j.gatedOutAt), w: 60 }, { text: j.jobNumber, w: 70 }, { text: `${j.plate}${j.loose ? " (loose)" : ""}`, w: 150 }, { text: VERDICT_LABELS[j.verdict], w: 80 }, { text: aed(j.invoiced), w: 90, right: true }, { text: `${aed(j.profit)}${j.marginPercent !== null ? ` (${j.marginPercent}%)` : ""}`, w: 90, right: true }, { text: `${j.days}`, w: 40, right: true }]} />)}
       {s.jobs.length === 0 ? <Text style={{ color: GREY, paddingVertical: px(6) }}>Nothing gated out in this month.</Text> : null}
+      {(s.commissions ?? []).length ? (
+        <View style={{ marginTop: px(14) }} wrap={false}>
+          <Text style={styles.sectionTitle}>Commissions{s.commissionsUnpaid ? ` · ${aed(s.commissionsUnpaid)} not paid` : ""}</Text>
+          <Row head cells={[{ text: "Job", w: 70 }, { text: "Car", w: 150 }, { text: "To", w: 150 }, { text: "Amount", w: 90, right: true }, { text: "Status", w: 100 }]} />
+          {s.commissions.map((c) => <Row key={c.quotationId} cells={[{ text: c.jobNumber, w: 70 }, { text: `${c.plate}${c.inMonth ? "" : " (earlier)"}`, w: 150 }, { text: c.to || "–", w: 150 }, { text: aed(c.amount), w: 90, right: true }, { text: c.paidAt ? `Paid ${formatDate(c.paidAt)}` : "Not paid", w: 100 }]} />)}
+        </View>
+      ) : null}
       <View break>
         <Text style={styles.sectionTitle}>Technicians</Text>
         <Row head cells={[{ text: "Name", w: 140 }, { text: "Jobs", w: 50, right: true }, { text: "On the clock", w: 90, right: true }, { text: "Charged", w: 70, right: true }, { text: "Efficiency", w: 70, right: true }, { text: "QC send-backs", w: 90, right: true }, { text: "Needs a talk", w: 80, right: true }]} />

@@ -1,4 +1,5 @@
 import "server-only";
+import { finishPartsPlanning } from "./lpo";
 import { createAdminClient } from "./supabase/admin";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { newLabelCode } from "./parts-data";
@@ -117,8 +118,13 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   await notifyStaff(advisors, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   await notifyManagers(job.department ?? null, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   if (!extra && noParts) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${answer.name} approved ${q.number}; no parts needed. Pick the start day and the technicians, then Release to workshop.`, jobId: job.id, href: `/jobs/${job.id}#planning` });
-  else if (!extra) await notifyRoles(["parts"], { type: "planning", title: `Plan the parts · ${job.job_number}`, body: `${answer.name} approved ${q.number}. For each part: in stock, or to order with the date. Then press "Parts planned".`, jobId: job.id, href: `/parts/${job.id}` });
-  else if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `${answer.name} approved additional work. See the To order list.`, jobId: job.id, href: "/parts" });
+  else if (!extra && !needsOrder) {
+    // Every approved part is from our stock: nothing to order, the workshop manager plans the work; Parts hear so the parts are ready for the handover.
+    await finishPartsPlanning(job.id, null);
+    await notifyRoles(["parts"], { type: "planning", title: `Approved parts from stock · ${job.job_number}`, body: `${answer.name} approved ${q.number}. Every part is from our stock, nothing to order: have them ready for the handover.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
+  }
+  else if (!extra) await notifyRoles(["parts"], { type: "planning", title: `Send the LPO for approval · ${job.job_number}`, body: `${answer.name} approved ${q.number}. The approved parts are on the Parts list: open the car and press Send LPO for approval.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
+  else if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `${answer.name} approved additional work. Open the car and press Send LPO for approval.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
   if (job.assigned_to && extra) await notifyStaff([job.assigned_to], { type: "quote_approved", title: `Additional work approved · ${job.job_number}`, body: "The customer approved the additional work. The new lines are on your work order.", jobId: job.id, href: `/my-jobs/${job.id}` });
   return { status };
 }

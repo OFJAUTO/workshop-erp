@@ -100,10 +100,10 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
   if (j.status === "approved" || j.status === "waiting_parts") {
     const since = j.stage_entered_at;
     const on = x.planningOn ?? "parts";
-    if (on === "workshop") return { done: { label: "Parts planned", by: null }, next: `${j.managerLabel} picks the start day and the technicians, then releases the car to the workshop.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Plan the work", href: `/jobs/${jobId}#planning` }, since, line: `Planning, waiting on ${j.managerLabel} to release the car` };
+    if (on === "workshop") return { done: { label: "Parts ordered", by: null }, next: `${j.managerLabel} picks the start day and the technicians, then releases the car to the workshop.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Plan the work", href: `/jobs/${jobId}#planning` }, since, line: `Planning, waiting on ${j.managerLabel} to release the car` };
     if (on === "advisor") return { done: { label: "Released to the workshop", by: null }, next: `${advisor} confirms the finish date and tells the customer.`, waitingOn: advisor, actorRole: "service_advisor", action: { label: "Confirm the date", href: `/jobs/${jobId}#planning` }, since, line: `Waiting on ${advisor} to confirm the finish date` };
     if (x.partsState === "ordered" && x.partsLate) return { done: { label: "Parts ordered", by: null }, next: `${x.partsLate} part${x.partsLate === 1 ? " is" : "s are"} late. Parts chase the supplier.`, waitingOn: "the supplier", actorRole: "parts", action: { label: "LPOs", href: "/parts/orders" }, since, line: `Waiting for parts, ${x.partsLate} late` };
-    return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts say for each part: in stock, or to order with the date. Then \"Parts planned\".", waitingOn: "Parts", actorRole: "parts", action: { label: "Plan the parts", href: `/parts/${jobId}` }, since, line: "Planning, waiting on Parts" };
+    return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts send the LPO for approval; after the one-tap approval they order from each supplier.", waitingOn: "Parts", actorRole: "parts", action: { label: "Send LPO for approval", href: `/parts/${jobId}#lpo` }, since, line: "Planning, waiting on Parts" };
   }
   if (j.status === "in_work") {
     const techs = x.technicianNames?.length ? x.technicianNames.join(", ") : tech;

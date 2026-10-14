@@ -17,6 +17,8 @@ type LinePatch = {
   markup_percent?: number | string | null;
   unit_price?: number | string | null;
   hours?: number | string | null;
+  /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours. */
+  hours_estimate?: number | string | null;
   labour_rate?: number | string | null;
   discount_percent?: number | string;
   discount_reason?: string | null;
@@ -51,7 +53,7 @@ type Body = {
   /** keepParts: the job goes but its parts stay on the quotation, unlinked. */
   removeLine?: { id: string; keepParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string };
+  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -148,6 +150,7 @@ export async function POST(request: NextRequest) {
     }
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
+    if (p.hours_estimate !== undefined) out.hours_estimate = p.hours_estimate === null || p.hours_estimate === "" ? null : parseHours(p.hours_estimate);
     if (p.labour_rate !== undefined) {
       // The advisor can raise the hourly rate, never set it below the standard rate for this car. Only the owner can go lower.
       const rate = n(p.labour_rate);
@@ -158,16 +161,22 @@ export async function POST(request: NextRequest) {
     if (p.markup_percent !== undefined) {
       const m = n(p.markup_percent);
       if (type === "part") {
-        // The markup starts at the floor and never goes below it; there is no upper limit, but a very high one is confirmed with the result spelled out.
-        if (m === null || m < minMarkup) return `The markup on a part cannot be below ${minMarkup}%.`;
-        if (m >= confirmAt && !p.markup_confirmed) {
-          const qty = current?.quantity || 1;
-          const sell = round2((current?.unit_cost ?? 0) * (1 + m / 100) * qty);
-          return { confirm: `Markup ${m}%. This part will sell for ${aed(sell)}. Correct?` };
+        // Every part starts at the minimum (5%). An advisor can raise it to anything, never lower it; a figure below goes back to the minimum.
+        // Only the owner can go below (kept as confirmed, so the floor check lets it through). Above the confirmation level it is asked about once.
+        let mk = m ?? minMarkup;
+        let belowByOwner = false;
+        if (mk < minMarkup) {
+          if (isOwner) belowByOwner = true;
+          else mk = minMarkup;
         }
-        out.markup_confirmed = m >= confirmAt;
-      }
-      out.markup_percent = m;
+        if (mk >= confirmAt && !p.markup_confirmed) {
+          const qty = current?.quantity || 1;
+          const sell = round2((current?.unit_cost ?? 0) * (1 + mk / 100) * qty);
+          return { confirm: `Markup is ${mk}%. This part will sell for ${aed(sell)}. Is that right?` };
+        }
+        out.markup_confirmed = mk >= confirmAt || belowByOwner;
+        out.markup_percent = mk;
+      } else out.markup_percent = m;
     }
     if (p.discount_percent !== undefined) {
       const d = Math.min(100, Math.max(0, n(p.discount_percent) ?? 0));
@@ -418,6 +427,25 @@ export async function POST(request: NextRequest) {
     if (h.discount_percent !== undefined) {
       if (!isOwner) return NextResponse.json({ error: "Only the owner gives a discount." }, { status: 403 });
       patch.discount_percent = Math.min(100, Math.max(0, n(h.discount_percent) ?? 0));
+    }
+    // The labour discount: a percentage or a fixed amount of our own labour lines; nothing on parts or outside services.
+    if (h.discount_kind !== undefined || h.discount_value !== undefined) {
+      const kind = h.discount_kind === "aed" ? "aed" : h.discount_kind === "percent" ? "percent" : null;
+      const v = n(h.discount_value) ?? 0;
+      if (!kind || v <= 0) Object.assign(patch, { discount_kind: null, discount_value: null, discount_percent: 0 });
+      else Object.assign(patch, { discount_kind: kind, discount_value: kind === "percent" ? Math.min(100, v) : v, discount_percent: 0 });
+    }
+    // Commission (internal only): who, and a fixed amount or a percentage of the total before VAT. New names join the Settings list.
+    if (h.commission_to !== undefined || h.commission_kind !== undefined || h.commission_value !== undefined) {
+      const { data: curQ } = await admin.from("quotations").select("commission_to, commission_kind, commission_value").eq("id", q.id).maybeSingle();
+      const to = h.commission_to === undefined ? ((curQ?.commission_to as string | null) ?? null) : h.commission_to ? String(h.commission_to).trim().slice(0, 80) : null;
+      const kind = h.commission_kind === "percent" ? "percent" : h.commission_kind === "aed" ? "aed" : h.commission_kind === undefined ? ((curQ?.commission_kind as string | null) ?? "aed") : "aed";
+      const v = h.commission_value === undefined ? Number(curQ?.commission_value) || 0 : n(h.commission_value) ?? 0;
+      Object.assign(patch, { commission_to: to, commission_kind: to && v > 0 ? kind : null, commission_value: to && v > 0 ? (kind === "percent" ? Math.min(100, v) : v) : null });
+      if (to) {
+        const current = ((settings.commission_people ?? []) as string[]).map(String);
+        if (!current.includes(to)) await admin.from("settings").upsert({ key: "commission_people", value: [...current, to], label: "Commission: people", description: "People we pay commission to, offered as one-tap choices in the internal box of a quotation." }, { onConflict: "key" });
+      }
     }
     if (h.customer_note !== undefined) patch.customer_note = h.customer_note ? String(h.customer_note).trim().slice(0, 2000) : null;
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));

@@ -1,10 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@react-pdf/renderer"],
+  serverExternalPackages: ["@react-pdf/renderer", "mupdf"],
   agentRules: false,
   // The PDF routes read the document font and the logo from the public folder on the server.
-  outputFileTracingIncludes: { "/api/pdf/**/*": ["./public/fonts/**/*", "./public/logo.svg", "./public/logo.jpg"] },
+  outputFileTracingIncludes: { "/api/pdf/**/*": ["./public/fonts/**/*", "./public/logo.svg", "./public/logo.jpg"], "/parts/**/*": ["./node_modules/mupdf/dist/**/*"] },
   // Every screen depends on who is logged in, so pages are rendered per request.
   // The experimental component cache is left off on purpose.
   turbopack: {

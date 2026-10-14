@@ -1,5 +1,6 @@
 import "server-only";
 import { dubaiDate } from "./jobs";
+import { loadJobLpos } from "./lpo";
 import { PART_FULL_SELECT, toPartFull, type PartFull } from "./parts-data";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
@@ -92,7 +93,11 @@ export async function loadPlanning(job: JobRow, settings: Settings): Promise<Pla
   const { data: signed } = paths.length ? await admin.storage.from("staff-photos").createSignedUrls(Array.from(new Set(paths)), 3600) : { data: [] as { path: string | null; signedUrl: string }[] };
   const urlOf = new Map((signed ?? []).filter((s) => s.path).map((s) => [s.path as string, s.signedUrl]));
   const person = (p: { id: string; display_name: string; photo_path: string | null } | null) => (p ? { id: p.id, name: p.display_name, photoUrl: p.photo_path ? (urlOf.get(p.photo_path) ?? null) : null } : null);
-  const partsLine = job.plan_parts_done_at ? (partsDelayed ? `Delayed: now all here by ${partsReadyDate}` : missing.length ? `All parts here by ${job.plan_parts_ready_date ?? partsReadyDate}` : "All parts in stock") : unplanned.length ? `${unplanned.length} part${unplanned.length === 1 ? "" : "s"} to decide: in stock or to order` : parts.length ? "Press Parts planned" : "No parts needed: press Parts planned";
+  // The Parts step: the LPO sent for approval, approved and ordered from each supplier; then "All parts here by".
+  const lpos = active || !job.plan_parts_done_at ? await loadJobLpos(job.id) : null;
+  const pendingMain = lpos?.main && lpos.main.status === "pending_approval" ? lpos.main : null;
+  const toOrderLpos = (lpos?.suppliers ?? []).filter((s) => s.po.status === "approved");
+  const partsLine = job.plan_parts_done_at && !pendingMain && !toOrderLpos.length && !lpos?.toOrder.length ? (partsDelayed ? `Delayed: now all here by ${partsReadyDate}` : missing.length ? `All parts here by ${job.plan_parts_ready_date ?? partsReadyDate}` : parts.length ? "Every part is here" : "No parts needed") : pendingMain ? `${pendingMain.number} waiting for approval` : toOrderLpos.length ? `${toOrderLpos.length} supplier LPO${toOrderLpos.length === 1 ? "" : "s"} to order` : lpos?.toOrder.length ? `${lpos.toOrder.length} part${lpos.toOrder.length === 1 ? "" : "s"} to order: send the LPO for approval` : parts.length ? "Every part is here" : "No parts needed";
   const circles: PlanningCircle[] = [
     { key: "parts", n: 1, title: "Parts", state: job.plan_parts_done_at && !partsDelayed ? "green" : active ? "amber" : "grey", since: job.plan_parts_done_at ? null : job.stage_entered_at, person: person(people[0]), line: partsLine },
     { key: "workshop", n: 2, title: "Workshop", state: job.plan_released_at ? "green" : waitingOn === "workshop" ? "amber" : "grey", since: job.plan_parts_done_at, person: person(people[1]), line: job.plan_released_at ? `Released: start ${job.plan_start_date}` : waitingOn === "workshop" ? "Pick the start day and the technicians" : "After Parts" },

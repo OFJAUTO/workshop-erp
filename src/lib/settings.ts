@@ -134,7 +134,9 @@ const DEFAULTS = {
   keep_signed_in_days_staff: 30,
   keep_signed_in_days_owner_accounts: 1,
   discount_limit_percent: 25,
-  parts_min_markup_percent: 20,
+  parts_min_markup_percent: 5,
+  /** People we pay commission to (one-tap choices in the internal box of a quotation). */
+  commission_people: [] as string[],
   parts_min_markup_by_make: {} as Record<string, number>,
   technician_cost_rate_aed: 90,
   technician_cost_rate_by_department: {} as Record<string, number>,

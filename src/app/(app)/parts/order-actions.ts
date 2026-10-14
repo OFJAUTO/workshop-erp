@@ -9,6 +9,7 @@ import { blankToNull } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief } from "@/lib/parts-data";
+import { splitMainLpo } from "@/lib/lpo";
 import { verifyPin } from "@/lib/pin";
 import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
@@ -135,6 +136,14 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
   }
   await admin.from("purchase_orders").update({ status: "approved", approved_by: staff.id, approved_at: new Date().toISOString(), deposit_override_by: override?.by ?? null, deposit_override_reason: override?.reason ?? null, updated_by: staff.id }).eq("id", poId);
   await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number} approved by ${staff.display_name}${override ? ` (deposit override: ${override.reason})` : ""}`, created_by: staff.id });
+  if (po.kind === "main") {
+    // The main LPO is split into one LPO per supplier (LPO-00012-1, -2, -3); Parts send each and press Ordered.
+    const { created } = await splitMainLpo(poId, staff);
+    for (const c of created) revalidatePath(`/parts/orders/${c.id}`);
+    await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} approved · ${created.length} supplier LPO${created.length === 1 ? "" : "s"}`, body: `${job?.job_number ?? ""} · ${created.map((c) => `${c.number} ${c.supplier}`).join(", ")}. Copy or PDF to each supplier, then press Ordered.`, jobId: po.job_id, href: `/parts/${po.job_id}#lpo` });
+    refresh(po.job_id, poId);
+    redirect(`${back}?message=${encodeURIComponent(`Approved. ${created.map((c) => `${c.number} (${c.supplier})`).join(", ")} ready for Parts to send and mark ordered.`)}`);
+  }
   await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} approved: send it to ${po.supplier_name}`, body: `${job?.job_number ?? ""} · approved by ${staff.display_name}`, jobId: po.job_id, href: back });
   refresh(po.job_id, poId);
   redirect(`${back}?message=${encodeURIComponent("Approved. Download the PDF, send it to the supplier, then mark it ordered with the expected dates.")}`);

@@ -67,7 +67,15 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const hoursMemory: Record<string, number> = {};
   for (const [k, v] of Object.entries(memory)) if (!k.includes("|")) hoursMemory[k] = Number(v);
   for (const [k, v] of Object.entries(memory)) if (modelKey && k.startsWith(modelKey + "|")) hoursMemory[k.slice(modelKey.length + 1)] = Number(v);
-  const [catalogue, { data: jobRequests }] = await Promise.all([loadCatalogue(), createAdminClient().from("job_requests").select("text").eq("job_id", id).eq("is_active", true).order("position")]);
+  const [catalogue, { data: jobRequests }, { data: sessions }, { data: jobRow }] = await Promise.all([
+    loadCatalogue(),
+    createAdminClient().from("job_requests").select("text").eq("job_id", id).eq("is_active", true).order("position"),
+    // The hours the technicians clocked on the car: once the work is done, labour at cost uses them instead of the estimate.
+    createAdminClient().from("work_sessions").select("minutes").eq("job_id", id).eq("is_active", true),
+    createAdminClient().from("jobs").select("status, is_open").eq("id", id).maybeSingle(),
+  ]);
+  const workDone = !!jobRow && (!jobRow.is_open || ["pending_qc", "pending_wash", "ready", "in_delivery", "closed"].includes(String(jobRow.status)));
+  const clockedHours = workDone ? Math.round(((sessions ?? []).reduce((a, s) => a + (Number(s.minutes) || 0), 0) / 60) * 100) / 100 : null;
   const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string)) : null;
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
@@ -97,6 +105,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     today: dubaiDate(),
     workingTime: workingTimeOf(settings),
     reasons: { part_discount: reasonsFor(settings, "part_discount") },
+    commissionPeople: ((settings.commission_people ?? []) as string[]).map(String),
+    clockedHours,
   };
   const tone = q.status === "approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
   const urgentCount = bundle.lines.filter((l) => l.urgency === "urgent" && !isHidden(l)).length;
