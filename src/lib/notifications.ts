@@ -10,6 +10,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "invoice_paid", label: "Paid in full: the tax invoice is created and ready to send", locked: true },
   { type: "payment_waiting_long", label: "A proforma has waited too long for payment (owner)", locked: true },
   { type: "stock_low", label: "A stock item is below its minimum (Parts)" },
+  { type: "sticker_prompt", label: "A sticker or label to print (labels at receipt, battery warranty, oil service)", locked: true },
   { type: "supplier_invoice_mismatch", label: "A supplier invoice price differs from the LPO (accounts)", locked: true },
   { type: "quote_revised_by_parts", label: "Parts changed: revised quotation to send" },
   { type: "job_declined_out", label: "Declined job going out" },

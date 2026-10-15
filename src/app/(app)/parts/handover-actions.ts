@@ -164,7 +164,7 @@ export async function dispositionAction(jobId: string, formData: FormData) {
   if (!(role === "owner" || can(role, "managePurchaseOrders")) || staff.viewingAs) outcome(jobId, { error: "Only Parts or the owner decide where a part goes." }, to);
   const partId = String(formData.get("part") ?? "");
   const disposition = String(formData.get("disposition") ?? "");
-  if (disposition !== "returned" && disposition !== "stock" && disposition !== "fit_pending") outcome(jobId, { error: "Choose where the part goes." }, to);
+  if (disposition !== "returned" && disposition !== "stock" && disposition !== "fit_pending" && disposition !== "scrap") outcome(jobId, { error: "Choose where the part goes." }, to);
   let creditNotePath: string | null = null;
   const file = formData.get("credit_note");
   if (file instanceof File && file.size > 0) {
@@ -174,7 +174,7 @@ export async function dispositionAction(jobId: string, formData: FormData) {
     const { error: upError } = await createAdminClient().storage.from(PARTS_BUCKET).upload(creditNotePath, file, { contentType: file.type || "application/pdf", upsert: false });
     if (upError) outcome(jobId, { error: `Could not save the scan: ${upError.message}` }, to);
   }
-  const r = await setDisposition(jobId, partId, actorOf(staff), { disposition: disposition as "returned" | "stock" | "fit_pending", note: blankToNull(formData.get("note")), creditNotePath });
+  const r = await setDisposition(jobId, partId, actorOf(staff), { disposition: disposition as "returned" | "stock" | "fit_pending" | "scrap", note: blankToNull(formData.get("note")), creditNotePath });
   refresh(jobId);
   revalidatePath("/parts/no-home");
   outcome(jobId, r, to);

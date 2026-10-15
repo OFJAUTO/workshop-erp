@@ -8,7 +8,8 @@ import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
-import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief } from "@/lib/parts-data";
+import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief, type PoLineRow, type PurchaseOrderRow } from "@/lib/parts-data";
+import { recordStockMovement } from "@/lib/stock";
 import { splitMainLpo } from "@/lib/lpo";
 import { verifyPin } from "@/lib/pin";
 import { round2 } from "@/lib/money";
@@ -121,12 +122,12 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
   if (decision === "refuse") {
     await admin.from("purchase_orders").update({ status: "cancelled", notes: [po.notes, note ? `Refused: ${note}` : "Refused"].filter(Boolean).join("\n"), updated_by: staff.id }).eq("id", poId);
     await admin.from("part_items").update({ po_id: null, po_line_id: null, updated_by: staff.id }).eq("po_id", poId);
-    await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_refused", note: `${po.number} refused by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
+    if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_refused", note: `${po.number} refused by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
     if (po.created_by) await notifyStaff([po.created_by], { type: "po_decided", title: `${po.number} refused`, body: note ?? "", jobId: po.job_id, href: back });
     refresh(po.job_id, poId);
     redirect(`${back}?message=${encodeURIComponent("LPO refused.")}`);
   }
-  const deposit = await depositState(po.job_id);
+  const deposit = po.job_id ? await depositState(po.job_id) : { required: 0, received: 0, short: false };
   let override: { by: string; reason: string } | null = null;
   if (deposit.short) {
     const reason = blankToNull(formData.get("override_reason"));
@@ -135,7 +136,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     override = { by: staff.id, reason };
   }
   await admin.from("purchase_orders").update({ status: "approved", approved_by: staff.id, approved_at: new Date().toISOString(), deposit_override_by: override?.by ?? null, deposit_override_reason: override?.reason ?? null, updated_by: staff.id }).eq("id", poId);
-  await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number} approved by ${staff.display_name}${override ? ` (deposit override: ${override.reason})` : ""}`, created_by: staff.id });
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number} approved by ${staff.display_name}${override ? ` (deposit override: ${override.reason})` : ""}`, created_by: staff.id });
   if (po.kind === "main") {
     // The main LPO is split into one LPO per supplier (LPO-00012-1, -2, -3); Parts send each and press Ordered.
     const { created } = await splitMainLpo(poId, staff);
@@ -163,15 +164,17 @@ export async function markOrdered(poId: string, formData: FormData) {
     const d = String(formData.get(`expected__${l.id}`) ?? "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) redirect(`${back}?error=${encodeURIComponent(`Enter the expected date for ${l.description}.`)}`);
     await admin.from("purchase_order_lines").update({ expected_date: d, updated_by: staff.id }).eq("id", l.id);
-    await admin.from("part_items").update({ order_status: "ordered", expected_date: d, delivery_date: d, updated_by: staff.id }).eq("id", l.part_item_id);
+    if (l.part_item_id) await admin.from("part_items").update({ order_status: "ordered", expected_date: d, delivery_date: d, updated_by: staff.id }).eq("id", l.part_item_id);
   }
   await admin.from("purchase_orders").update({ status: "ordered", ordered_at: new Date().toISOString(), ordered_by: staff.id, updated_by: staff.id }).eq("id", poId);
-  await admin.from("jobs").update({ parts_state: "ordered" }).eq("id", po.job_id).in("parts_state", ["none", "ordering"]);
-  const job = await jobBrief(po.job_id);
   const latest = lines.map((l) => String(formData.get(`expected__${l.id}`))).sort().at(-1);
-  await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_ordered", note: `${po.number} ordered from ${po.supplier_name} by ${staff.display_name}; expected by ${latest}`, created_by: staff.id });
-  const ids = await advisorIds(po.job_id, job);
-  await notifyStaff(ids, { type: "parts_arrived", title: `Parts ordered · ${job?.job_number ?? ""}`, body: `${po.number} from ${po.supplier_name}, expected by ${latest}.`, jobId: po.job_id, href: `/jobs/${po.job_id}` });
+  if (po.job_id) {
+    await admin.from("jobs").update({ parts_state: "ordered" }).eq("id", po.job_id).in("parts_state", ["none", "ordering"]);
+    const job = await jobBrief(po.job_id);
+    await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_ordered", note: `${po.number} ordered from ${po.supplier_name} by ${staff.display_name}; expected by ${latest}`, created_by: staff.id });
+    const ids = await advisorIds(po.job_id, job);
+    await notifyStaff(ids, { type: "parts_arrived", title: `Parts ordered · ${job?.job_number ?? ""}`, body: `${po.number} from ${po.supplier_name}, expected by ${latest}.`, jobId: po.job_id, href: `/jobs/${po.job_id}` });
+  }
   refresh(po.job_id, poId);
   redirect(`${back}?message=${encodeURIComponent("Marked ordered. The job shows Waiting for parts with the dates.")}`);
 }
@@ -196,14 +199,26 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
     const total = round2(Math.min(l.quantity, l.received_qty + qty));
     const complete = total + 0.005 >= l.quantity;
     await admin.from("purchase_order_lines").update({ received_qty: total, received_at: now, flag: flag === "wrong" || flag === "damaged" ? flag : null, flag_note: flag ? flagNote : null, updated_by: staff.id }).eq("id", l.id);
-    const { data: p } = await admin.from("part_items").select("label_code").eq("id", l.part_item_id).maybeSingle();
-    await admin.from("part_items").update({ received_qty: total, order_status: complete ? "received" : "partly_received", label_code: p?.label_code ?? newLabelCode(), return_status: flag === "wrong" || flag === "damaged" ? "to_return" : "none", return_note: flag ? (flagNote ?? (flag === "wrong" ? "Wrong part" : "Damaged")) : null, updated_by: staff.id }).eq("id", l.part_item_id);
+    if (l.part_item_id) {
+      const { data: p } = await admin.from("part_items").select("label_code").eq("id", l.part_item_id).maybeSingle();
+      await admin.from("part_items").update({ received_qty: total, order_status: complete ? "received" : "partly_received", label_code: p?.label_code ?? newLabelCode(), return_status: flag === "wrong" || flag === "damaged" ? "to_return" : "none", return_note: flag ? (flagNote ?? (flag === "wrong" ? "Wrong part" : "Damaged")) : null, updated_by: staff.id }).eq("id", l.part_item_id);
+    } else if (l.stock_item_id && !flag) {
+      // A stock order: the delivery lands on the shelf with its cost averaged in.
+      await recordStockMovement(l.stock_item_id, { kind: "in", quantity: qty, unitCost: l.unit_cost, poId, note: `Delivery on ${po.number}` }, staff);
+    }
     received++;
   }
   if (!received) redirect(`${back}?error=${encodeURIComponent("Enter the quantity received on at least one line.")}`);
   const { data: after } = await admin.from("purchase_order_lines").select("quantity, received_qty").eq("po_id", poId).eq("is_active", true);
   const allIn = (after ?? []).every((l) => Number(l.received_qty) + 0.005 >= Number(l.quantity));
   await admin.from("purchase_orders").update({ status: allIn ? "received" : "partly_received", received_at: allIn ? now : null, updated_by: staff.id }).eq("id", poId);
+  // The supplier invoice entered with the delivery (optional; stock orders need no scan).
+  const invoiceNow = formData.get("to_follow") === "on" || blankToNull(formData.get("invoice_number"));
+  const invoiceResult = invoiceNow ? await applySupplierInvoice(po, (((await admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", poId).eq("is_active", true)).data ?? []) as Record<string, unknown>[]).map(toPoLine), formData, staff) : null;
+  if (!po.job_id) {
+    refresh(null, poId);
+    redirect(`${back}?message=${encodeURIComponent(`${allIn ? "Received in full: the items are on the shelf." : "Partial delivery recorded: the items are on the shelf."}${invoiceResult?.message ? ` ${invoiceResult.message}` : invoiceResult?.error ? ` Invoice: ${invoiceResult.error}` : ""}`)}`);
+  }
   const job = await jobBrief(po.job_id);
   const { data: open } = await admin.from("part_items").select("id").eq("job_id", po.job_id).eq("is_active", true).in("order_status", ["to_order", "ordered", "partly_received"]);
   if ((open ?? []).length === 0) await admin.from("jobs").update({ parts_state: "received" }).eq("id", po.job_id);
@@ -213,10 +228,51 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   await notifyStaff(ids, n);
   await notifyManagers(job?.department ?? null, n);
   refresh(po.job_id, poId);
-  redirect(`${back}?message=${encodeURIComponent(allIn ? "Received in full. Enter the supplier invoice, print the labels and issue the parts." : "Partial delivery recorded.")}`);
+  redirect(`${back}?message=${encodeURIComponent(`${allIn ? "Received in full. Print the labels and issue the parts." : "Partial delivery recorded."}${invoiceResult?.message ? ` ${invoiceResult.message}` : invoiceResult?.error ? ` Invoice: ${invoiceResult.error}` : allIn ? " Enter the supplier invoice if it came with the delivery." : ""}`)}`);
 }
 
 /** The supplier invoice: number and scan (compulsory), or "invoice to follow". A different price corrects the job cost. */
+/**
+ * The supplier invoice against an LPO: number and scan (a stock order needs no scan), or "invoice to follow". A line
+ * whose invoice price differs from the order by more than AED 1 is flagged for Accept new price or Dispute; the
+ * job's cost follows the invoice price meanwhile.
+ */
+async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], formData: FormData, staff: { id: string; display_name: string }): Promise<{ error?: string; message?: string }> {
+  const admin = createAdminClient();
+  const toFollow = formData.get("to_follow") === "on";
+  const number = blankToNull(formData.get("invoice_number"));
+  const path = blankToNull(formData.get("scan_path"));
+  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
+  if (toFollow) {
+    await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", po.id);
+    if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice to follow (${staff.display_name})`, created_by: staff.id });
+    return { message: "Noted: invoice to follow. It sits in the pending list and the job's profit stays provisional." };
+  }
+  if (!number) return { error: "Enter the supplier invoice number, or tick Invoice to follow." };
+  if (!path && po.job_id) return { error: "Attach the scan of the supplier invoice (phone camera or PC upload)." };
+  const diffs: string[] = [];
+  let mismatches = 0;
+  const now = new Date().toISOString();
+  for (const l of lines) {
+    const text = String(formData.get(`price__${l.id}`) ?? "").trim();
+    if (!text) continue;
+    const price = Number(text.replace(/[^\d.]/g, ""));
+    if (!Number.isFinite(price) || price < 0) continue;
+    const mismatch = Math.abs(price - l.unit_cost) > 1;
+    await admin.from("purchase_order_lines").update({ invoice_unit_cost: price, invoice_check: mismatch ? "mismatch" : "match", invoice_check_by: staff.id, invoice_check_at: now, updated_by: staff.id }).eq("id", l.id);
+    if (Math.abs(price - l.unit_cost) > 0.005) {
+      diffs.push(`${l.description}: LPO ${l.unit_cost.toFixed(2)}, invoice ${price.toFixed(2)}`);
+      if (l.part_item_id) await admin.from("part_items").update({ final_cost_aed: price, updated_by: staff.id }).eq("id", l.part_item_id);
+    }
+    if (mismatch) mismatches++;
+  }
+  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_path: path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...(mismatches ? {} : { supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id }), updated_by: staff.id }).eq("id", po.id);
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
+  if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
+  return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };
+}
+
+/** The supplier invoice entered on its own, after the delivery. */
 export async function supplierInvoice(poId: string, formData: FormData) {
   const staff = await requirePermission("managePurchaseOrders");
   const back = `/parts/orders/${poId}`;
@@ -224,36 +280,35 @@ export async function supplierInvoice(poId: string, formData: FormData) {
   const [{ data: raw }, { data: lineRows }] = await Promise.all([admin.from("purchase_orders").select(PO_SELECT).eq("id", poId).maybeSingle(), admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", poId).eq("is_active", true)]);
   if (!raw) redirect("/parts/orders");
   const po = toPo(raw as Record<string, unknown>);
-  const toFollow = formData.get("to_follow") === "on";
-  const number = blankToNull(formData.get("invoice_number"));
-  const path = blankToNull(formData.get("scan_path"));
-  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
-  if (toFollow) {
-    await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
-    await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice to follow (${staff.display_name})`, created_by: staff.id });
-    refresh(po.job_id, poId);
-    redirect(`${back}?message=${encodeURIComponent("Noted: invoice to follow. It sits in the pending list and the job's profit stays provisional.")}`);
-  }
-  if (!number) redirect(`${back}?error=${encodeURIComponent("Enter the supplier invoice number, or tick Invoice to follow.")}`);
-  if (!path) redirect(`${back}?error=${encodeURIComponent("Attach the scan of the supplier invoice (phone camera or PC upload).")}`);
-  const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
-  const diffs: string[] = [];
-  for (const l of lines) {
-    const text = String(formData.get(`price__${l.id}`) ?? "").trim();
-    if (!text) continue;
-    const price = Number(text.replace(/[^\d.]/g, ""));
-    if (!Number.isFinite(price) || price < 0) continue;
-    await admin.from("purchase_order_lines").update({ invoice_unit_cost: price, updated_by: staff.id }).eq("id", l.id);
-    if (Math.abs(price - l.unit_cost) > 0.005) {
-      diffs.push(`${l.description}: PO ${l.unit_cost.toFixed(2)}, invoice ${price.toFixed(2)}`);
-      await admin.from("part_items").update({ final_cost_aed: price, updated_by: staff.id }).eq("id", l.part_item_id);
-    }
-  }
-  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_path: path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: new Date().toISOString(), supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
-  await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
-  if (diffs.length) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_pending", title: `Supplier price differs from the PO · ${po.number}`, body: diffs.join("; "), jobId: po.job_id, href: back });
+  const r = await applySupplierInvoice(po, ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine), formData, staff);
   refresh(po.job_id, poId);
-  redirect(`${back}?message=${encodeURIComponent(diffs.length ? `Supplier invoice saved. ${diffs.length} price difference${diffs.length === 1 ? "" : "s"} flagged and the job cost corrected.` : "Supplier invoice saved.")}`);
+  redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Saved.")}`);
+}
+
+/** Accept new price (the invoice price stands) or Dispute (the owner and Parts chase the supplier) on a flagged line. */
+export async function decideInvoiceCheck(lineId: string, formData: FormData) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const role = staff.role_id as RoleId;
+  if (!(role === "owner" || role === "accounts" || can(role, "managePurchaseOrders"))) redirect("/parts/orders");
+  const decision = String(formData.get("decision") ?? "");
+  const admin = createAdminClient();
+  const { data: line } = await admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("id", lineId).maybeSingle();
+  if (!line) redirect("/parts/orders");
+  const l = toPoLine(line as Record<string, unknown>);
+  const back = `/parts/orders/${l.po_id}`;
+  if (decision !== "accept" && decision !== "dispute") redirect(back);
+  const { data: poRaw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", l.po_id).maybeSingle();
+  const po = poRaw ? toPo(poRaw as Record<string, unknown>) : null;
+  const now = new Date().toISOString();
+  await admin.from("purchase_order_lines").update({ invoice_check: decision === "accept" ? "accepted" : "disputed", invoice_check_by: staff.id, invoice_check_at: now, updated_by: staff.id }).eq("id", lineId);
+  if (decision === "accept" && l.part_item_id && l.invoice_unit_cost !== null) await admin.from("part_items").update({ final_cost_aed: l.invoice_unit_cost, updated_by: staff.id }).eq("id", l.part_item_id);
+  if (decision === "dispute" && l.part_item_id) await admin.from("part_items").update({ final_cost_aed: l.unit_cost, updated_by: staff.id }).eq("id", l.part_item_id);
+  const { data: left } = await admin.from("purchase_order_lines").select("id").eq("po_id", l.po_id).eq("invoice_check", "mismatch").eq("is_active", true);
+  if (!(left ?? []).length) await admin.from("purchase_orders").update({ supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id, updated_by: staff.id }).eq("id", l.po_id);
+  if (po?.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: ${l.description} invoice price ${l.invoice_unit_cost?.toFixed(2) ?? "?"} against LPO ${l.unit_cost.toFixed(2)} ${decision === "accept" ? "accepted" : "disputed"} by ${staff.display_name}`, created_by: staff.id });
+  if (decision === "dispute") await notifyRoles(["owner", "parts"], { type: "supplier_invoice_mismatch", title: `Invoice price disputed · ${po?.number ?? ""}`, body: `${l.description}: LPO ${l.unit_cost.toFixed(2)}, invoice ${l.invoice_unit_cost?.toFixed(2) ?? "?"}. ${staff.display_name} disputes it: chase ${po?.supplier_name ?? "the supplier"} for a credit note.`, jobId: po?.job_id ?? null, href: back });
+  refresh(po?.job_id ?? null, l.po_id);
+  redirect(`${back}?message=${encodeURIComponent(decision === "accept" ? "New price accepted: the job cost follows the invoice." : "Disputed: the owner and Parts are told; the LPO price stands on the job until the supplier answers.")}`);
 }
 
 /**
@@ -363,7 +418,7 @@ export async function issueStock(formData: FormData) {
   if (value > threshold && !verifyPin(pin, priv?.pin_hash)) redirect(`${back}?error=${encodeURIComponent(`Above AED ${threshold}: the technician's PIN is needed, and it was wrong or missing.`)}`);
   const now = new Date().toISOString();
   await admin.from("stock_issues").insert({ stock_item_id: itemId, job_id: jobId, quantity: qty, unit_cost: Number(item.unit_cost) || 0, issued_by: staff.id, confirmed_by: tech.id, confirmed_at: now, created_by: staff.id, updated_by: staff.id });
-  await admin.from("stock_items").update({ quantity: Math.max(0, Number(item.quantity) - qty), updated_by: staff.id }).eq("id", itemId);
+  await recordStockMovement(itemId, { kind: "out", quantity: qty, jobId, note: `Issued to ${tech.display_name}` }, staff);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "stock_issued", note: `${qty} × ${item.name} issued by ${staff.display_name}, confirmed by ${tech.display_name}`, created_by: staff.id });
   revalidatePath("/parts/stock");
   revalidatePath(`/jobs/${jobId}`);

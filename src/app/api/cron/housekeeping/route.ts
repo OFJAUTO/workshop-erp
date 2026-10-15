@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { notifyLowStock } from "@/lib/stock";
 import { bodyshopHourly } from "@/lib/bodyshop";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { addDays, dayStartIso, dubaiTimeOf } from "@/lib/calendar";
@@ -323,6 +324,18 @@ export async function GET(request: NextRequest) {
       told++;
     }
     report.paymentWaiting = told;
+  }
+
+  // 18. Stock: an item below its minimum tells Parts once; on the 1st the monthly count is asked for.
+  {
+    report.stockLow = await notifyLowStock();
+    const thisMonth = monthKey();
+    if (String(settings.stock_count_reminded_for ?? "") !== thisMonth) {
+      const { count } = await admin.from("stock_items").select("id", { count: "exact", head: true }).eq("is_active", true);
+      if ((count ?? 0) > 0) await notifyRoles(["parts"], { type: "stock_low", title: "Monthly stock count", body: "A new month: count the shelf and type the figures on the stock page.", href: "/parts/stock?count=1" });
+      await admin.from("settings").upsert({ key: "stock_count_reminded_for", value: thisMonth }, { onConflict: "key" });
+      report.stockCount = 1;
+    }
   }
 
   // 16. Bodyshop: a late stage pushes the later due dates and the handover (manager and advisor told); cars due out tomorrow are announced with the sign-offs needed.

@@ -142,23 +142,26 @@ export async function orderSupplierLpo(poId: string, by: Actor): Promise<{ error
   if (po.status === "pending_approval") return { error: "Not approved yet." };
   if (po.status !== "approved") return { error: "This order was already placed." };
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
-  const { data: partRows } = await admin.from("part_items").select(PART_FULL_SELECT).in("id", lines.map((l) => l.part_item_id));
+  const partIds = lines.map((l) => l.part_item_id).filter((x): x is string => !!x);
+  const { data: partRows } = partIds.length ? await admin.from("part_items").select(PART_FULL_SELECT).in("id", partIds) : { data: [] as Record<string, unknown>[] };
   const parts = new Map(((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => [p.id, p]));
   const today = dubaiDate();
   const dates: string[] = [];
   for (const l of lines) {
-    const p = parts.get(l.part_item_id);
+    const p = l.part_item_id ? parts.get(l.part_item_id) : undefined;
     const expected = p ? expectedDateFor(p, today) : null;
     if (expected) dates.push(expected);
     await admin.from("purchase_order_lines").update({ expected_date: expected, updated_by: by.id }).eq("id", l.id);
-    await admin.from("part_items").update({ order_status: "ordered", expected_date: expected, ...(expected ? { delivery_date: expected } : {}), updated_by: by.id }).eq("id", l.part_item_id);
+    if (l.part_item_id) await admin.from("part_items").update({ order_status: "ordered", expected_date: expected, ...(expected ? { delivery_date: expected } : {}), updated_by: by.id }).eq("id", l.part_item_id);
   }
   const now = new Date().toISOString();
   await admin.from("purchase_orders").update({ status: "ordered", ordered_at: now, ordered_by: by.id, sent_at: po.sent_at ?? now, sent_by: po.sent_by ?? by.id, sent_method: po.sent_method ?? "ordered", updated_by: by.id }).eq("id", poId);
-  await admin.from("jobs").update({ parts_state: "ordered" }).eq("id", po.job_id).in("parts_state", ["none", "ordering"]);
   const latest = dates.sort().at(-1) ?? null;
-  await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_ordered", note: `${po.number} ordered from ${po.supplier_name} by ${by.display_name}${latest ? `; expected by ${latest}` : ""}`, created_by: by.id });
-  await finishPartsPlanning(po.job_id, by);
+  if (po.job_id) {
+    await admin.from("jobs").update({ parts_state: "ordered" }).eq("id", po.job_id).in("parts_state", ["none", "ordering"]);
+    await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_ordered", note: `${po.number} ordered from ${po.supplier_name} by ${by.display_name}${latest ? `; expected by ${latest}` : ""}`, created_by: by.id });
+    await finishPartsPlanning(po.job_id, by);
+  }
   return { latest, number: po.number };
 }
 

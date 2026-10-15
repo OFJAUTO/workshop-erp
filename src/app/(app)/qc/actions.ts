@@ -1,11 +1,12 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { isBatteryPart, jobHasOilChange } from "@/lib/stickers";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { recordJobSummary } from "@/lib/job-summary";
-import { notifyManagers, notifyStaff } from "@/lib/notifications";
+import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -125,6 +126,18 @@ export async function saveQc(jobId: string, formData: FormData) {
   await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_qc", to_status: "pending_wash", note: `QC passed (${staff.display_name}), mileage ${(mileage ?? 0).toLocaleString("en-GB")} ${mileageUnit}${qc.round > 1 ? `, round ${qc.round}` : ""}`, created_by: staff.id });
   await notifyStaff(await advisorIds(jobId, job.gated_in_by), { type: "wash", title: `QC passed · ${job.job_number}`, body: `Passed by ${staff.display_name}. The car is ready for the wash: press "Send to wash" on the job card when it should go.`, jobId, href: `/jobs/${jobId}` });
   await recordJobSummary(jobId, job.job_number, job.department ?? null, settings);
+  await stickerPrompts(jobId, job.job_number, job.gated_in_by);
   refresh(jobId);
   redirect(`/qc?message=${encodeURIComponent(`${job.job_number} passed QC. The advisor sends it to the wash.`)}`);
+}
+
+/** After a pass: the oil service sticker (an oil change on the job) and the battery warranty sticker (a battery fitted) are prompted. */
+async function stickerPrompts(jobId: string, jobNumber: string, gatedInBy: string | null) {
+  const admin = createAdminClient();
+  if (await jobHasOilChange(jobId)) {
+    await notifyStaff(await advisorIds(jobId, gatedInBy), { type: "sticker_prompt", title: `Print the service sticker · ${jobNumber}`, body: "QC passed with an oil change: print the oil service sticker from the job card and put it on the windscreen.", jobId, href: `/jobs/${jobId}#sticker` });
+  }
+  const { data: parts } = await admin.from("part_items").select("id, description, part_type, sticker_kind, stickers_printed, issue_status").eq("job_id", jobId).eq("is_active", true).eq("issue_status", "confirmed");
+  const batteries = (parts ?? []).filter((p) => isBatteryPart(p) && !p.stickers_printed);
+  if (batteries.length) await notifyRoles(["parts"], { type: "sticker_prompt", title: `Print the battery warranty sticker · ${jobNumber}`, body: `${batteries.map((b) => b.description).join(", ")} fitted: print the warranty sticker from the handover page.`, jobId, href: `/parts/handover/${jobId}` });
 }

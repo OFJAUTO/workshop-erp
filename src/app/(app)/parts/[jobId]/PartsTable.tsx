@@ -355,6 +355,8 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
   const [origin] = useState(() => row.original ?? row.name);
   const [otherMode, setOtherMode] = useState(() => availabilityChoice(row.values) === "other" && !daysComplete(row.values.days));
   const [copied, setCopied] = useState(false);
+  // Price memory: the last price given for this part number, offered with one tap while the price boxes are empty.
+  const [memory, setMemory] = useState<{ list: number | null; discount: number | null; net: number | null; supplier: string | null; part_type: string | null; brand: string | null; when: string | null; job: string | null } | null>(null);
   const [split, setSplit] = useState(false);
   // "Remove: not needed": which kind of row is being removed, and the few seconds of Undo after it.
   const [removing, setRemoving] = useState<null | "part" | "request" | "ordered">(null);
@@ -420,6 +422,21 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
   const changeType = (part_type: string) => {
     const discount = supplier ? String(supplierDiscount(supplier, part_type)) : latest.current.v.discount;
     change({ part_type, discount, cost_aed: netOf(latest.current.v.list_price, discount) || latest.current.v.cost_aed });
+  };
+  const lookupMemory = async () => {
+    const pn = latest.current.v.part_number.trim();
+    if (latest.current.v.cost_aed || latest.current.v.list_price || pn.length < 4) { setMemory(null); return; }
+    try {
+      const res = await fetch(`/api/parts/price-memory?pn=${encodeURIComponent(pn)}`);
+      const j = (await res.json()) as { memory: { list_price: number | null; discount: number | null; net: number | null; supplier: string | null; part_type: string | null; brand: string | null; priced_at: string | null; job_number: string | null } | null };
+      setMemory(j.memory ? { list: j.memory.list_price, discount: j.memory.discount, net: j.memory.net, supplier: j.memory.supplier, part_type: j.memory.part_type, brand: j.memory.brand, when: j.memory.priced_at, job: j.memory.job_number } : null);
+    } catch { setMemory(null); }
+  };
+  const useMemory = () => {
+    if (!memory) return;
+    const cur = latest.current.v;
+    change({ list_price: memory.list !== null ? String(memory.list) : cur.list_price, discount: memory.discount !== null ? String(memory.discount) : cur.discount, cost_aed: memory.net !== null ? String(memory.net) : cur.cost_aed, supplier: memory.supplier ?? cur.supplier, part_type: memory.part_type ?? cur.part_type, brand: memory.brand ?? cur.brand });
+    setMemory(null);
   };
   const changeAvailability = (c: AvailabilityChoice, el: HTMLSelectElement) => {
     setOtherMode(c === "other");
@@ -515,7 +532,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
       {/* Part number: always a box (never swapped for text while the row is open), with Copy beside it */}
       <span className={`${SECOND_LINE} h-9 flex items-center gap-1 min-w-0`}>
         {readOnly ? textCell(v.part_number || "No part number", "flex-1 font-semibold") : (
-          <Input value={v.part_number} onChange={(e) => change({ part_number: e.target.value })} placeholder="Part number" textCase="upper" className={box("part_number", "w-full min-w-0 flex-1 px-2")} aria-label="Part number" />
+          <Input value={v.part_number} onChange={(e) => change({ part_number: e.target.value })} onBlur={() => void lookupMemory()} placeholder="Part number" textCase="upper" className={box("part_number", "w-full min-w-0 flex-1 px-2")} aria-label="Part number" />
         )}
         <button type="button" onClick={copyPn} disabled={!v.part_number} className={`shrink-0 h-9 w-12 rounded-control border border-line text-[11px] font-bold ${v.part_number ? "" : "invisible"}`} aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button>
       </span>
@@ -618,6 +635,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
         {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
+        {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""} · Use</button> : null}
         <span className="min-w-0 flex-1 truncate text-muted" title={notes}>{notes}</span>
         {row.removed && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
         <span className={`shrink-0 max-w-[60%] truncate ${tag.cls}`} title={tag.text} data-row-tag>{tag.text}</span>

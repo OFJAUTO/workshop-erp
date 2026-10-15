@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { approvedQuotations } from "@/lib/quote-data";
 import { notFound } from "next/navigation";
-import { Badge, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
@@ -15,7 +15,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
-import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice } from "../../order-actions";
+import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck } from "../../order-actions";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "../../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard } from "../../SupplierLpoCard";
@@ -42,8 +42,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const isMain = po.kind === "main";
   const admin = createAdminClient();
   const [{ data: q }, { data: pays }, settings, lpos] = await Promise.all([
-    approvedQuotations(po.job_id).then((qs) => ({ data: qs.length ? { deposit_aed: qs.reduce((a, q) => a + q.deposit_aed, 0), number: qs.map((q) => q.number).join(", ") } : null })),
-    admin.from("payments").select(PAYMENT_SELECT).eq("job_id", po.job_id).eq("is_active", true),
+    po.job_id ? approvedQuotations(po.job_id).then((qs) => ({ data: qs.length ? { deposit_aed: qs.reduce((a, q) => a + q.deposit_aed, 0), number: qs.map((q) => q.number).join(", ") } : null })) : Promise.resolve({ data: null }),
+    po.job_id ? admin.from("payments").select(PAYMENT_SELECT).eq("job_id", po.job_id).eq("is_active", true) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     getSettings(),
     isMain ? loadJobLpos(po.job_id) : Promise.resolve(null),
   ]);
@@ -55,7 +55,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;
   const today = todayIso();
   const typeOf = (partId: string) => { const p = bundle.parts.find((x) => x.id === partId); return p ? partTypeText(p) : null; };
-  const formLines = lines.map((l) => ({ id: l.id, description: l.description, part_number: l.part_number, quantity: l.quantity, received_qty: l.received_qty, unit_cost: l.unit_cost, flag: l.flag }));
+  const formLines = lines.map((l) => ({ id: l.id, description: l.description, part_number: l.part_number, quantity: l.quantity, received_qty: l.received_qty, unit_cost: l.unit_cost, flag: l.flag, invoice_check: l.invoice_check }));
   const v = job?.vehicle;
   const site = await getSiteUrl();
   const supplierEmailOf = new Map<string, string | null>(((lpos?.suppliers ?? []).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos?.suppliers ?? []).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
@@ -154,7 +154,13 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}
                       {l.received_qty > 0 ? <Badge tone={l.received_qty >= l.quantity ? "green" : "amber"}>received {l.received_qty}</Badge> : null}
                       {l.flag ? <Badge tone="red">{l.flag === "wrong" ? "Wrong part" : "Damaged"}: {l.flag_note}</Badge> : null}
-                      {l.invoice_unit_cost !== null && Math.abs(l.invoice_unit_cost - l.unit_cost) > 0.005 ? <Badge tone="amber">Invoice price {l.invoice_unit_cost.toFixed(2)}</Badge> : null}
+                      {l.invoice_unit_cost !== null && Math.abs(l.invoice_unit_cost - l.unit_cost) > 0.005 ? <Badge tone={l.invoice_check === "mismatch" || l.invoice_check === "disputed" ? "red" : "amber"}>Invoice price {l.invoice_unit_cost.toFixed(2)}{l.invoice_check === "accepted" ? " · accepted" : l.invoice_check === "disputed" ? " · disputed" : ""}</Badge> : null}
+                      {l.invoice_check === "mismatch" && (role === "owner" || role === "accounts" || canManage) && !staff.viewingAs ? (
+                        <form action={decideInvoiceCheck.bind(null, l.id)} className="flex gap-1" data-invoice-check={l.id}>
+                          <Button type="submit" name="decision" value="accept" size="md">Accept new price</Button>
+                          <Button type="submit" name="decision" value="dispute" size="md" tone="secondary">Dispute</Button>
+                        </form>
+                      ) : null}
                       {part?.label_code ? <span className="ml-auto text-xs text-muted">label {part.label_code}</span> : null}
                       {part?.issue_status === "confirmed" ? <Badge tone="green">Issued</Badge> : null}
                     </li>
@@ -181,10 +187,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Receive the delivery</SectionLabel>
-              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} />
+              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} jobId={po.job_id} poId={po.id} askInvoice={po.supplier_invoice_status !== "received"} />
             </Card>
           ) : null}
-          {!isMain && po.status !== "pending_approval" && po.status !== "cancelled" && po.status !== "approved" && canManage && po.supplier_invoice_status !== "received" ? (
+          {!isMain && po.status === "received" && canManage && po.supplier_invoice_status !== "received" ? (
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "border-red-bar" : ""}`}>
               <SectionLabel>Supplier invoice</SectionLabel>
               <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} />
@@ -209,7 +215,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               ]}
             />
           </Card>
-          {po.status === "received" || po.status === "partly_received" ? (
+          {(po.status === "received" || po.status === "partly_received") && po.job_id ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>Next for the workshop</SectionLabel>
               <LinkButton href={`/parts/labels/${po.job_id}`} tone="secondary" size="md">Print the QR labels</LinkButton>

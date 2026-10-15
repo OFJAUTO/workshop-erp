@@ -24,13 +24,16 @@ export default async function PartsNoHomePage({ searchParams }: { searchParams: 
   if (!(role === "owner" || can(role, "managePurchaseOrders") || can(role, "manageWork"))) notFound();
   const { message, error } = await searchParams;
   const [parts, { data: people }] = await Promise.all([partsWithNoHome(), createAdminClient().from("staff").select("id, display_name")]);
+  const poIds = Array.from(new Set(parts.map((p) => p.po_id).filter((x): x is string => !!x)));
+  const { data: pos } = poIds.length ? await createAdminClient().from("purchase_orders").select("id, number").in("id", poIds) : { data: [] as { id: string; number: string }[] };
+  const poNumber = new Map((pos ?? []).map((o) => [o.id, o.number]));
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   const canEnd = !staff.viewingAs && (role === "owner" || can(role, "managePurchaseOrders"));
   const isOwner = role === "owner" && !staff.viewingAs;
   const cost = (p: (typeof parts)[number]) => Math.round(Number(p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1) * 100) / 100;
   return (
     <>
-      <PageHeader title="Parts with no home" subtitle="Not needed, wrong or faulty, or back with Parts: each needs an ending." actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>} />
+      <PageHeader title="Returns and leftovers" subtitle="Not needed, wrong or faulty, or back with Parts: each goes back to the supplier against its LPO, onto the shelf as stock, to scrap, or on the car with the owner's approval." actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {parts.length === 0 ? <Empty title="Every part has a home" /> : null}
@@ -38,7 +41,7 @@ export default async function PartsNoHomePage({ searchParams }: { searchParams: 
         const s = partState(p);
         const plate = p.job?.vehicle ? formatPlate(p.job.vehicle) : p.job?.job_number ?? "";
         return (
-          <Card key={p.id} className={`flex flex-col gap-2 ${s.key === "fit_pending" ? "border-amber-bar" : ""}`}>
+          <Card key={p.id} data-no-home={p.id} className={`flex flex-col gap-2 ${s.key === "fit_pending" ? "border-amber-bar" : ""}`}>
             <div className="flex flex-wrap items-center gap-2">
               <SectionLabel right={`since ${formatDateTime(p.since)}`}>{p.description} × {Number(p.confirmed_quantity ?? p.quantity) || 1}</SectionLabel>
               <Badge tone={s.tone}>{s.label}</Badge>
@@ -47,6 +50,7 @@ export default async function PartsNoHomePage({ searchParams }: { searchParams: 
               {p.job ? <Link href={`/parts/handover/${p.job.id}`} className="font-semibold underline underline-offset-4">{plate} · {p.job.job_number}</Link> : null}
               {p.job?.vehicle ? <span className="text-muted"> · {[p.job.vehicle.make?.name, p.job.vehicle.model?.name].filter(Boolean).join(" ")}</span> : null}
               {p.cost_aed !== null ? <span className="text-muted"> · cost AED {cost(p).toFixed(2)}</span> : null}
+              {p.po_id && poNumber.get(p.po_id) ? <span className="text-muted"> · came on {poNumber.get(p.po_id)}</span> : null}
             </p>
             {p.not_needed_reason ? <p className="text-xs text-muted">Not needed: {p.not_needed_reason} ({nameOf.get(p.not_needed_by ?? "") ?? ""}, {formatDateTime(p.not_needed_at)})</p> : null}
             {p.exchange_at ? <p className="text-xs text-muted">{p.exchange_note ? `${p.exchange_note} · ` : ""}wrong or faulty {formatDateTime(p.exchange_at)}{p.replacement_part_id ? " · the correct part is on the Parts desk to order" : ""}</p> : null}

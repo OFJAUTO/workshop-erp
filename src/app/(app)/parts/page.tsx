@@ -1,4 +1,5 @@
 import { formatDate } from "@/lib/format";
+import { partsWithNoHome } from "@/lib/handover";
 import { CarThumb } from "@/components/CarThumb";
 import { signCarPictures } from "@/lib/car-pictures";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
@@ -40,6 +41,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     admin.from("part_items").select(PART_FULL_SELECT).eq("is_active", true).order("created_at"),
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
+  const noHomeCount = (await partsWithNoHome()).length;
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
   const today = todayIso();
   const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)]));
@@ -112,7 +114,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <LiveRefresh tables={["part_requests", "part_items", "jobs"]} pollMs={60000} />
-      <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." actions={<LinkButton href="/parts/no-home" tone="secondary" size="lg">Parts with no home</LinkButton>} />
+      <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." actions={<LinkButton href="/parts/no-home" tone="secondary" size="lg" data-returns-tab>Returns and leftovers{noHomeCount ? ` (${noHomeCount})` : ""}</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <WaitingPanel staff={staff} />

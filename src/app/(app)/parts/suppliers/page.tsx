@@ -44,7 +44,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
   const list = show === "all" ? all : all.filter((s) => s.is_active);
   return (
     <>
-      <PageHeader title="Suppliers" subtitle="Name, TRN, phone, email, address and payment terms. LPOs and supplier invoices pick from this list." />
+      <PageHeader title="Suppliers" subtitle="Name, TRN, phone, email, address and payment terms. LPOs and supplier invoices pick from this list." actions={<LinkButton href="/parts/suppliers/totals" tone="secondary" size="lg">Purchase totals</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {apply && all.some((s) => s.id === apply) ? (

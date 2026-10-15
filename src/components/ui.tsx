@@ -46,15 +46,16 @@ export function LinkButton({
   tone = "primary",
   size = "md",
   className = "",
+  ...rest
 }: {
   href: string;
   children: ReactNode;
   tone?: Tone;
   size?: Size;
   className?: string;
-}) {
+} & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "children" | "className">) {
   return (
-    <Link href={href} className={`${base} ${toneClass[tone]} ${sizeClass[size]} ${className}`}>
+    <Link href={href} className={`${base} ${toneClass[tone]} ${sizeClass[size]} ${className}`} {...rest}>
       {children}
     </Link>
   );

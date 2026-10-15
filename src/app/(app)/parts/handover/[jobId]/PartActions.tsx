@@ -82,7 +82,7 @@ export function EndingForm({ partId, back, action }: { partId: string; back?: st
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Scan of the credit note (optional)<input type="file" name="credit_note" accept="application/pdf,image/*" className="min-h-11 text-sm" /></label>
         </div>
       ) : choice ? (
-        <Textarea name="note" rows={1} placeholder={choice === "stock" ? "Shelf or bin (optional)" : "Why fit it anyway (the owner reads this)"} textCase="sentence" className="min-h-12" />
+        <Textarea name="note" rows={1} placeholder={choice === "stock" ? "Shelf or bin (optional)" : choice === "scrap" ? "Why it is scrapped (required)" : "Why fit it anyway (the owner reads this)"} textCase="sentence" className="min-h-12" required={choice === "scrap"} />
       ) : null}
       {choice === "fit_pending" ? <span className="text-xs text-muted">The owner approves it as goodwill; the part then goes to the technician as usual.</span> : null}
       <div><Button type="submit" size="md" disabled={!choice}>Save the ending</Button></div>

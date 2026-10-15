@@ -122,3 +122,15 @@ end $$;
 -- Section tablets registered by the tests.
 delete from public.devices where name ilike 'E2e %';
 set session_replication_role = default;
+
+-- Stock orders, stock items and the notifications the Part C tests make.
+set session_replication_role = replica;
+delete from public.stock_movements where stock_item_id in (select id from public.stock_items where name ilike 'e2e %') or po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
+delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
+delete from public.notifications where href like '/parts/orders/%' and href in (select '/parts/orders/' || id::text from public.purchase_orders where supplier_name ilike 'e2e %');
+delete from public.purchase_orders where supplier_name ilike 'e2e %';
+delete from public.notifications where title ilike '%e2e %' and type in ('stock_low', 'supplier_invoice_mismatch', 'po_approval', 'po_decided');
+delete from public.stock_items where name ilike 'e2e %';
+delete from public.suppliers where name ilike 'e2e %' and not exists (select 1 from public.purchase_orders where supplier_id = suppliers.id);
+set session_replication_role = default;
+select count(*) as left_over_stock from public.stock_items where name ilike 'e2e %';

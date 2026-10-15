@@ -33,6 +33,7 @@ export const DISPOSITIONS: { value: string; label: string }[] = [
   { value: "returned", label: "Returned to supplier with credit note" },
   { value: "stock", label: "Moved to stock" },
   { value: "fit_pending", label: "Fit on this car with approval" },
+  { value: "scrap", label: "Scrap" },
 ];
 
 export function exchangeReasonLabel(v: string | null | undefined) {
@@ -42,6 +43,7 @@ export function exchangeReasonLabel(v: string | null | undefined) {
 export function partState(p: PartStateInput): PartState {
   if (p.disposition === "returned") return { key: "returned_supplier", label: "Returned to supplier", tone: "neutral" };
   if (p.disposition === "stock") return { key: "stock", label: "Moved to stock", tone: "neutral" };
+  if (p.disposition === "scrap") return { key: "scrap", label: "Scrapped", tone: "neutral" };
   if (p.disposition === "fit_approved") return { key: "fit_approved", label: "Fitted as goodwill, approved by the owner", tone: "green" };
   if (p.disposition === "fit_pending") return { key: "fit_pending", label: "Fit on this car: waiting for the owner", tone: "amber" };
   if (p.exchange_status === "needed") return { key: "exchange", label: `${exchangeReasonLabel(p.exchange_reason)}: waiting for the correct part`, tone: "red" };

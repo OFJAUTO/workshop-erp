@@ -1,4 +1,5 @@
 import "server-only";
+import { addPartToStock } from "./stock";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { hasNoHome } from "./part-state";
 import { PART_FULL_SELECT, toPartFull } from "./parts-data";
@@ -235,18 +236,27 @@ export async function partNotNeeded(jobId: string, partId: string, actor: Actor,
 }
 
 /** Where a part without a home ends up: returned to the supplier (credit note), moved to stock, or fitted on this car once the owner approves. */
-export async function setDisposition(jobId: string, partId: string, actor: Actor, input: { disposition: "returned" | "stock" | "fit_pending"; note: string | null; creditNotePath: string | null }): Promise<Result> {
+export async function setDisposition(jobId: string, partId: string, actor: Actor, input: { disposition: "returned" | "stock" | "fit_pending" | "scrap"; note: string | null; creditNotePath: string | null }): Promise<Result> {
   const admin = createAdminClient();
   const p = await fullPart(partId, jobId);
   if (!p) return { error: "Part not found." };
   if (!hasNoHome(p)) return { error: "This part has a home already." };
   if (input.disposition === "returned" && !(input.note || input.creditNotePath)) return { error: "Type the credit note number, or attach its scan." };
+  if (input.disposition === "scrap" && !input.note) return { error: "Write why it is scrapped." };
+  // A return goes against the LPO it came on; a part kept goes onto the shelf as real stock.
+  const { data: po } = p.po_id ? await admin.from("purchase_orders").select("number").eq("id", p.po_id).maybeSingle() : { data: null };
+  let stockNote = "";
+  if (input.disposition === "stock") {
+    const r = await addPartToStock(p, actor, jobId);
+    if (r.error) return { error: r.error };
+    stockNote = r.itemName ? ` (stock item: ${r.itemName})` : "";
+  }
   const job = await jobBrief(jobId);
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = { disposition: input.disposition, disposition_at: now, disposition_by: actor.id, disposition_note: input.note, credit_note_path: input.creditNotePath ?? p.credit_note_path, updated_by: actor.id };
   if (input.disposition === "returned" && (p.exchange_status === "needed" || p.exchange_status === "ordered")) patch.exchange_status = "done";
   await admin.from("part_items").update(patch).eq("id", p.id);
-  const label = input.disposition === "returned" ? "returned to the supplier with a credit note" : input.disposition === "stock" ? "moved to stock" : "to be fitted on this car, waiting for the owner's approval";
+  const label = input.disposition === "returned" ? `returned to the supplier${po?.number ? ` against ${po.number}` : ""} with a credit note` : input.disposition === "stock" ? `moved to stock${stockNote}` : input.disposition === "scrap" ? "scrapped" : "to be fitted on this car, waiting for the owner's approval";
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_disposition", note: `${p.description} ${label} (${actor.display_name})${input.note ? `: ${input.note}` : ""}`, created_by: actor.id });
   if (input.disposition === "fit_pending") await notifyRoles(["owner"], { type: "parts_no_home", title: `Fit a part as goodwill? · ${job?.job_number ?? ""}`, body: `${p.description} was marked not needed; Parts ask to fit it on this car anyway. Approve it under "Parts with no home".`, jobId, href: "/parts/no-home" });
   return { ok: true, message: `${p.description}: ${label}.` };

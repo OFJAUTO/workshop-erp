@@ -111,6 +111,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
 
   // After the customer's approval: the approved parts, the one main LPO and its supplier LPOs.
   const approvedParts = parts.filter((p) => p.order_status !== "none" && String(rawById.get(p.id)?.return_status ?? "none") !== "returned");
+  // Received and still with Parts: their labels are printed before the handover.
+  const labelsToPrint = parts.filter((p) => (p.order_status === "received" || p.order_status === "partly_received") && String(rawById.get(p.id)?.issue_status ?? "none") !== "confirmed" && String(rawById.get(p.id)?.return_status ?? "none") === "none" && !rawById.get(p.id)?.not_needed_at);
   const hasApproved = approvedParts.length > 0 || lpos.suppliers.length > 0 || !!lpos.main;
   const pendingMain = lpos.main && lpos.main.status === "pending_approval" ? lpos.main : null;
   const supplierNames = Array.from(new Set(lpos.toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
@@ -188,6 +190,12 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         </section>
       ) : null}
 
+      {labelsToPrint.length ? (
+        <Card className="flex flex-wrap items-center gap-3 border-ink" data-labels-prompt>
+          <span className="text-sm font-semibold">{labelsToPrint.length} part{labelsToPrint.length === 1 ? " is" : "s are"} here: print the label{labelsToPrint.length === 1 ? "" : "s"} before the handover.</span>
+          <LinkButton href={`/parts/labels/${jobId}`} size="lg" className="ml-auto">Print labels ({labelsToPrint.length})</LinkButton>
+        </Card>
+      ) : null}
       {toReceive.length ? (
         <Card id="received" className="flex flex-col gap-2" data-received-card>
           <SectionLabel right={steps.find((s) => s.key === "received")?.detail ?? undefined}>Parts received</SectionLabel>
