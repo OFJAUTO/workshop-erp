@@ -60,6 +60,11 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
   ]);
   const all = (data ?? []) as unknown as Row[];
   const summaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
+  // The live proforma or tax invoice of the cars at the money steps, so the next step never says "proforma to prepare" on a paid car.
+  const moneyIds = all.filter((j) => ["ready", "pending_payment", "in_delivery"].includes(j.status)).map((j) => j.id);
+  const { data: invRows } = moneyIds.length ? await admin.from("invoices").select("job_id, kind, sent_at, converted_to").in("job_id", moneyIds).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("kind", ["proforma", "tax_invoice"]) : { data: [] as { job_id: string; kind: string; sent_at: string | null }[] };
+  const invoiceOf = new Map<string, { kind: "proforma" | "tax_invoice"; sent_at: string | null }>();
+  for (const r of (invRows ?? []) as { job_id: string; kind: string; sent_at: string | null }[]) if (!invoiceOf.has(r.job_id) || r.kind === "tax_invoice") invoiceOf.set(r.job_id, { kind: r.kind as "proforma" | "tax_invoice", sent_at: r.sent_at });
   const myCars = new Set((onCar ?? []).map((t) => t.job_id));
   const side = role === "owner" ? null : sideOfDepartment(staff.department_id);
   const wt = workingTimeOf(settings);
@@ -84,6 +89,7 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       gateInComplete: !!j.gate_in?.is_complete,
       loose: j.job_kind === "loose",
       quote: summaries.has(j.id) ? quoteState(summaries.get(j.id)!, !!insp && insp.status === "approved") : null,
+      extra: invoiceOf.has(j.id) ? { invoiced: true, invoiceKind: invoiceOf.get(j.id)!.kind, readySent: invoiceOf.get(j.id)!.kind === "proforma" && !!invoiceOf.get(j.id)!.sent_at, invoiceSent: invoiceOf.get(j.id)!.kind === "tax_invoice" && !!invoiceOf.get(j.id)!.sent_at } : undefined,
     });
     if (!step.actorRole || step.actorRole === "customer") continue;
     const mine =

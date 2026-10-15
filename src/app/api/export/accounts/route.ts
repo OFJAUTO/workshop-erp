@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const from = request.nextUrl.searchParams.get("from") ?? "";
   const to = request.nextUrl.searchParams.get("to") ?? "";
   const admin = createAdminClient();
-  let iq = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs(job_number), customer:customers(full_name, company_name, trn)").eq("is_active", true).order("issued_at");
+  let iq = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs!invoices_job_id_fkey(job_number), customer:customers(full_name, company_name, trn)").eq("is_active", true).order("issued_at");
   let pq = admin.from("payments").select(PAYMENT_SELECT + ", job:jobs(job_number), invoice:invoices(number), customer:customers(full_name, company_name)").eq("is_active", true).order("received_at");
   if (/^\d{4}-\d{2}-\d{2}$/.test(from)) {
     iq = iq.gte("issued_at", `${from}T00:00:00+04:00`);

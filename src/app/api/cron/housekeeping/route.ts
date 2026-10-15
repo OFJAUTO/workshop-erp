@@ -311,7 +311,7 @@ export async function GET(request: NextRequest) {
   // 17. A sent proforma unpaid past the waiting limit (24 h by default): the owner is told once per proforma.
   {
     const limitMs = (Number(settings.payment_waiting_hours) || 24) * 3600000;
-    const { data: waiting } = await admin.from("invoices").select("id, number, job_id, total_aed, sent_at, expected_payment_method, job:jobs(job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).is("waiting_notified_at", null).not("sent_at", "is", null).lt("sent_at", new Date(Date.now() - limitMs).toISOString()).limit(100);
+    const { data: waiting } = await admin.from("invoices").select("id, number, job_id, total_aed, sent_at, expected_payment_method, job:jobs!invoices_job_id_fkey(job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).is("waiting_notified_at", null).not("sent_at", "is", null).lt("sent_at", new Date(Date.now() - limitMs).toISOString()).limit(100);
     let told = 0;
     for (const w of waiting ?? []) {
       const job = w.job as unknown as { job_number: string; is_open: boolean; vehicle: Parameters<typeof formatPlate>[0] | null } | null;
