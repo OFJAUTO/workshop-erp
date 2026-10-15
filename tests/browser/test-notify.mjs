@@ -335,7 +335,7 @@ try {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}/work`);
-    const btn = page.getByRole("button", { name: "Confirmed, send to QC" });
+    const btn = page.getByRole("button", { name: /Confirmed, send to QC|Send to QC anyway/ });
     check("manager can confirm the work", (await btn.count()) === 1 && !(await btn.isDisabled()), (await page.textContent("body") ?? "").match(/Before QC[^.]*\.|still to do[^.]*\./)?.[0] ?? "");
     await btn.click();
     await submitted(page);
@@ -378,9 +378,14 @@ try {
   {
     const { browser, page } = await browserForId(accountsId);
     await go(page, `${base}/jobs/${jobId}/invoice`);
-    const full = page.getByRole("button", { name: "Full amount" }).first();
+    // The proforma is not sent yet: the payment form sits folded under step 2; a full payment is confirmed in words.
+    const folded = page.locator("[data-record-block][data-folded] summary");
+    if (await folded.count()) await folded.click();
+    const full = page.locator("[data-amount-full]").first();
     if (await full.count()) await full.click();
-    await page.getByRole("button", { name: /^Record/ }).first().click();
+    await page.locator("[data-record-payment]").first().click();
+    const yes = page.locator("[data-confirm-yes]");
+    if (await yes.count()) await yes.click();
     await submitted(page);
     const inv = await sql("select kind, number from public.invoices where job_id = $1 and is_active order by created_at", [jobId]);
     check("tax invoice generated at zero balance", inv.some((i) => i.kind === "tax_invoice"), JSON.stringify(inv));

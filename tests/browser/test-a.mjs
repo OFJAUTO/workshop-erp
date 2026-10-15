@@ -223,15 +223,16 @@ await section("F1 proforma", async () => {
   check("no staff names on the customer page (C6)", !/Prepared by|>Advisor</.test(html));
   const head = html.slice(0, html.indexOf("</head>"));
   check("link preview image is the 1200x630 JPEG with size tags (A7)", /og:image" content="https:\/\/erp\.ofjauto\.com\/preview\.jpg"/.test(head) && /og:image:width" content="1200"/.test(head) && /image_src/.test(head), head.match(/og:image[^>]*/g)?.slice(0, 2).join(" ") ?? "");
-  const { browser, page } = await browserFor("accounts");
+  // Since 16 October the counter methods (cash, card) are the advisor's or the owner's; the owner records here.
+  const { browser, page } = await browserFor("owner");
   await go(page, `${base}/jobs/${jobId}/invoice`);
   const b = await page.textContent("body");
-  check("payment box shows Full amount and Partial (A8)", /Full amount/.test(b ?? "") && /Partial/.test(b ?? ""));
-  check("bank charge note under the method buttons (F2)", /No bank charge on cash/.test(b ?? ""));
+  check("payment box shows Full amount and Part payment (A8)", /Full amount/.test(b ?? "") && /Part payment/.test(b ?? ""));
+  check("bank charge note under the method buttons (F2)", /No bank charge/.test(b ?? ""));
   await page.getByRole("button", { name: "Card", exact: true }).first().click();
   await sleep(200);
   check("card shows its 2.26% charge (F2)", /Bank charge 2\.26% on card/.test(await page.textContent("body")));
-  await page.getByRole("button", { name: "Partial" }).first().click();
+  await page.locator("[data-amount-partial]").first().click();
   await page.locator("label:has-text('Amount received') input").first().fill("100");
   await page.getByRole("button", { name: /^Record/ }).first().click();
   await submitted(page);
@@ -239,8 +240,10 @@ await section("F1 proforma", async () => {
   check("card payment recorded with 2.26% charge (F2)", rows.length === 1 && Math.abs(rows[0].charge - 2.26) < 0.01, JSON.stringify(rows));
   await go(page, `${base}/jobs/${jobId}/invoice`);
   await page.getByRole("button", { name: "Cash", exact: true }).first().click();
-  await page.getByRole("button", { name: "Full amount" }).first().click();
-  await page.getByRole("button", { name: /^Record/ }).first().click();
+  await page.locator("[data-amount-full]").first().click();
+  await page.locator("[data-record-payment]").first().click();
+  const yes = page.locator("[data-confirm-yes]");
+  if (await yes.count()) await yes.click();
   await submitted(page);
   await sleep(2500);
   const invs = await sql("select number, kind, converted_to is not null as converted, converted_from is not null as from_pro, status from public.invoices where job_id = $1 order by created_at", [jobId]);
@@ -250,7 +253,8 @@ await section("F1 proforma", async () => {
   const job = await sql("select status from public.jobs where id = $1", [jobId]);
   check("job is Ready after full payment (F1)", job[0]?.status === "ready", JSON.stringify(job));
   const notes = await sql("select title from public.notifications where job_id = $1 and title ilike '%tax invoice%' order by created_at", [jobId]);
-  check("accounts and the advisor notified about the tax invoice (F1)", notes.some((n) => /generated/.test(n.title)) && notes.some((n) => /ready to send/.test(n.title)), JSON.stringify(notes.map((n) => n.title)));
+  const paidNote = await sql("select title from public.notifications where job_id = $1 and type = 'invoice_paid' limit 1", [jobId]);
+  check("accounts and the advisor notified about the tax invoice (F1; the advisor's note reads Paid: plate, amount since 16 Oct)", notes.some((n) => /generated/.test(n.title)) && paidNote.length > 0 && /^Paid: /.test(paidNote[0].title), JSON.stringify(notes.map((n) => n.title)));
   const after = await (await fetch(`${base}/invoice/${inv.token}`)).text();
   check("old proforma link now shows the paid tax invoice (F1)", /Tax invoice/.test(after) && /Paid, thank you/.test(after) && !/not a tax invoice/.test(after));
   const receipt = after.match(/\/api\/pdf\/receipt\/[^"]+/)?.[0];

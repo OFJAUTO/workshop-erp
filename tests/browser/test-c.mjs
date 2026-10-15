@@ -209,7 +209,7 @@ await section("4-10 customer links and messages", async () => {
   check("ready stage made a proforma", invoice?.kind === "proforma" && !!invoice?.token, JSON.stringify(invoice));
   const pro = await (await fetch(`${base}/proforma/${invoice.token}`)).text();
   check("the proforma address works and says proforma in the preview (10)", /Your Proforma/.test(pro) && /View proforma \(PDF\)/.test(pro) && !/\?view=1/.test(pro), pro.match(/<title>[^<]*/)?.[0] ?? "");
-  check("View opens the PDF itself in a new tab (4)", new RegExp(`href="/api/pdf/invoice/${invoice.token}"[^>]*target="_blank"`).test(pro) || new RegExp(`target="_blank"[^>]*href="/api/pdf/invoice/${invoice.token}"`).test(pro));
+  check("View shows the PDF inside the page, never a new tab (4, changed 16 Oct)", /data-doc-viewer-open/.test(pro) && !new RegExp(`target="_blank"[^>]*href="/api/pdf/invoice/${invoice.token}"`).test(pro));
   const pdf = await fetchPdf(`/api/pdf/invoice/${invoice.token}`);
   check("the proforma PDF opens inline from the link (4)", pdf.status === 200 && /inline/.test(pdf.disp), `${pdf.status} ${pdf.disp}`);
   const full = await (await fetch(`${base}/invoice/${invoice.token}?view=1`)).text();

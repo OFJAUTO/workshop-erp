@@ -201,6 +201,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                   <div className="border-t border-line pt-3" data-record-block>
                     <PaymentForm invoiceId={live.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live.number} isProforma={live.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
                   </div>
+                ) : live && unpaid && canRecord && !creditDays ? (
+                  // Money can arrive before the proforma is sent (a customer at the counter): the form is there, folded.
+                  <details className="border-t border-line pt-3" data-record-block data-folded>
+                    <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a payment before the proforma is sent</summary>
+                    <div className="pt-2">
+                      <PaymentForm invoiceId={live.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live.number} isProforma={live.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
+                    </div>
+                  </details>
                 ) : null}
                 {live && unpaid && canRecord && creditDays ? (
                   <div className="border-t border-line pt-3" data-record-block>

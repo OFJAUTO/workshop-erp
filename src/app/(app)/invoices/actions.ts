@@ -93,7 +93,9 @@ export async function recordPayment(formData: FormData) {
   const jobIdIn = blankToNull(formData.get("job_id"));
   const returnTo = blankToNull(formData.get("return_to"));
   const base = invoiceId ? `/invoices/${invoiceId}` : jobIdIn ? `/jobs/${jobIdIn}/invoice` : "/invoices";
-  const back = returnTo && returnTo.startsWith(base) && !returnTo.includes("message=") && !returnTo.includes("error=") ? returnTo : base;
+  // Back to where the tap happened: the job's invoice page or the invoice's own page, never anywhere else.
+  const ownPage = !!returnTo && /^\/(jobs\/[0-9a-f-]{36}\/invoice|invoices\/[0-9a-f-]{36})$/.test(returnTo.split("?")[0]);
+  const back = returnTo && ownPage && !returnTo.includes("message=") && !returnTo.includes("error=") ? returnTo : base;
   const sep = back.includes("?") ? "&" : "?";
   const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
   const method = String(formData.get("method") ?? "");
