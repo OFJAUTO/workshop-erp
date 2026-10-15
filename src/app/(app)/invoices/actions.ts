@@ -12,8 +12,11 @@ import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPay
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { convertProformaIfPaid, ensureProforma } from "@/lib/invoice-flow";
-import { replacePaymentLink } from "@/lib/payment-links";
+import { currentPaymentLink, ensureAutoPayLink, paymentLinksOf, replacePaymentLink } from "@/lib/payment-links";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, methodsFor } from "@/lib/money-steps";
+import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { formatPlate } from "@/lib/types";
 
 function refresh(jobId: string | null, invoiceId?: string) {
   revalidatePath("/invoices");
@@ -93,6 +96,8 @@ export async function recordPayment(formData: FormData) {
   const back = returnTo && returnTo.startsWith(base) && !returnTo.includes("message=") && !returnTo.includes("error=") ? returnTo : base;
   const sep = back.includes("?") ? "&" : "?";
   const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
+  const method = String(formData.get("method") ?? "");
+  if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) redirect(`${back}${sep}error=${encodeURIComponent(`${PAYMENT_METHOD_LABELS[method] ?? "This method"} is recorded by ${method === "cash" || method === "card" ? "the advisor at the counter" : "accounts"}, not by you.`)}`);
   const r = await recordPaymentCore(actorOf(staff), {
     invoiceId,
     jobId: jobIdIn,
@@ -104,8 +109,49 @@ export async function recordPayment(formData: FormData) {
     clientKey: blankToNull(formData.get("client_key")),
   }, settings);
   const jobId = jobIdIn ?? (invoiceId ? (await loadInvoice(invoiceId))?.invoice.job_id ?? null : null);
+  // A part payment: the Pay now order (if any) is remade for what is left.
+  if (invoiceId && !r.error) {
+    const cur = currentPaymentLink(await paymentLinksOf(invoiceId));
+    if (cur?.provider === "ngenius" && !cur.paid_at) await ensureAutoPayLink(invoiceId, { id: staff.id, display_name: staff.display_name }, await getSiteUrl());
+  }
   refresh(jobId, invoiceId ?? undefined);
   redirect(`${back}${sep}${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Recorded.")}`);
+}
+
+/**
+ * The advisor heard from the customer that the money was sent (a transfer or a link): the proforma shows
+ * "Customer says paid, checking" and accounts are asked to look at the bank. Nothing is released by it.
+ */
+export async function customerSaysPaid(invoiceId: string, formData: FormData) {
+  const staff = await requirePermission("viewInvoices");
+  const admin = createAdminClient();
+  const bundle = await loadInvoice(invoiceId);
+  const returnTo = blankToNull(formData.get("return_to"));
+  const back = returnTo && returnTo.startsWith("/") ? returnTo.split("?")[0] : bundle?.invoice.job_id ? `/jobs/${bundle.invoice.job_id}/invoice` : `/invoices/${invoiceId}`;
+  if (!bundle) redirect("/invoices");
+  const method = blankToNull(formData.get("method"));
+  const note = blankToNull(formData.get("note"));
+  const now = new Date().toISOString();
+  await admin.from("invoices").update({ customer_says_paid_at: now, customer_says_paid_by: staff.id, customer_says_paid_method: method, customer_says_paid_note: note, updated_by: staff.id }).eq("id", invoiceId);
+  const { data: job } = bundle!.invoice.job_id ? await admin.from("jobs").select("job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", bundle!.invoice.job_id).maybeSingle() : { data: null };
+  const plate = job?.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : bundle!.invoice.number;
+  const live = bundle!.payments.filter((p) => p.status === "recorded");
+  const due = round2(bundle!.invoice.total_aed - live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared").reduce((a, p) => a + p.amount_aed, 0));
+  if (bundle!.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle!.invoice.job_id, event_type: "payment", note: `Customer says paid (${method ? PAYMENT_METHOD_LABELS[method] ?? method : "method not given"})${note ? `: ${note}` : ""}, noted by ${staff.display_name}. Accounts asked to check.`, created_by: staff.id });
+  await notifyRoles(["accounts"], { type: "customer_says_paid", title: `Customer says paid: ${plate}, AED ${due.toLocaleString("en-GB")}`, body: `${bundle!.invoice.number}${method ? ` by ${PAYMENT_METHOD_LABELS[method] ?? method}` : ""}${note ? ` · ${note}` : ""}. Check the bank and record the payment.`, jobId: bundle!.invoice.job_id, href: bundle!.invoice.job_id ? `/jobs/${bundle!.invoice.job_id}/invoice` : `/invoices/${invoiceId}` });
+  refresh(bundle!.invoice.job_id, invoiceId);
+  redirect(`${back}?message=${encodeURIComponent("Noted: customer says paid. Accounts have been asked to check the bank.")}`);
+}
+
+/** Pay now by Network International on an invoice (the advisor's "Add Pay now"); the customer's page shows the button. */
+export async function addPayNow(invoiceId: string, formData: FormData) {
+  const staff = await requirePermission("sendApproval");
+  const returnTo = blankToNull(formData.get("return_to"));
+  const bundle = await loadInvoice(invoiceId);
+  const back = returnTo && returnTo.startsWith("/") ? returnTo.split("?")[0] : bundle?.invoice.job_id ? `/jobs/${bundle.invoice.job_id}/invoice` : `/invoices/${invoiceId}`;
+  const r = await ensureAutoPayLink(invoiceId, { id: staff.id, display_name: staff.display_name }, await getSiteUrl());
+  refresh(bundle?.invoice.job_id ?? null, invoiceId);
+  redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? "Pay now is on the customer's page.")}`);
 }
 
 /** A wrong receipt is never deleted: the owner or the head accountant voids it with a reason. */
@@ -218,12 +264,59 @@ export async function issueCreditNote(invoiceId: string, formData: FormData) {
 }
 
 /** Records that the "car is ready" message with the invoice went to the customer. */
-export async function markReadySent(jobId: string, method: string): Promise<{ error?: string; ok?: boolean }> {
+async function liveProforma(jobId: string) {
+  const { data } = await createAdminClient().from("invoices").select("id, number, total_aed, token, sent_at, expected_payment_method, pay_now_enabled").eq("job_id", jobId).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).order("issued_at", { ascending: false }).limit(1).maybeSingle();
+  return data;
+}
+
+/**
+ * Before the proforma goes out: how the customer will pay (compulsory), Pay now by Network International, or a
+ * pasted payment link. Saved on the proforma; the message is sent in the next step.
+ */
+export async function prepareProformaSend(jobId: string, opts: { expected: string | null; payNow?: boolean; linkUrl?: string | null }): Promise<{ error?: string; ok?: boolean; payNowError?: string; payNowOn?: boolean }> {
   const staff = await requirePermission("sendApproval");
   const admin = createAdminClient();
-  await admin.from("jobs").update({ ready_sent_at: new Date().toISOString() }).eq("id", jobId);
-  await admin.from("invoices").update({ sent_by: staff.id, sent_at: new Date().toISOString() }).eq("job_id", jobId).eq("kind", "proforma").eq("is_active", true);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: `Proforma and "your car is ready" sent by ${staff.display_name} (${method})`, created_by: staff.id });
+  const expected = opts.expected;
+  if (!expected || !PAYMENT_METHODS.includes(expected as (typeof PAYMENT_METHODS)[number])) return { error: "Choose how the customer will pay before sending." };
+  const pro = await liveProforma(jobId);
+  if (!pro) return { error: "There is no proforma on this job yet." };
+  let payNowError: string | undefined;
+  let payNowOn = false;
+  if (opts.linkUrl) {
+    if (!/^https:\/\/\S+$/.test(opts.linkUrl)) return { error: "Paste the full https:// payment link." };
+    const r = await replacePaymentLink(pro.id, opts.linkUrl, { id: staff.id, display_name: staff.display_name });
+    if (r.error) return { error: r.error };
+    payNowOn = true;
+  } else if (opts.payNow) {
+    const r = await ensureAutoPayLink(pro.id, { id: staff.id, display_name: staff.display_name }, await getSiteUrl());
+    if (r.error) payNowError = r.error;
+    else payNowOn = true;
+  }
+  await admin.from("invoices").update({ expected_payment_method: expected, pay_now_enabled: payNowOn || !!pro.pay_now_enabled, updated_by: staff.id }).eq("id", pro.id);
+  refresh(jobId, pro.id);
+  return { ok: true, payNowError, payNowOn };
+}
+
+/** Records that the "car is ready" message with the proforma went to the customer; accounts are told the first time. */
+export async function markReadySent(jobId: string, method: string, opts: { expected?: string | null } = {}): Promise<{ error?: string; ok?: boolean }> {
+  const staff = await requirePermission("sendApproval");
+  const admin = createAdminClient();
+  const pro = await liveProforma(jobId);
+  if (!pro) return { error: "There is no proforma on this job yet." };
+  const expected = opts.expected ?? pro.expected_payment_method ?? null;
+  if (!expected || !PAYMENT_METHODS.includes(expected as (typeof PAYMENT_METHODS)[number])) return { error: "Choose how the customer will pay before sending." };
+  const now = new Date().toISOString();
+  const first = !pro.sent_at;
+  await admin.from("jobs").update({ ready_sent_at: now }).eq("id", jobId);
+  await admin.from("invoices").update({ sent_by: staff.id, sent_at: now, expected_payment_method: expected, updated_by: staff.id }).eq("id", pro.id);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: `Proforma ${pro.number} and "your car is ready" sent by ${staff.display_name} (${method}); expected ${PAYMENT_METHOD_LABELS[expected] ?? expected}${pro.pay_now_enabled ? ", Pay now on the page" : ""}`, created_by: staff.id });
+  if (first) {
+    const { data: job } = await admin.from("jobs").select("job_number, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", jobId).maybeSingle();
+    const cust = job?.customer as unknown as { full_name: string; company_name: string | null } | null;
+    const who = cust?.company_name ?? (cust?.full_name ?? "").split(" ")[0] ?? "the customer";
+    const plate = job?.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : job?.job_number ?? "";
+    await notifyRoles(["accounts"], { type: "proforma_sent", title: `Proforma ${pro.number} sent: ${who}, AED ${Number(pro.total_aed).toLocaleString("en-GB")}, expected ${PAYMENT_METHOD_LABELS[expected] ?? expected}, ${plate}`, body: "Awaiting payment. Record it here when it arrives.", jobId, href: `/jobs/${jobId}/invoice` });
+  }
   refresh(jobId);
   return { ok: true };
 }

@@ -3,22 +3,144 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
-import { Button } from "@/components/ui";
-import { markInvoiceSent, markReadySent } from "@/app/(app)/invoices/actions";
+import { Button, Input } from "@/components/ui";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "@/lib/money-steps";
+import { markInvoiceSent, markReadySent, prepareProformaSend } from "@/app/(app)/invoices/actions";
 
-/** "Your car is ready" with the proforma link, or the tax invoice once paid: the WhatsApp message in the centre window, recorded when sent. */
-export function ReadySendControl({ jobId, token, siteUrl, messageTemplate, phoneDigits, sentAt, kind = "proforma" }: { jobId: string; token: string | null; siteUrl: string; messageTemplate: string; phoneDigits: string; sentAt: string | null; kind?: "proforma" | "tax_invoice" }) {
+/**
+ * "Your car is ready" with the proforma link, or the tax invoice once paid. For the proforma the window first asks
+ * how the customer will pay (compulsory), offers Pay now (Network International, when set up) and a box to paste a
+ * payment link; then the WhatsApp message. Recorded when sent.
+ */
+export function ReadySendControl({
+  jobId,
+  token,
+  siteUrl,
+  messageTemplate,
+  phoneDigits,
+  sentAt,
+  kind = "proforma",
+  expectedMethod = null,
+  payNowAvailable = false,
+  payNowOn = false,
+  size = "md",
+  label = null,
+  pdf = null,
+  startWithPayNow = false,
+  charges = {},
+}: {
+  jobId: string;
+  token: string | null;
+  siteUrl: string;
+  messageTemplate: string;
+  phoneDigits: string;
+  sentAt: string | null;
+  kind?: "proforma" | "tax_invoice";
+  /** The method chosen the last time, pre-selected. */
+  expectedMethod?: string | null;
+  /** Network International keys are in place: the Pay now switch is offered. */
+  payNowAvailable?: boolean;
+  /** The customer's page already shows Pay now. */
+  payNowOn?: boolean;
+  size?: "md" | "lg";
+  label?: string | null;
+  pdf?: { href: string; fileName: string } | null;
+  /** "Add Pay now and resend": the window opens with the switch on. */
+  startWithPayNow?: boolean;
+  /** Bank charge per method, shown next to the choice. */
+  charges?: Record<string, number>;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [, start] = useTransition();
+  const [step, setStep] = useState<"how" | "message">(kind === "tax_invoice" ? "message" : "how");
+  const [expected, setExpected] = useState<string | null>(expectedMethod);
+  const [payNow, setPayNow] = useState(startWithPayNow || payNowOn);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [paste, setPaste] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [pending, start] = useTransition();
   // Before payment the link says proforma, never invoice; the tax invoice has its own address.
   const message = token ? messageTemplate.replaceAll("[link]", `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) : null;
   if (!token) return <p className="text-xs text-muted">The message is ready once the proforma is prepared.</p>;
   const tax = kind === "tax_invoice";
+  const title = tax ? "Your tax invoice" : "Your car is ready";
+  const buttonLabel = label ?? (tax ? (sentAt ? "Send the tax invoice again" : "Send the tax invoice") : sentAt ? (startWithPayNow ? "Add Pay now and resend" : "Send the proforma again") : "Send the proforma");
+
+  function openWindow() {
+    setError(null);
+    setNote(null);
+    setStep(tax ? "message" : "how");
+    setOpen(true);
+  }
+
+  function continueToMessage() {
+    if (!expected) {
+      setError("Choose how the customer will pay.");
+      return;
+    }
+    setError(null);
+    start(async () => {
+      const r = await prepareProformaSend(jobId, { expected, payNow: payNow && !paste, linkUrl: paste && linkUrl.trim() ? linkUrl.trim() : null });
+      if (r.error) {
+        setError(r.error);
+        return;
+      }
+      if (r.payNowError) setNote(`${r.payNowError} The proforma can still go out: the customer sees the bank details.`);
+      setStep("message");
+      router.refresh();
+    });
+  }
+
+  const sent = (method: "whatsapp" | "copy") =>
+    start(async () => {
+      const r = tax ? await markInvoiceSent(jobId, method) : await markReadySent(jobId, method, { expected });
+      if (r.error) setError(r.error);
+      router.refresh();
+    });
+
   return (
-    <div className="flex flex-col gap-1">
-      <Button type="button" size="md" tone={sentAt ? "secondary" : "primary"} onClick={() => setOpen(true)}>{tax ? (sentAt ? "Send the tax invoice again" : "Send the tax invoice") : sentAt ? "Send the proforma again" : "Send the proforma"}</Button>
-      {open ? <SendLinkDialog title={tax ? "Your tax invoice" : "Your car is ready"} message={message} phoneDigits={phoneDigits} onSent={(method) => start(async () => { if (tax) await markInvoiceSent(jobId, method); else await markReadySent(jobId, method); router.refresh(); })} onClose={() => setOpen(false)} /> : null}
+    <div className="flex flex-col gap-1" data-ready-send={kind}>
+      <Button type="button" size={size} tone={sentAt && !startWithPayNow ? "secondary" : "primary"} onClick={openWindow} className={size === "lg" ? "w-full" : ""}>
+        {buttonLabel}
+      </Button>
+      {error && !open ? <span className="text-xs font-semibold text-red">{error}</span> : null}
+      {open ? (
+        <SendLinkDialog title={title} message={step === "message" ? message : null} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} pdf={pdf ? { ...pdf, jobId, kind } : null} note={step === "message" ? note : null}>
+          {step === "how" ? (
+            <div className="flex flex-col gap-4" data-pay-how>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">How will the customer pay?</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {PAYMENT_METHODS.map((m) => (
+                    <button key={m} type="button" onClick={() => setExpected(m)} aria-pressed={expected === m} data-expected={m} className={`min-h-12 rounded-control border-2 px-2 text-sm font-bold flex flex-col items-center justify-center ${expected === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                      <span>{PAYMENT_METHOD_LABELS[m]}</span>
+                      {charges[m] ? <span className={`text-[11px] font-semibold ${expected === m ? "text-white/80" : "text-muted"}`}>{charges[m]}% bank charge</span> : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {payNowAvailable && !paste ? (
+                <label className="flex items-center gap-3 min-h-12 rounded-control border border-line-strong bg-white px-4 cursor-pointer" data-pay-now-switch>
+                  <input type="checkbox" checked={payNow} onChange={(e) => setPayNow(e.target.checked)} className="h-5 w-5 accent-ink" />
+                  <span className="flex flex-col"><span className="text-sm font-bold">Pay now on the customer&apos;s page</span><span className="text-xs text-muted">Card payment through Network International; the payment records itself.</span></span>
+                </label>
+              ) : null}
+              {!paste ? (
+                <button type="button" onClick={() => setPaste(true)} className="self-start text-xs font-bold underline underline-offset-4 text-muted" data-paste-link>Paste a payment link instead</button>
+              ) : (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-muted">Payment link (opens once for the customer)</span>
+                  <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://…" data-link-url />
+                  <button type="button" onClick={() => { setPaste(false); setLinkUrl(""); }} className="self-start text-xs font-bold underline underline-offset-4 text-muted">No link</button>
+                </label>
+              )}
+              {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
+              <Button type="button" size="lg" className="w-full" disabled={pending || !expected} onClick={continueToMessage} data-pay-continue>{pending ? "Saving…" : "Continue to the message"}</Button>
+            </div>
+          ) : undefined}
+        </SendLinkDialog>
+      ) : null}
     </div>
   );
 }

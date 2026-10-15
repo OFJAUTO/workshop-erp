@@ -103,8 +103,9 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
   const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", pro.id).eq("is_active", true);
   const bal = invoiceBalance(pro, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
   if (bal.balance > 0.005 && !opts.force) return null;
-  const { data: job } = await admin.from("jobs").select("job_number, status, gated_in_by").eq("id", jobId).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("job_number, status, gated_in_by, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", jobId).maybeSingle();
   if (!job) return null;
+  const plate = job.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : job.job_number;
   const number = await nextDocumentNumber("tax_invoice", settings);
   const token = newToken();
   const { data: lines } = await admin.from("invoice_lines").select(INVOICE_LINE_SELECT).eq("invoice_id", pro.id).eq("is_active", true).order("position");
@@ -155,7 +156,9 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
   const paidNote = opts.force ? `${number} issued by the owner before full payment (${money(bal.balance)} still due): ${opts.force.reason}` : `${number} generated: ${pro.number} paid in full`;
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: paidNote, created_by: by });
   await notifyRoles(["accounts"], { type: "invoice_issued", title: `Tax invoice ${number} ${opts.force ? "issued" : "generated"} · ${job.job_number}`, body: `${paidNote}. Check it.`, jobId, href: `/invoices/${tax.id}` });
-  await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { type: "invoice_issued", title: `Tax invoice ready to send · ${job.job_number}`, body: `${number} is ${opts.force ? "issued" : "generated and marked paid"}. Send it to the customer.`, jobId, href: `/jobs/${jobId}` });
+  await notifyStaff(await advisorsOf(jobId, job.gated_in_by), opts.force
+    ? { type: "invoice_issued", title: `Tax invoice ready to send · ${job.job_number}`, body: `${number} is issued by the owner. Send it to the customer.`, jobId, href: `/jobs/${jobId}/invoice` }
+    : { type: "invoice_paid", title: `Paid: ${plate}, ${money(pro.total_aed)}`, body: `Tax invoice ${number} created. Send it to the customer, then gate out.`, jobId, href: `/jobs/${jobId}/invoice` });
   return toInvoice(tax as unknown as Record<string, unknown>);
 }
 

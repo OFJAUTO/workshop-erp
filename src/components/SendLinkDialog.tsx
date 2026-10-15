@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { SharePdfButton } from "./SharePdfButton";
 
 /**
  * The centre window that opens where a "send to customer" button was clicked: the written message
@@ -14,7 +15,13 @@ export function SendLinkDialog({
   onSent,
   onClose,
   children,
+  pdf = null,
+  note = null,
 }: {
+  /** The document as a PDF: "Share PDF" hands the file to the share sheet (or downloads it on a PC). */
+  pdf?: { href: string; fileName: string; jobId?: string | null; kind?: string } | null;
+  /** A warning shown above the message (for example Pay now could not be switched on). */
+  note?: string | null;
   title: string;
   /** The full message with the link already in it. */
   message: string | null;
@@ -60,6 +67,7 @@ export function SendLinkDialog({
           children
         ) : message ? (
           <>
+            {note ? <p className="text-sm font-semibold text-amber" data-pay-note>{note}</p> : null}
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Message to the customer</p>
             <textarea readOnly value={message} rows={6} className="w-full rounded-control border border-line bg-canvas p-3 text-sm" onFocus={(e) => e.currentTarget.select()} />
             {phoneDigits ? (
@@ -78,6 +86,7 @@ export function SendLinkDialog({
             <button type="button" onClick={copy} className="min-h-12 w-full rounded-control border border-line-strong bg-white text-sm font-bold">
               {copied ? "Copied message and link" : "Copy message and link"}
             </button>
+            {pdf ? <SharePdfButton href={pdf.href} fileName={pdf.fileName} jobId={pdf.jobId ?? null} kind={pdf.kind ?? "document"} /> : null}
             {copyError ? <span className="text-xs font-semibold text-red">{copyError}</span> : null}
           </>
         ) : null}

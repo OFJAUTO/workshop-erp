@@ -4,6 +4,8 @@ import { GATE_IN_BUCKET } from "@/lib/media";
 import { addDays, dayStartIso, dubaiTimeOf } from "@/lib/calendar";
 import { dubaiDate, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { formatDateTime } from "@/lib/format";
+import { formatPlate } from "@/lib/types";
 import { workingHoursBetween } from "@/lib/working-time";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -304,6 +306,23 @@ export async function GET(request: NextRequest) {
       await admin.from("jobs").update({ doc_reminders: done }).eq("id", j.id as string);
       report.docReminders = (report.docReminders ?? 0) + fresh.length;
     }
+  }
+
+  // 17. A sent proforma unpaid past the waiting limit (24 h by default): the owner is told once per proforma.
+  {
+    const limitMs = (Number(settings.payment_waiting_hours) || 24) * 3600000;
+    const { data: waiting } = await admin.from("invoices").select("id, number, job_id, total_aed, sent_at, expected_payment_method, job:jobs(job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).is("waiting_notified_at", null).not("sent_at", "is", null).lt("sent_at", new Date(Date.now() - limitMs).toISOString()).limit(100);
+    let told = 0;
+    for (const w of waiting ?? []) {
+      const job = w.job as unknown as { job_number: string; is_open: boolean; vehicle: Parameters<typeof formatPlate>[0] | null } | null;
+      if (!job?.is_open) continue;
+      const hours = Math.floor((Date.now() - Date.parse(w.sent_at as string)) / 3600000);
+      const plate = job.vehicle ? formatPlate(job.vehicle) : job.job_number;
+      await notifyRoles(["owner"], { type: "payment_waiting_long", title: `Waiting ${hours} h for payment: ${plate}, AED ${Number(w.total_aed).toLocaleString("en-GB")}`, body: `${w.number} sent ${formatDateTime(w.sent_at as string)}${w.expected_payment_method ? `, expected ${w.expected_payment_method}` : ""}. Nothing received yet.`, jobId: w.job_id as string, href: `/jobs/${w.job_id}/invoice` });
+      await admin.from("invoices").update({ waiting_notified_at: new Date().toISOString() }).eq("id", w.id);
+      told++;
+    }
+    report.paymentWaiting = told;
   }
 
   // 16. Bodyshop: a late stage pushes the later due dates and the handover (manager and advisor told); cars due out tomorrow are announced with the sign-offs needed.

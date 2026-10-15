@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice } from "@/lib/invoice-data";
+import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice, nextDocumentNumber } from "@/lib/invoice-data";
+import { methodsFor } from "@/lib/money-steps";
 import { paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -47,6 +48,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   // A proforma takes payments until it becomes the tax invoice.
   const payable = isTax || (invoice.kind === "proforma" && !invoice.converted_to);
   const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
+  const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
 
   return (
     <>
@@ -136,7 +138,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               </ul>
               {canPay && bal.balance > 0 ? (
                 <div className="border-t border-line pt-3">
-                  <PaymentForm invoiceId={invoice.id} jobId={null} balance={bal.balance} action={recordPayment} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} isOwner={role === "owner"} />
+                  <PaymentForm invoiceId={invoice.id} jobId={null} balance={bal.balance} action={recordPayment} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={invoice.number} isProforma={invoice.kind === "proforma"} nextTaxNumber={invoice.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} />
                 </div>
               ) : null}
               {payable && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}

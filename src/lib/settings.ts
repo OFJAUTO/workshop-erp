@@ -35,6 +35,11 @@ const DEFAULTS = {
   whatsapp_invoice_template: "Thank you for your payment. The tax invoice for [make model] ([plate]) is here:\n[link]",
   whatsapp_followup_template:
     "Dear [name], thank you for choosing OFJ Automotive for your [make model] ([plate]). We hope everything is running well. If anything needs our attention, please let us know.\nThank you, [advisor], OFJ Automotive",
+  /** Hours a sent proforma may wait unpaid before the job card turns amber and the owner is told once. */
+  payment_waiting_hours: 24,
+  /** Supplier LPOs by email go out from this Google Workspace mailbox (the service account must be allowed to send as it). */
+  supplier_lpo_from_email: "peter@ofjauto.com",
+  supplier_lpo_email_text: "Dear [supplier],\n\nPlease find attached our purchase order [number]. Kindly confirm availability and the delivery date.\n\nThank you,\nOFJ Automotive, Parts",
   bank_charge_card_percent: 2.26,
   bank_charge_link_percent: 1.75,
   bank_charge_cash_percent: 0,

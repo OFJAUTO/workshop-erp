@@ -6,7 +6,8 @@ import { bankChargePercentFor, getSettings, type Settings } from "./settings";
 import { convertProformaIfPaid } from "./invoice-flow";
 import { createAdminClient } from "./supabase/admin";
 
-export type Actor = { id: string; display_name: string; role_id: string; is_head_accountant?: boolean };
+/** Who records: a staff member, or the payment gateway (no id). */
+export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
 export type PaymentInput = { invoiceId: string | null; jobId: string | null; method: string; amount: number; reference?: string | null; cheque?: { number: string | null; bank: string | null; date: string | null } | null; notes?: string | null; clientKey?: string | null };
 export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string };
 
@@ -19,7 +20,7 @@ async function advisorsOf(jobId: string) {
 }
 
 /** After a payment, a void or a cheque change: the job is Ready when the invoice is settled, pending payment otherwise. */
-export async function settleJob(jobId: string, invoiceId: string, by: string, settings?: Settings) {
+export async function settleJob(jobId: string, invoiceId: string, by: string | null, settings?: Settings) {
   const admin = createAdminClient();
   const [{ data: inv }, { data: pays }, { data: job }] = await Promise.all([
     admin.from("invoices").select(INVOICE_SELECT).eq("id", invoiceId).maybeSingle(),
@@ -105,6 +106,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (error || !created) return { error: error?.message ?? "Could not record the payment." };
   if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as a deposit"} received by ${actor.display_name}${over ? " (above the balance, owner)" : ""}`, created_by: actor.id });
+  // Money arrived: "Customer says paid" is answered.
+  if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
   if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
   if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
   if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
@@ -115,7 +118,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
 /** A wrong receipt is never deleted: the owner or the head accountant voids it with a reason; it stays visible, struck through. */
 export async function voidPayment(paymentId: string, actor: Actor, reason: string): Promise<PaymentResult> {
   const admin = createAdminClient();
-  if (!(actor.role_id === "owner" || (actor.role_id === "accounts" && actor.is_head_accountant))) return { error: "Only the owner or the head accountant can void a receipt." };
+  if (!actor.id || !(actor.role_id === "owner" || (actor.role_id === "accounts" && actor.is_head_accountant))) return { error: "Only the owner or the head accountant can void a receipt." };
   const clean = reason.trim().slice(0, 300);
   if (clean.length < 3) return { error: "Write the reason for the void." };
   const { data: raw } = await admin.from("payments").select(PAYMENT_SELECT).eq("id", paymentId).maybeSingle();
@@ -131,7 +134,7 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
 
 /** Accounts tick a payment once the money is confirmed. */
 export async function verifyPayment(paymentId: string, actor: Actor): Promise<PaymentResult> {
-  if (!(actor.role_id === "owner" || actor.role_id === "accounts")) return { error: "Only accounts verify payments." };
+  if (!actor.id || !(actor.role_id === "owner" || actor.role_id === "accounts")) return { error: "Only accounts verify payments." };
   const admin = createAdminClient();
   const { error } = await admin.from("payments").update({ verified_at: new Date().toISOString(), verified_by: actor.id, updated_by: actor.id }).eq("id", paymentId).is("verified_at", null);
   return error ? { error: error.message } : { ok: true, message: "Verified." };
@@ -139,7 +142,7 @@ export async function verifyPayment(paymentId: string, actor: Actor): Promise<Pa
 
 /** The owner approves a payment above the balance (it becomes a recorded receipt) or refuses it (voided). */
 export async function decideOverpayment(paymentId: string, actor: Actor, approve: boolean, note: string | null): Promise<PaymentResult> {
-  if (actor.role_id !== "owner") return { error: "Only the owner approves a payment above the balance." };
+  if (!actor.id || actor.role_id !== "owner") return { error: "Only the owner approves a payment above the balance." };
   const admin = createAdminClient();
   const { data: raw } = await admin.from("payments").select(PAYMENT_SELECT).eq("id", paymentId).maybeSingle();
   if (!raw) return { error: "Payment not found." };

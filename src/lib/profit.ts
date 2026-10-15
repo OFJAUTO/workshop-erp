@@ -119,7 +119,7 @@ function plateText(v: { plate_number: string | null; plate_code: string | null; 
   return [v.plate_emirate, v.plate_code, v.plate_number].filter(Boolean).join(" ");
 }
 
-export type DailyProfit = { date: string; target: number; yellowPercent: number; invoicedProfit: number; invoicedTotal: number; collected: number; carry: number; effective: number; percent: number; tone: "green" | "amber" | "red"; count: number; provisional: number; /** The losses on comebacks invoiced today (our fault), shown as a red line. */ comebacks: number };
+export type DailyProfit = { date: string; target: number; yellowPercent: number; invoicedProfit: number; invoicedTotal: number; collected: number; carry: number; effective: number; percent: number; tone: "green" | "amber" | "red"; count: number; provisional: number; /** Profit invoiced this month so far, today included. */ monthProfit: number; /** The losses on comebacks invoiced today (our fault), shown as a red line. */ comebacks: number };
 
 /** Dubai midnight of a date as an ISO instant. */
 function dayStart(date: string) {
@@ -159,7 +159,7 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
   const percent = target > 0 ? Math.round((effective / target) * 100) : 0;
   const tone: DailyProfit["tone"] = target <= 0 ? "green" : percent >= 100 ? "green" : percent >= yellowPercent ? "amber" : "red";
   const comebacks = round2(today.filter((p) => p.comeback?.ours).reduce((a, p) => a + Math.max(0, -(p.profit + (p.comeback?.claimPaid ?? 0))), 0));
-  return { date, target, yellowPercent, invoicedProfit, invoicedTotal: round2(today.reduce((a, p) => a + p.invoice.total_aed, 0)), collected, carry, effective, percent, tone, count: today.length, provisional: today.filter((p) => p.provisional).length, comebacks };
+  return { date, target, yellowPercent, invoicedProfit, invoicedTotal: round2(today.reduce((a, p) => a + p.invoice.total_aed, 0)), collected, carry, effective, percent, tone, monthProfit: round2(earlierProfit + invoicedProfit), count: today.length, provisional: today.filter((p) => p.provisional).length, comebacks };
 }
 
 export type { PaymentRow };

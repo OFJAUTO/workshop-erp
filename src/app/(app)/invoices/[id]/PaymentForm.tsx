@@ -1,70 +1,139 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button, Input } from "@/components/ui";
+import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
 
-const METHODS = [
-  { value: "cash", label: "Cash" },
-  { value: "card", label: "Card" },
-  { value: "link", label: "Payment link" },
-  { value: "cheque", label: "Cheque" },
-  { value: "transfer", label: "Bank transfer" },
-];
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function RecordButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
-  return <Button type="submit" size="lg" disabled={pending}>{pending ? "Recording…" : label}</Button>;
+  return <Button type="submit" size="lg" disabled={pending} data-record-payment>{pending ? "Recording…" : label}</Button>;
 }
 
 /**
- * Three taps: the method, "Full amount" or "Partial", Record. A cheque asks for its number and date.
- * The button locks while it records; the same tap twice makes one receipt, not two. More than the
- * balance goes to the owner for approval unless the owner records it.
+ * Recording a payment in three taps: the method (only the ones this person may record; the expected one is
+ * pre-selected), Full amount or Partial, Record. A full payment asks once more, in plain words, what it does:
+ * the proforma becomes a tax invoice that can never be deleted. A cheque asks for its number and date. The same
+ * tap twice makes one receipt, not two; more than the balance goes to the owner for approval.
  */
-export function PaymentForm({ invoiceId, jobId, balance, action, bankChargeCard, bankChargeLink, bankChargeCash = 0, bankChargeCheque = 0, bankChargeTransfer = 0, returnTo = null, isOwner = false }: { bankChargeCash?: number; bankChargeCheque?: number; bankChargeTransfer?: number; invoiceId: string | null; jobId: string | null; balance: number | null; action: (formData: FormData) => void; bankChargeCard: number; bankChargeLink: number; returnTo?: string | null; isOwner?: boolean }) {
-  const [method, setMethod] = useState("cash");
+export function PaymentForm({
+  invoiceId,
+  jobId,
+  balance,
+  action,
+  charges,
+  methods,
+  expected = null,
+  returnTo = null,
+  isOwner = false,
+  invoiceNumber = "",
+  isProforma = false,
+  nextTaxNumber = null,
+}: {
+  invoiceId: string | null;
+  jobId: string | null;
+  balance: number | null;
+  action: (formData: FormData) => void;
+  /** Bank charge per method, in percent. */
+  charges: Record<string, number>;
+  /** The methods this person may record. */
+  methods: string[];
+  expected?: string | null;
+  returnTo?: string | null;
+  isOwner?: boolean;
+  invoiceNumber?: string;
+  isProforma?: boolean;
+  /** The number the tax invoice will get when this payment settles the proforma. */
+  nextTaxNumber?: string | null;
+}) {
+  const first = expected && methods.includes(expected) ? expected : methods[0] ?? "";
+  const [method, setMethod] = useState(first);
   const [mode, setMode] = useState<"full" | "partial">(balance && balance > 0 ? "full" : "partial");
   const [amount, setAmount] = useState("");
+  const [reference, setReference] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const [clientKey] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`));
-  const charge = method === "card" ? bankChargeCard : method === "link" ? bankChargeLink : method === "cash" ? bankChargeCash : method === "transfer" ? bankChargeTransfer : bankChargeCheque;
+  const charge = charges[method] ?? 0;
   const value = mode === "full" && balance ? balance : Number(amount) || 0;
   const over = balance !== null && value > balance + 0.005;
+  const settles = balance !== null && balance > 0 && value >= balance - 0.005 && !over;
+  if (!methods.length) return <p className="text-sm text-muted">Payments are recorded by accounts (bank side) or the advisor at the counter.</p>;
+
   return (
-    <form action={action} className="flex flex-col gap-3">
-      {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
-      {invoiceId ? <input type="hidden" name="invoice_id" value={invoiceId} /> : null}
-      {jobId ? <input type="hidden" name="job_id" value={jobId} /> : null}
-      <input type="hidden" name="method" value={method} />
-      <input type="hidden" name="client_key" value={clientKey} />
-      <input type="hidden" name="amount" value={mode === "full" && balance ? balance.toFixed(2) : amount} />
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        {METHODS.map((m) => (
-          <button key={m.value} type="button" onClick={() => setMethod(m.value)} aria-pressed={method === m.value} className={`min-h-12 rounded-control border-2 text-sm font-bold ${method === m.value ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{m.label}</button>
-        ))}
-      </div>
-      <p className="text-xs text-muted">{charge > 0 ? `Bank charge ${charge}% on ${METHODS.find((x) => x.value === method)?.label.toLowerCase()}${value > 0 ? ` (AED ${((value * charge) / 100).toFixed(2)})` : ""}, internal, never shown to the customer.` : `No bank charge on ${METHODS.find((x) => x.value === method)?.label.toLowerCase()}.`}</p>
-      {balance && balance > 0 ? (
-        <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => setMode("full")} aria-pressed={mode === "full"} className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "full" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Full amount · {money(balance)}</button>
-          <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Partial</button>
+    <>
+      <form ref={formRef} action={action} className="flex flex-col gap-3" data-payment-form>
+        {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
+        {invoiceId ? <input type="hidden" name="invoice_id" value={invoiceId} /> : null}
+        {jobId ? <input type="hidden" name="job_id" value={jobId} /> : null}
+        <input type="hidden" name="method" value={method} />
+        <input type="hidden" name="client_key" value={clientKey} />
+        <input type="hidden" name="amount" value={mode === "full" && balance ? balance.toFixed(2) : amount} />
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {methods.map((m) => (
+            <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-method={m} className={`min-h-12 rounded-control border-2 text-sm font-bold ${method === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              {PAYMENT_METHOD_LABELS[m] ?? m}
+              {expected === m ? <span className={`block text-[10px] font-semibold ${method === m ? "text-white/80" : "text-muted"}`}>expected</span> : null}
+            </button>
+          ))}
+        </div>
+        {balance && balance > 0 ? (
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setMode("full")} aria-pressed={mode === "full"} data-amount-full className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "full" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              Full amount · {money(balance)}
+            </button>
+            <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} data-amount-partial className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              Part payment
+            </button>
+          </div>
+        ) : null}
+        {mode === "partial" || !balance ? (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-muted">Amount received (AED)</span>
+            <Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" required className="max-w-56" data-amount-input />
+          </label>
+        ) : null}
+        {method === "cheque" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque date</span><Input name="cheque_date" type="date" required /></label>
+          </div>
+        ) : null}
+        {method !== "cash" && method !== "cheque" ? (
+          <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === "card" ? "Terminal slip number (optional)" : method === "transfer" ? "Transfer reference (optional)" : "Link reference (optional)"} className="max-w-72" data-reference />
+        ) : null}
+        <p className="text-xs text-muted">
+          {charge > 0 ? `Bank charge ${charge}% on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (${money((value * charge) / 100)})` : ""}, internal, never shown to the customer.` : "No bank charge on this method."}
+          {method === "cheque" ? " A cheque counts as unpaid until it is marked cleared." : ""}
+        </p>
+        {over ? <p className="text-sm font-semibold text-amber">{isOwner ? "More than the balance: recorded as the owner." : "More than the balance: the owner is asked to approve it before it counts."}</p> : null}
+        {/* A full payment is confirmed in words first: it creates the tax invoice, which can never be undone. */}
+        <div>{settles && invoiceId ? <Button type="button" size="lg" onClick={() => setConfirming(true)} data-record-payment>Record full payment</Button> : <RecordButton label={over && !isOwner ? "Request owner approval" : "Record"} />}</div>
+      </form>
+
+      {confirming ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label="Confirm full payment" data-confirm-full>
+          <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
+            <h2 className="text-lg font-extrabold">Confirm full payment</h2>
+            <p className="text-sm leading-relaxed">{confirmFullText({ amount: value, method, reference: reference || null, invoiceNumber, isProforma, nextTaxNumber })}</p>
+            <Button
+              type="button"
+              size="lg"
+              className="w-full"
+              data-confirm-yes
+              onClick={() => {
+                setConfirming(false);
+                formRef.current?.requestSubmit();
+              }}
+            >
+              {isProforma ? "Yes, record and create tax invoice" : "Yes, record the payment"}
+            </Button>
+            <button type="button" onClick={() => setConfirming(false)} className="min-h-11 w-full rounded-control border border-line-strong bg-white text-sm font-bold" data-confirm-back>Go back</button>
+          </div>
         </div>
       ) : null}
-      {mode === "partial" || !balance ? (
-        <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Amount received (AED)</span><Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" required className="max-w-56 text-lg font-bold" /></label>
-      ) : null}
-      {method === "cheque" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required /></label>
-          <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque date</span><Input name="cheque_date" type="date" required /></label>
-        </div>
-      ) : null}
-      {method === "card" || method === "link" ? <Input name="reference" placeholder={method === "card" ? "Terminal slip number (optional)" : "Link reference (optional)"} className="max-w-72" /> : null}
-      {charge ? <p className="text-xs text-muted">Bank charge {charge}% of the amount is recorded as an internal cost.</p> : null}
-      {method === "cheque" ? <p className="text-xs text-muted">A cheque counts as unpaid until it is marked cleared.</p> : null}
-      {over ? <p className="text-sm font-semibold text-amber">{isOwner ? "More than the balance: recorded as the owner." : "More than the balance: the owner is asked to approve it before it counts."}</p> : null}
-      <div><RecordButton label={over && !isOwner ? "Request owner approval" : "Record"} /></div>
-    </form>
+    </>
   );
 }

@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, toInvoice, toPayment } from "@/lib/invoice-data";
+import { INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment } from "@/lib/invoice-data";
+import { methodsFor } from "@/lib/money-steps";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
@@ -47,6 +48,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const depositRows = ((deposits ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
   const depositTotal = depositRows.reduce((a, p) => a + p.amount_aed, 0);
   const canIssue = can(role, "issueInvoices") && !staff.viewingAs && job.is_open && !taxInvoice;
+  const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
   const services = draft.lines.filter((l) => l.section !== "parts");
   const parts = draft.lines.filter((l) => l.section === "parts");
 
@@ -116,14 +118,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           {can(role, "recordPayments") && !staff.viewingAs && job.is_open && active && activeBalance && activeBalance.balance > 0 ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel right={`AED ${m(activeBalance.balance)} due`}>Payment against {active.number}</SectionLabel>
-              <PaymentForm invoiceId={active.id} jobId={null} balance={activeBalance.balance} action={recordPayment} returnTo={`/jobs/${id}/invoice`} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} bankChargeTransfer={Number(settings.bank_charge_transfer_percent) || 0} isOwner={role === "owner"} />
+              <PaymentForm invoiceId={active.id} jobId={null} balance={activeBalance.balance} action={recordPayment} returnTo={`/jobs/${id}/invoice`} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={active.number} isProforma={active.kind === "proforma"} nextTaxNumber={active.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} />
             </Card>
           ) : null}
           {can(role, "recordPayments") && !staff.viewingAs && !active && job.is_open ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel right={draft.lines.length ? `AED ${m(Math.max(0, draft.totals.total - depositTotal))} to go` : undefined}>Deposit before the proforma</SectionLabel>
               {depositRows.map((p) => <p key={p.id} className="text-sm">{p.number} · AED {m(p.amount_aed)} by {p.method} · {formatDateTime(p.received_at)}</p>)}
-              <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={`/jobs/${id}/invoice`} bankChargeCard={Number(settings.bank_charge_card_percent) || 0} bankChargeLink={Number(settings.bank_charge_link_percent) || 0} bankChargeCash={Number(settings.bank_charge_cash_percent) || 0} bankChargeCheque={Number(settings.bank_charge_cheque_percent) || 0} bankChargeTransfer={Number(settings.bank_charge_transfer_percent) || 0} isOwner={role === "owner"} />
+              <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={`/jobs/${id}/invoice`} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} />
             </Card>
           ) : null}
         </div>

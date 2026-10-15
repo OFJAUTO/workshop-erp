@@ -18,7 +18,10 @@ import { missingItems } from "@/lib/media-checklist";
 import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
 import { PART_SELECT, loadQuoteSummary, toPart } from "@/lib/quote-data";
-import { jobBalance } from "@/lib/invoice-data";
+import { INVOICE_SELECT, jobBalance, toInvoice } from "@/lib/invoice-data";
+import { moneyState, type MoneyInvoice } from "@/lib/money-steps";
+import { ngeniusConfigured } from "@/lib/ngenius";
+import { currentPaymentLink, paymentLinksOf } from "@/lib/payment-links";
 import { jobPartsState } from "@/lib/parts-data";
 import { latestQc, loadWash, loadWork } from "@/lib/work-data";
 import { markReadyToInvoice } from "../../invoices/actions";
@@ -161,6 +164,33 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   ]);
   const partsDots = <PartsSteps size="dots" steps={partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) })} />;
   const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
+  // The money side in five steps (one rule with the invoice page and the accounts screens).
+  const [{ data: moneyInvRows }, { data: creditCust }] = laterStage
+    ? await Promise.all([
+        createAdminClient().from("invoices").select(INVOICE_SELECT + ", expected_payment_method, customer_says_paid_at, pay_now_enabled, sent_at").eq("job_id", id).eq("is_active", true).eq("status", "issued").in("kind", ["proforma", "tax_invoice"]).order("issued_at", { ascending: false }),
+        createAdminClient().from("customers").select("credit_terms_days").eq("id", job.customer_id).maybeSingle(),
+      ])
+    : [{ data: [] }, { data: null }];
+  const moneyInvoices = ((moneyInvRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toInvoice(r), expected_payment_method: (r.expected_payment_method as string | null) ?? null, customer_says_paid_at: (r.customer_says_paid_at as string | null) ?? null, pay_now_enabled: !!r.pay_now_enabled, sent_at: (r.sent_at as string | null) ?? null }));
+  const liveProforma = (moneyInvoices.find((i) => i.kind === "proforma" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & { id: string }) | null;
+  const liveTax = (moneyInvoices.find((i) => i.kind === "tax_invoice") ?? null) as (MoneyInvoice & { id: string }) | null;
+  const money = moneyState({
+    jobStatus: job.status,
+    isOpen: job.is_open,
+    gatedOutAt: job.gated_out_at,
+    proforma: liveProforma,
+    taxInvoice: liveTax,
+    total: bal?.invoice?.total_aed ?? 0,
+    paid: bal?.paid ?? 0,
+    balance: bal?.balance ?? 0,
+    chequePending: bal?.pending ?? 0,
+    needsInvoice: !!bal?.needsInvoice,
+    creditDays: Number(creditCust?.credit_terms_days) || 0,
+    declinedOut: !!stepJob?.declined_out_at,
+    waitingHours: Number(settings.payment_waiting_hours) || 24,
+  });
+  const payNowOn = money.live ? !!currentPaymentLink(await paymentLinksOf(money.live.id)) : false;
+  const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
   const inspectionMinutes = insp ? inspectionWorkingMinutes(insp, wt) : 0;
   const inspectionOver = !!insp && insp.status === "in_progress" && inspectionOverTarget(insp, wt);
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
@@ -518,17 +548,25 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
         {can(role, "viewInvoices") ? (
-        <Card id="invoice" className={tile(["ready"], bal?.invoice?.kind === "tax_invoice" && bal.state === "paid" ? "green" : bal?.invoice ? "amber" : "neutral", !!bal?.invoice || job.status === "ready" || job.status === "pending_payment")}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{bal?.invoice?.kind === "tax_invoice" ? "Tax invoice" : "Proforma"}</span>
-          <span className="text-sm font-semibold">{bal?.invoice ? `${bal.invoice.number} · ${bal.state === "paid" ? (bal.invoice.kind === "tax_invoice" ? "paid in full" : "paid, tax invoice on its way") : bal.state === "part_paid" ? `part paid, AED ${bal.balance.toFixed(0)} due` : bal.state === "cheque_pending" ? "cheque pending" : `awaiting payment, AED ${bal.balance.toFixed(0)}`}` : job.status === "ready" || job.status === "pending_payment" ? (bal?.needsInvoice ? "Proforma to prepare" : "Nothing to invoice") : job.inspection_fee_due ? "Inspection fee to invoice" : "After QC and the wash"}</span>
+        <Card id="invoice" data-money-tile data-money-step={money.current} className={tile(["ready"], money.waitingHours ? "red" : money.chip.tone === "green" ? "green" : money.live ? "amber" : "neutral", !!money.live || job.status === "ready" || job.status === "pending_payment")}>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{money.live ? (money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma") : "Proforma"}</span>
+          <span className="flex flex-wrap items-center gap-2">
+            {money.live ? <span className="text-sm font-semibold">{money.live.number}</span> : null}
+            <Badge tone={money.chip.tone === "ink" ? "ink" : money.chip.tone}>{money.chip.text}</Badge>
+          </span>
+          {money.live && bal?.invoice ? <span className="text-xs text-muted">Total AED {bal.invoice.total_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{bal.paid ? ` · paid AED ${bal.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}{bal.balance > 0 ? ` · due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}</span> : null}
           {job.ready_sent_at ? <span className="text-xs text-muted">Proforma sent {formatDayTime(job.ready_sent_at)}</span> : null}
+          {money.waitingHours ? <span className="text-xs font-bold text-red" data-money-waiting>Waiting {money.waitingHours} h for payment</span> : null}
           {job.invoice_sent_at ? <span className="text-xs text-muted">Tax invoice sent {formatDayTime(job.invoice_sent_at)}</span> : null}
-          <div className="mt-auto flex flex-wrap gap-2">
-            {!bal?.invoice && bal?.needsInvoice && ["ready", "pending_wash", "pending_qc", "pending_payment"].includes(job.status) && can(role, "markReadyToInvoice") && !staff.viewingAs ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="md">Prepare the proforma</Button></form> : null}
-            {can(role, "issueInvoices") && laterStage && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} tone="secondary" size="md">Payments and invoice</LinkButton> : null}
-            {bal?.invoice && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open {bal.invoice.kind === "tax_invoice" ? "tax invoice" : "proforma"}</LinkButton> : null}
+          <div className="mt-auto flex flex-col gap-2" data-money-action={money.action}>
+            {money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && !staff.viewingAs && job.is_open ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full">Prepare the proforma</Button></form> : null}
+            {(money.action === "send_proforma" || money.action === "send_tax_invoice") && money.live && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? (
+              <ReadySendControl jobId={id} size="lg" token={money.live.token} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />
+            ) : null}
+            {money.action === "record_payment" && can(role, "recordPayments") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} size="lg" className="w-full">{money.actionLabel}</LinkButton> : null}
+            {money.action === "gate_out" && can(role, "gateOut") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full">Gate out</LinkButton> : null}
+            {can(role, "viewInvoices") && laterStage ? <LinkButton href={`/jobs/${id}/invoice`} tone="secondary" size="md">Payments and invoice</LinkButton> : null}
           </div>
-          {bal?.invoice && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? <ReadySendControl jobId={id} token={bal.invoice.token} kind={bal.invoice.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={bal.invoice.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={bal.invoice.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} /> : null}
         </Card>
         ) : null}
       </div>

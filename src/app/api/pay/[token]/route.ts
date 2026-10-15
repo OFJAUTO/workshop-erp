@@ -5,7 +5,7 @@ import { openPaymentLink } from "@/lib/payment-links";
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const origin = request.nextUrl.origin;
-  const res = await openPaymentLink(token);
-  if (res.error || !res.url) return NextResponse.redirect(`${origin}/invoice/${token}?error=${encodeURIComponent(res.error ?? "Could not open the payment link.")}`, { status: 303 });
+  const res = await openPaymentLink(token, origin);
+  if (res.error || !res.url) return NextResponse.redirect(`${origin}/proforma/${token}?error=${encodeURIComponent(res.error ?? "Could not open the payment link.")}`, { status: 303 });
   return NextResponse.redirect(res.url, { status: 303 });
 }

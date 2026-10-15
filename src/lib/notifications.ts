@@ -5,6 +5,12 @@ import type { RoleId } from "./roles";
 /** Every kind of notification the system can send. Later phases add their own. */
 export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean }[] = [
   { type: "clock_overnight", label: "Clock left running overnight" },
+  { type: "proforma_sent", label: "A proforma was sent: awaiting payment (accounts)", locked: true },
+  { type: "customer_says_paid", label: "The customer says they have paid: check the bank (accounts)", locked: true },
+  { type: "invoice_paid", label: "Paid in full: the tax invoice is created and ready to send", locked: true },
+  { type: "payment_waiting_long", label: "A proforma has waited too long for payment (owner)", locked: true },
+  { type: "stock_low", label: "A stock item is below its minimum (Parts)" },
+  { type: "supplier_invoice_mismatch", label: "A supplier invoice price differs from the LPO (accounts)", locked: true },
   { type: "quote_revised_by_parts", label: "Parts changed: revised quotation to send" },
   { type: "job_declined_out", label: "Declined job going out" },
   { type: "approval_opened", label: "Customer opened the approval link", locked: true },

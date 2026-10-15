@@ -71,7 +71,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   ]);
   const nameOf = new Map((names ?? []).map((n) => [n.id, n]));
   const [profit, { data: clocked }, { data: invoiced }] = await Promise.all([
-    can(role, "viewProfitPanel") ? dailyProfit(settings) : Promise.resolve(null),
+    role === "owner" ? dailyProfit(settings) : Promise.resolve(null),
     createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", all.map((j) => j.id)),
     createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
   ]);
@@ -154,13 +154,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <WaitingPanel staff={staff} />
 
-      {can(role, "viewProfitPanel") && profit ? (
+      {role === "owner" && profit ? (
         <ProfitPanel
           targetAed={profit.target}
           yellowPercent={profit.yellowPercent}
           invoicedAed={profit.invoicedProfit}
           collectedAed={profit.collected}
-          carryAed={profit.carry}
+          monthAed={profit.monthProfit}
           live
           provisional={profit.provisional}
           count={profit.count}
