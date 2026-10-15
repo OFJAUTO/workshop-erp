@@ -11,7 +11,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { aed, blockOf, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { aed, blockOf, estimateLineSuspect, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -500,6 +500,13 @@ export function QuoteEditor({
     const h = Math.max(0.1, Math.round(Number(v) * 100) / 100);
     if (h !== l.hours) patch(l.id, { hours: h }, true);
   };
+  /** The AED/h box: the finished rate is saved on leaving the box (the server keeps it at or above the standard rate for advisors). */
+  const rateBlur = (l: QuoteLine, raw: string) => {
+    const v = raw.replace(",", ".");
+    if (v === "") return;
+    const r = Math.max(0, round2(Number(v)));
+    if (r !== l.labour_rate) patch(l.id, { labour_rate: r }, true);
+  };
 
   /* ----- one labour or service row: name box, the amount box, the total, the three-dot menu ----- */
   const labourRow = (l: QuoteLine, index: number) => {
@@ -516,14 +523,15 @@ export function QuoteEditor({
     const noteOpen = openRows.has(`note-${l.id}`);
     const rateOpen = openRows.has(`rate-${l.id}`);
     const discOpen = openRows.has(`disc-${l.id}`);
-    const rateChanged = l.line_type === "labour" && (l.labour_rate ?? 0) !== settings.labourRate;
+    // An Est. h over 50 is not hours (the rate was typed there once): amber on the line, the quoted hours stand in.
+    const estSuspect = showProfit && estimateLineSuspect(l);
     const amountBox = (extra: string) => `w-16 text-right min-h-10 px-1 ${extra}`;
     return (
       <div key={l.id} id={`item-line-${l.id}`} className="flex flex-col">
-        <div className="flex items-center gap-2 py-1.5 px-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 py-1.5 px-2 text-sm">
           <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${done ? "bg-green text-white" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
-          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+          <div className="flex-1 min-w-[12rem] flex flex-col gap-0.5">
             <NameBox
               id={`name-${l.id}`}
               value={l.title}
@@ -543,27 +551,38 @@ export function QuoteEditor({
                 {isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id] ? <span data-last-price>Last time {aed(settings.lastPrices[svc.id])}</span> : null}
               </span>
             ) : null}
-            {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || rateChanged ? (
+            {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
                 {positions.length ? <span>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}
                 {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
                 {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
                 {l.details ? <Badge tone="outline">Note: {l.details.length > 36 ? `${l.details.slice(0, 34)}…` : l.details}</Badge> : null}
                 {(l.discount_percent ?? 0) > 0 ? <span>Discount {l.discount_percent}%</span> : null}
-                {rateChanged ? <span className={(l.labour_rate ?? 0) + 0.005 < settings.labourRate ? "font-semibold text-red" : ""}>Rate {num(l.labour_rate)}</span> : null}
+                {estSuspect ? <span className="font-semibold text-amber" data-estimate-warning>Check Est. h: {num(l.hours_estimate)} is not hours (the rate is {num(l.labour_rate)} AED/h). Labour at cost uses the quoted {hoursText(l.hours)} until it is fixed.</span> : null}
               </span>
             ) : null}
           </div>
+          <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-2">
           {l.line_type === "labour" ? (
-            <span className="inline-flex items-center gap-1">
-              <Input id={`amount-${l.id}`} data-amount value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); hoursBlur(l, e.currentTarget.value); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="0" className={amountBox(blocked && !(l.hours && l.hours > 0) ? "border-red-bar" : "")} />
-              <span className="text-[11px] font-semibold text-muted">h</span>
+            /* Three separate things, each labelled: the hours quoted to the customer, our internal estimate (Est. h, profit
+               viewers only), and the hourly rate in AED/h. The estimate label never sits on the rate box. */
+            <span className="inline-flex shrink-0 flex-wrap items-center gap-2" data-labour-boxes>
+              <label className="inline-flex items-center gap-1 whitespace-nowrap" title="The hours quoted to the customer">
+                <span className="text-[10px] font-semibold text-muted">Hours</span>
+                {/* The shared input style is full width, so each of the three boxes carries its own width. */}
+                <Input id={`amount-${l.id}`} data-amount value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); hoursBlur(l, e.currentTarget.value); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="0" style={{ width: "4.5rem" }} className={amountBox(blocked && !(l.hours && l.hours > 0) ? "border-red-bar" : "")} />
+                <span className="text-[11px] font-semibold text-muted">h</span>
+              </label>
               {showProfit ? (
-                <label className="inline-flex items-center gap-1 ml-1" title="The workshop's estimate of the hours: labour at cost is worked out from it (then from the hours clocked)">
-                  <span className="text-[10px] font-semibold text-muted">est.</span>
-                  <Input value={num(l.hours_estimate ?? l.hours)} onChange={(e) => patch(l.id, { hours_estimate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const v = e.target.value.replace(",", "."); if (v === "") return; const h = Math.max(0.1, Math.round(Number(v) * 100) / 100); if (h !== (l.hours_estimate ?? l.hours)) patch(l.id, { hours_estimate: h }, true); }} inputMode="decimal" disabled={disabled} aria-label="Estimated hours" className="w-14 text-right min-h-10 px-1 text-xs" data-estimate />
+                <label className="inline-flex items-center gap-1 whitespace-nowrap" title="Our internal estimate of the hours, never shown to the customer: labour at cost is worked out from it (then from the hours clocked)">
+                  <span className={`text-[10px] font-semibold ${estSuspect ? "text-amber" : "text-muted"}`}>Est. h</span>
+                  <Input value={num(l.hours_estimate ?? l.hours)} onChange={(e) => patch(l.id, { hours_estimate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const v = e.target.value.replace(",", "."); if (v === "") return; const h = Math.max(0.1, Math.round(Number(v) * 100) / 100); if (h !== (l.hours_estimate ?? l.hours)) patch(l.id, { hours_estimate: h }, true); }} inputMode="decimal" disabled={disabled} aria-label="Estimated hours (internal)" style={{ width: "4.5rem", ...(estSuspect ? { borderColor: "var(--color-amber-bar)", backgroundColor: "var(--color-amber-soft)" } : {}) }} className={`text-right min-h-10 px-1 text-xs ${estSuspect ? "text-amber font-bold" : "text-muted"}`} data-estimate data-estimate-suspect={estSuspect ? "1" : undefined} />
                 </label>
               ) : null}
+              <label className="inline-flex items-center gap-1 whitespace-nowrap" title={`The hourly rate charged to the customer (standard AED ${settings.labourRate})`}>
+                <Input value={num(l.labour_rate)} onChange={(e) => patch(l.id, { labour_rate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => rateBlur(l, e.target.value)} inputMode="decimal" disabled={disabled} aria-label="Rate per hour" placeholder={String(settings.labourRate)} style={{ width: "5rem" }} className={`text-right min-h-10 px-1 text-xs ${(l.labour_rate ?? 0) + 0.005 < settings.labourRate ? "border-red-bar text-red" : ""}`} data-rate />
+                <span className="text-[10px] font-semibold text-muted">AED/h</span>
+              </label>
             </span>
           ) : (
             <>
@@ -606,6 +625,7 @@ export function QuoteEditor({
               ) : null}
             </span>
           ) : null}
+          </span>
         </div>
         {askPosition ? (
           <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2 text-xs">
@@ -823,9 +843,12 @@ export function QuoteEditor({
               </Button>
             </div>
           ) : null}
-          {workshopEstimate && workshopEstimate.hours !== null ? (
-            <p className={`text-xs ${totals.labourHours + 0.05 < (workshopEstimate.managerHours ?? workshopEstimate.hours ?? 0) ? "font-semibold text-amber" : "text-muted"}`}>
-              Workshop estimate {workshopEstimate.managerHours ?? workshopEstimate.hours} h{workshopEstimate.agreed ? "" : " (not yet agreed by the manager)"} · quoted {hoursText(totals.labourHours)}{totals.labourHours + 0.05 < (workshopEstimate.managerHours ?? workshopEstimate.hours ?? 0) ? " · lower than the workshop estimate" : ""}
+          {totals.labourHours > 0 || totals.labourEstimateHours > 0 ? (
+            /* The same two figures the internal box uses: the Est. h boxes added up (after the sanity checks) and the quoted hours. */
+            <p className={`text-xs ${totals.estimateTotalSuspect || totals.labourHours + 0.05 < totals.labourEstimateHours ? "font-semibold text-amber" : "text-muted"}`} data-estimate-footer>
+              Workshop estimate {hoursText(totals.labourEstimateHours)} · quoted {hoursText(totals.labourHours)}
+              {totals.estimateTotalSuspect ? ` · the Est. h boxes add up to ${hoursText(totals.labourEstimateEntered)}, more than three times the quoted hours: check them (the quoted hours are used until then)` : totals.labourHours + 0.05 < totals.labourEstimateHours ? " · quoted lower than the workshop estimate" : ""}
+              {workshopEstimate && workshopEstimate.hours !== null && Math.abs((workshopEstimate.managerHours ?? workshopEstimate.hours ?? 0) - totals.labourEstimateHours) > 0.05 ? ` · at approval the manager put ${workshopEstimate.managerHours ?? workshopEstimate.hours} h${workshopEstimate.agreed ? "" : " (not yet agreed)"}` : ""}
             </p>
           ) : null}
         </Card>
@@ -995,7 +1018,10 @@ export function QuoteEditor({
               </div>
               <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs" data-internal-box>
                 <dt className="text-muted">Parts cost</dt><dd className="text-right">{aed(totals.partsCost)}</dd>
-                <dt className="text-muted" data-labour-cost-label>Labour at cost ({hoursText(totals.labourCostHours)} {totals.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED {settings.technicianCostRate ?? 0})</dt><dd className="text-right">{aed(totals.labourCost)}</dd>
+                <dt className="text-muted" data-labour-cost-label>
+                  Labour at cost ({hoursText(totals.labourCostHours)} {totals.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED {settings.technicianCostRate ?? 0})
+                  {totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="ml-1 font-semibold text-amber" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>· Est. h flagged, quoted hours used</span> : null}
+                </dt><dd className="text-right" data-labour-cost>{aed(totals.labourCost)}</dd>
                 {totals.outsideCost ? <><dt className="text-muted">Outside work, our cost</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
                 <dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd>

@@ -286,6 +286,15 @@ export const hoursText = (h: number | null | undefined) => {
   const n = round2(h ?? 0);
   return `${Math.abs(n * 10 - Math.round(n * 10)) < 1e-9 ? n.toFixed(1) : n.toFixed(2)} h`;
 };
+/** The hours a labour line is estimated at: the Est. h box, else the quoted hours. Never the rate. */
+export const estimateOf = (l: Pick<QuoteLine, "hours" | "hours_estimate">) => l.hours_estimate ?? l.hours ?? 0;
+/** No single job takes more than this: an estimate above it is not hours (the rate was typed in the box once). */
+export const ESTIMATE_MAX_LINE_HOURS = 50;
+/** Estimates totalling more than this many times the quoted hours are not trusted either. */
+export const ESTIMATE_TOTAL_FACTOR = 3;
+/** An estimate over ESTIMATE_MAX_LINE_HOURS on one line: shown amber, the quoted hours stand in for it in labour at cost. */
+export const estimateLineSuspect = (l: Pick<QuoteLine, "hours" | "hours_estimate" | "line_type">) =>
+  l.line_type === "labour" && l.hours_estimate !== null && l.hours_estimate !== undefined && l.hours_estimate > ESTIMATE_MAX_LINE_HOURS;
 /** Hours typed with a full stop or a comma, one decimal place, at least 0.1. Null when empty. */
 export function parseHours(text: string | number | null | undefined): number | null {
   if (text === null || text === undefined || text === "") return null;
@@ -378,8 +387,14 @@ export type QuoteTotals = {
   labourSell: number;
   /** The hours the customer pays for. */
   labourHours: number;
-  /** The workshop's estimate of the hours (per line, defaulting to the quoted hours). */
+  /** The workshop's estimate of the hours (per line, defaulting to the quoted hours), after the sanity checks. */
   labourEstimateHours: number;
+  /** The Est. h boxes as typed, before the sanity checks (for the warning text). */
+  labourEstimateEntered: number;
+  /** Labour lines whose Est. h is over ESTIMATE_MAX_LINE_HOURS: shown amber, the quoted hours stand in for them. */
+  estimateSuspectLineIds: string[];
+  /** The estimates total more than ESTIMATE_TOTAL_FACTOR times the quoted hours: shown amber, the quoted hours stand in. */
+  estimateTotalSuspect: boolean;
   /** Bodyshop materials (film, paint, consumables) from the internal box. */
   materialsCost: number;
   /** The hours labour at cost is worked out from: the clocked hours once the work is done, else the estimate. */
@@ -457,7 +472,14 @@ export function quoteTotals(
   const labour = counted.filter((l) => blockOf(l) === "labour");
   const labourLines = labour.filter((l) => l.line_type === "labour");
   const labourHours = round2(labourLines.reduce((a, l) => a + (l.hours ?? 0), 0));
-  const labourEstimateHours = round2(labourLines.reduce((a, l) => a + (l.hours_estimate ?? l.hours ?? 0), 0));
+  // Labour at cost is worked out from the Est. h boxes (never the rate or the quoted hours), with two sanity checks: an
+  // estimate over ESTIMATE_MAX_LINE_HOURS on a line, or estimates totalling more than ESTIMATE_TOTAL_FACTOR times the
+  // quoted hours, are flagged on the screen and the quoted hours stand in for them.
+  const labourEstimateEntered = round2(labourLines.reduce((a, l) => a + estimateOf(l), 0));
+  const estimateSuspectLineIds = labourLines.filter(estimateLineSuspect).map((l) => l.id);
+  const estimateChecked = round2(labourLines.reduce((a, l) => a + (estimateLineSuspect(l) ? (l.hours ?? 0) : estimateOf(l)), 0));
+  const estimateTotalSuspect = labourHours > 0 && estimateChecked > ESTIMATE_TOTAL_FACTOR * labourHours;
+  const labourEstimateHours = estimateTotalSuspect ? labourHours : estimateChecked;
   const clocked = opts.clockedHours !== undefined && opts.clockedHours !== null && opts.clockedHours > 0 ? round2(opts.clockedHours) : null;
   const labourCostHours = clocked ?? labourEstimateHours;
   const labourSell = round2(labour.reduce((a, l) => a + lineTotal(l), 0));
@@ -482,7 +504,7 @@ export function quoteTotals(
   return {
     subtotal, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
-    labourSell, labourHours, labourEstimateHours, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
+    labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
     otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, materialsCost, totalCost, profit,
     labourMargin: round2(labourSell - discount - labourCost - outsideCost),
     deposit,
