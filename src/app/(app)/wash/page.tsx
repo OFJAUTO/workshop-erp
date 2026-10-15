@@ -1,5 +1,5 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Card, Empty, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import type { RoleId } from "@/lib/roles";
@@ -41,7 +41,7 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
   return (
     <>
       <LiveRefresh tables={["jobs", "washes"]} pollMs={60000} />
-      <PageHeader title="Car wash" subtitle={`${waiting.length} waiting to be sent · ${atWash.length} at the wash`} actions={role === "owner" ? <LinkButton href="/board/wash" tone="secondary" size="lg">Wash board (display)</LinkButton> : undefined} />
+      <PageHeader title="Car wash" subtitle={`${waiting.length} waiting to be sent · ${atWash.length} at the wash`} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {rows.length === 0 ? <Empty title="No cars waiting for wash" /> : null}

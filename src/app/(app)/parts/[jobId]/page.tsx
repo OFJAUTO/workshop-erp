@@ -1,4 +1,5 @@
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
@@ -44,7 +45,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const admin = createAdminClient();
   const settings = await getSettings();
   const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }, insp, catalogue, { data: lastImportRow }, lpos] = await Promise.all([
-    admin.from("jobs").select("id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
     admin.from("part_items").select(PART_SELECT + ", po_id, expected_date, received_qty, issue_status, return_status").eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
@@ -132,6 +133,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     <>
       <LiveRefresh tables={["part_requests", "part_items", "purchase_orders"]} jobId={jobId} pollMs={60000} />
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Parts · ${v ? formatPlate(v) : job.job_number}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">

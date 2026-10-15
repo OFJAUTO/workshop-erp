@@ -1,5 +1,6 @@
 "use server";
 
+import { chooserValues, resolveCustomerCar } from "@/lib/customer-car";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
@@ -12,13 +13,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function createEstimate(_state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("viewEstimates");
   const values = formValues(formData);
-  const customerId = String(formData.get("customer_id") ?? "");
-  const vehicleId = String(formData.get("vehicle_id") ?? "");
-  if (!customerId) return { error: "Choose the customer.", values };
-  if (!vehicleId) return { error: "Choose the car. Add it first if it is not on the list.", values };
+  // The customer and the car from the three-choice chooser (created here when they are new).
+  const picked = await resolveCustomerCar(formData, staff);
+  if ("error" in picked) return { error: picked.error, values: chooserValues(values, picked) };
+  const { customerId, vehicleId } = picked;
   const admin = createAdminClient();
-  const { data: vehicle } = await admin.from("vehicles").select("id, customer_id").eq("id", vehicleId).maybeSingle();
-  if (!vehicle || vehicle.customer_id !== customerId) return { error: "That car does not belong to the chosen customer.", values };
   const settings = await getSettings();
   const { data: created, error } = await admin
     .from("quotations")

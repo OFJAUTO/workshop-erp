@@ -11,7 +11,6 @@ import { getSettings } from "@/lib/settings";
 
 function refresh(jobId: string) {
   revalidatePath("/wash");
-  revalidatePath("/board/wash");
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/dashboard");
 }

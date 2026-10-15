@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
 import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -124,6 +125,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   return (
     <>
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={q.vehicle_id} />}
         title={`${q.number} · version ${q.version}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2 uppercase">

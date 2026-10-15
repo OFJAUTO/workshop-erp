@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -76,6 +77,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
     <>
       <LiveRefresh tables={["work_lines", "work_sessions", "additional_work", "jobs", "job_technicians", "work_pauses"]} jobId={id} pollMs={60000} />
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Work order · ${formatPlate(vehicle)}`}
         subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>}
         actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{job.status === "pending_qc" ? <LinkButton href={`/qc/${id}`} tone="secondary" size="lg">QC</LinkButton> : null}</>}

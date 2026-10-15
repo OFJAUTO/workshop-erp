@@ -1,4 +1,6 @@
 import { formatDate } from "@/lib/format";
+import { CarThumb } from "@/components/CarThumb";
+import { signCarPictures } from "@/lib/car-pictures";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
 import { CopyVin } from "@/components/CopyVin";
 import Link from "next/link";
@@ -22,8 +24,8 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 type JobInfo = { id: string; job_number: string; is_open: boolean; status: string; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; assignee: { display_name: string } | null };
 
 /** The Parts role's desk: price requests from inspections, parts waiting for prices or the technician, and approved parts to order. */
-type AllJob = { id: string; job_number: string; status: string; is_open: boolean; gated_in_at: string; gated_out_at: string | null; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: { kind?: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; customer: { full_name: string; company_name: string | null } | null };
-const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_at, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)";
+type AllJob = { id: string; job_number: string; status: string; is_open: boolean; gated_in_at: string; gated_out_at: string | null; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: { kind?: string | null; photo_path?: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; customer: { full_name: string; company_name: string | null } | null };
+const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_at, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)";
 
 export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string }> }) {
   const staff = await requirePermission("priceParts");
@@ -88,6 +90,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       found = (data ?? []) as unknown as AllJob[];
     }
   }
+  const pics = await signCarPictures([...allCars, ...found].map((j) => j.vehicle?.photo_path));
   const carRow = (j: AllJob) => {
     const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0])) });
     const allDone = steps.every((s) => s.state === "done");
@@ -95,6 +98,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     const car = [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ");
     return (
       <Link key={j.id} href={`/parts/${j.id}`} className={`flex flex-wrap items-center gap-3 rounded-card border px-3 py-2 min-h-12 ${gone ? "border-line bg-chip" : allDone ? "border-green bg-green-soft" : "border-line bg-white"}`} data-all-car={j.id} data-all-done={allDone && !gone ? "1" : undefined} data-gone={gone ? "1" : undefined}>
+        <CarThumb size="sm" url={j.vehicle?.photo_path ? (pics.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : j.job_number} />
         <span className="font-extrabold uppercase">{j.vehicle ? formatPlate(j.vehicle) : "—"}</span>
         <span className="text-sm uppercase">{car}</span>
         <span className="text-sm text-muted">{j.job_number}</span>

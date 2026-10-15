@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Avatar, Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
@@ -88,6 +89,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
     <>
       <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} pollMs={60000} />
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`${v ? formatPlate(v) : job.job_number} · ${carName}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">

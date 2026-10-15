@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime, formatDayTime } from "@/lib/format";
@@ -124,6 +125,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   return (
     <>
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Invoice · ${formatPlate(vehicle)}`}
         subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]} · {customerName}</span><Badge tone={chipTone}>{money.chip.text}</Badge>{money.waitingHours ? <Badge tone="red">Waiting {money.waitingHours} h</Badge> : null}</span>}
         actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{live && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${live.id}`} tone="secondary" size="lg">Full record</LinkButton> : null}</>}

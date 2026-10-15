@@ -1,5 +1,7 @@
 "use server";
 
+import { chooserValues, resolveCustomerCar } from "@/lib/customer-car";
+import { formValues, type FormState } from "@/lib/form-state";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission, requireStaff } from "@/lib/auth";
@@ -16,7 +18,6 @@ const enc = encodeURIComponent;
 function refresh(jobId?: string | null) {
   revalidatePath("/bodyshop");
   revalidatePath("/bodyshop/mine");
-  revalidatePath("/board/bodyshop");
   revalidatePath("/tablet/bodyshop");
   revalidatePath("/assign");
   revalidatePath("/dashboard");
@@ -29,13 +30,14 @@ function refresh(jobId?: string | null) {
 const back = (jobId: string, res: { error?: string } | null, message: string, hash = "") => redirect(`/bodyshop/${jobId}?${res?.error ? `error=${enc(res.error)}` : `message=${enc(message)}`}${hash}`);
 
 /** The advisor's quotation before the car arrives: customer and car, then the usual builder. */
-export async function createBodyshopQuote(formData: FormData) {
+export async function createBodyshopQuote(_state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("bodyshopQuote");
-  const customerId = String(formData.get("customer_id") ?? "");
-  const vehicleId = String(formData.get("vehicle_id") ?? "");
-  if (!customerId || !vehicleId) redirect(`/bodyshop/new?error=${enc("Choose the customer and the car. Add the car first if it is not on the list.")}`);
-  const r = await createBodyshopJob(customerId, vehicleId, staff, await getSettings());
-  if (r.error || !r.jobId) redirect(`/bodyshop/new?error=${enc(r.error ?? "Could not start the quotation.")}`);
+  const values = formValues(formData);
+  // The customer and the car from the three-choice chooser (created here when they are new).
+  const picked = await resolveCustomerCar(formData, staff);
+  if ("error" in picked) return { error: picked.error, values: chooserValues(values, picked) };
+  const r = await createBodyshopJob(picked.customerId, picked.vehicleId, staff, await getSettings());
+  if (r.error || !r.jobId) return { error: r.error ?? "Could not start the quotation.", values };
   refresh(r.jobId);
   redirect(`/jobs/${r.jobId}/quote/${r.quotationId}`);
 }

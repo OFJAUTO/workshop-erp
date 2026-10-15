@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -137,7 +138,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   if (!bundle) {
     return (
       <>
-        <PageHeader title={`Inspection · ${formatPlate(vehicle)}`} subtitle={`${vehicleTitle(vehicle)} · ${job.job_number}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary">Job card</LinkButton>} />
+        <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`Inspection · ${formatPlate(vehicle)}`} subtitle={`${vehicleTitle(vehicle)} · ${job.job_number}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary">Job card</LinkButton>} />
         <Notice tone="info">No inspection yet. It starts once a technician is assigned.</Notice>
       </>
     );
@@ -187,6 +188,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   return (
     <>
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Inspection · ${formatPlate(vehicle)}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">

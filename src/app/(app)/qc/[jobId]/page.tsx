@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -34,7 +35,7 @@ export default async function QcPage({ params, searchParams }: { params: Promise
 
   return (
     <>
-      <PageHeader title={`QC · ${formatPlate(vehicle)}`} subtitle={`${vehicleTitle(vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}${open ? ` · round ${open.round}` : ""}`} actions={<><LinkButton href="/qc" tone="secondary" size="lg">Cars for QC</LinkButton>{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
+      <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`QC · ${formatPlate(vehicle)}`} subtitle={`${vehicleTitle(vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}${open ? ` · round ${open.round}` : ""}`} actions={<><LinkButton href="/qc" tone="secondary" size="lg">Cars for QC</LinkButton>{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {workedOnIt && can(role, "doQc") ? <Notice tone="error">You worked on this car. Someone else must do its QC.</Notice> : null}

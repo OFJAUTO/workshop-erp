@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CarThumb } from "@/components/CarThumb";
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -67,6 +68,7 @@ export default async function VehiclePage({
   return (
     <>
       <PageHeader
+        picture={<CarThumb url={profileUrl} alt={formatPlate(v)} />}
         title={formatPlate(v)}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">

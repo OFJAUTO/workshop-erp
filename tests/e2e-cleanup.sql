@@ -7,9 +7,9 @@ declare
   veh_ids uuid[];
   t text;
 begin
-  select coalesce(array_agg(id), '{}') into job_ids from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%';
   select coalesce(array_agg(id), '{}') into cust_ids from public.customers where id::text like '22222222-0000-4000-8000-00000000e%';
-  select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where id::text like '22222222-0000-4000-8000-00000000e%';
+  select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids);
+  select coalesce(array_agg(id), '{}') into job_ids from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids) or vehicle_id = any(veh_ids);
   delete from public.bodyshop_clockings where job_id = any(job_ids);
   delete from public.bodyshop_assignments where job_id = any(job_ids);
   delete from public.bodyshop_signoffs where job_id = any(job_ids);
@@ -17,8 +17,9 @@ begin
   delete from public.bodyshop_updates where job_id = any(job_ids);
   delete from public.bodyshop_stages where job_id = any(job_ids);
   update public.jobs set final_check_appointment_id = null, bodyshop_after_photo_id = null where id = any(job_ids);
-  delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids));
-  delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids));
+  delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
+  delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
+  delete from public.quotations where job_id is null and (customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
   delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids);
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
@@ -59,8 +60,9 @@ begin
   delete from public.bodyshop_updates where job_id = any(job_ids);
   delete from public.bodyshop_stages where job_id = any(job_ids);
   update public.jobs set final_check_appointment_id = null, bodyshop_after_photo_id = null where id = any(job_ids);
-  delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids));
-  delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids));
+  delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
+  delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
+  delete from public.quotations where job_id is null and (customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
   delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids);
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
@@ -91,6 +93,7 @@ select count(*) as left_over_ui from public.customers where phone like '+9715000
 set session_replication_role = replica;
 delete from public.quotation_lines where service_id in (select id from public.services where name ilike 'e2e %');
 delete from public.services where name ilike 'e2e %';
+delete from public.vehicle_models where name ilike 'e2e %' and not exists (select 1 from public.vehicles where model_id = vehicle_models.id);
 delete from public.supplier_discount_changes where supplier_id in (select id from public.suppliers where name ilike 'e2e %');
 delete from public.suppliers where name ilike 'e2e %' and not exists (select 1 from public.purchase_orders where supplier_id = suppliers.id);
 delete from public.service_categories where name ilike 'e2e %';

@@ -1,4 +1,5 @@
 import { PartsSteps } from "@/components/PartsSteps";
+import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -262,6 +263,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     <>
       <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests"]} jobId={id} />
       <PageHeader
+        picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={formatPlate(vehicle)}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
