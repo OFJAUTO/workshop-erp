@@ -66,7 +66,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         title={title}
         meta={meta}
         boxes={boxes}
-        view={{ href: `/api/pdf/invoice/${token}`, label: isProforma ? "View proforma (PDF)" : isTax ? "View tax invoice (PDF)" : "View credit note (PDF)" }}
+        view={{ href: `/api/pdf/invoice/${token}`, label: isProforma ? "View proforma (PDF)" : isTax ? "View tax invoice (PDF)" : "View credit note (PDF)", fileName: `OFJ ${title} ${invoice.number}.pdf` }}
         action={
           due ? (
             <div className="flex flex-col gap-3">

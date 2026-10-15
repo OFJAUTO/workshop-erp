@@ -427,6 +427,14 @@ export function SettingsForm({
             <Field label="Part types (one per line)" hint="One-tap choice on every part: the first is the default. Genuine needs no brand; the others ask for one.">
               <Textarea name="part_types" defaultValue={v.part_types ?? listTexts.part_types} rows={4} required />
             </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Send supplier LPOs from" hint="The Google Workspace mailbox the LPO emails go out from. The owner connects it once (the service account must be allowed to send as this address).">
+                <Input name="supplier_lpo_from_email" type="email" defaultValue={v.supplier_lpo_from_email} />
+              </Field>
+              <Field label="LPO email text" hint="Placeholders: [supplier], [number]. The PDF is attached.">
+                <Textarea name="supplier_lpo_email_text" defaultValue={v.supplier_lpo_email_text} rows={4} />
+              </Field>
+            </div>
             <Field label="Supplier discount needing owner approval above (%)" hint="A part priced with a supplier discount above this waits for the owner's one-tap approval before it counts as priced.">
               <Input name="supplier_discount_approval_above_percent" defaultValue={v.supplier_discount_approval_above_percent ?? "70"} inputMode="numeric" required className="max-w-32" />
             </Field>
@@ -605,6 +613,9 @@ export function SettingsForm({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Follow-up after gate-out (days)" hint="The advisor is reminded to call the customer.">
                 <Input name="followup_days" defaultValue={v.followup_days} inputMode="numeric" required />
+              </Field>
+              <Field label="Payment waiting limit (hours)" hint="A sent proforma unpaid this long turns red on the job card and the owner is told once.">
+                <Input name="payment_waiting_hours" defaultValue={v.payment_waiting_hours ?? "24"} inputMode="numeric" required />
               </Field>
             </div>
             <Field label="WhatsApp follow-up message" hint="Placeholders: [name], [make model], [plate], [advisor].">

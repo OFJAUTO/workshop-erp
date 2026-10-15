@@ -102,3 +102,17 @@ export async function renderPdfPages(buffer: Buffer | Uint8Array, maxPages = 8):
   }
   return out;
 }
+
+/** How many pages a PDF has. */
+export async function pdfPageCount(buffer: Buffer | Uint8Array): Promise<number> {
+  const mupdf = await lib();
+  return mupdf.Document.openDocument(buffer, "application/pdf").countPages();
+}
+
+/** One page of a PDF as a PNG at the given scale (2 = crisp on a phone), or null when the page does not exist. */
+export async function renderPdfPage(buffer: Buffer | Uint8Array, index: number, scale = 2): Promise<Uint8Array | null> {
+  const mupdf = await lib();
+  const doc = mupdf.Document.openDocument(buffer, "application/pdf");
+  if (index < 0 || index >= doc.countPages()) return null;
+  return doc.loadPage(index).toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false, true).asPNG();
+}

@@ -23,7 +23,9 @@ export function SharePdfButton({ href, fileName, jobId = null, kind = "document"
       const blob = await res.blob();
       const file = new File([blob], fileName, { type: "application/pdf" });
       const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
-      if (typeof nav.share === "function" && nav.canShare?.({ files: [file] })) {
+      // The share sheet is for phones and tablets; a PC (where Windows offers a sheet of its own that rarely reaches WhatsApp) downloads the file instead.
+      const phone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mobile|Tablet/i.test(navigator.userAgent));
+      if (phone && typeof nav.share === "function" && nav.canShare?.({ files: [file] })) {
         await nav.share({ files: [file], title: fileName.replace(/\.pdf$/i, "") });
         setState("shared");
         log("shared");

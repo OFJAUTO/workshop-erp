@@ -115,7 +115,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         title={title}
         meta={meta}
         boxes={boxes}
-        view={{ href: `/api/pdf/quote/${liveToken}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)" }}
+        view={{ href: `/api/pdf/quote/${liveToken}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)", fileName: `OFJ ${isEstimate ? "Estimate" : "Quotation"} ${q.number}${q.version > 1 ? ` v${q.version}` : ""}.pdf` }}
         action={open ? <QuoteResponse token={liveToken} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} /> : null}
         contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} label="Questions or changes?" />}
       >

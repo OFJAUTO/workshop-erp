@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DocViewer } from "./DocViewer";
 import { Logo } from "./Logo";
 
 export type FrontMeta = { label: string; value: string };
@@ -21,7 +22,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
   /** The essentials: a total in large print, a note, a line of counts. */
   children?: ReactNode;
   /** The big View button. */
-  view?: { href: string; label: string } | null;
+  view?: { href: string; label: string; fileName?: string } | null;
   /** The one action this page is for (an approve box, Pay now, ...). */
   action?: ReactNode;
   /** Call and WhatsApp to the advisor. */
@@ -78,11 +79,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
               </section>
             ) : null}
             {children}
-            {view ? (
-              <a href={view.href} target="_blank" rel="noreferrer" className="flex min-h-16 items-center justify-center rounded-lg bg-[#111113] px-4 text-lg font-extrabold text-white">
-                {view.label}
-              </a>
-            ) : null}
+            {view ? <DocViewer href={view.href} label={view.label} fileName={view.fileName ?? "document.pdf"} /> : null}
             {action}
             {contact}
           </div>

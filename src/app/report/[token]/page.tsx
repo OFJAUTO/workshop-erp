@@ -80,7 +80,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
         title="Inspection report"
         meta={[{ label: "Job card", value: card.job.job_number }, { label: "Inspected", value: formatDate(insp.submitted_at) }, { label: "Approved", value: formatDate(insp.approved_at) }]}
         boxes={[frontBoxes[1], frontBoxes[0]].filter(Boolean)}
-        view={{ href: `/api/pdf/report/${token}`, label: "View report (PDF)" }}
+        view={{ href: `/api/pdf/report/${token}`, label: "View report (PDF)", fileName: `OFJ Inspection report ${card.job.job_number}.pdf` }}
         contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
       >
         {insp.manager_note ? (

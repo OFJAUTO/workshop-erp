@@ -22,7 +22,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingDone, reopenPricing } from "../actions";
-import { markSupplierOrdered, receivePartAction, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { emailSupplierLpo, markSupplierOrdered, receivePartAction, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
 import { PartsTable, type TableRow } from "./PartsTable";
@@ -120,7 +121,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     lpos.fromStock.length ? `${lpos.fromStock.length} from our stock` : "",
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })) });
+  const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })) });
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
@@ -181,7 +183,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         <section id="lpos" className="flex flex-col gap-3" data-supplier-lpos>
           <SectionLabel right={`${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
           {lpos.suppliers.map((s) => (
-            <SupplierLpoCard key={s.po.id} po={toView(s)} vin={v?.vin ?? null} canManage={canOrder} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} />
+            <SupplierLpoCard key={s.po.id} po={toView(s)} vin={v?.vin ?? null} canManage={canOrder} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={jobId} />
           ))}
         </section>
       ) : null}

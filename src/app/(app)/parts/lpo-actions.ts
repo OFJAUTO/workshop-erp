@@ -5,7 +5,11 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { receivePartInFull,createMainLpo, orderSupplierLpo, setPartExpected } from "@/lib/lpo";
+import { gmailConfigured, sendGmail } from "@/lib/gmail";
 import { notifyStaff } from "@/lib/notifications";
+import { loadPurchaseOrder } from "@/lib/parts-data";
+import { renderPoPdf } from "@/lib/pdf/invoice-pdf";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 function refresh(jobId: string | null, poId?: string | null) {
@@ -75,4 +79,42 @@ export async function receivePartAction(jobId: string, partId: string) {
   revalidatePath(`/jobs/${jobId}`);
   if (r.error) redirect(`/parts/${jobId}?error=${encodeURIComponent(r.error)}#received`);
   redirect(`/parts/${jobId}?message=${encodeURIComponent(r.complete ? "Received. Every part is in: hand them over." : "Received.")}#received`);
+}
+
+/**
+ * "Email to supplier": the supplier copy of the LPO (the PDF, never the customer or our selling prices) goes from the
+ * workshop's Google Workspace mailbox to the supplier's email on file. Until the mailbox is connected the button says
+ * so; without an email on the supplier it says what to add. The send is written on the LPO and the job.
+ */
+export async function emailSupplierLpo(poId: string): Promise<{ error?: string; message?: string }> {
+  const staff = await requirePermission("managePurchaseOrders");
+  const bundle = await loadPurchaseOrder(poId);
+  if (!bundle) return { error: "LPO not found." };
+  const { po, supplier } = bundle;
+  if (po.kind === "main") return { error: "The main LPO is for approval only; email each supplier's LPO." };
+  if (po.status === "pending_approval" || po.status === "cancelled") return { error: "This LPO is not approved." };
+  if (!gmailConfigured()) return { error: "Email not set up yet: the owner adds the Google Workspace keys in Vercel first. Use Share PDF or Copy meanwhile." };
+  const to = (supplier?.email ?? "").trim();
+  if (!to) return { error: `Add ${po.supplier_name}'s email under Suppliers first.` };
+  const settings = await getSettings();
+  const from = String(settings.supplier_lpo_from_email ?? "").trim();
+  if (!from) return { error: "Choose the mailbox to send from under Settings > Parts first." };
+  const text = String(settings.supplier_lpo_email_text ?? "").replaceAll("[supplier]", po.supplier_name).replaceAll("[number]", po.number);
+  let pdf: Buffer;
+  try {
+    pdf = await renderPoPdf(bundle, settings);
+  } catch {
+    return { error: "The LPO PDF could not be made." };
+  }
+  try {
+    await sendGmail({ from, fromName: "OFJ Automotive, Parts", to, subject: `Purchase order ${po.number} from OFJ Automotive`, text, attachments: [{ filename: `OFJ ${po.number}.pdf`, content: pdf, contentType: "application/pdf" }] });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "The email could not be sent." };
+  }
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+  await admin.from("purchase_orders").update({ emailed_at: now, emailed_to: to, emailed_by: staff.id, ...(po.sent_at ? {} : { sent_at: now, sent_by: staff.id, sent_method: "email" }), updated_by: staff.id }).eq("id", poId);
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "lpo_sent", note: `${po.number} emailed to ${to} by ${staff.display_name}`, created_by: staff.id });
+  refresh(po.job_id, poId);
+  return { message: `Sent to ${to}.` };
 }
