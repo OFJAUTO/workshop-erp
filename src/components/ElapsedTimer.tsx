@@ -30,5 +30,8 @@ const getServerNow = () => 0;
 export function ElapsedTimer({ since, stoppedAt, className = "" }: { since: string; stoppedAt?: string | null; className?: string }) {
   const now = useSyncExternalStore(subscribe, getNow, getServerNow);
   const end = stoppedAt ? Date.parse(stoppedAt) : now;
-  return <span className={`font-mono tabular-nums ${className}`}>{!stoppedAt && now === 0 ? "–:––" : fmt(end - Date.parse(since))}</span>;
+  const start = Date.parse(since);
+  // A missing or unreadable start shows as nothing counted, never "NaN:NaN".
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return <span className={`font-mono tabular-nums ${className}`}>0:00</span>;
+  return <span className={`font-mono tabular-nums ${className}`}>{!stoppedAt && now === 0 ? "–:––" : fmt(end - start)}</span>;
 }

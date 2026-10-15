@@ -13,7 +13,8 @@ export type QcFailed = { round: number; items: { label: string; remark: string |
 export type RunningSession = { since: string; name: string; mine: boolean; throughBreak?: boolean };
 
 const fmtHm = (min: number) => {
-  const m = Math.max(0, Math.round(Math.abs(min)));
+  // An unreadable figure prints as nothing counted, never NaN.
+  const m = Number.isFinite(min) ? Math.max(0, Math.round(Math.abs(min))) : 0;
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
 };
 

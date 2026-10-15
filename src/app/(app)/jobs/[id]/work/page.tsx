@@ -59,6 +59,8 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
   const pending = work.additional.filter((a) => a.status === "pending");
   const running = work.sessions.filter((s) => !s.ended_at);
   const minutesUsed = work.sessions.filter((s) => s.ended_at).reduce((a, s) => a + sessionMinutes(s), 0);
+  // Nobody clocked a minute on this car: QC can still go ahead, but the manager is told so first.
+  const noClock = minutesUsed === 0 && running.length === 0;
   const pauses = (pauseRows ?? []) as PauseRow[];
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const nowMs = Date.now();
@@ -109,8 +111,9 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
               <SectionLabel>{job.work_done_at ? `Job finished ${formatDateTime(job.work_done_at)}: confirm it` : "Work complete"}</SectionLabel>
               {job.work_done_at ? <p className="text-sm">The technician{techs.length > 1 ? "s say" : " says"} all work on this car is done. Check the car, then confirm, or send it back with a note the technician sees on top.</p> : <p className="text-sm text-muted">The technician presses Job finished on the tablet; you confirm here. You can also confirm now if you checked the car yourself.</p>}
               {blockers.length ? <p className="text-sm text-red font-semibold">Not possible yet: {blockers.join("; ")}.</p> : null}
+              {noClock && !blockers.length ? <p className="text-sm font-semibold text-amber" data-no-clock>No time has been clocked on this car (0 h 00 min). The technicians never pressed Start work, so the labour cost will read zero. Send it to QC anyway, or send it back so the time is clocked.</p> : null}
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                <form action={confirmWorkComplete.bind(null, id)} className="sm:flex-1"><Button type="submit" size="lg" className="w-full" disabled={blockers.length > 0}>Confirmed, send to QC</Button></form>
+                <form action={confirmWorkComplete.bind(null, id)} className="sm:flex-1"><Button type="submit" size="lg" className="w-full" disabled={blockers.length > 0}>{noClock ? "Send to QC anyway (0 min clocked)" : "Confirmed, send to QC"}</Button></form>
                 <form action={sendWorkBack.bind(null, id)} className="sm:flex-1 flex flex-col gap-2">
                   <Textarea name="note" rows={2} required placeholder="What is not done (the technician sees this on top)" />
                   <Button type="submit" tone="secondary" size="lg" className="w-full">Not done, send back</Button>
