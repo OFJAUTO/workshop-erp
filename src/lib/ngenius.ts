@@ -1,4 +1,5 @@
 import "server-only";
+import { createAdminClient } from "./supabase/admin";
 
 /**
  * Network International, N-Genius Online: the hosted payment page behind the customer's "Pay now".
@@ -46,15 +47,16 @@ async function accessToken(): Promise<string> {
   return json.access_token;
 }
 
-/** The pretend gateway for local tests: orders live in memory, the "payment page" is our own mock route. */
-const mockOrders = new Map<string, { amountAed: number; state: string; redirectUrl: string }>();
-export function mockOrderSet(reference: string, state: string) {
-  const o = mockOrders.get(reference);
-  if (o) o.state = state;
-  return o ?? null;
+/** The pretend gateway for local tests: the order's state lives on its payment_links row; the "payment page" is our own mock route. */
+export async function mockOrderGet(reference: string): Promise<{ amountAed: number; state: string; token: string | null } | null> {
+  const { data } = await createAdminClient().from("payment_links").select("amount_aed, state, invoice:invoices(token)").eq("order_reference", reference).maybeSingle();
+  if (!data) return null;
+  const inv = data.invoice as unknown as { token: string | null } | null;
+  return { amountAed: Number(data.amount_aed) || 0, state: String(data.state ?? "STARTED"), token: inv?.token ?? null };
 }
-export function mockOrderGet(reference: string) {
-  return mockOrders.get(reference) ?? null;
+export async function mockOrderSet(reference: string, state: string) {
+  await createAdminClient().from("payment_links").update({ state }).eq("order_reference", reference);
+  return mockOrderGet(reference);
 }
 
 /** Makes an order for the amount: the customer pays on N-Genius's page and comes back to ours. */
@@ -65,7 +67,6 @@ export async function createNgeniusOrder(input: { amountAed: number; merchantRef
   if (value <= 0) throw new Error("Nothing to pay.");
   if (env === "mock") {
     const reference = `mock-${crypto.randomUUID()}`;
-    mockOrders.set(reference, { amountAed: input.amountAed, state: "STARTED", redirectUrl: input.redirectUrl });
     return { reference, paymentUrl: `${input.siteUrl}/api/pay/ngenius/mock?ref=${encodeURIComponent(reference)}` };
   }
   const token = await accessToken();
@@ -93,7 +94,7 @@ export async function fetchNgeniusStatus(reference: string): Promise<NgeniusStat
   const env = ngeniusEnv();
   if (!env) throw new Error("Pay now is not set up.");
   if (env === "mock") {
-    const o = mockOrders.get(reference);
+    const o = await mockOrderGet(reference);
     const raw = o?.state ?? "FAILED";
     return { state: PAID_STATES.has(raw) ? "paid" : FAILED_STATES.has(raw) ? "failed" : "pending", rawState: raw, amountAed: o?.amountAed ?? null, cardLast4: o && PAID_STATES.has(raw) ? "4242" : null };
   }

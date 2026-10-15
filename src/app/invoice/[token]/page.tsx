@@ -23,9 +23,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * "Paid in full", one View button, Pay now (a payment link that opens once) and the folded bank details.
  * "?view=1" opens the full document with Download PDF and a way back.
  */
-export default async function CustomerInvoicePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
+export default async function CustomerInvoicePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string; paid?: string; notpaid?: string; cancelled?: string }> }) {
   const { token } = await params;
-  const { error } = await searchParams;
+  const { error, paid: paidFlag, notpaid, cancelled } = await searchParams;
   const settings = await getSettings();
   const company = companyFromSettings(settings);
   const admin = createAdminClient();
@@ -70,8 +70,8 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         action={
           due ? (
             <div className="flex flex-col gap-3">
-              {link && !link.opened_at ? <PayNowButton token={token} amountText={aed(bal.balance)} /> : null}
-              {link?.opened_at ? (
+              {link && (link.provider === "ngenius" ? !link.paid_at : !link.opened_at) ? <PayNowButton token={token} amountText={aed(bal.balance)} once={link.provider !== "ngenius"} /> : null}
+              {link?.opened_at && link.provider !== "ngenius" ? (
                 <div className="rounded-lg border border-[#D4D4D8] bg-[#F4F4F5] px-4 py-3 flex flex-col gap-2 text-sm">
                   <span className="font-bold">Payment link opened at {formatDateTime(link.opened_at)}</span>
                   <span>Didn&apos;t complete the payment? Ask us for a new link.</span>
@@ -104,6 +104,9 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
       >
         {error ? <Notice tone="error">{error}</Notice> : null}
+        {paidFlag && paid ? <Notice tone="success">Thank you, your payment was received.</Notice> : null}
+        {notpaid && !paid ? <Notice tone="error">The payment was not completed. You can try again with Pay now, or pay by transfer with the bank details below.</Notice> : null}
+        {cancelled && !paid ? <Notice tone="info">Payment cancelled. Nothing was charged.</Notice> : null}
         {isProforma ? <p className="text-xs text-[#5F6368]">This is not a tax invoice. It shows what is due for the work approved; the tax invoice follows on full payment.</p> : null}
         {payable ? (
           <div className={`rounded-lg px-4 py-4 flex flex-col gap-1 ${paid ? "bg-green-soft" : "bg-[#F4F4F5]"}`}>

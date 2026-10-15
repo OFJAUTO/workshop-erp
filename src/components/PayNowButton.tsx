@@ -7,8 +7,16 @@ import { useState } from "react";
  * posts to our own route, which records the opening and sends the browser on. Nothing on the page
  * holds the address.
  */
-export function PayNowButton({ token, amountText }: { token: string; amountText: string }) {
+export function PayNowButton({ token, amountText, once = true }: { token: string; amountText: string; /** A pasted link opens once and asks first; a Network International page opens straight away, as often as needed until paid. */ once?: boolean }) {
   const [asking, setAsking] = useState(false);
+  if (!once) {
+    return (
+      <form method="post" action={`/api/pay/${token}`} className="flex flex-col gap-1" data-pay-now="card">
+        <button type="submit" className="flex min-h-16 w-full items-center justify-center rounded-lg bg-[#111113] px-4 text-lg font-extrabold text-white">Pay now · {amountText}</button>
+        <span className="text-center text-xs text-[#5F6368]">Card payment on a secure page by Network International.</span>
+      </form>
+    );
+  }
   return (
     <>
       <button type="button" onClick={() => setAsking(true)} className="flex min-h-16 w-full items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-lg font-extrabold">

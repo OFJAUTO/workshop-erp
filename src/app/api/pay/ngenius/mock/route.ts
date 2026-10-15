@@ -18,7 +18,7 @@ function page(ref: string, amount: number) {
 export async function GET(request: NextRequest) {
   if (ngeniusEnv() !== "mock") return NextResponse.json({ error: "Not available" }, { status: 404 });
   const ref = request.nextUrl.searchParams.get("ref") ?? "";
-  const o = mockOrderGet(ref);
+  const o = await mockOrderGet(ref);
   if (!o) return new NextResponse("Unknown order", { status: 404 });
   return new NextResponse(page(ref, o.amountAed), { headers: { "content-type": "text/html; charset=utf-8" } });
 }
@@ -28,9 +28,9 @@ export async function POST(request: NextRequest) {
   const form = await request.formData();
   const ref = String(form.get("ref") ?? "");
   const outcome = String(form.get("outcome") ?? "");
-  const o = mockOrderSet(ref, outcome === "paid" ? "CAPTURED" : "FAILED");
+  const o = await mockOrderSet(ref, outcome === "paid" ? "CAPTURED" : "FAILED");
   if (!o) return new NextResponse("Unknown order", { status: 404 });
   // What the webhook would do a moment later.
   await settleNgeniusOrder(ref);
-  return NextResponse.redirect(`${o.redirectUrl}${o.redirectUrl.includes("?") ? "&" : "?"}ref=${encodeURIComponent(ref)}`, { status: 303 });
+  return NextResponse.redirect(`${request.nextUrl.origin}/api/pay/ngenius/return?t=${encodeURIComponent(o.token ?? "")}&ref=${encodeURIComponent(ref)}`, { status: 303 });
 }
