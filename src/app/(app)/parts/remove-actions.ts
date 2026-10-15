@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requireStaff } from "@/lib/auth";
-import { partNotNeeded } from "@/lib/handover";
+import { setDisposition,partNotNeeded } from "@/lib/handover";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type SupplierOption } from "@/lib/parts-rows";
@@ -119,6 +119,12 @@ export async function notNeededFromParts(jobId: string, partId: string, formData
   const staff = await partsPerson();
   if ("error" in staff) return staff;
   const r = await partNotNeeded(jobId, partId, staff, String(formData.get("reason") ?? ""));
+  // The ending chosen on the spot: back to the supplier (credit note to follow), or kept in stock.
+  const disposition = String(formData.get("disposition") ?? "");
+  if (!r.error && (disposition === "returned" || disposition === "stock")) {
+    const d = await setDisposition(jobId, partId, staff, { disposition, note: null, creditNotePath: null });
+    if (d.error) return d;
+  }
   refresh(jobId);
   return r;
 }

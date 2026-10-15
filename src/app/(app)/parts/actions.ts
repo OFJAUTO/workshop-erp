@@ -1,5 +1,6 @@
 "use server";
 
+import { syncPartLine } from "@/lib/quote-versions";
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -10,7 +11,7 @@ import { dubaiDate } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { dateFromDays, daysComplete, rowMissing, rowState } from "@/lib/parts-rows";
-import { PARTS_BUCKET, PART_SELECT, minMarkupFor, refreshQuoteTotals, toPart, parentLineFor } from "@/lib/quote-data";
+import { PARTS_BUCKET, PART_SELECT, toPart } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -29,51 +30,18 @@ async function jobOf(jobId: string) {
   return data;
 }
 
-/** The job's open quotation (draft), if any, so part lines stay in step with the part items. */
+/** The job's open quotation (draft), if any: callers that only want to know whether one exists. */
 async function draftQuotation(jobId: string) {
   const { data } = await createAdminClient().from("quotations").select("id").eq("job_id", jobId).eq("is_active", true).in("status", ["draft", "pending_owner"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
   return data?.id ?? null;
 }
 
-/** The part's line on the open quotation: made when the part is priced, kept in step afterwards. The first option of a group is the chosen one. */
+/**
+ * The part's line on the quotation (src/lib/quote-versions.ts): the open draft, or the next version when the latest one
+ * was already sent or approved, with the advisor told to send it. Parts never think about versions.
+ */
 export async function syncLineForPart(jobId: string, partId: string, by: string) {
-  const admin = createAdminClient();
-  const quotationId = await draftQuotation(jobId);
-  if (!quotationId) return;
-  const [{ data: pRaw }, { data: line }] = await Promise.all([
-    admin.from("part_items").select(PART_SELECT).eq("id", partId).maybeSingle(),
-    admin.from("quotation_lines").select("id").eq("quotation_id", quotationId).eq("part_item_id", partId).eq("is_active", true).maybeSingle(),
-  ]);
-  if (!pRaw) return;
-  const p = toPart(pRaw as Record<string, unknown>);
-  // The name only: part numbers never reach a customer document (they live on the part item for the LPO and the supplier list).
-  const title = p.description;
-  const shared = { title, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, positions: p.positions ?? null, updated_by: by };
-  if (p.confirm_status === "rejected" || !p.is_active) {
-    if (line) await admin.from("quotation_lines").update({ is_active: false, updated_by: by }).eq("id", line.id);
-  } else if (line) {
-    await admin.from("quotation_lines").update(shared).eq("id", line.id);
-    const { data: cur } = await admin.from("quotation_lines").select("parent_line_id").eq("id", line.id).maybeSingle();
-    if (cur && !cur.parent_line_id) {
-      const { data: req0 } = p.part_request_id ? await admin.from("part_requests").select("source_type, source_key").eq("id", p.part_request_id).maybeSingle() : { data: null };
-      const parent = await parentLineFor(quotationId, req0 ? { source_type: req0.source_type, source_key: req0.source_key } : null);
-      if (parent) await admin.from("quotation_lines").update({ parent_line_id: parent, updated_by: by }).eq("id", line.id);
-    }
-  } else {
-    const settings = await getSettings();
-    const { data: v } = await admin.from("jobs").select("vehicle:vehicles(make:vehicle_makes(name))").eq("id", jobId).maybeSingle();
-    const make = ((v?.vehicle as unknown as { make: { name: string } | null } | null)?.make?.name) ?? null;
-    const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", quotationId).order("position", { ascending: false }).limit(1).maybeSingle();
-    const { data: req } = p.part_request_id ? await admin.from("part_requests").select("label, source_type, source_key").eq("id", p.part_request_id).maybeSingle() : { data: null };
-    const parent = await parentLineFor(quotationId, req ? { source_type: req.source_type, source_key: req.source_key } : null);
-    let chosen = true;
-    if (p.option_group) {
-      const { data: siblings } = await admin.from("quotation_lines").select("id").eq("quotation_id", quotationId).eq("option_group", p.option_group).eq("is_active", true).eq("chosen", true).limit(1);
-      chosen = !(siblings ?? []).length;
-    }
-    await admin.from("quotation_lines").insert({ quotation_id: quotationId, position: (Number(last?.position) || 0) + 1, line_type: "part", ...shared, chosen, parent_line_id: parent, group_label: req?.label ?? "Parts", source_type: "manual", markup_percent: minMarkupFor(settings, make), part_item_id: p.id, created_by: by });
-  }
-  await refreshQuoteTotals(quotationId, await getSettings(), by, { reopen: true });
+  await syncPartLine(jobId, partId, by);
 }
 
 /** When every request on the job is answered and every part has a price, the advisor hears about it. */

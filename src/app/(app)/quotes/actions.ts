@@ -1,16 +1,18 @@
 "use server";
 
-import { newToken } from "@/lib/media";
+import { dropParts } from "@/lib/drop-parts";
+import { createChargeInvoice } from "@/lib/invoice-flow";
+import { COPY_FIELDS, createNextVersion, missingPricedParts, syncMissingParts } from "@/lib/quote-versions";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { TYRE_POSITIONS } from "@/lib/inspection";
-import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { isUnchosen,ownerApprovalReasons, quoteTotals, recoveryTitle, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
+import { isUnchosen, ownerApprovalReasons, quoteTotals, recoveryTitle, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -71,7 +73,6 @@ async function syncPartLines(quotationId: string, jobId: string, by: string, min
   if (rows.length) await admin.from("quotation_lines").insert(rows);
 }
 
-const COPY_FIELDS = (l: QuoteLine) => ({ line_type: l.line_type, positions: l.positions ?? null, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key, quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent, discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer, urgency: l.urgency, advisor_added: l.advisor_added, part_type: l.part_type, brand: l.brand, option_group: l.option_group, chosen: l.chosen, recovery_trips: l.recovery_trips, recovery_provider: l.recovery_provider, dangerous: l.dangerous, recovery_provider_kind: l.recovery_provider_kind, markup_confirmed: l.markup_confirmed });
 
 /** "Start quotation": suggested lines from the approved report (or the estimate), one part line per listed part. */
 export async function startQuotation(jobId: string) {
@@ -172,38 +173,12 @@ async function makeVersion(quotationId: string, urgentOnly: boolean) {
   const back = q.kind === "estimate" ? `/estimates/${quotationId}` : `/jobs/${q.job_id}/quote/${quotationId}`;
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
   if (!["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"].includes(q.status)) redirect(back);
-  const admin = createAdminClient();
-  const { data: created, error } = await admin
-    .from("quotations")
-    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, commission_to: q.commission_to ?? null, commission_kind: q.commission_kind ?? null, commission_value: q.commission_value ?? null, created_by: staff.id, updated_by: staff.id })
-    .select("id")
-    .single();
-  if (error || !created) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not revise.")}`);
-  // Urgent only: the labour lines marked Urgent, their parts, and every other charge. The rest is kept against the car as declined work.
-  const active = bundle.lines.filter((l) => l.is_active && !l.fee_kind);
-  const keepLabour = active.filter((l) => blockOf(l) === "labour" && (!urgentOnly || l.urgency === "urgent"));
-  const keepIds = new Set(keepLabour.map((l) => l.id));
-  const kept = active.filter((l) => blockOf(l) === "other" || keepIds.has(l.id) || (blockOf(l) === "parts" && (!l.parent_line_id || keepIds.has(l.parent_line_id))));
-  const keptIds = new Set(kept.map((l) => l.id));
-  const left = active.filter((l) => !keptIds.has(l.id) && !isHidden(l));
-  const idMap = new Map<string, string>();
-  for (const l of kept.filter((x) => !x.parent_line_id)) {
-    const { data: ins } = await admin.from("quotation_lines").insert({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), revised_from_line_id: l.id, parent_line_id: null, created_by: staff.id, updated_by: staff.id }).select("id").single();
-    if (ins) idMap.set(l.id, ins.id);
-  }
-  for (const l of kept.filter((x) => x.parent_line_id)) {
-    await admin.from("quotation_lines").insert({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), revised_from_line_id: l.id, parent_line_id: idMap.get(l.parent_line_id!) ?? null, created_by: staff.id, updated_by: staff.id });
-  }
-  const keep = kept;
-  if (left.length && q.kind === "quotation") {
-    await admin.from("declined_work").insert(left.map((l) => ({ vehicle_id: q.vehicle_id, customer_id: q.customer_id, job_id: q.job_id, quotation_id: q.id, title: l.title, details: `${l.group_label ?? ""}${l.group_label ? " · " : ""}left out of the urgent-only quotation`, amount_aed: l.line_total, declined_at: new Date().toISOString(), created_by: staff.id, updated_by: staff.id })));
-  }
-  if (["sent", "opened", "expired", "pending_owner", "urgent_requested"].includes(q.status)) await admin.from("quotations").update({ status: "superseded", updated_by: staff.id }).eq("id", q.id);
-  await refreshQuoteTotals(created.id, await getSettings(), staff.id);
-  await logQuoteEvent(created.id, q.job_id, staff.id, urgentOnly ? "quote_urgent_version" : "quote_revised", `${q.number} version ${q.version + 1} started by ${staff.display_name}${urgentOnly ? ` with the urgent work only (${keep.length} line${keep.length === 1 ? "" : "s"}; ${left.length} left out and kept as declined work)` : ""}`);
-  refresh(q.job_id, created.id);
-  redirect(q.kind === "estimate" ? `/estimates/${created.id}` : `/jobs/${q.job_id}/quote/${created.id}`);
+  const r = await createNextVersion(quotationId, staff, { urgentOnly });
+  if ("error" in r) redirect(`${back}?error=${encodeURIComponent(r.error)}`);
+  refresh(q.job_id, r.id);
+  redirect(q.kind === "estimate" ? `/estimates/${r.id}` : `/jobs/${q.job_id}/quote/${r.id}`);
 }
+
 
 export async function reviseQuotation(quotationId: string) {
   await makeVersion(quotationId, false);
@@ -365,7 +340,7 @@ async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQ
  * "Quotation complete": every check passes, the labour hours are remembered for the next quotation on
  * the same work, and descriptions typed by hand are counted so the owner can add them to the list.
  */
-export async function completeQuotation(quotationId: string, opts: { /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "markup"; message?: string }> {
+export async function completeQuotation(quotationId: string, opts: { /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean; /** "Leave them off" on the missing-parts check: logged. */ skipParts?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "markup" | "parts"; message?: string; missing?: string[] }> {
   const bundle = await loadQuotation(quotationId);
   if (!bundle) return { error: "Quotation not found." };
   const q = bundle.quotation;
@@ -386,6 +361,12 @@ export async function completeQuotation(quotationId: string, opts: { /** "Contin
     if (!opts.skipMarkup) return { ask: "markup", message: `Parts markup is still at the minimum ${minMarkup}%. Set it now?` };
     await admin.from("quotations").update({ markup_skipped_at: new Date().toISOString(), markup_skipped_by: staff.id, updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "markup_skipped", `${q.number} v${q.version}: parts markup left at the minimum ${minMarkup}% by ${staff.display_name} (Continue anyway)`);
+  }
+  // Every priced part (Our stock included) must be on the quotation: the missing ones are added with one tap.
+  if (q.kind === "quotation" && q.job_id) {
+    const missing = await missingPricedParts(q.job_id, q.id);
+    if (missing.length && !opts.skipParts) return { ask: "parts", message: `${missing.length} priced part${missing.length === 1 ? " is" : "s are"} missing from the quote`, missing: missing.map((m) => m.description) };
+    if (missing.length && opts.skipParts) await logQuoteEvent(q.id, q.job_id, staff.id, "parts_left_off", `${q.number} v${q.version} completed by ${staff.display_name} without ${missing.length} priced part${missing.length === 1 ? "" : "s"}: ${missing.map((m) => m.description).join(", ")}`);
   }
   const workLines = active.filter((l) => l.line_type !== "part" && !l.fee_kind);
   // Custom jobs typed by hand are counted; the owner sees them in Settings > Jobs and services and adds them to the list with one tap.
@@ -537,3 +518,60 @@ export async function keepUrgentOnly(quotationId: string): Promise<{ error?: str
 }
 
 export type { QuoteLine };
+
+/** "Add them": the priced parts with no line join the quotation, one line each. */
+export async function addMissingParts(quotationId: string): Promise<{ error?: string; ok?: boolean; added?: number }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Only the job's advisor or the owner can change it." };
+  if (!q.job_id || !["draft", "pending_owner"].includes(q.status)) return { error: "Only a draft can take the parts." };
+  const added = await syncMissingParts(q.job_id, q.id, staff.id);
+  refresh(q.job_id, q.id);
+  return { ok: true, added };
+}
+
+/**
+ * After "Mark as declined": the car goes to gate-out. Open part requests are cancelled, unordered parts leave the list
+ * (Parts are asked about ordered ones), the workshop manager is told to put the car back together, and an optional
+ * charge (DIAGNOSIS...) becomes a small tax invoice to be paid before the car leaves. Without one the car goes out free.
+ */
+export async function declineToGateOut(quotationId: string, formData: FormData) {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) redirect("/dashboard");
+  const q = bundle.quotation;
+  const back = `/jobs/${q.job_id}/quote/${q.id}`;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
+  if (q.status !== "declined" || !q.job_id) redirect(`${back}?error=${encodeURIComponent("Only a declined quotation can go to gate-out.")}`);
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, job_number, status, is_open, department, gated_in_by").eq("id", q.job_id).maybeSingle();
+  if (!job || !job.is_open) redirect(`${back}?error=${encodeURIComponent("This job is closed.")}`);
+  const settings = await getSettings();
+  const now = new Date().toISOString();
+  // The optional charge first, so a bad amount stops here.
+  const description = String(formData.get("charge_description") ?? "").trim();
+  const amount = Number(String(formData.get("charge_amount") ?? "").replace(",", ".")) || 0;
+  let invoiceId: string | null = null;
+  let chargeText = "";
+  if (description || amount > 0) {
+    const inv = await createChargeInvoice(q.job_id, staff, settings, { description: description || "Charge", amount });
+    if ("error" in inv) redirect(`${back}?error=${encodeURIComponent(inv.error)}`);
+    invoiceId = inv.id;
+    chargeText = ` ${inv.number} for ${description || "the charge"} (AED ${inv.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) must be paid before the car leaves.`;
+  }
+  // Open requests are cancelled: Parts stop pricing them. Unordered parts leave the list; ordered ones are put to Parts.
+  const { data: openReqs } = await admin.from("part_requests").select("id").eq("job_id", q.job_id).eq("is_active", true).eq("status", "open");
+  for (const r of openReqs ?? []) await admin.from("part_requests").update({ status: "rejected", closed_reason: "Quotation declined", removed_at: now, removed_by: staff.id, removed_reason: "Quotation declined", updated_by: staff.id }).eq("id", r.id);
+  const { data: parts } = await admin.from("part_items").select("id").eq("job_id", q.job_id).eq("is_active", true);
+  await dropParts(q.job_id, (parts ?? []).map((p) => p.id), staff, "declined");
+  await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, declined_out_at: now, declined_charge_invoice_id: invoiceId, inspection_fee_due: false, updated_by: staff.id }).eq("id", q.job_id);
+  await admin.from("job_events").insert({ job_id: q.job_id, event_type: "status_change", from_status: job.status, to_status: "ready", note: `${q.number} declined: the car goes to gate-out (${staff.display_name}).${chargeText || " No charge: the car leaves free."}`, created_by: staff.id });
+  await logQuoteEvent(q.id, q.job_id, staff.id, "declined_to_gate_out", `Proceed to gate-out chosen by ${staff.display_name}${chargeText}`);
+  const n = { type: "job_declined_out", title: `${job.job_number} declined: make sure the car is put back together and ready for collection`, body: `The customer declined ${q.number}. Open parts requests are cancelled.${chargeText}`, jobId: q.job_id, href: `/jobs/${q.job_id}` };
+  await notifyManagers(job.department ?? null, n);
+  if (job.gated_in_by && job.gated_in_by !== staff.id) await notifyStaff([job.gated_in_by], n);
+  refresh(q.job_id, q.id);
+  redirect(`/jobs/${q.job_id}?message=${encodeURIComponent(`Declined, car going out.${chargeText || " No charge: the car leaves free."}`)}`);
+}

@@ -473,9 +473,10 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
   };
   const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || pricingLocked;
   const removeTarget = partId ? { partId } : { requestId: row.requestId };
-  const doRemove = (kind: "part" | "request" | "ordered", reason: string) => {
+  const doRemove = (kind: "part" | "request" | "ordered", reason: string, disposition?: "returned" | "stock") => {
     const fd = new FormData();
     fd.set("reason", reason);
+    if (disposition) fd.set("disposition", disposition);
     run(async () => {
       const r = kind === "ordered" && partId ? await notNeededFromParts(jobId, partId, fd) : await removeNotNeeded(jobId, removeTarget, fd);
       if (r.error) setError(r.error);
@@ -622,22 +623,29 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
         <span className={`shrink-0 max-w-[60%] truncate ${tag.cls}`} title={tag.text} data-row-tag>{tag.text}</span>
       </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
-      {removing ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason) => { const kind = removing; setRemoving(null); doRemove(kind, reason); }} /> : null}
+      {removing ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason, disposition) => { const kind = removing; setRemoving(null); doRemove(kind, reason, disposition); }} /> : null}
     </div>
   );
 }
 
 /** "Remove: not needed": one-tap reasons (Settings) or typed; before the order the row is greyed with Put back, after it the part gets an ending. */
-function RemoveDialog({ kind, name, options, onClose, onConfirm }: { kind: "part" | "request" | "ordered"; name: string; options: readonly string[]; onClose: () => void; onConfirm: (reason: string) => void }) {
+function RemoveDialog({ kind, name, options, onClose, onConfirm }: { kind: "part" | "request" | "ordered"; name: string; options: readonly string[]; onClose: () => void; onConfirm: (reason: string, disposition?: "returned" | "stock") => void }) {
   const [reason, setReason] = useState("");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={onClose}>
       <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-remove-dialog>
         <span className="text-lg font-extrabold">Remove: not needed</span>
-        <p className="text-xs text-muted">{kind === "ordered" ? `${name} is already ordered. After this it needs an ending: back to the supplier, to stock, or fitted with the owner's approval (Parts without a home).` : `${name} comes off the list and the quotation, greyed with the reason; Put back is one tap. The advisor and the workshop manager are told. "Not available" is different: wanted, but the supplier cannot supply it.`}</p>
+        <p className="text-xs text-muted">{kind === "ordered" ? `${name} is already ordered: choose where it goes, back to the supplier (credit note to follow) or into our stock. It leaves the quotation either way.` : `${name} comes off the list and the quotation, greyed with the reason; Put back is one tap. The advisor and the workshop manager are told. "Not available" is different: wanted, but the supplier cannot supply it.`}</p>
         <ReasonChips name="reason" label="Why?" options={options} onValue={setReason} placeholder="Tap a reason, or type" textCase="sentence" />
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>Remove</Button>
+          {kind === "ordered" ? (
+            <>
+              <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim(), "returned")} data-remove-return>Return to supplier</Button>
+              <Button type="button" size="md" tone="secondary" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim(), "stock")} data-remove-stock>Keep in stock</Button>
+            </>
+          ) : (
+            <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>Remove</Button>
+          )}
           <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
         </div>
       </div>

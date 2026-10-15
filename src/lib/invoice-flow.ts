@@ -158,3 +158,42 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
   await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { type: "invoice_issued", title: `Tax invoice ready to send · ${job.job_number}`, body: `${number} is ${opts.force ? "issued" : "generated and marked paid"}. Send it to the customer.`, jobId, href: `/jobs/${jobId}` });
   return toInvoice(tax as unknown as Record<string, unknown>);
 }
+
+/**
+ * A tax invoice for one charge on a declined job (for example DIAGNOSIS): issued at once, paid before the car leaves
+ * like any invoice. Nothing comes from a quotation.
+ */
+export async function createChargeInvoice(jobId: string, actor: Actor, settings: Settings, charge: { description: string; amount: number }): Promise<{ id: string; number: string; token: string; total: number } | { error: string }> {
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, gated_in_by").eq("id", jobId).maybeSingle();
+  if (!job) return { error: "Job not found." };
+  const description = charge.description.trim().slice(0, 200);
+  const amount = round2(charge.amount);
+  if (!description || !(amount > 0)) return { error: "Give the charge a name and an amount." };
+  const vatPercent = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
+  const vat = round2(amount * (vatPercent / 100));
+  const total = round2(amount + vat);
+  const [{ data: customer }, { data: vehicle }] = await Promise.all([
+    admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", job.customer_id).maybeSingle(),
+    admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", job.vehicle_id).maybeSingle(),
+  ]);
+  const v = vehicle as unknown as { kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
+  const number = await nextDocumentNumber("tax_invoice", settings);
+  const token = newToken();
+  const by = actor?.id ?? job.gated_in_by ?? null;
+  const { data: inv, error } = await admin
+    .from("invoices")
+    .insert({
+      number, kind: "tax_invoice", job_id: jobId, customer_id: job.customer_id, vehicle_id: job.vehicle_id, token, labour_mode: "itemised",
+      subtotal_aed: amount, discount_aed: 0, taxable_aed: amount, vat_aed: vat, total_aed: total, agreed_total_aed: null, warranty_credit_aed: 0,
+      issue_reason: "Charge on a declined quotation", prepared_by: job.gated_in_by, issued_by: by, customer_snapshot: customer ?? null,
+      vehicle_snapshot: v ? (v.kind === "loose" ? { title: "Items", variant: null, plate: v.variant ?? "Loose items", vin: null } : { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: v.variant, plate: formatPlate(v), vin: v.vin }) : null,
+      created_by: by, updated_by: by,
+    })
+    .select("id, number, token")
+    .single();
+  if (error || !inv) return { error: error?.message ?? "Could not make the invoice." };
+  await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: amount, amount_aed: amount, vat_aed: vat, total_aed: total, cost_aed: null, quotation_line_id: null, part_item_id: null, created_by: by, updated_by: by });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for ${description} (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
+  return { id: inv.id as string, number: inv.number as string, token: inv.token as string, total };
+}

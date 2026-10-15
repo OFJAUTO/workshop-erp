@@ -5,6 +5,8 @@ import type { RoleId } from "./roles";
 /** Every kind of notification the system can send. Later phases add their own. */
 export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean }[] = [
   { type: "clock_overnight", label: "Clock left running overnight" },
+  { type: "quote_revised_by_parts", label: "Parts changed: revised quotation to send" },
+  { type: "job_declined_out", label: "Declined job going out" },
   { type: "approval_opened", label: "Customer opened the approval link", locked: true },
   { type: "approval_approved", label: "Customer approved the job card", locked: true },
   { type: "approval_reminder", label: "Approval link not opened in time", locked: true },

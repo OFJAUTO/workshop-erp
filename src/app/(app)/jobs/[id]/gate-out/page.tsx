@@ -41,7 +41,9 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const job = card.job;
   const { data: creditCust } = job.customer_id ? await createAdminClient().from("customers").select("credit_terms_days").eq("id", job.customer_id).maybeSingle() : { data: null };
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
-  const blocked = (bal.state === "no_invoice" || bal.balance > 0) && !(bal.state !== "no_invoice" && bal.balance > 0 && creditDays > 0);
+  const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at").eq("id", id).maybeSingle();
+  const declinedOut = !!declinedRow?.declined_out_at;
+  const blocked = ((bal.state === "no_invoice" && !declinedOut) || bal.balance > 0) && !(bal.state !== "no_invoice" && bal.balance > 0 && creditDays > 0);
   // Bodyshop: the sign-off state, and the final check visit for a PPF car (7 to 14 days, the Settings default).
   const bodyshop = job.department === "bodyshop";
   const signoff = bodyshop ? await signoffState(id) : null;
@@ -52,7 +54,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <PageHeader title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${job.job_number} · ${STATUS_LABELS[job.status]}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
+      <PageHeader title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${job.job_number} · ${declinedOut ? "Declined, car going out" : STATUS_LABELS[job.status]}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {signoff && signoff.hasStages && !signoff.complete ? <Notice tone="info">Release sign-off still needed from {signoff.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. The handover stays locked until all have signed on the bodyshop page.</Notice> : null}
@@ -72,7 +74,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             </Card>
           ) : (
             <Card>
-              <GateOutForm finalCheck={finalCheck} creditDays={creditDays} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+              <GateOutForm finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           )}
         </div>

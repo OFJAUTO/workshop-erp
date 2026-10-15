@@ -157,7 +157,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // The five parts steps as dots (the same rule as the parts page).
   const [{ data: stepRows }, { data: stepJob }] = await Promise.all([
     createAdminClient().from("part_items").select("is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status").eq("job_id", id),
-    createAdminClient().from("jobs").select("parts_pricing_done_at, parts_pricing_reopened_at").eq("id", id).maybeSingle(),
+    createAdminClient().from("jobs").select("parts_pricing_done_at, parts_pricing_reopened_at, declined_out_at").eq("id", id).maybeSingle(),
   ]);
   const partsDots = <PartsSteps size="dots" steps={partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) })} />;
   const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
@@ -301,7 +301,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <div className="xl:col-span-2 flex flex-col gap-4">
           <Card className="flex flex-col gap-3">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-lg font-extrabold">{STATUS_LABELS[job.status]}</span>
+              <span className="text-lg font-extrabold" data-job-status>{stepJob?.declined_out_at ? "Declined, car going out" : STATUS_LABELS[job.status]}</span>
               <span className="text-sm text-muted">
                 {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date yet"}
                 {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}

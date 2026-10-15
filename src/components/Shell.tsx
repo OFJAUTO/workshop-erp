@@ -54,7 +54,7 @@ export function Shell({
           </details>
         ) : null}
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col relative">
+      <main className="flex-1 min-w-0 flex flex-col relative pb-28">
         {viewingAs && user ? (
           <div className="bg-amber-soft border-b-2 border-amber-bar px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="font-bold">
@@ -98,7 +98,7 @@ export function PublicShell({ note, children }: { note?: ReactNode; children: Re
         <Logo onDark className="h-11 md:h-15" />
         {note ? <span className="text-xs text-white/70 md:mt-2">{note}</span> : null}
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col">{children}</main>
+      <main className="flex-1 min-w-0 flex flex-col pb-28">{children}</main>
     </div>
   );
 }

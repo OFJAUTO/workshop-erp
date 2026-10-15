@@ -51,7 +51,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   const role = staff.role_id as RoleId;
   const values = formValues(formData);
   const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, status, is_open, job_number, gated_in_by, customer_id").eq("id", jobId).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("id, status, is_open, job_number, gated_in_by, customer_id, declined_out_at").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is already closed.", values };
   if (job.status === "in_delivery") return { error: "The car has left for delivery. Mark it delivered instead.", values };
   // Gate-out comes after QC, the wash and the invoice. Only the owner may go through earlier, and it is written down.
@@ -98,7 +98,11 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   const { data: creditJob } = await createAdminClient().from("jobs").select("customer_id").eq("id", jobId).maybeSingle();
   const { data: creditCust } = creditJob?.customer_id ? await createAdminClient().from("customers").select("credit_terms_days").eq("id", creditJob.customer_id).maybeSingle() : { data: null };
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
-  if (bal.state === "no_invoice") {
+  if (bal.state === "no_invoice" && job.declined_out_at) {
+    // The customer declined the quotation and no charge was added: the car leaves free, written down.
+    releaseBy = staff.id;
+    releaseReason = "Declined quotation, no charge: the car leaves free";
+  } else if (bal.state === "no_invoice") {
     if (!can(role, "approveRelease")) return { error: "No invoice has been issued for this job. Accounts must issue it before the car leaves.", values };
     if (releaseReason.length < 5) return { error: "No invoice issued yet. Write the reason to release without one (logged).", values };
     releaseBy = staff.id;

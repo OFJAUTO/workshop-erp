@@ -11,10 +11,11 @@ import { markQuoteSent, resendQuotation, roundQuotation, sendQuotation } from "@
  * "Send quotation": the rounding question (to the nearest ten dirhams, down by default), the checks,
  * then the centre window with the message, Open WhatsApp and Copy.
  */
-export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, phoneDigits, blocked, onBlocked, existingToken, status, total, roundedTotal, again = false, compact = false }: { quotationId: string; kind: "quotation" | "estimate"; siteUrl: string; messageTemplate: string; phoneDigits: string; blocked: boolean; onBlocked: () => void; existingToken: string | null; status: string; total: number; roundedTotal: number | null; again?: boolean; /** In the bottom bar: a normal-sized button, the notes beside it. */ compact?: boolean }) {
+export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, phoneDigits, blocked, onBlocked, existingToken, status, total, roundedTotal, again = false, compact = false, autoOpen = false }: { /** Opens the send window on arrival (the "send the revised quotation" link). */ autoOpen?: boolean; quotationId: string; kind: "quotation" | "estimate"; siteUrl: string; messageTemplate: string; phoneDigits: string; blocked: boolean; onBlocked: () => void; existingToken: string | null; status: string; total: number; roundedTotal: number | null; again?: boolean; /** In the bottom bar: a normal-sized button, the notes beside it. */ compact?: boolean }) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(existingToken);
-  const [open, setOpen] = useState(false);
+  // Arriving from "send the revised quotation": the window is open from the start.
+  const [open, setOpen] = useState(autoOpen && !!existingToken);
   const [error, setError] = useState<string | null>(null);
   const [pendingOwner, setPendingOwner] = useState<string[] | null>(null);
   const [warranty, setWarranty] = useState(false);

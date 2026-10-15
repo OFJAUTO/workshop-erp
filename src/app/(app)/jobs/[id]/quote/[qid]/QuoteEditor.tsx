@@ -13,7 +13,7 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
-import { completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
+import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
 
 type Op = Record<string, unknown>;
@@ -220,6 +220,8 @@ export function QuoteEditor({
   recoveryTypes = [],
   wait = null,
   workshopEstimate = null,
+  onRevise = null,
+  autoSend = false,
   completedAt = null,
   estimatedDays = 0,
   isRevision = false,
@@ -253,6 +255,10 @@ export function QuoteEditor({
   recoveryTypes?: RecoveryType[];
   wait?: PartsWait | null;
   workshopEstimate?: { hours: number | null; managerHours: number | null; agreed: boolean } | null;
+  /** "Revise quotation" in the bottom bar once the quotation was sent. */
+  onRevise?: ((formData: FormData) => Promise<void>) | null;
+  /** Arriving from "send the revised quotation": complete and open the send window by itself. */
+  autoSend?: boolean;
   completedAt?: string | null;
   estimatedDays?: number;
   isRevision?: boolean;
@@ -269,6 +275,7 @@ export function QuoteEditor({
   const [discountOpen, setDiscountOpen] = useState(false);
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
+  const [partsAsk, setPartsAsk] = useState<{ message: string; missing: string[] } | null>(null);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
   const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
   const flagMin = (id: string) => { setMinFlags((s) => new Set(s).add(id)); setTimeout(() => setMinFlags((s) => { const x = new Set(s); x.delete(id); return x; }), 4000); };
@@ -387,12 +394,6 @@ export function QuoteEditor({
     save({ removeLine: { id, withParts } });
     setRemoveAsk(null);
   };
-  /** Quotation complete, with the one-time markup reminder when every part is still at the minimum markup. */
-  const completeNow = (skipMarkup: boolean) => run(async () => {
-    const r = await completeQuotation(quotation.id, { skipMarkup });
-    if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
-    return r;
-  });
   const setHeaderField = (fields: Partial<typeof header>, immediate = false) => {
     setHeader((h) => ({ ...h, ...fields }));
     const op = () => ({ header: fields });
@@ -434,6 +435,28 @@ export function QuoteEditor({
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
   const completed = !!completedAt;
+  /** Quotation complete, with the one-time markup reminder when every part is still at the minimum markup. */
+  const completeNow = (skipMarkup: boolean, skipParts = false) => run(async () => {
+    const r = await completeQuotation(quotation.id, { skipMarkup, skipParts });
+    if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
+    if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
+    return r;
+  });
+  /** "Add them": the missing priced parts join the quotation, then the completion runs again. */
+  const addMissingNow = () => run(async () => {
+    setPartsAsk(null);
+    const a = await addMissingParts(quotation.id);
+    if (a.error) return a;
+    const r = await completeQuotation(quotation.id, {});
+    if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
+    if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
+    return r;
+  });
+  // Arriving from "send the revised quotation": complete it (when not yet) so the send window can open.
+  useEffect(() => {
+    if (autoSend && !sent && !completed && !disabled) completeNow(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Parts that go with a quoted part (a wear sensor with brake pads): offered to the advisor, never added by themselves.
   const partOffers = isQuotation && !disabled
     ? goesWithOffers(
@@ -1168,6 +1191,20 @@ export function QuoteEditor({
           </div>
         </div>
       ) : null}
+      {partsAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-parts-ask>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">{partsAsk.message}</span>
+            <ul className="text-sm font-semibold uppercase">{partsAsk.missing.map((m, i) => <li key={i}>{m}</li>)}</ul>
+            <p className="text-xs text-muted">Every priced part belongs on the quotation, Our stock included (our stock only skips the ordering). The customer is not charged for a part that is not here.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={addMissingNow} data-parts-add>{partsAsk.missing.length === 1 ? "Add it" : "Add them"}</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { setPartsAsk(null); completeNow(false, true); }} data-parts-leave>Leave {partsAsk.missing.length === 1 ? "it" : "them"} off</Button>
+              <Button type="button" tone="ghost" size="md" onClick={() => setPartsAsk(null)}>Cancel</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {markupAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-markup-ask>
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
@@ -1214,7 +1251,8 @@ export function QuoteEditor({
                   {pending ? "Checking…" : isQuotation ? "Quotation complete" : "Estimate complete"}
                 </Button>
               ) : null}
-              {!sent && completed && canSend ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} compact /> : null}
+              {!sent && completed && canSend ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
+              {canSend && sent && onRevise ? <form action={onRevise}><Button type="submit" tone="secondary" size="md" data-revise-bar>Revise quotation</Button></form> : null}
               {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} again /> : null}
             </span>
           </div>

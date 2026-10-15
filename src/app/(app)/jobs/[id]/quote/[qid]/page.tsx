@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
+import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
@@ -11,7 +11,7 @@ import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { confirmEstimateUnchanged, decideQuoteApproval, declineQuotation, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
+import { confirmEstimateUnchanged, decideQuoteApproval, declineQuotation, declineToGateOut, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { loadPricingRows } from "@/lib/parts-pricing";
@@ -21,11 +21,14 @@ import { quoteReferenceOf } from "@/lib/quote-reference";
 export const dynamic = "force-dynamic";
 
 /** The quotation builder for a job. Only the owner and the job's advisor can open it; everyone else goes back to the job card. */
-export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
+export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
-  const { message, error } = await searchParams;
+  const { message, error, send } = await searchParams;
+  const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open").eq("id", id).maybeSingle();
+  const declinedOut = !!declinedRow?.declined_out_at;
+  const jobOpen = declinedRow?.is_open !== false;
   const [bundle, settings, site] = await Promise.all([loadQuotation(qid), getSettings(), getSiteUrl()]);
   if (!bundle || bundle.quotation.job_id !== id) notFound();
   const { quotation: q, job, vehicle, customer } = bundle;
@@ -206,6 +209,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}
+        onRevise={canSend && ["sent", "opened", "expired", "declined", "approved", "urgent_requested"].includes(q.status) ? reviseQuotation.bind(null, q.id) : null}
+        autoSend={send === "1"}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -233,22 +238,36 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
             </Card>
           ) : null}
           {canSend && ["sent", "opened", "expired"].includes(q.status) ? (
-            <Card className="flex flex-col gap-2">
-              <SectionLabel>Declined by the customer?</SectionLabel>
-              <p className="text-sm text-muted">The customer&apos;s page has no Declined button. After talking to the customer, mark it here (or make a revised quotation below).</p>
-              <form action={declineQuotation.bind(null, q.id)} className="flex flex-col gap-2">
+            <details className="text-sm" data-mark-declined>
+              <summary className="cursor-pointer font-semibold underline underline-offset-4 min-h-11 flex items-center">Mark as declined</summary>
+              <form action={declineQuotation.bind(null, q.id)} className="mt-2 flex flex-col gap-2">
+                <p className="text-xs text-muted">The customer&apos;s page has no Declined button: after talking to the customer, mark it here.</p>
                 <Textarea name="reason" rows={1} placeholder="Reason (optional)" />
                 <div><Button type="submit" tone="secondary" size="md">Mark as declined</Button></div>
               </form>
-            </Card>
+            </details>
           ) : null}
-          {canSend && ["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"].includes(q.status) ? (
-            <Card className="flex flex-col gap-2">
-              <SectionLabel>Revise</SectionLabel>
-              <p className="text-sm text-muted">A new version of {q.number} with the same lines, ready to change and send again. This version stays on record.</p>
-              <form action={reviseQuotation.bind(null, q.id)}>
-                <Button type="submit" tone="secondary" size="md">Start version {q.version + 1}</Button>
-              </form>
+          {q.status === "declined" && canSend && jobOpen && !declinedOut ? (
+            <Card className="flex flex-col gap-3 border-ink" data-declined-next>
+              <SectionLabel>Declined: what next?</SectionLabel>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <form action={reviseQuotation.bind(null, q.id)} className="flex flex-col gap-1">
+                  <Button type="submit" size="lg" className="w-full" data-declined-revise>Revise quotation</Button>
+                  <span className="text-xs text-muted">Opens version {q.version + 1} to change and send again.</span>
+                </form>
+                <form action={declineToGateOut.bind(null, q.id)} className="flex flex-col gap-2">
+                  <Button type="submit" size="lg" tone="secondary" className="w-full" data-declined-gateout>Proceed to gate-out</Button>
+                  <details className="text-sm" data-add-charge>
+                    <summary className="cursor-pointer font-semibold min-h-11 flex items-center">Add a charge (optional)</summary>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Input name="charge_description" placeholder="For example DIAGNOSIS" className="min-w-48 flex-1" textCase="upper" aria-label="Charge" data-charge-description />
+                      <Input name="charge_amount" inputMode="decimal" placeholder="AED" className="w-28 text-right" aria-label="Amount" data-charge-amount />
+                    </div>
+                    <p className="mt-1 text-xs text-muted">A small tax invoice is made and must be paid before the car leaves. Without a charge the car goes out free.</p>
+                  </details>
+                </form>
+              </div>
+              <p className="text-xs text-muted">Proceed to gate-out: open parts requests are cancelled, the workshop manager is told to put the car back together, and the car appears in gate-out as normal.</p>
             </Card>
           ) : null}
         </div>

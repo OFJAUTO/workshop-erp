@@ -9,14 +9,16 @@ import { ChoiceButtons, Field, Input, Notice } from "@/components/ui";
 export type BalanceInfo = { state: "paid" | "part_paid" | "unpaid" | "cheque_pending" | "no_invoice" | "nothing"; balance: number; invoiceNumber: string | null };
 
 /** The gate-out form: how the car leaves, the checks before release, the handover. */
-export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldParts, canOverride, canApproveRelease, balance, reasons = { keys: [], release: [] }, finalCheck = null, creditDays = 0 }: { /** Agreed credit days on the customer (owner-set); 0 = pay before release. */ creditDays?: number; /** A PPF car: the final check visit, 7 to 14 days after the handover. */ finalCheck?: { defaultDate: string; min: string; max: string } | null; jobId: string; action: FormAction; keysCount: number; keychain: boolean; dashCam: boolean; oldParts: boolean; canOverride: boolean; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for the keys override and for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
+export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldParts, canOverride, canApproveRelease, balance, reasons = { keys: [], release: [] }, finalCheck = null, creditDays = 0, declinedOut = false }: { /** The customer declined the quotation: the car goes out, free unless a charge was invoiced. */ declinedOut?: boolean; /** Agreed credit days on the customer (owner-set); 0 = pay before release. */ creditDays?: number; /** A PPF car: the final check visit, 7 to 14 days after the handover. */ finalCheck?: { defaultDate: string; min: string; max: string } | null; jobId: string; action: FormAction; keysCount: number; keychain: boolean; dashCam: boolean; oldParts: boolean; canOverride: boolean; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for the keys override and for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
   const [method, setMethod] = useState<string>("customer");
   const [returned, setReturned] = useState<string>(String(keysCount));
   const [chain, setChain] = useState<string>(keychain ? "yes" : "no");
   const [photos, setPhotos] = useState<JobFile[]>([]);
   const mismatch = Number(returned) !== keysCount || (chain === "yes") !== keychain;
   const onCredit = balance.state !== "no_invoice" && balance.balance > 0 && creditDays > 0;
-  const blocked = (balance.state === "no_invoice" || balance.balance > 0) && !onCredit;
+  // Nothing to pay on a declined job: no invoice at all, or none owed.
+  const declinedFree = declinedOut && balance.balance <= 0 && (balance.state === "no_invoice" || balance.state === "nothing");
+  const blocked = ((balance.state === "no_invoice" && !declinedFree) || balance.balance > 0) && !onCredit;
   const blockedText = balance.state === "no_invoice" ? "No invoice has been issued for this job." : `Balance due AED ${balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${balance.invoiceNumber ? ` on ${balance.invoiceNumber}` : ""}.`;
 
   return (
@@ -94,6 +96,8 @@ export function GateOutForm({ jobId, action, keysCount, keychain, dashCam, oldPa
             ) : (
               <Notice tone="error">{blockedText} Gate-out is blocked until the owner or accounts approve the release.</Notice>
             )
+          ) : declinedFree ? (
+            <div data-declined-free><Notice tone="info">Declined quotation, no charge: the car leaves free of charge. This is written on the job.</Notice></div>
           ) : onCredit ? (
             <div data-credit-release><Notice tone="info">Credit terms ({creditDays} days): the balance of AED {balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} is due within {creditDays} days. The car may leave; this is logged.</Notice></div>
           ) : balance.state === "paid" ? (
