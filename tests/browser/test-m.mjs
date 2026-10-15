@@ -44,7 +44,7 @@ await section("1 send the proforma", async () => {
   const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1366, height: 1200 } });
   await go(page, `${base}/jobs/${jobId}/invoice`);
   check("1: step 1 is the current step", (await page.locator('[data-step="proforma_sent"][data-state="current"]').count()) === 1);
-  check("1: step 2 carries no black button yet", (await page.locator('[data-step="payment"] [data-record-payment]').count()) === 0);
+  check("1: step 2 carries no black button yet (the form stays folded until the proforma is sent)", (await page.locator('[data-step="payment"] [data-record-payment]:visible').count()) === 0 && (await page.locator("[data-record-block][data-folded]").count()) === 1);
   await page.locator('[data-ready-send="proforma"] button').first().click();
   await page.locator("[data-pay-how]").waitFor({ timeout: 10000 });
   check("1: the window asks how the customer will pay", (await page.locator("[data-expected]").count()) === 5);
