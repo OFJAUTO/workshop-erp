@@ -623,7 +623,8 @@ export function InspectionForm({
                 <div key={it.key} id={`item-${it.key}`} className={`rounded-card border p-3 flex flex-col gap-3 ${it.dangerous ? "border-red-bar border-2" : isJob ? (it.status === "bad" ? "border-ink" : "border-line") : it.status === "bad" ? "border-red-bar" : it.status === "average" ? "border-amber-bar" : "border-line"}`}>
                   <p className="font-semibold flex flex-wrap items-center gap-2">
                     {it.label}
-                    {touchedKeys.has(it.key) ? <span className={`text-xs font-bold ${state === "saving" ? "text-muted" : state === "offline" ? "text-amber" : "text-green"}`} title={state === "saving" ? "Saving…" : state === "offline" ? "Not saved yet: no connection" : "Saved"} data-item-saved={state}>{state === "saving" ? "…" : state === "offline" ? "!" : "✓"}</span> : null}
+                    {/* The tick keeps its place whether shown or not, so the line never changes width while typing. */}
+                    <span className={`inline-block w-4 text-center text-xs font-bold ${state === "saving" ? "text-muted" : state === "offline" ? "text-amber" : "text-green"}`} title={!touchedKeys.has(it.key) ? undefined : state === "saving" ? "Saving…" : state === "offline" ? "Not saved yet: no connection" : "Saved"} data-item-saved={touchedKeys.has(it.key) ? state : undefined} aria-hidden={!touchedKeys.has(it.key)}>{!touchedKeys.has(it.key) ? "" : state === "saving" ? "…" : state === "offline" ? "!" : "✓"}</span>
                     {it.dangerous ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}
                     {it.editedBy ? <span className="text-xs font-medium text-muted">edited by {it.editedBy}</span> : null}
                   </p>

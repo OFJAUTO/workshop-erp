@@ -1,3 +1,4 @@
+import { getSettings } from "@/lib/settings";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
@@ -24,6 +25,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
   const card = await loadJobCard(supabase, id);
   if (!card) notFound();
   const check = mediaChecklist(card.media, { majorDamage: card.gateIn?.major_damage ?? false, wheelsRequired: card.gateIn?.wheels_required ?? false, damageNote: card.gateIn?.damage_note ?? "", hasCarPicture: !!card.vehicle.photo_path });
+  const damageChips = ((await getSettings()).damage_note_chips ?? []) as string[];
 
   const token = await createUploadLinkToken(id);
   const site = await getSiteUrl();
@@ -42,7 +44,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2">
-          <MediaChecklist jobId={id} check={check} carPictureUrl={card.vehiclePhotoUrl} />
+          <MediaChecklist jobId={id} check={check} carPictureUrl={card.vehiclePhotoUrl} damageChips={damageChips} />
         </div>
 
         <div className="flex flex-col gap-6">

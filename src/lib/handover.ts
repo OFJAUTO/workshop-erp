@@ -219,7 +219,7 @@ export async function exchangePart(jobId: string, partId: string, actor: Actor, 
 }
 
 /** "Not needed": the part is not used on this car. Parts then choose its ending. */
-export async function partNotNeeded(jobId: string, partId: string, actor: Actor, reason: string): Promise<Result> {
+export async function partNotNeeded(jobId: string, partId: string, actor: Actor, reason: string, opts: { /** The question Parts are asked instead of the usual wording. */ question?: string } = {}): Promise<Result> {
   const admin = createAdminClient();
   const p = await fullPart(partId, jobId);
   if (!p) return { error: "Part not found." };
@@ -230,7 +230,7 @@ export async function partNotNeeded(jobId: string, partId: string, actor: Actor,
   await takeBack(p, actor, `Not needed: ${reason.trim()}`);
   await admin.from("part_items").update({ not_needed_at: new Date().toISOString(), not_needed_by: actor.id, not_needed_reason: reason.trim().slice(0, 300), updated_by: actor.id }).eq("id", p.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_not_needed", note: `${p.description} not needed (${actor.display_name}): ${reason.trim()}`, created_by: actor.id });
-  await notifyRoles(["parts"], { type: "parts_no_home", title: `Part not needed · ${job.job_number}`, body: `${p.description}: ${reason.trim()}. Decide its ending: back to the supplier, to stock, or fit it with the owner's approval.`, jobId, href: `/parts/no-home` });
+  await notifyRoles(["parts"], { type: "parts_no_home", title: `Part not needed · ${job.job_number}`, body: opts.question ? `${opts.question} Decide on the Parts without a home page.` : `${p.description}: ${reason.trim()}. Decide its ending: back to the supplier, to stock, or fit it with the owner's approval.`, jobId, href: `/parts/no-home` });
   return { ok: true, message: `${p.description} marked not needed. Choose where it goes under "Parts without a home".` };
 }
 

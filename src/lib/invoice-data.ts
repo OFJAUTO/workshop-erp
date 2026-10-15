@@ -1,7 +1,7 @@
 import "server-only";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
-import { isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
+import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -230,8 +230,8 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
     // Parts returned to the supplier come off the bill.
     const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
     // The labour discount as the quotation had it (our own labour lines; older quotations: labour and services).
-    const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value });
-    if (d > 0 && !discountLabel) discountLabel = q.discount_kind === "percent" ? `Labour discount (${q.discount_value}%)` : q.discount_kind === "aed" ? "Labour discount" : `Discount (${q.discount_percent}%)`;
+    const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value, discount_scope: q.discount_scope });
+    if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope });
     discount += d;
     discountBase += base;
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));

@@ -25,7 +25,7 @@ export default async function CustomerPage({
   const [{ data: cData }, { data: contactsData }, { data: carsData }] = await Promise.all([
     supabase
       .from("customers")
-      .select("id, customer_number, customer_type, full_name, company_name, phone, phone2, email, area, trn, is_vip, vip_note, notes, is_active, created_at, updated_at")
+      .select("id, customer_number, customer_type, full_name, company_name, phone, phone2, email, area, trn, is_vip, vip_note, notes, is_active, created_at, credit_terms_days, updated_at")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -87,6 +87,7 @@ export default async function CustomerPage({
             <DescriptionList
               items={[
                 { label: "Type", value: c.customer_type === "company" ? "Company" : "Individual" },
+                { label: "Payment terms", value: c.credit_terms_days ? `Credit terms: ${c.credit_terms_days} days (set by the owner)` : "Full payment before the car leaves" },
                 { label: "Phone (WhatsApp)", value: c.phone },
                 { label: "Second phone", value: c.phone2 },
                 { label: "Email", value: c.email },

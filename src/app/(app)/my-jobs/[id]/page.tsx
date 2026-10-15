@@ -8,7 +8,7 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } fro
 import { requireStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus, inspectionLimitsOf, toItemState } from "@/lib/inspection";
-import { inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous, tyreSizeSuggestionFor } from "@/lib/inspection-data";
+import { hasLabourChargesLine, tasksFromInspection,inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous, tyreSizeSuggestionFor } from "@/lib/inspection-data";
 import { wheelConditionLines } from "@/lib/wheels";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { cleanPartsList } from "@/lib/parts-list";
@@ -106,6 +106,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
     : [null, null, { data: null }, { data: [] as { display_name: string; department_id: string | null }[] }];
   const qcFailed = qc && qc.status === "failed" && inWork ? { round: qc.round, items: qc.items.filter((i) => i.result === "fail").map((i) => ({ label: i.label, remark: i.remark })) } : null;
   const panelLines: PanelLine[] = work ? work.lines.map((l) => ({ id: l.id, title: l.title, details: l.details, hours_quoted: l.hours_quoted, status: l.status })) : [];
+  // One "Labour charges" line: the inspection's findings are the tasks.
+  const inspectionTasks = work && bundle && hasLabourChargesLine(work.lines) ? tasksFromInspection(bundle.items) : [];
   const panelParts: PanelPart[] = parts ? parts.needed.map((p) => ({ id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, state: p.issue_status === "confirmed" ? "handed" : p.order_status === "received" ? "here" : "coming", when: p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : null })) : [];
   const running: RunningSession[] = work ? work.sessions.filter((s) => !s.ended_at).map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: s.technician_id === staff.id, throughBreak: !!s.through_break })) : [];
   const breakWindow = breakOf(settings, staff);
@@ -281,6 +283,15 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             finishAction={jobFinished.bind(null, id)}
             reportAction={reportAdditionalWork.bind(null, id)}
           />
+          {inspectionTasks.length ? (
+            <Card className="flex flex-col gap-2" data-inspection-tasks>
+              <SectionLabel right={`${inspectionTasks.length}`}>Tasks from the inspection</SectionLabel>
+              <p className="text-xs text-muted">The quotation carries one Labour charges line: these are the findings the customer approved.</p>
+              <ul className="divide-y divide-line text-sm">
+                {inspectionTasks.map((t, i) => <li key={i} className="py-1.5"><span className="font-semibold">{t.label}</span><span className="text-muted"> · {t.status}</span>{t.note ? <span className="text-muted"> · {t.note}</span> : null}</li>)}
+              </ul>
+            </Card>
+          ) : null}
           {insp ? (
             <p className="text-xs text-muted">
               Inspection: {formatMinutes(insp.elapsed_minutes ?? workingMin)}{insp.status === "approved" ? `, approved ${formatDate(insp.approved_at)}` : ""} · <Link href={`/jobs/${id}/inspection`} className="underline underline-offset-4 font-semibold">Open the report</Link>

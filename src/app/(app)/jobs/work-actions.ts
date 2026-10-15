@@ -239,7 +239,7 @@ export async function clockOut() {
   // Any running job clock pauses with the shift.
   const { data: sessions } = await admin.from("work_sessions").select("id, job_id, started_at").eq("technician_id", staff.id).is("ended_at", null);
   for (const s of sessions ?? []) {
-    await admin.from("work_sessions").update({ ended_at: now, end_reason: "auto", pause_reason: "End of shift", minutes: sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null }), updated_by: staff.id }).eq("id", s.id);
+    await admin.from("work_sessions").update({ ended_at: now, end_reason: "auto", pause_reason: "End of shift", minutes: sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null }, Date.now(), null, workingTimeOf(await getSettings(), "mechanical")), updated_by: staff.id }).eq("id", s.id);
     await admin.from("work_pauses").insert({ job_id: s.job_id, technician_id: staff.id, reason: "End of shift", started_at: now, created_by: staff.id, updated_by: staff.id });
   }
   revalidatePath("/my-jobs");

@@ -132,6 +132,20 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
         )}
         <p className="text-xs text-muted">Commissions count against the profit of the quotation and never appear on anything the customer sees. Unpaid ones from earlier months stay here until marked paid.</p>
       </Card>
+      <Card id="markup-skipped" className="flex flex-col gap-2" data-markup-skipped>
+        <SectionLabel right={`${s.markupSkipped.length}`}>Parts markup left at the minimum</SectionLabel>
+        {s.markupSkipped.length === 0 ? <p className="text-sm text-muted">Nobody pressed &quot;Continue anyway&quot; on the markup reminder this month.</p> : (
+          <ul className="divide-y divide-line text-sm">
+            {s.markupSkipped.map((m) => (
+              <li key={`${m.quote}-${m.at}`} className="py-1.5 flex flex-wrap items-center gap-2" data-markup-skipped-row>
+                <span className="font-semibold">{m.quote}</span>
+                <span className="text-muted">· {m.by} · {formatDate(m.at)}</span>
+                {m.jobId ? <Link href={`/jobs/${m.jobId}`} className="ml-auto underline underline-offset-4 text-xs font-semibold">Job card</Link> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </>
   );
 }

@@ -83,7 +83,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string)) : null;
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
-  const template = settings.whatsapp_quote_template
+  // A revised quotation goes out with its own message ("has been updated").
+  const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
     .replaceAll("[name]", customerName)
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
@@ -122,7 +123,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       <PageHeader
         title={`${q.number} · version ${q.version}`}
         subtitle={
-          <span className="flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-center gap-2 uppercase">
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {job?.job_number}</span>
             <span>· {customerName}</span>
@@ -134,6 +135,11 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           <>
             <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>
             {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="lg">Inspection report</LinkButton> : null}
+            {canSend && ["sent", "opened", "expired", "declined", "approved", "urgent_requested"].includes(q.status) ? (
+              <form action={reviseQuotation.bind(null, q.id)}>
+                <Button type="submit" size="lg" data-revise>Revise quotation</Button>
+              </form>
+            ) : null}
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>

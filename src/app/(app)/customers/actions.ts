@@ -66,14 +66,21 @@ function toRow(d: z.infer<typeof customerSchema>) {
   };
 }
 
+/** Credit terms come from the owner's choice only; anyone else's form has no such box and leaves them as they are. */
+function creditTermsOf(formData: FormData, staff: { id: string; role_id: string }) {
+  if (staff.role_id !== "owner" || !formData.has("credit_terms_days")) return {};
+  const n = Math.round(Number(String(formData.get("credit_terms_days") ?? "")) || 0);
+  return n > 0 ? { credit_terms_days: Math.min(365, n), credit_terms_set_by: staff.id, credit_terms_set_at: new Date().toISOString() } : { credit_terms_days: null, credit_terms_set_by: null, credit_terms_set_at: null };
+}
+
 export async function createCustomer(_state: FormState, formData: FormData): Promise<FormState> {
-  await requirePermission("editCustomers");
+  const staff = await requirePermission("editCustomers");
   const values = formValues(formData);
   const parsed = parse(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
 
   const supabase = await createClient();
-  const { data, error } = await supabase.from("customers").insert(toRow(parsed.data)).select("id").single();
+  const { data, error } = await supabase.from("customers").insert({ ...toRow(parsed.data), ...creditTermsOf(formData, staff) }).select("id").single();
   if (error || !data) return { error: error?.message ?? "Could not save.", values };
 
   revalidatePath("/customers");
@@ -81,13 +88,13 @@ export async function createCustomer(_state: FormState, formData: FormData): Pro
 }
 
 export async function updateCustomer(id: string, _state: FormState, formData: FormData): Promise<FormState> {
-  await requirePermission("editCustomers");
+  const staff = await requirePermission("editCustomers");
   const values = formValues(formData);
   const parsed = parse(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("customers").update(toRow(parsed.data)).eq("id", id);
+  const { error } = await supabase.from("customers").update({ ...toRow(parsed.data), ...creditTermsOf(formData, staff) }).eq("id", id);
   if (error) return { error: error.message, values };
 
   revalidatePath("/customers");

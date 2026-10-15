@@ -162,7 +162,10 @@ await section("A pricing table and PDF import", async () => {
   const people = (await sql("select value from public.settings where key = 'commission_people'"))[0]?.value;
   check("13: the name joined the Settings list", Array.isArray(people) && people.includes("E2e Agent"), JSON.stringify(people));
   // 12. Markup: 500% asks once; the owner may go below 5%.
-  const markupBox = op.locator("input[aria-label*='arkup']").first();
+  // The first part row on the screen and the same line in the database (several part lines exist after the import).
+  const firstPartRow = op.locator("[data-part-line]").first();
+  const firstLineId = ((await firstPartRow.getAttribute("id").catch(() => "")) ?? "").replace(/^item-line-/, "");
+  const markupBox = firstPartRow.locator("input[aria-label*='arkup']").first();
   if (await markupBox.count()) {
     await markupBox.fill("500");
     await op.keyboard.press("Tab");
@@ -170,12 +173,12 @@ await section("A pricing table and PDF import", async () => {
     check("12: a markup of 500% is asked about once ('Yes, keep it' / 'Change')", !!dlg);
     if (dlg) {
       await op.locator("[data-confirm-markup]").click();
-      const kept = await until(async () => { const r = (await sql("select markup_percent, markup_confirmed from public.quotation_lines where quotation_id = $1 and line_type = 'part' and is_active limit 1", [quotationId]))[0]; return Number(r?.markup_percent) === 500 && r?.markup_confirmed ? r : null; }, 30, 500);
+      const kept = await until(async () => { const r = (await sql("select markup_percent, markup_confirmed from public.quotation_lines where id = $1", [firstLineId]))[0]; return Number(r?.markup_percent) === 500 && r?.markup_confirmed ? r : null; }, 30, 500);
       check("12: 'Yes, keep it' keeps 500% and never asks again", !!kept, JSON.stringify(kept));
     }
     await markupBox.fill("2");
     await op.keyboard.press("Tab");
-    const low = await until(async () => { const r = (await sql("select markup_percent from public.quotation_lines where quotation_id = $1 and line_type = 'part' and is_active limit 1", [quotationId]))[0]; return Number(r?.markup_percent) === 2 ? r : null; }, 30, 500);
+    const low = await until(async () => { const r = (await sql("select markup_percent from public.quotation_lines where id = $1", [firstLineId]))[0]; return Number(r?.markup_percent) === 2 ? r : null; }, 30, 500);
     check("12: the owner may go below the 5% minimum", !!low);
   } else check("12: markup box found", false, "no input with 'arkup' in its label");
   // The settings floor is 5%, no maximum.

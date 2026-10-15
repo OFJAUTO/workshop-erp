@@ -110,4 +110,5 @@ input[type="number"]::-webkit-inner-spin-button {
 
 /* A box the form refused (empty when required, wrong format): red outline, the message under it in the system's own words. */
 .erp-invalid { border-color: var(--color-red-bar) !important; }
-.erp-field-msg { display: block; margin-top: 0.25rem; }
+.erp-field-host { position: relative; }
+.erp-field-msg { position: absolute; left: 0; top: 100%; margin-top: 0.125rem; white-space: nowrap; line-height: 1rem; pointer-events: none; }

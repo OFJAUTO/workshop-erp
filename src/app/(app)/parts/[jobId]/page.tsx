@@ -1,3 +1,4 @@
+import { partsSteps, stepPartOf } from "@/lib/parts-steps";
 import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
@@ -20,8 +21,9 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingDone, reopenPricing } from "../actions";
-import { markSupplierOrdered, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { markSupplierOrdered, receivePartAction, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
+import { PartsSteps } from "@/components/PartsSteps";
 import { PartsTable, type TableRow } from "./PartsTable";
 
 export const dynamic = "force-dynamic";
@@ -121,6 +123,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
+  // The five steps across the top (one rule with the parts desk and the job card), and the parts still to receive.
+  const stepParts = parts.map((p) => stepPartOf({ ...p, received_qty: Number(rawById.get(p.id)?.received_qty) || 0, issue_status: String(rawById.get(p.id)?.issue_status ?? "") || null, po_id: (rawById.get(p.id)?.po_id as string | null) ?? null, return_status: String(rawById.get(p.id)?.return_status ?? "none") }));
+  const steps = partsSteps({ jobStatus: job.status, pricingDoneAt: job.parts_pricing_done_at, pricingReopenedAt: job.parts_pricing_reopened_at, parts: stepParts.map((sp, i) => ({ ...sp, from_stock: sp.from_stock || lpos.fromStock.some((f) => f.id === parts[i].id) })), mainLpoStatus: lpos.main?.status ?? null, toOrder: lpos.toOrder.length });
+  const toReceive = parts.filter((p) => ["ordered", "partly_received"].includes(String(p.order_status)));
 
   return (
     <>
@@ -144,6 +150,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!job.is_open ? <Notice tone="info">This job is closed.</Notice> : null}
+      <PartsSteps steps={steps} hrefs={{ pricing: "#pricing", approval: "#lpo", lpo: "#lpos", received: "#received", handover: `/parts/handover/${jobId}` }} />
 
       {hasApproved ? (
         <Card id="lpo" className={`flex flex-col gap-3 ${lpos.toOrder.length && !pendingMain && canOrder ? "border-ink" : ""}`} data-lpo-card>
@@ -169,7 +176,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       {lpos.suppliers.length ? (
-        <section className="flex flex-col gap-3" data-supplier-lpos>
+        <section id="lpos" className="flex flex-col gap-3" data-supplier-lpos>
           <SectionLabel right={`${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
           {lpos.suppliers.map((s) => (
             <SupplierLpoCard key={s.po.id} po={toView(s)} vin={v?.vin ?? null} canManage={canOrder} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} />
@@ -177,7 +184,22 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         </section>
       ) : null}
 
-      <Card className="flex flex-col gap-2 overflow-visible">
+      {toReceive.length ? (
+        <Card id="received" className="flex flex-col gap-2" data-received-card>
+          <SectionLabel right={steps.find((s) => s.key === "received")?.detail ?? undefined}>Parts received</SectionLabel>
+          <p className="text-xs text-muted">Tick each part as it arrives from the supplier. A partial delivery, a wrong or a damaged part: use the LPO page.</p>
+          <ul className="divide-y divide-line text-sm">
+            {toReceive.map((p) => (
+              <li key={p.id} className="py-1.5 flex items-center gap-2" data-receive-row={p.id}>
+                <span className="flex-1 min-w-0 font-semibold">{p.description}<span className="font-normal text-muted"> · × {Number(p.confirmed_quantity ?? p.quantity) || 1}{p.supplier ? ` · ${p.supplier}` : ""}{orderLabel(p) ? ` · ${orderLabel(p)}` : ""}</span></span>
+                {canOrder ? <form action={receivePartAction.bind(null, jobId, p.id)}><Button type="submit" tone="secondary" size="md" data-receive-part={p.id}>Received</Button></form> : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      <Card id="pricing" className="flex flex-col gap-2 overflow-visible">
         <PartsTable jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} />
       </Card>
       {canPrice && !inPlanning ? <div className="h-20" /> : null}

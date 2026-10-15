@@ -7,10 +7,13 @@ export function CustomerForm({
   action,
   initialValues,
   mode,
+  isOwner = false,
 }: {
   action: FormAction;
   initialValues?: Record<string, string>;
   mode: "create" | "edit";
+  /** Only the owner sees and sets the credit terms. */
+  isOwner?: boolean;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues}>
@@ -60,6 +63,25 @@ export function CustomerForm({
             <Field label="VIP handling note" hint="Shown to every staff member who opens one of this customer's cars.">
               <Textarea name="vip_note" defaultValue={v.vip_note} placeholder="For example: always call before any extra work; prefers WhatsApp after 10am." />
             </Field>
+          </div>
+
+          <div className="rounded-card border border-line p-4 flex flex-col gap-2" data-credit-terms>
+            <span className="text-sm font-semibold">Payment terms</span>
+            {isOwner ? (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {[["", "Pay before release"], ["7", "7 days credit"], ["15", "15 days credit"], ["30", "30 days credit"], ["60", "60 days credit"]].map(([val, label]) => (
+                    <label key={val || "off"} className="cursor-pointer">
+                      <input type="radio" name="credit_terms_days" value={val} defaultChecked={(v.credit_terms_days ?? "") === val} className="peer sr-only" />
+                      <span className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-white">{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <span className="text-xs text-muted">Every customer pays in full before the car leaves unless you switch credit terms on here (B2B).</span>
+              </>
+            ) : (
+              <span className="text-sm text-muted">{v.credit_terms_days ? `Credit terms: ${v.credit_terms_days} days (set by the owner).` : "Full payment before the car leaves. Only the owner can set credit terms."}</span>
+            )}
           </div>
 
           <Field label="Notes" optional>

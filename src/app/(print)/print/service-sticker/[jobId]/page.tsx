@@ -43,14 +43,14 @@ export default async function ServiceStickerPage({ params, searchParams }: { par
   const unit = saved.mileage_unit === "miles" ? "miles" : "km";
   return (
     <div>
-      <style>{stickerPageCss(ss.large, ss.large)}</style>
+      <style>{stickerPageCss(ss.service, ss.service)}</style>
       <div className="bar">
         <span>Oil service sticker · {j.job_number}{first ? "" : " · printed again"}</span>
         <PrintNow />
         <a href={`/api/pdf/stickers/service-${jobId}`}>Download PDF</a>
         <a href={back || `/jobs/${jobId}`} style={{ marginLeft: "auto" }}>Back</a>
       </div>
-      <ServiceSticker size={ss.large} logoUrl={logo} d={{ qr, servicedOn: formatDate(saved.serviced_on), mileage: saved.mileage ? `${saved.mileage.toLocaleString("en-GB")} ${unit}` : "", nextDate: formatDate(saved.next_date), nextMileage: saved.next_mileage ? `${saved.next_mileage.toLocaleString("en-GB")} ${unit}` : "", vin: j.vehicle?.vin ?? "", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} />
+      <ServiceSticker size={ss.service} logoUrl={logo} d={{ qr, servicedOn: formatDate(saved.serviced_on), mileage: saved.mileage ? `${saved.mileage.toLocaleString("en-GB")} ${unit}` : "", nextDate: formatDate(saved.next_date), nextMileage: saved.next_mileage ? `${saved.next_mileage.toLocaleString("en-GB")} ${unit}` : "", vin: j.vehicle?.vin ?? "", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} />
     </div>
   );
 }

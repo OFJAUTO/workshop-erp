@@ -11,7 +11,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { aed, blockOf, estimateLineSuspect, floorPrice, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -265,8 +265,10 @@ export function QuoteEditor({
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuUp, setMenuUp] = useState(false);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null });
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
+  const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
+  const [markupAsk, setMarkupAsk] = useState<string | null>(null);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
   const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
   const flagMin = (id: string) => { setMinFlags((s) => new Set(s).add(id)); setTimeout(() => setMinFlags((s) => { const x = new Set(s); x.delete(id); return x; }), 4000); };
@@ -374,11 +376,23 @@ export function QuoteEditor({
     else debounced(`line-${id}-${Object.keys(fields).join(",")}`, op);
   };
   const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null }) => save({ addLine: fields });
+  /** Removing a job with parts under it asks once ("Also remove its parts?", default Yes); on its own, the parts stay on the quotation. */
   const removeLine = (id: string) => {
-    // Parts stand on their own: removing a job never removes a part.
-    setLines((prev) => prev.filter((l) => l.id !== id).map((l) => (l.parent_line_id === id ? { ...l, parent_line_id: null } : l)));
-    save({ removeLine: { id } });
+    const kids = lines.filter((l) => l.is_active && l.parent_line_id === id && blockOf(l) === "parts" && !l.left_off);
+    if (kids.length) { setRemoveAsk({ id, parts: kids.length }); return; }
+    doRemove(id, false);
   };
+  const doRemove = (id: string, withParts: boolean) => {
+    setLines((prev) => prev.filter((l) => l.id !== id && !(withParts && l.parent_line_id === id)).map((l) => (l.parent_line_id === id ? { ...l, parent_line_id: null } : l)));
+    save({ removeLine: { id, withParts } });
+    setRemoveAsk(null);
+  };
+  /** Quotation complete, with the one-time markup reminder when every part is still at the minimum markup. */
+  const completeNow = (skipMarkup: boolean) => run(async () => {
+    const r = await completeQuotation(quotation.id, { skipMarkup });
+    if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
+    return r;
+  });
   const setHeaderField = (fields: Partial<typeof header>, immediate = false) => {
     setHeader((h) => ({ ...h, ...fields }));
     const op = () => ({ header: fields });
@@ -405,6 +419,11 @@ export function QuoteEditor({
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
   const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null });
+  const countedForDiscount = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off);
+  const discountBases = {
+    labour: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour" }).base,
+    labour_services: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour_services" }).base,
+  };
   const labourLines = lines.filter((l) => l.is_active && blockOf(l) === "labour");
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
@@ -425,11 +444,11 @@ export function QuoteEditor({
   const fitsDept = (s: Service) => s.department === "both" || !department || department === "both" || s.department === department;
   const priceHint = (s: Service) => (s.price_aed !== null ? `${aed(s.price_aed)}${s.price_per && s.price_per !== "job" ? ` per ${s.price_per}` : ""}` : s.default_hours !== null ? hoursText(s.default_hours) : "");
   const labourSuggestions = useMemo<Suggestion[]>(() => [
-    ...services.filter((s) => s.price_aed === null && fitsDept(s)).map((s) => ({ id: s.id, title: s.name, hint: priceHint(s), service: s })),
+    ...services.filter((s) => !isFixedService(s) && fitsDept(s)).sort((a, b) => pinnedRank(a.name) - pinnedRank(b.name)).map((s) => ({ id: s.id, title: s.name, hint: priceHint(s), service: s })),
     ...candidates.map((t) => ({ id: `custom:${t}`, title: t, hint: "used before", service: null })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [services, candidates, department]);
-  const serviceSuggestions = useMemo<Suggestion[]>(() => services.filter((s) => s.price_aed !== null && fitsDept(s)).map((s) => ({ id: s.id, title: s.name, hint: priceHint(s), service: s })),
+  const serviceSuggestions = useMemo<Suggestion[]>(() => services.filter((s) => isFixedService(s) && fitsDept(s)).sort((a, b) => pinnedRank(a.name) - pinnedRank(b.name)).map((s) => ({ id: s.id, title: s.name, hint: priceHint(s), service: s })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [services, department]);
   // The Suggested tab: services whose suggest_for keys match the report's findings.
@@ -442,7 +461,7 @@ export function QuoteEditor({
 
   /** A picked service fills the row: the name and the pricing; a labour job keeps the hours for the advisor. */
   const applyService = (lineId: string, s: Service) => {
-    const fixed = s.price_aed !== null;
+    const fixed = isFixedService(s);
     // A bodyshop package: a service line with no price until the advisor types it (the last price shows as a hint).
     if (!fixed && s.bodyshop_kind) {
       patch(lineId, { title: s.name, service_id: s.id, line_type: "package", unit_price: null, price_per: "job", quantity: 1 }, true);
@@ -897,7 +916,7 @@ export function QuoteEditor({
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
                           <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
                             {l.option_group ? <input type="radio" name={`opt-${l.option_group}`} checked={!optionOff} onChange={() => choose(l.option_group!, l.id)} disabled={disabled || leftOff} className="h-4 w-4 shrink-0 accent-ink" aria-label="Use this option" /> : null}
-                            <span className="font-semibold truncate" title={l.title}>{l.title}</span>
+                            <span className="font-semibold truncate uppercase" title={l.title}>{l.title}</span>
                             {l.positions?.length ? <span className="text-xs text-muted shrink-0">{l.positions.join(", ")}</span> : null}
                             {partTypeText(l) ? <Badge tone="outline">{partTypeText(l)}</Badge> : null}
                           </div>
@@ -996,7 +1015,7 @@ export function QuoteEditor({
             <dt className="text-muted">Labour and services</dt><dd className="text-right">{aed(totals.labourSell)}</dd>
             <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
             <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
-            {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>Labour discount{q.discount_kind === "percent" ? ` (${q.discount_value}%)` : q.discount_kind ? "" : ` (${q.discount_percent}%)`}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
+            {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>{discountLabelOf(q)}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
             {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"} data-roundoff-row>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
             <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
             <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
@@ -1024,7 +1043,7 @@ export function QuoteEditor({
                 </dt><dd className="text-right" data-labour-cost>{aed(totals.labourCost)}</dd>
                 {totals.outsideCost ? <><dt className="text-muted">Outside work, our cost</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
-                <dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd>
+                {department === "bodyshop" || Number(header.materials_cost_aed) > 0 ? <><dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd></> : null}
                 <dt className="text-muted">Commission{header.commission_to ? ` (to ${header.commission_to})` : ""}</dt><dd className="text-right">{aed(totals.commission)}</dd>
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
                 <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
@@ -1136,13 +1155,38 @@ export function QuoteEditor({
           onClose={() => setPartPicker(false)}
         />
       ) : null}
+      {removeAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-remove-parts-ask>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">Also remove its {removeAsk.parts} part{removeAsk.parts === 1 ? "" : "s"}?</span>
+            <p className="text-sm text-muted">They leave the quotation and the parts list. A part already ordered is never removed quietly: Parts are asked whether to return it or keep it in stock.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => doRemove(removeAsk.id, true)} data-remove-with-parts>Yes, remove the parts too</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => doRemove(removeAsk.id, false)} data-remove-keep-parts>No, keep the parts</Button>
+              <Button type="button" tone="ghost" size="md" onClick={() => setRemoveAsk(null)}>Cancel</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {markupAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-markup-ask>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">{markupAsk}</span>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => { setMarkupAsk(null); const box = document.getElementById("markup-all") ?? document.querySelector<HTMLElement>("[data-markup-box]"); box?.scrollIntoView({ block: "center", behavior: "smooth" }); (box as HTMLElement | null)?.focus(); }} data-markup-set>Set markup</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { setMarkupAsk(null); completeNow(true); }} data-markup-continue>Continue anyway</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {discountOpen ? (
         <LabourDiscountDialog
           kind={header.discount_kind ?? "percent"}
           value={header.discount_value}
-          base={totals.discountBase}
+          scope={header.discount_scope === "labour_services" ? "labour_services" : "labour"}
+          bases={discountBases}
           onClose={() => setDiscountOpen(false)}
-          onApply={(kind, value) => { setHeaderField({ discount_kind: value > 0 ? kind : null, discount_value: value > 0 ? value : null, discount_percent: 0 }, true); setDiscountOpen(false); }}
+          onApply={(kind, value, scope) => { setHeaderField({ discount_kind: value > 0 ? kind : null, discount_value: value > 0 ? value : null, discount_percent: 0, discount_scope: scope }, true); setDiscountOpen(false); }}
         />
       ) : null}
       {confirming ? (
@@ -1166,7 +1210,7 @@ export function QuoteEditor({
             {!sent ? <span className="text-xs font-semibold">{progressText}</span> : <span className="text-xs font-semibold">{quotation.status === "sent" ? "Sent, not yet opened" : quotation.status === "opened" ? "Opened by the customer" : quotation.status === "approved" ? "Approved" : quotation.status === "declined" ? "Declined" : quotation.status === "expired" ? "Expired" : quotation.status === "urgent_requested" ? "Urgent work asked for" : "Sent"}</span>}
             <span className="ml-auto flex flex-wrap items-center gap-2">
               {!sent && !completed && !disabled ? (
-                <Button type="button" size="md" className={blockers.length ? "opacity-60" : ""} disabled={pending} onClick={() => { if (blockers.length) { scrollToFirstBlocker(); return; } run(() => completeQuotation(quotation.id)); }}>
+                <Button type="button" size="md" className={blockers.length ? "opacity-60" : ""} disabled={pending} onClick={() => { if (blockers.length) { scrollToFirstBlocker(); return; } completeNow(false); }}>
                   {pending ? "Checking…" : isQuotation ? "Quotation complete" : "Estimate complete"}
                 </Button>
               ) : null}
@@ -1209,7 +1253,7 @@ function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, on
           spellCheck
           lang="en"
           autoComplete="off"
-          className="min-h-10 min-w-0 flex-1 bg-transparent px-2.5 text-sm font-semibold outline-none disabled:text-muted"
+          className="min-h-10 min-w-0 flex-1 uppercase bg-transparent px-2.5 text-sm font-semibold outline-none disabled:text-muted"
         />
         {!disabled ? <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onArrow} aria-label={kind === "labour" ? "Open the labour jobs list" : "Open the services list"} className="min-h-10 min-w-10 border-l border-line text-sm font-bold hover:bg-canvas">▾</button> : null}
       </div>
@@ -1261,8 +1305,10 @@ function OwnerPartDiscount({ percent, reason, options = [], onChange }: { percen
  * "Discount": one box and a % | AED toggle. It comes off our own labour lines (hours) only, before VAT, before the
  * round-off; parts, outside fixed-price services and other charges are never discounted here.
  */
-function LabourDiscountDialog({ kind: initialKind, value: initialValue, base, onClose, onApply }: { kind: "percent" | "aed"; value: number | null | undefined; base: number; onClose: () => void; onApply: (kind: "percent" | "aed", value: number) => void }) {
+function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: initialScope, bases, onClose, onApply }: { kind: "percent" | "aed"; value: number | null | undefined; scope: "labour" | "labour_services"; bases: { labour: number; labour_services: number }; onClose: () => void; onApply: (kind: "percent" | "aed", value: number, scope: "labour" | "labour_services") => void }) {
   const [kind, setKind] = useState<"percent" | "aed">(initialKind);
+  const [scope, setScope] = useState<"labour" | "labour_services">(initialScope);
+  const base = bases[scope];
   const [text, setText] = useState(initialValue ? String(initialValue) : "");
   const boxRef = useRef<HTMLDivElement>(null);
   const v = Number(text.replace(",", ".")) || 0;
@@ -1272,8 +1318,12 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, base, on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={onClose}>
       <div ref={boxRef} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-labour-discount-dialog>
-        <span className="text-lg font-extrabold">Labour discount</span>
-        <p className="text-xs text-muted">On our own labour lines only ({aed(base)} of labour). Not on parts, outside services or other charges. Taken off before VAT, then the round-off.</p>
+        <span className="text-lg font-extrabold">Discount</span>
+        <div className="flex flex-wrap gap-1.5" data-discount-scope>
+          <button type="button" onClick={() => setScope("labour")} aria-pressed={scope === "labour"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Labour only</button>
+          <button type="button" onClick={() => setScope("labour_services")} aria-pressed={scope === "labour_services"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour_services" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Labour + services</button>
+        </div>
+        <p className="text-xs text-muted">{scope === "labour" ? `On our own labour lines only (${aed(base)} of labour).` : `On our labour and our own services (${aed(base)}).`} Never on parts, outside work or other charges. Taken off before VAT, then the round-off.</p>
         <div className="flex items-center gap-2">
           <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="0" autoFocus aria-label="Discount amount" className="w-28 text-right min-h-11" />
           <span className="inline-flex rounded-control border border-line-strong overflow-hidden">
@@ -1281,10 +1331,10 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, base, on
             <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-11 px-4 text-sm font-bold ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
           </span>
         </div>
-        <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off the labour` : "No discount"}</p>
+        <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off ${scope === "labour" ? "the labour" : "labour and services"}` : "No discount"}</p>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="md" onClick={() => onApply(kind, current())}>Apply</Button>
-          {initialValue ? <Button type="button" tone="secondary" size="md" onClick={() => onApply(kind, 0)}>Remove the discount</Button> : null}
+          <Button type="button" size="md" onClick={() => onApply(kind, current(), scope)}>Apply</Button>
+          {initialValue ? <Button type="button" tone="secondary" size="md" onClick={() => onApply(kind, 0, scope)}>Remove the discount</Button> : null}
           <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
         </div>
       </div>

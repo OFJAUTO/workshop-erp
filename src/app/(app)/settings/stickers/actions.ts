@@ -21,6 +21,8 @@ export async function saveStickerSettings(formData: FormData) {
     { key: "sticker_part_width_mm", value: num("sticker_part_width_mm", 10, 100, "Part sticker width") },
     { key: "sticker_part_height_mm", value: num("sticker_part_height_mm", 10, 100, "Part sticker height") },
     { key: "sticker_large_mm", value: num("sticker_large_mm", 30, 120, "Battery and service sticker size") },
+    { key: "sticker_battery_mm", value: num("sticker_battery_mm", 30, 120, "Battery sticker size") },
+    { key: "sticker_service_mm", value: num("sticker_service_mm", 30, 120, "Service sticker size") },
     { key: "battery_warranty_months", value: Math.round(num("battery_warranty_months", 1, 120, "Battery warranty")) },
     { key: "service_interval_months", value: Math.round(num("service_interval_months", 1, 60, "Next service months")) },
     { key: "service_interval_km", value: Math.round(num("service_interval_km", 500, 100000, "Next service km")) },

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Service, ServiceCategory } from "@/lib/quotes";
-import { aed, hoursText } from "@/lib/quotes";
+import { pinnedRank,isFixedService,aed, hoursText } from "@/lib/quotes";
 
 export type PickerKind = "labour" | "service" | "both";
 
@@ -44,10 +44,10 @@ export function ServicePicker({
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Service[]>([]);
   const [custom, setCustom] = useState<string[]>([]);
-  const fitsKind = (s: Service) => kind === "both" || (kind === "labour" ? s.price_aed === null : s.price_aed !== null);
+  const fitsKind = (s: Service) => kind === "both" || (kind === "labour" ? !isFixedService(s) : isFixedService(s));
   const sortedAll = useMemo(() => {
     const fits = (s: Service) => (s.department === "both" || !department || department === "both" || s.department === department) && fitsKind(s);
-    return [...services].filter(fits).sort((a, b) => (usage[b.id] ?? 0) - (usage[a.id] ?? 0) || a.position - b.position);
+    return [...services].filter(fits).sort((a, b) => pinnedRank(a.name) - pinnedRank(b.name) || (usage[b.id] ?? 0) - (usage[a.id] ?? 0) || a.position - b.position);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [services, usage, department, kind]);
   const suggestedHere = suggested.filter(fitsKind);
@@ -59,7 +59,7 @@ export function ServicePicker({
     : tab === "suggested"
       ? suggestedHere
       : tab === "most"
-        ? sortedAll.filter((s) => (usage[s.id] ?? 0) > 0).slice(0, 14)
+        ? sortedAll.filter((s) => (usage[s.id] ?? 0) > 0 || pinnedRank(s.name) < 99).slice(0, 14)
         : sortedAll.filter((s) => s.category_id === tab);
   const exact = q ? services.some((s) => s.name.toLowerCase() === q) || custom.some((c) => c.toLowerCase() === q) : true;
   const priceText = (s: Service) => (s.price_aed !== null ? `${aed(s.price_aed)}${s.price_per && s.price_per !== "job" ? ` per ${s.price_per}` : ""}` : s.default_hours !== null ? hoursText(s.default_hours) : "hours typed by you");
@@ -96,7 +96,7 @@ export function ServicePicker({
               return (
                 <button key={s.id} type="button" onClick={() => toggle(s)} aria-pressed={on} className={`min-h-12 rounded-control border px-3 text-left flex items-center gap-3 ${on ? "border-green bg-green-soft" : "border-line hover:border-ink"}`}>
                   <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${on ? "bg-green text-white" : "border border-line-strong text-transparent"}`}>✓</span>
-                  <span className="font-semibold truncate flex-1 min-w-0">{s.name}</span>
+                  <span className="font-semibold truncate flex-1 min-w-0 uppercase">{s.name}</span>
                   <span className="text-xs font-semibold shrink-0 text-muted">{priceText(s)}</span>
                 </button>
               );

@@ -91,14 +91,20 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   const oldParts = gi.old_parts_return ? formData.get("old_parts_handed") === "on" : null;
   if (gi.old_parts_return && !oldParts) return { error: "Tick that the old parts were handed over; the customer asked for them.", values };
 
-  // Balance
+  // Balance. Credit terms (B2B, set by the owner on the customer): the balance is due within the agreed days instead.
   const bal = await jobBalance(jobId);
   let releaseBy: string | null = null;
-  const releaseReason = String(formData.get("release_reason") ?? "").trim();
+  let releaseReason = String(formData.get("release_reason") ?? "").trim();
+  const { data: creditJob } = await createAdminClient().from("jobs").select("customer_id").eq("id", jobId).maybeSingle();
+  const { data: creditCust } = creditJob?.customer_id ? await createAdminClient().from("customers").select("credit_terms_days").eq("id", creditJob.customer_id).maybeSingle() : { data: null };
+  const creditDays = Number(creditCust?.credit_terms_days) || 0;
   if (bal.state === "no_invoice") {
     if (!can(role, "approveRelease")) return { error: "No invoice has been issued for this job. Accounts must issue it before the car leaves.", values };
     if (releaseReason.length < 5) return { error: "No invoice issued yet. Write the reason to release without one (logged).", values };
     releaseBy = staff.id;
+  } else if (bal.balance > 0 && creditDays > 0) {
+    releaseBy = staff.id;
+    releaseReason = `Credit terms: ${creditDays} days, balance AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} due by ${new Date(Date.now() + creditDays * 86400000).toISOString().slice(0, 10)}`;
   } else if (bal.balance > 0) {
     if (!can(role, "approveRelease")) return { error: `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner or accounts can approve the release.`, values };
     if (releaseReason.length < 5) return { error: "Write the reason for releasing with a balance due (logged).", values };

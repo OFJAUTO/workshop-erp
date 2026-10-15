@@ -1,3 +1,4 @@
+import { partsSteps, stepPartOf } from "@/lib/parts-steps";
 import { CopyVin } from "@/components/CopyVin";
 import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -11,12 +12,13 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { WaitingPanel } from "@/components/WaitingPanel";
+import { PartsSteps } from "@/components/PartsSteps";
 
 export const dynamic = "force-dynamic";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-type JobInfo = { id: string; job_number: string; is_open: boolean; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; assignee: { display_name: string } | null };
+type JobInfo = { id: string; job_number: string; is_open: boolean; status: string; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; assignee: { display_name: string } | null };
 
 /** The Parts role's desk: price requests from inspections, parts waiting for prices or the technician, and approved parts to order. */
 export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
@@ -34,12 +36,18 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
   const today = todayIso();
   const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)]));
-  const { data: jobRows } = jobIds.length ? await admin.from("jobs").select("id, job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").in("id", jobIds) : { data: [] };
+  const { data: jobRows } = jobIds.length ? await admin.from("jobs").select("id, job_number, is_open, status, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").in("id", jobIds) : { data: [] };
   const jobs = new Map(((jobRows ?? []) as unknown as JobInfo[]).filter((j) => j.is_open).map((j) => [j.id, j]));
   const jobLine = (id: string) => {
     const j = jobs.get(id);
     if (!j) return null;
     return `${j.vehicle ? formatPlate(j.vehicle) : ""} · ${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}${j.assignee ? ` · ${j.assignee.display_name}` : ""}`;
+  };
+  /** The five steps of a car's parts as dots (the same rule as the car's parts page). */
+  const dotsOf = (jobId: string) => {
+    const j = jobs.get(jobId);
+    if (!j) return null;
+    return <PartsSteps size="dots" steps={partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === jobId).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0])) })} />;
   };
   const tone = (sinceIso: string) => {
     const min = workingMinutesSince(sinceIso, wt);
@@ -72,7 +80,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           return (
             <Card key={jobId} className={`flex flex-col gap-2 ${t.tone === "red" ? "border-red-bar" : t.tone === "amber" ? "border-amber-bar" : ""}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <span className="flex items-center gap-2">
                   <Badge tone={t.tone}>{formatWait(t.min, wt)} waiting</Badge>
                   <LinkButton href={`/parts/${jobId}`} size="md">Open</LinkButton>
@@ -94,7 +102,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {waitingPrice.length === 0 ? <p className="text-sm text-muted">None.</p> : null}
           {byJob(waitingPrice).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1">
-              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
               <ul className="text-sm divide-y divide-line">
                 {waitingPrice.filter((p) => p.job_id === jobId).map((p) => (
                   <li key={p.id} className="py-1.5">{p.description}{p.part_number ? <span className="text-muted"> · {p.part_number}</span> : null} · × {p.confirmed_quantity ?? p.quantity}</li>
@@ -115,7 +123,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           const supplierSet = Array.from(new Set(items.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
           return (
             <Card key={jobId} className="flex flex-wrap items-center gap-3">
-              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#lpo`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#lpo`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
               <span className="text-sm text-muted">{items.length} part{items.length === 1 ? "" : "s"} · {supplierSet.length ? `${supplierSet.length} supplier${supplierSet.length === 1 ? "" : "s"}` : "no supplier yet"} · AED {total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
               <LinkButton href={`/parts/${jobId}#lpo`} size="md" className="ml-auto">Send LPO for approval</LinkButton>
             </Card>
@@ -130,7 +138,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {byJob(ordered).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <LinkButton href="/parts/orders" tone="secondary" size="md">LPOs</LinkButton>
               </div>
               <ul className="text-sm divide-y divide-line">
@@ -154,7 +162,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {byJob(toIssue).map((jobId) => (
             <Card key={jobId} className="flex flex-col gap-1 border-ink">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link><CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <span className="flex gap-2"><LinkButton href={`/parts/labels/${jobId}`} tone="secondary" size="md">Labels</LinkButton><LinkButton href={`/parts/issue/${jobId}`} size="md">Issue</LinkButton></span>
               </div>
               <ul className="text-sm divide-y divide-line">

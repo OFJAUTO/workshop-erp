@@ -84,5 +84,5 @@ export function ServiceSticker({ size, logoUrl, d }: { size: number; logoUrl: st
 
 /** The one style tag every sticker print page needs: the page is the sticker. */
 export function stickerPageCss(w: number, h: number) {
-  return `@page { size: ${w}mm ${h}mm; margin: 0; } html, body { margin: 0; background: #fff; } .bar { font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; padding: 10px 14px; display: flex; gap: 12px; align-items: center; font-size: 14px; } .bar a, .bar button { color: #fff; } @media print { .bar { display: none; } }`;
+  return `@page { size: ${w}mm ${h}mm; margin: 0; } html, body { margin: 0; background: #fff; } .bar { font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; padding: 10px 14px; display: flex; gap: 12px; align-items: center; font-size: 14px; } .bar a, .bar button { color: #fff; } @media print { .bar { display: none; } } .print-one { font: 700 12px Arial, Helvetica, sans-serif; margin: 6px 8px; padding: 5px 10px; border: 1px solid #111; background: #fff; border-radius: 6px; cursor: pointer; } @media print { .print-one { display: none; } body.printing-one .one:not(.print-this) { display: none; } }`;
 }

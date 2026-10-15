@@ -5,7 +5,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
-import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
+import { hasLabourChargesLine, tasksFromInspection,inspectionDangerous, loadInspection } from "@/lib/inspection-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { jobPartsState } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
@@ -67,6 +67,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
   const blockers = [...(unhanded.length ? [`${unhanded.length} part${unhanded.length === 1 ? "" : "s"} not handed to the technician`] : []), ...(pending.length ? ["additional work waiting for your decision"] : [])];
   const inPlanning = ["approved", "waiting_parts"].includes(job.status);
   const inspBundle = await loadInspection(id);
+  const inspectionTasks = inspBundle && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspBundle.items) : [];
   const dangers = inspBundle ? inspectionDangerous(inspBundle) : [];
 
   return (
@@ -137,6 +138,15 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
               ))}
             </ol>
           </Card>
+          {inspectionTasks.length ? (
+            <Card className="flex flex-col gap-2" data-inspection-tasks>
+              <SectionLabel right={`${inspectionTasks.length}`}>Tasks from the inspection</SectionLabel>
+              <p className="text-xs text-muted">The quotation carries one Labour charges line: these are the findings the customer approved.</p>
+              <ul className="divide-y divide-line text-sm">
+                {inspectionTasks.map((t, i) => <li key={i} className="py-1.5"><span className="font-semibold">{t.label}</span><span className="text-muted"> · {t.status}</span>{t.note ? <span className="text-muted"> · {t.note}</span> : null}</li>)}
+              </ul>
+            </Card>
+          ) : null}
 
           <Card className={`flex flex-col gap-3 ${pending.length ? "border-ink" : ""}`}>
             <SectionLabel right={`${pending.length} waiting`}>Additional work found</SectionLabel>

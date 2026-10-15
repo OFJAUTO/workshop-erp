@@ -3,7 +3,7 @@ import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { amountInWords } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
+import { discountLabelOf,blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { dubaiDate } from "@/lib/jobs";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -58,7 +58,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const [logo, qr] = await Promise.all([loadLogo(), q.token ? qrPng(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : Promise.resolve(null)]);
   const carName = vehicle ? [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ") : "";
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
-  const discountLabel = q.discount_kind === "percent" ? `Labour discount (${q.discount_value}%)` : q.discount_kind === "aed" ? "Labour discount" : `Discount (${q.discount_percent}%)`;
+  const discountLabel = discountLabelOf(q);
 
   const doc = (
     <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={[]} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>

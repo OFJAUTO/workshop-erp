@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
-import { createMainLpo, orderSupplierLpo, setPartExpected } from "@/lib/lpo";
+import { receivePartInFull,createMainLpo, orderSupplierLpo, setPartExpected } from "@/lib/lpo";
 import { notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -65,4 +65,14 @@ export async function setPartExpectedDate(partId: string, formData: FormData) {
   const from = String(formData.get("from") ?? "");
   const back = from.startsWith("/") ? from : `/parts/${p.job_id}`;
   redirect(`${back}?${r.error ? `error=${enc(r.error)}` : `message=${enc("Date saved.")}`}`);
+}
+
+/** One tap on the parts page: this part arrived in full. */
+export async function receivePartAction(jobId: string, partId: string) {
+  const staff = await requirePermission("managePurchaseOrders");
+  const r = await receivePartInFull(partId, { id: staff.id, display_name: staff.display_name });
+  revalidatePath(`/parts/${jobId}`);
+  revalidatePath(`/jobs/${jobId}`);
+  if (r.error) redirect(`/parts/${jobId}?error=${encodeURIComponent(r.error)}#received`);
+  redirect(`/parts/${jobId}?message=${encodeURIComponent(r.complete ? "Received. Every part is in: hand them over." : "Received.")}#received`);
 }

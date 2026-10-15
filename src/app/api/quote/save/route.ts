@@ -1,3 +1,4 @@
+import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
@@ -55,9 +56,10 @@ type Body = {
   addLine?: LinePatch & { service_id?: string | null };
   patchLine?: { id: string } & LinePatch;
   /** keepParts: the job goes but its parts stay on the quotation, unlinked. */
-  removeLine?: { id: string; keepParts?: boolean };
+  /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
+  removeLine?: { id: string; keepParts?: boolean; withParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ materials_cost_aed?: number | string | null; commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
+  header?: { discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ materials_cost_aed?: number | string | null; commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -414,13 +416,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (body.removeLine) {
-    const { data: cur } = await admin.from("quotation_lines").select("id, fee_kind, line_type").eq("id", body.removeLine.id).eq("quotation_id", q.id).maybeSingle();
+    const { data: cur } = await admin.from("quotation_lines").select("id, fee_kind, line_type, part_item_id").eq("id", body.removeLine.id).eq("quotation_id", q.id).maybeSingle();
     if (!cur) return NextResponse.json({ error: "Line not found." }, { status: 404 });
     if (cur.fee_kind) return NextResponse.json({ error: "The bank charge line is automatic; it cannot be removed." }, { status: 400 });
     const { error } = await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    // Parts stand on their own: removing a job never removes a part (the parts under it are simply unlinked).
-    if (cur.line_type === "labour" || cur.line_type === "package") await admin.from("quotation_lines").update({ parent_line_id: null, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
+    const actor = { id: staff.id, display_name: staff.display_name };
+    if (cur.line_type === "labour" || cur.line_type === "package") {
+      if (body.removeLine.withParts && q.job_id) {
+        // The customer declined the job: its parts go too. Not yet ordered: off the parts list; already ordered: Parts are asked.
+        const { data: kids } = await admin.from("quotation_lines").select("id, part_item_id").eq("quotation_id", q.id).eq("parent_line_id", cur.id).eq("is_active", true);
+        const ids = (kids ?? []).map((k) => k.id);
+        if (ids.length) await admin.from("quotation_lines").update({ is_active: false, ...stamp }).in("id", ids);
+        await dropParts(q.job_id, (kids ?? []).map((k) => k.part_item_id).filter((x): x is string => !!x), actor, "declined");
+      } else {
+        // Parts stand on their own: removing a job alone leaves its parts on the quotation, unlinked.
+        await admin.from("quotation_lines").update({ parent_line_id: null, ...stamp }).eq("quotation_id", q.id).eq("parent_line_id", cur.id);
+      }
+    } else if (cur.line_type === "part" && cur.part_item_id && q.job_id) {
+      // A part taken off the quotation leaves the parts list too (Parts are asked when it was already ordered).
+      await dropParts(q.job_id, [cur.part_item_id], actor, "removed");
+    }
     await refreshed();
     return NextResponse.json({ ok: true });
   }
@@ -443,6 +459,8 @@ export async function POST(request: NextRequest) {
       if (!kind || v <= 0) Object.assign(patch, { discount_kind: null, discount_value: null, discount_percent: 0 });
       else Object.assign(patch, { discount_kind: kind, discount_value: kind === "percent" ? Math.min(100, v) : v, discount_percent: 0 });
     }
+    // What the discount comes off: our labour only (default), or labour and our own services as well.
+    if (h.discount_scope !== undefined) patch.discount_scope = h.discount_scope === "labour_services" ? "labour_services" : "labour";
     // Commission (internal only): who, and a fixed amount or a percentage of the total before VAT. New names join the Settings list.
     if (h.materials_cost_aed !== undefined) patch.materials_cost_aed = Math.max(0, n(h.materials_cost_aed) ?? 0);
     if (h.commission_to !== undefined || h.commission_kind !== undefined || h.commission_value !== undefined) {

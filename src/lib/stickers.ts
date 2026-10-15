@@ -11,6 +11,9 @@ export type StickerSettings = {
   partW: number;
   partH: number;
   large: number;
+  /** The battery warranty sticker (square, mm) and the oil service sticker (square, mm), each set in Settings. */
+  battery: number;
+  service: number;
   partTypes: string[];
   batteryRequired: boolean;
   serviceRequired: boolean;
@@ -34,6 +37,8 @@ export function stickerSettings(settings: Settings): StickerSettings {
     partW: Number(settings.sticker_part_width_mm) || 20,
     partH: Number(settings.sticker_part_height_mm) || 20,
     large: Number(settings.sticker_large_mm) || 60,
+    battery: Number(settings.sticker_battery_mm) || Number(settings.sticker_large_mm) || 60,
+    service: Number(settings.sticker_service_mm) || Number(settings.sticker_large_mm) || 60,
     partTypes: Array.isArray(settings.sticker_part_types) ? (settings.sticker_part_types as string[]).map((t) => t.toLowerCase()) : [],
     batteryRequired: settings.sticker_battery_required !== false,
     serviceRequired: settings.sticker_service_required !== false,

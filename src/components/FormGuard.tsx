@@ -95,6 +95,8 @@ export function FormGuard() {
       el.classList.add("erp-invalid");
       const host = hostOf(el);
       if (!host) return;
+      // The message hangs under the box without taking space, so nothing below moves when it appears.
+      host.classList.add("erp-field-host");
       let msg = host.querySelector<HTMLElement>(":scope > .erp-field-msg");
       if (!msg) {
         msg = document.createElement("span");

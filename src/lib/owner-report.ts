@@ -273,6 +273,8 @@ export type MonthlySummary = {
   /** Owner only: commissions on the jobs of the month, plus any still unpaid from before. Never on a customer document. */
   commissions: CommissionLine[];
   commissionsUnpaid: number;
+  /** "Continue anyway" on the markup reminder this month: who, which quotation, when. */
+  markupSkipped: { quote: string; by: string; at: string; jobId: string | null }[];
   /** The bodyshop: cars in progress and late, days per job, profit per car, materials against price. */
   bodyshop: BodyshopMonth;
 };
@@ -338,6 +340,9 @@ export async function monthlySummary(settings: Settings, month: string): Promise
       qcs.set(r.people.qc, l);
     }
   }
+  // The parts markup left at the minimum ("Continue anyway") this month: who, and on which quotation.
+  const { data: skipRows } = await admin.from("quotations").select("number, version, job_id, markup_skipped_at, by:staff!quotations_markup_skipped_by_fkey(display_name)").eq("is_active", true).gte("markup_skipped_at", fromIso).lt("markup_skipped_at", toIso).order("markup_skipped_at");
+  const markupSkipped = (skipRows ?? []).map((r) => ({ quote: `${r.number} v${r.version}`, by: (r.by as unknown as { display_name: string } | null)?.display_name ?? "—", at: String(r.markup_skipped_at), jobId: (r.job_id as string | null) ?? null }));
   // Commissions: on the jobs gated out this month, and every unpaid one from any month so nothing is forgotten.
   const monthJobIds = reports.map((r) => r.jobId);
   const { data: comRows } = await admin.from("quotations").select("id, number, job_id, commission_to, commission_aed, commission_paid_at, responded_at").eq("is_active", true).eq("status", "approved").gt("commission_aed", 0).or(`commission_paid_at.is.null${monthJobIds.length ? `,job_id.in.(${monthJobIds.join(",")})` : ""}`).order("responded_at", { ascending: false }).limit(300);
@@ -372,6 +377,7 @@ export async function monthlySummary(settings: Settings, month: string): Promise
     jobs: reports.map((r) => ({ id: r.jobId, jobNumber: r.jobNumber, plate: r.plate, title: r.title, customer: r.customer.name, gatedOutAt: r.time.gatedOutAt, verdict: r.verdict, invoiced: r.money.invoiced, profit: r.money.profit, marginPercent: r.money.marginPercent, days: r.time.days, flags: r.flags.length, loose: r.loose })),
     commissions,
     commissionsUnpaid: round2(commissions.filter((c) => !c.paidAt).reduce((a, c) => a + c.amount, 0)),
+    markupSkipped,
     bodyshop: await bodyshopMonth(settings, fromIso, toIso),
   };
 }

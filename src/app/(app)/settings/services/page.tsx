@@ -2,7 +2,7 @@ import { ServicePriceField } from "./ServicePriceField";
 import { Badge, Button, Card, Empty, Field, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadServices } from "@/lib/quote-data";
-import { aed, hoursText, type Service, type ServiceCategory } from "@/lib/quotes";
+import { isFixedService,aed, hoursText, type Service, type ServiceCategory } from "@/lib/quotes";
 import { addCategory, addService, adoptCustomJob, dismissCustomJob, moveCategory, moveService, removeCategory, removeService, renameCategory, saveService } from "./actions";
 import { getSettings } from "@/lib/settings";
 import { TYRE_POSITIONS, checklistItems, type ChecklistSection } from "@/lib/inspection";
@@ -117,7 +117,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
       </Card>
       {categories.length === 0 ? <Empty title="No categories yet" /> : null}
       {categories.map((c, ci) => {
-        const items = services.filter((s) => s.category_id === c.id && (showBodyshop ? !!s.bodyshop_kind : showLabour ? s.price_aed === null && !s.bodyshop_kind : s.price_aed !== null && !s.bodyshop_kind));
+        const items = services.filter((s) => s.category_id === c.id && (showBodyshop ? !!s.bodyshop_kind : showLabour ? !isFixedService(s) && !s.bodyshop_kind : isFixedService(s) && !s.bodyshop_kind));
         return (
           <Card key={c.id} id={`cat-${c.id}`} className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">

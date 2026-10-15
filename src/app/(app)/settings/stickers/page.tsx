@@ -40,7 +40,9 @@ export default async function StickersSettingsPage({ searchParams }: { searchPar
           <Card className="flex flex-col gap-4">
             <SectionLabel>Battery warranty sticker</SectionLabel>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label="Size (mm, square)" hint="Also the service sticker."><Input name="sticker_large_mm" defaultValue={String(ss.large)} inputMode="decimal" required /></Field>
+              <Field label="Battery sticker size (mm, square)" hint="Printed at this exact size on the label printer."><Input name="sticker_battery_mm" defaultValue={String(ss.battery)} inputMode="decimal" required /></Field>
+              <Field label="Oil service sticker size (mm, square)" hint="Printed at this exact size on the label printer."><Input name="sticker_service_mm" defaultValue={String(ss.service)} inputMode="decimal" required /></Field>
+              <input type="hidden" name="sticker_large_mm" value={String(ss.large)} />
               <Field label="Warranty (months)"><Input name="battery_warranty_months" defaultValue={String(ss.warrantyMonths)} inputMode="numeric" required /></Field>
               <Field label="Title"><Input name="w_battery" defaultValue={ss.wording.battery} /></Field>
               <Field label="Bottom line"><Input name="w_battery_valid" defaultValue={ss.wording.battery_valid} /></Field>

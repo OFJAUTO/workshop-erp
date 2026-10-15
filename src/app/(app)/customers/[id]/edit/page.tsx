@@ -7,12 +7,12 @@ import { updateCustomer } from "../../actions";
 import { CustomerForm } from "../../CustomerForm";
 
 export default async function EditCustomerPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("editCustomers");
+  const staff = await requirePermission("editCustomers");
   const { id } = await params;
   const supabase = await createClient();
   const { data } = await supabase
     .from("customers")
-    .select("id, customer_number, customer_type, full_name, company_name, phone, phone2, email, area, trn, is_vip, vip_note, notes, is_active, created_at, updated_at")
+    .select("id, customer_number, customer_type, full_name, company_name, phone, phone2, email, area, trn, is_vip, vip_note, notes, is_active, created_at, updated_at, credit_terms_days")
     .eq("id", id)
     .maybeSingle();
   if (!data) notFound();
@@ -25,6 +25,7 @@ export default async function EditCustomerPage({ params }: { params: Promise<{ i
         <CustomerForm
           action={updateCustomer.bind(null, c.id)}
           mode="edit"
+          isOwner={staff.role_id === "owner"}
           initialValues={{
             customer_type: c.customer_type,
             full_name: c.full_name,
@@ -37,6 +38,7 @@ export default async function EditCustomerPage({ params }: { params: Promise<{ i
             is_vip: c.is_vip ? "on" : "",
             vip_note: c.vip_note ?? "",
             notes: c.notes ?? "",
+            credit_terms_days: c.credit_terms_days ? String(c.credit_terms_days) : "",
           }}
         />
       </Card>

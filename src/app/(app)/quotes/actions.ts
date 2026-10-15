@@ -1,5 +1,6 @@
 "use server";
 
+import { newToken } from "@/lib/media";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
@@ -9,7 +10,7 @@ import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { ownerApprovalReasons, quoteTotals, recoveryTitle, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
+import { isUnchosen,ownerApprovalReasons, quoteTotals, recoveryTitle, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -174,7 +175,7 @@ async function makeVersion(quotationId: string, urgentOnly: boolean) {
   const admin = createAdminClient();
   const { data: created, error } = await admin
     .from("quotations")
-    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, created_by: staff.id, updated_by: staff.id })
+    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, commission_to: q.commission_to ?? null, commission_kind: q.commission_kind ?? null, commission_value: q.commission_value ?? null, created_by: staff.id, updated_by: staff.id })
     .select("id")
     .single();
   if (error || !created) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not revise.")}`);
@@ -187,11 +188,11 @@ async function makeVersion(quotationId: string, urgentOnly: boolean) {
   const left = active.filter((l) => !keptIds.has(l.id) && !isHidden(l));
   const idMap = new Map<string, string>();
   for (const l of kept.filter((x) => !x.parent_line_id)) {
-    const { data: ins } = await admin.from("quotation_lines").insert({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), parent_line_id: null, created_by: staff.id, updated_by: staff.id }).select("id").single();
+    const { data: ins } = await admin.from("quotation_lines").insert({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), revised_from_line_id: l.id, parent_line_id: null, created_by: staff.id, updated_by: staff.id }).select("id").single();
     if (ins) idMap.set(l.id, ins.id);
   }
   for (const l of kept.filter((x) => x.parent_line_id)) {
-    await admin.from("quotation_lines").insert({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), parent_line_id: idMap.get(l.parent_line_id!) ?? null, created_by: staff.id, updated_by: staff.id });
+    await admin.from("quotation_lines").insert({ quotation_id: created.id, position: l.position, ...COPY_FIELDS(l), revised_from_line_id: l.id, parent_line_id: idMap.get(l.parent_line_id!) ?? null, created_by: staff.id, updated_by: staff.id });
   }
   const keep = kept;
   if (left.length && q.kind === "quotation") {
@@ -364,7 +365,7 @@ async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQ
  * "Quotation complete": every check passes, the labour hours are remembered for the next quotation on
  * the same work, and descriptions typed by hand are counted so the owner can add them to the list.
  */
-export async function completeQuotation(quotationId: string): Promise<{ error?: string; ok?: boolean }> {
+export async function completeQuotation(quotationId: string, opts: { /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "markup"; message?: string }> {
   const bundle = await loadQuotation(quotationId);
   if (!bundle) return { error: "Quotation not found." };
   const q = bundle.quotation;
@@ -377,6 +378,15 @@ export async function completeQuotation(quotationId: string): Promise<{ error?: 
   const blockers = await quoteBlockers(bundle, settings, checks);
   if (blockers.length) return { error: `Not complete yet: ${blockers.map((b) => b.label).join(" · ")}` };
   const active = bundle.lines.filter((l) => l.is_active);
+  // The parts markup never moved off the minimum: asked once (Set markup / Continue anyway); "Continue anyway" is logged for the owner's summary.
+  const minMarkup = Number(settings.parts_min_markup_percent) || 5;
+  const partLines = active.filter((l) => l.line_type === "part" && !isUnchosen(l) && !l.left_off);
+  const markupUntouched = partLines.length > 0 && partLines.every((l) => Math.abs((Number(l.markup_percent) || 0) - minMarkup) < 0.001);
+  if (markupUntouched && !q.markup_skipped_at) {
+    if (!opts.skipMarkup) return { ask: "markup", message: `Parts markup is still at the minimum ${minMarkup}%. Set it now?` };
+    await admin.from("quotations").update({ markup_skipped_at: new Date().toISOString(), markup_skipped_by: staff.id, updated_by: staff.id }).eq("id", q.id);
+    await logQuoteEvent(q.id, q.job_id, staff.id, "markup_skipped", `${q.number} v${q.version}: parts markup left at the minimum ${minMarkup}% by ${staff.display_name} (Continue anyway)`);
+  }
   const workLines = active.filter((l) => l.line_type !== "part" && !l.fee_kind);
   // Custom jobs typed by hand are counted; the owner sees them in Settings > Jobs and services and adds them to the list with one tap.
   const { data: svcNames } = await admin.from("services").select("name").eq("is_active", true);

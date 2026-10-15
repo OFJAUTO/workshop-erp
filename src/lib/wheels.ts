@@ -1,6 +1,7 @@
 /** The four wheel photos taken at gate-in, in the order they are taken, and the conditions that can be ticked under each. */
 
-export const WHEEL_KINDS = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"] as const;
+// A walk round the car: front left, rear left, rear right, front right.
+export const WHEEL_KINDS = ["wheel_fl", "wheel_rl", "wheel_rr", "wheel_fr"] as const;
 export type WheelKind = (typeof WHEEL_KINDS)[number];
 
 export const WHEEL_LABELS: Record<WheelKind, string> = {

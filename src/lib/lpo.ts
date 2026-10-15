@@ -1,3 +1,4 @@
+import { newLabelCode } from "@/lib/parts-data";
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { dubaiDate } from "./jobs";
@@ -199,4 +200,37 @@ export async function finishPartsPlanning(jobId: string, by: Actor | null, opts:
     if (!job.plan_released_at) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${text}. Pick the start day and the technicians, then Release to workshop.`, jobId, href: `/jobs/${jobId}#planning` });
   }
   return true;
+}
+
+/**
+ * "Received" with one tap on the parts page: the part's LPO line is received in full and the part is ready to hand over.
+ * Partial deliveries and wrong or damaged parts stay on the LPO page. When the last ordered part is in, the manager and
+ * the advisor hear.
+ */
+export async function receivePartInFull(partId: string, by: Actor): Promise<{ error?: string; complete?: boolean }> {
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, job_id, description, po_id, order_status, quantity, confirmed_quantity, received_qty, label_code").eq("id", partId).maybeSingle();
+  if (!p) return { error: "Part not found." };
+  if (!["ordered", "partly_received"].includes(String(p.order_status))) return { error: "This part is not on order." };
+  const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
+  const now = new Date().toISOString();
+  const { data: line } = p.po_id ? await admin.from("purchase_order_lines").select("id, po_id, quantity").eq("po_id", p.po_id).eq("part_item_id", p.id).eq("is_active", true).maybeSingle() : { data: null };
+  if (line) await admin.from("purchase_order_lines").update({ received_qty: line.quantity, received_at: now, updated_by: by.id }).eq("id", line.id);
+  await admin.from("part_items").update({ received_qty: qty, order_status: "received", label_code: p.label_code ?? newLabelCode(), updated_by: by.id }).eq("id", p.id);
+  if (line) {
+    const { data: after } = await admin.from("purchase_order_lines").select("quantity, received_qty").eq("po_id", line.po_id).eq("is_active", true);
+    const allIn = (after ?? []).every((l) => Number(l.received_qty) + 0.005 >= Number(l.quantity));
+    await admin.from("purchase_orders").update({ status: allIn ? "received" : "partly_received", received_at: allIn ? now : null, updated_by: by.id }).eq("id", line.po_id);
+  }
+  const { data: open } = await admin.from("part_items").select("id").eq("job_id", p.job_id).eq("is_active", true).in("order_status", ["to_order", "ordered", "partly_received"]);
+  const complete = (open ?? []).length === 0;
+  if (complete) await admin.from("jobs").update({ parts_state: "received" }).eq("id", p.job_id);
+  await admin.from("job_events").insert({ job_id: p.job_id, event_type: "parts_received", note: `${p.description} received (${by.display_name})${complete ? " · every part is in" : ""}`, created_by: by.id });
+  if (complete) {
+    const { data: job } = await admin.from("jobs").select("job_number, department, gated_in_by").eq("id", p.job_id).maybeSingle();
+    const n = { type: "parts_arrived", title: `All parts in · ${job?.job_number ?? ""}`, body: "Every ordered part has arrived. Hand them over to the technician.", jobId: p.job_id as string, href: `/parts/handover/${p.job_id}` };
+    await notifyManagers(job?.department ?? null, n);
+    if (job?.gated_in_by) await notifyStaff([job.gated_in_by], n);
+  }
+  return { complete };
 }

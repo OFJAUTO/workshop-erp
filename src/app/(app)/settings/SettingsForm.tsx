@@ -385,6 +385,9 @@ export function SettingsForm({
             <Field label="WhatsApp quotation message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_quote_template" defaultValue={v.whatsapp_quote_template} rows={3} required />
             </Field>
+            <Field label="WhatsApp revised quotation message" hint="Sent when a quotation is revised after it was sent. Same placeholders.">
+              <Textarea name="whatsapp_quote_revised_template" defaultValue={v.whatsapp_quote_revised_template} rows={3} required />
+            </Field>
             <Field label="WhatsApp estimate message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_estimate_template" defaultValue={v.whatsapp_estimate_template} rows={3} required />
             </Field>
@@ -472,6 +475,9 @@ export function SettingsForm({
             </Field>
             <Field label="Tyre brands (one per line)" hint="The list under the tyre brand box; it filters as the technician types and anything else can still be typed. Brands typed more than once are offered on the Inspection checklist page.">
               <Textarea name="tyre_brands" defaultValue={v.tyre_brands ?? listTexts.tyre_brands} rows={6} required />
+            </Field>
+            <Field label="Damage note chips (gate-in)" hint="One per line. The one-tap words above the damage note; several can be picked, typing always works too.">
+              <Textarea name="damage_note_chips" defaultValue={v.damage_note_chips ?? listTexts.damage_note_chips} rows={6} required data-damage-chips-setting />
             </Field>
             <p className="text-xs text-muted">Tap-first suggestions per checklist item learn from every approved report on their own.</p>
           </Card>

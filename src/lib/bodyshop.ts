@@ -1,3 +1,6 @@
+import { getSettings } from "@/lib/settings";
+import { workingTimeOf } from "@/lib/jobs";
+import { countedMinutes, type WorkingTime } from "@/lib/working-time";
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { addDaysIso, neededSignoffs, sectionOfDepartment, spreadDueDates, stageDef, stageKeysFor, stageLabelFor, workingDaysBetween, type Section, type SignoffKey, type StageSection } from "./bodyshop-kinds";
@@ -77,8 +80,9 @@ export const currentStage = (stages: StageRow[]) => stages.find((s) => s.status 
 export const nextStageAfter = (stages: StageRow[], s: StageRow) => stages.find((x) => x.position > s.position && x.status !== "done" && x.status !== "skipped") ?? null;
 
 /** Minutes clocked on a car, open clockings counted to now. */
-export function clockedMinutes(rows: { started_at: string; ended_at: string | null; minutes: number | null }[], now = Date.now()) {
-  return rows.reduce((a, c) => a + (c.minutes !== null ? c.minutes : c.ended_at ? 0 : Math.max(0, Math.round((now - Date.parse(c.started_at)) / 60000))), 0);
+export function clockedMinutes(rows: { started_at: string; ended_at: string | null; minutes: number | null }[], now = Date.now(), wt: WorkingTime | null = null) {
+  // A running clocking counts opening hours only (break left out) when the hours are known; closed ones keep their minutes.
+  return rows.reduce((a, c) => a + (c.minutes !== null ? c.minutes : c.ended_at ? 0 : wt ? countedMinutes(c.started_at, now, wt) : Math.max(0, Math.round((now - Date.parse(c.started_at)) / 60000))), 0);
 }
 
 export type BodyshopJob = {
@@ -139,7 +143,7 @@ export async function loadBodyshopJob(jobId: string): Promise<BodyshopJob | null
     quotationId: approved.quotationId,
     needed,
     waitingOn: needed.filter((k) => !signoffs.some((s) => s.role_key === k)),
-    minutes: clockedMinutes(clk ?? []),
+    minutes: clockedMinutes(clk ?? [], Date.now(), workingTimeOf(await getSettings(), "bodyshop")),
     people,
     advisorName: (advisor as { display_name: string } | null)?.display_name ?? null,
   };
@@ -507,8 +511,9 @@ export async function clockOut(staffId: string, by: string | null): Promise<{ mi
   const { data: open } = await admin.from("bodyshop_clockings").select("id, started_at").eq("staff_id", staffId).is("ended_at", null).eq("is_active", true);
   let total = 0;
   const now = new Date();
+  const wt = workingTimeOf(await getSettings(), "bodyshop");
   for (const c of open ?? []) {
-    const minutes = Math.max(1, Math.round((now.getTime() - Date.parse(c.started_at)) / 60000));
+    const minutes = Math.max(1, countedMinutes(c.started_at, now, wt));
     total += minutes;
     await admin.from("bodyshop_clockings").update({ ended_at: now.toISOString(), minutes, updated_by: by }).eq("id", c.id);
   }
@@ -648,6 +653,7 @@ export type BoardCar = {
 /** Every open bodyshop car with its stages, people and sign-off state, in due order. */
 export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCar[]; today: string; tomorrow: string }> {
   const admin = createAdminClient();
+  const wtBoard = workingTimeOf(await getSettings(), "bodyshop");
   const { data: jobs } = await admin.from("jobs").select(JOB_SELECT).eq("is_open", true).eq("department", "bodyshop").in("status", ["gate_in_pending", "pending_approval", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment"]).order("promised_at", { ascending: true, nullsFirst: false });
   const rows = (jobs ?? []) as unknown as BodyshopJobRow[];
   if (!rows.length) {
@@ -678,7 +684,7 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
       stages,
       current,
       people: (asg ?? []).filter((a) => a.job_id === job.id).map((a) => ({ id: a.staff_id, name: (a.staff as unknown as { display_name: string } | null)?.display_name ?? "" })),
-      minutes: clockedMinutes((clk ?? []).filter((c) => c.job_id === job.id)),
+      minutes: clockedMinutes((clk ?? []).filter((c) => c.job_id === job.id), Date.now(), wtBoard),
       pictureUrl: job.vehicle?.photo_path ? (picOf.get(job.vehicle.photo_path) ?? null) : null,
       signoff: { needed, signed: signedKeys, waitingOn: needed.filter((k) => !signedKeys.includes(k)) },
       tone,
@@ -715,7 +721,7 @@ export async function electricalTasks(): Promise<{ stage: StageRow; job: Bodysho
  * advisor (once per stage per day); the day before a car is due out, the manager and every leader involved hear it
  * with the sign-offs still needed.
  */
-export async function bodyshopHourly(settings: Settings): Promise<{ late: number; dueOut: number }> {
+export async function bodyshopHourly(settings: Settings): Promise<{ late: number; dueOut: number; closed: number }> {
   const admin = createAdminClient();
   const today = dubaiDate();
   const tomorrow = addDaysIso(today, 1);
@@ -730,6 +736,18 @@ export async function bodyshopHourly(settings: Settings): Promise<{ late: number
     await shiftAfterLateStage(s, daysLate, settings);
     late++;
   }
+  // The bodyshop clocks pause themselves at closing time: open clockings end with the minutes counted up to closing.
+  let closed = 0;
+  const hourNow = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", hour12: false }).format(new Date()));
+  if (hourNow >= (Number(settings.closing_hour) || 17)) {
+    const wt = workingTimeOf(settings, "bodyshop");
+    const { data: open } = await admin.from("bodyshop_clockings").select("id, started_at").is("ended_at", null).eq("is_active", true);
+    for (const c of open ?? []) {
+      const nowIso = new Date().toISOString();
+      await admin.from("bodyshop_clockings").update({ ended_at: nowIso, minutes: countedMinutes(c.started_at, nowIso, wt), closed_reason: "end_of_shift" }).eq("id", c.id);
+      closed++;
+    }
+  }
   let dueOut = 0;
   const { data: jobs } = await admin.from("jobs").select(JOB_SELECT).eq("is_open", true).eq("department", "bodyshop").eq("promised_at", tomorrow).is("bodyshop_due_out_notified_at", null);
   for (const j of (jobs ?? []) as unknown as BodyshopJobRow[]) {
@@ -740,7 +758,7 @@ export async function bodyshopHourly(settings: Settings): Promise<{ late: number
     await admin.from("jobs").update({ bodyshop_due_out_notified_at: new Date().toISOString() }).eq("id", j.id);
     dueOut++;
   }
-  return { late, dueOut };
+  return { late, dueOut, closed };
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */

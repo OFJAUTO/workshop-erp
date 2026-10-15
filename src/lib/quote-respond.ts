@@ -1,3 +1,4 @@
+import { dropParts } from "@/lib/drop-parts";
 import "server-only";
 import { finishPartsPlanning } from "./lpo";
 import { createAdminClient } from "./supabase/admin";
@@ -46,8 +47,18 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
 
   for (const l of lines) await admin.from("quotation_lines").update({ customer_approved: answer.approve }).eq("id", l.id);
   await admin.from("quotations").update({ status, responded_at: now, approver_name: answer.name, approver_phone: q.sent_to_phone, opened_at: now, declined_note: answer.approve ? null : (answer.note ?? null), declined_by: !answer.approve && answer.via === "advisor" ? (answer.by ?? null) : null, updated_by: answer.by ?? null, ...(!answer.approve && answer.dangerAck ? { danger_acknowledged_at: now, danger_acknowledged_by: answer.name } : {}) }).eq("id", quotationId);
+  // A revised quotation approved again: an earlier version of the same number was already approved. The car never moves
+  // backwards; unchanged lines carry on; the parts of lines that left the quotation leave the parts list below.
+  const { data: olderApproved } = answer.approve ? await admin.from("quotations").select("id").eq("number", q.number).eq("kind", q.kind).lt("version", q.version).eq("is_active", true).eq("status", "approved") : { data: [] as { id: string }[] };
+  const revisionOfApproved = (olderApproved ?? []).length > 0;
   // One approved version per number: the older versions are replaced, so nothing is counted twice on the work order or the invoice.
   if (answer.approve) await admin.from("quotations").update({ status: "superseded", updated_by: answer.by ?? null }).eq("number", q.number).eq("kind", q.kind).lt("version", q.version).eq("is_active", true).neq("status", "superseded");
+  if (answer.approve && revisionOfApproved && q.job_id) {
+    const { data: oldLines } = await admin.from("quotation_lines").select("part_item_id").in("quotation_id", (olderApproved ?? []).map((o) => o.id)).eq("is_active", true).eq("customer_approved", true).not("part_item_id", "is", null);
+    const keep = new Set(lines.map((l) => l.part_item_id).filter((x): x is string => !!x));
+    const gone = Array.from(new Set((oldLines ?? []).map((l) => String(l.part_item_id)).filter((id) => !keep.has(id))));
+    if (gone.length) await dropParts(q.job_id, gone, { id: answer.by ?? null, display_name: answer.name }, "revised");
+  }
   await refreshQuoteTotals(quotationId, settings, answer.by ?? "");
   const { data: fresh } = await admin.from("quotations").select("approved_total_aed, total_aed").eq("id", quotationId).maybeSingle();
   const totalText = aed(Number(fresh?.approved_total_aed ?? fresh?.total_aed ?? 0));
@@ -106,6 +117,8 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
     if (l.part_item_id) {
       const p = parts.find((x) => x.id === l.part_item_id);
       if (!p) continue;
+      // A part already in the ordering flow (a revised quotation approved again) carries on where it is.
+      if (p.order_status && p.order_status !== "none") continue;
       const toOrder = p.availability !== "in_stock";
       if (toOrder) needsOrder = true;
       // A part on the shelf needs no LPO: it counts as received from stock, with its label, ready to issue.
@@ -120,9 +133,12 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   // An additional quotation (the car is already in work, QC or wash): the job never moves backwards.
   // The new lines join the work order, the promised date can only move later, and the parts follow the normal ordering path.
   // An additional quotation (the car is already in work, QC or wash) joins the work order; a first approval goes to Planning inside the Parts step.
+  // A revised quotation approved again while the car is past the quote stage keeps its stage: nothing is reset.
+  const revisionKeepsStage = revisionOfApproved && !["pending_quote", "pending_customer_approval"].includes(job.status);
   const extra = ["in_work", "pending_qc", "pending_wash"].includes(job.status);
-  const toStatus = extra ? "in_work" : "waiting_parts";
-  await admin.from("jobs").update({ status: toStatus, stage: extra ? "work" : "parts", stage_entered_at: now, inspection_fee_due: false, ...(extra ? {} : { plan_parts_done_at: null, plan_released_at: null, plan_date_confirmed_at: null, plan_start_date: null }) }).eq("id", job.id);
+  const toStatus = revisionKeepsStage ? job.status : extra ? "in_work" : "waiting_parts";
+  if (revisionKeepsStage) await admin.from("jobs").update({ inspection_fee_due: false }).eq("id", job.id);
+  else await admin.from("jobs").update({ status: toStatus, stage: extra ? "work" : "parts", stage_entered_at: now, inspection_fee_due: false, ...(extra ? {} : { plan_parts_done_at: null, plan_released_at: null, plan_date_confirmed_at: null, plan_start_date: null }) }).eq("id", job.id);
   const madeLines = extra ? await ensureWorkLines(job.id, answer.by ?? null) : 0;
   // No parts on the approved work: the Parts circle is done at once and the workshop manager plans the work.
   const noParts = !extra && !lines.some((l) => l.line_type === "part") && !parts.some((p) => p.order_status !== "none");

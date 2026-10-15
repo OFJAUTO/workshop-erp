@@ -1,3 +1,5 @@
+import { withBreak } from "@/lib/breaks";
+import { workingTimeOf } from "@/lib/jobs";
 import "server-only";
 import { dubaiDate } from "./jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
@@ -28,6 +30,9 @@ async function advisorIds(jobId: string, gatedInBy: string | null) {
   return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
 }
 
+/** Which side's opening hours and break a person follows. */
+const sideOfDepartment = (departmentId: string | null | undefined): "mechanical" | "bodyshop" => (["bodyshop", "paint", "ppf_tint", "detailing"].includes(departmentId ?? "") ? "bodyshop" : "mechanical");
+
 /** The technicians on a car: everyone the manager put on it who has not left. */
 export async function activeTechnicians(jobId: string) {
   const { data } = await createAdminClient().from("job_technicians").select("id, staff_id, done_at, left_at").eq("job_id", jobId).eq("is_active", true).is("left_at", null);
@@ -44,7 +49,7 @@ async function closeOpenSessions(technicianId: string, by: string, endReason: "s
   const now = new Date().toISOString();
   let minutes = 0;
   for (const s of (open ?? []) as WorkSessionRow[]) {
-    const m = sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null, through_break: s.through_break }, Date.now(), brk);
+    const m = sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null, through_break: s.through_break }, Date.now(), brk, withBreak(workingTimeOf(settings, sideOfDepartment(person?.department_id)), brk));
     minutes += m;
     await admin.from("work_sessions").update({ ended_at: now, end_reason: endReason, pause_reason: pauseReason, minutes: m, updated_by: by }).eq("id", s.id);
   }
@@ -292,7 +297,7 @@ export async function autoPauseBreaks(settings: Settings): Promise<number> {
     // Only once the break has started, only for a session that was running before it, and only within the break or the hour after.
     if (now < b.startsAt || started >= b.startsAt || now > b.endsAt + 65 * 60000) continue;
     const at = new Date(b.startsAt).toISOString();
-    const minutes = sessionMinutes({ started_at: s.started_at, ended_at: at, minutes: null }, now, brk);
+    const minutes = sessionMinutes({ started_at: s.started_at, ended_at: at, minutes: null }, now, brk, withBreak(workingTimeOf(settings, sideOfDepartment(byId.get(s.technician_id)?.department_id)), brk));
     await admin.from("work_sessions").update({ ended_at: at, end_reason: "pause", pause_reason: "Break", minutes }).eq("id", s.id);
     await admin.from("work_pauses").insert({ job_id: s.job_id, technician_id: s.technician_id, reason: "Break", started_at: at, accepted: true });
     await event(s.job_id, null, "work_pause", "Clock paused for the break");
@@ -310,7 +315,8 @@ export async function autoPauseEndOfShift(settings: Settings): Promise<number> {
   let n = 0;
   for (const s of (open ?? []) as WorkSessionRow[]) {
     const now = new Date().toISOString();
-    await admin.from("work_sessions").update({ ended_at: now, end_reason: "auto", pause_reason: "End of shift", minutes: sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null }) }).eq("id", s.id);
+    // The minutes stop at closing time: nothing after hours is counted.
+    await admin.from("work_sessions").update({ ended_at: now, end_reason: "auto", pause_reason: "End of shift", minutes: sessionMinutes({ started_at: s.started_at, ended_at: now, minutes: null, through_break: s.through_break }, Date.now(), null, workingTimeOf(settings, "mechanical")) }).eq("id", s.id);
     await admin.from("work_pauses").insert({ job_id: s.job_id, technician_id: s.technician_id, reason: "End of shift", started_at: now });
     await event(s.job_id, null, "work_pause", "Clock paused at the end of the shift");
     n++;

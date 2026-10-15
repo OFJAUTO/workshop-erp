@@ -69,7 +69,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
                 {boxes.map((b) => (
                   <div key={b.title} className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-[3px] text-xs">
                     <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{b.title}</span>
-                    <span className="text-sm font-bold">{b.strong}</span>
+                    <span className="text-sm font-bold uppercase">{b.strong}</span>
                     {b.rows.filter(([, v]) => v).map(([k, v]) => (
                       <span key={k || String(v)}><span className="text-[#5F6368]">{k}{k ? " " : ""}</span>{v}</span>
                     ))}

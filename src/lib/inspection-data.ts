@@ -263,3 +263,17 @@ export function inspectionDangerous(b: Pick<InspectionBundle, "items" | "inspect
     ...TYRE_POSITIONS.filter((p) => String(m[`tyre_${p.key}_danger`] ?? "") === "1").map((p) => `${p.label} tyre${m[`tyre_${p.key}_danger_reason`] ? ` (${m[`tyre_${p.key}_danger_reason`]})` : ""}`),
   ];
 }
+
+/** True when the approved work carries the one standard "Labour charges" line (the hours typed, no job names). */
+export const hasLabourChargesLine = (lines: { title: string }[]) => lines.some((l) => /^\s*labour charges\s*$/i.test(l.title));
+
+/**
+ * The findings the inspection raised (every item not Good, OK or N/A), with the technician's remark: his tasks when
+ * the quotation says only "Labour charges", so he still knows what to do.
+ */
+export function tasksFromInspection(items: Pick<InspectionItemRow, "item_label" | "section_title" | "status" | "remarks">[]): { label: string; status: string; note: string | null }[] {
+  const fine = new Set(["good", "na"]);
+  return items
+    .filter((i) => i.status && !fine.has(String(i.status).toLowerCase()))
+    .map((i) => ({ label: `${i.section_title}: ${i.item_label}`, status: String(i.status), note: i.remarks?.trim() || null }));
+}

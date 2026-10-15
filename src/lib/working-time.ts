@@ -48,6 +48,12 @@ export function workingHoursBetween(start: Date | string | number, end: Date | s
   return total / 3600000;
 }
 
+/** Minutes a clock counts between two moments: inside the opening hours only, the break left out (unless it was worked through). */
+export function countedMinutes(start: Date | string | number, end: Date | string | number, wt: WorkingTime, opts: { throughBreak?: boolean } = {}): number {
+  const w = opts.throughBreak ? { ...wt, breakStart: null, breakEnd: null } : wt;
+  return Math.max(0, Math.round(workingHoursBetween(start, end, w) * 60));
+}
+
 /** Minutes of a break that fall inside a span of time (Dubai clock), for a technician's clock. */
 export function breakMinutesBetween(start: Date | string | number, end: Date | string | number, brk: BreakWindow | null | undefined): number {
   if (!brk) return 0;

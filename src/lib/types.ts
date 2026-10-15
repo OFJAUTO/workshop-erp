@@ -48,6 +48,8 @@ export type DeviceRow = {
 export type CustomerRow = {
   id: string;
   customer_number: string;
+  /** Agreed credit days (B2B, set by the owner); null = full payment before the car leaves. */
+  credit_terms_days?: number | null;
   customer_type: "individual" | "company";
   full_name: string;
   company_name: string | null;

@@ -202,7 +202,12 @@ try {
     const body0 = await page.textContent("body");
     check("editor shows no ratings or findings (main rule)", !/BAD|AVG|not quoted|Request:/.test(body0 ?? ""), (body0 ?? "").match(/BAD|AVG|not quoted|Request:/)?.[0] ?? "");
     const complete = page.getByRole("button", { name: /complete$/ });
-    if (await complete.count()) { await complete.click(); await sleep(3500); }
+    if (await complete.count()) {
+      await complete.click();
+      // The markup reminder (every part still at the minimum markup): Continue anyway, as an advisor would when the price is right.
+      for (let i = 0; i < 12; i++) { if (await page.locator("[data-markup-ask]").count()) { await page.locator("[data-markup-continue]").click(); break; } await sleep(500); }
+      await sleep(3500);
+    }
     await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
     const sendBtn = page.getByRole("button", { name: /^Send (the )?quotation|^Send to the customer|^Send$/ }).first();
     check("Send button after Complete", (await sendBtn.count()) >= 1, (await page.textContent("body") ?? "").match(/Finish the quotation[^.]*\./)?.[0] ?? "");

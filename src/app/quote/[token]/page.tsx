@@ -6,7 +6,7 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { aed, isHidden, isUnchosen, quoteTotals } from "@/lib/quotes";
+import { discountLabelOf,aed, isHidden, isUnchosen, quoteTotals } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -42,8 +42,13 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       <main className="mx-auto max-w-2xl px-4 py-8">{children}</main>
     </div>
   );
-  const { data: row } = await admin.from("quotations").select("id, kind, status, valid_until, viewed_full_at").eq("token", token).maybeSingle();
-  if (!row) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
+  // The link always opens the latest version the customer was sent: an older link follows the number to the newest one.
+  const { data: byToken } = await admin.from("quotations").select("id, kind, number").eq("token", token).maybeSingle();
+  if (!byToken) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
+  const { data: latest } = await admin.from("quotations").select("id, kind, status, valid_until, viewed_full_at, token, version, sent_at").eq("number", byToken.number).eq("kind", byToken.kind).eq("is_active", true).not("status", "in", "(draft,pending_owner,cancelled)").order("version", { ascending: false }).limit(1).maybeSingle();
+  const row = latest ?? null;
+  if (!row) return plain(<Notice tone="info">This quotation is being updated. The new version will be sent to you shortly.</Notice>);
+  const liveToken = row.token ?? token;
   const isEstimate = row.kind === "estimate";
 
   // First opening: remembered and the advisor told. Opening the PDF is remembered by the PDF route.
@@ -57,7 +62,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     const ids = [q.created_by, q.sent_by, job?.gated_in_by].filter((x): x is string => !!x);
     await notifyStaff(ids, { type: "quote_opened", title: `Customer opened ${isEstimate ? "the estimate" : "the quotation"} · ${q.number}`, body: vehicle ? formatPlate(vehicle) : "", jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}` : `/estimates/${q.id}` });
   }
-  if (q.status === "superseded" || q.status === "cancelled" || q.status === "draft" || q.status === "pending_owner") return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} has been replaced. Please use the newest link the workshop sent you.</Notice>);
+  if (q.status === "superseded" || q.status === "cancelled" || q.status === "draft" || q.status === "pending_owner") return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} is being updated. The new version will be sent to you shortly.</Notice>);
 
   // Internal lines, unused options and parts left off never reach the customer.
   const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l) && !l.left_off);
@@ -110,15 +115,16 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         title={title}
         meta={meta}
         boxes={boxes}
-        view={{ href: `/api/pdf/quote/${token}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)" }}
-        action={open ? <QuoteResponse token={token} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} /> : null}
+        view={{ href: `/api/pdf/quote/${liveToken}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)" }}
+        action={open ? <QuoteResponse token={liveToken} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} /> : null}
         contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} label="Questions or changes?" />}
       >
         {statusNotes}
+        {row.version > 1 && row.sent_at ? <p className="text-xs font-semibold text-[#5F6368]" data-updated-on>Updated on {formatDateTime(row.sent_at)}</p> : null}
         <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">
           <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{isEstimate ? "Estimate total" : "Total"} including VAT</span>
           <span className="text-3xl font-extrabold">{aed(totals.total)}</span>
-          {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{q.discount_kind === "percent" ? `Labour discount (${q.discount_value}%)` : q.discount_kind === "aed" ? "Labour discount" : `Discount (${q.discount_percent}%)`}: − {aed(totals.discount)}</span> : null}
+          {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{discountLabelOf(q)}: − {aed(totals.discount)}</span> : null}
           {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
           {totals.deposit ? <span className="text-xs text-[#5F6368]">Deposit required on approval: {aed(totals.deposit)}</span> : null}
         </div>

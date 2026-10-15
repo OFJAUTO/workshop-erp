@@ -207,6 +207,31 @@ export async function GET(request: NextRequest) {
   report.clocksPaused = await autoPauseEndOfShift(settings);
   report.breaksPaused = await autoPauseBreaks(settings);
 
+  // 10b. The next morning (the first run after opening): "Clock left running overnight: [car], [person]" to the manager, once per clock.
+  {
+    const hourNow = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", hour12: false }).format(new Date()));
+    if (hourNow === (Number(settings.opening_hour) || 8)) {
+      const since = new Date(Date.now() - 20 * 3600000).toISOString();
+      const carOf = (j: { job_number: string; vehicle?: { make?: { name: string } | null; model?: { name: string } | null } | null } | null) => j ? [j.job_number, [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")].filter(Boolean).join(" · ") : "";
+      const { data: ws } = await admin.from("work_sessions").select("id, job_id, technician_id, tech:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, department, vehicle:vehicles(make:vehicle_makes(name), model:vehicle_models(name)))").eq("end_reason", "auto").eq("pause_reason", "End of shift").gte("ended_at", since).is("overnight_notified_at", null);
+      for (const s of ws ?? []) {
+        const job = s.job as unknown as { job_number: string; department: string | null; vehicle?: { make?: { name: string } | null; model?: { name: string } | null } | null } | null;
+        const who = (s.tech as unknown as { display_name: string } | null)?.display_name ?? "a technician";
+        await notifyManagers(job?.department ?? null, { type: "clock_overnight", title: `Clock left running overnight: ${carOf(job)}, ${who}`, body: "The clock stopped counting at closing time; the minutes after hours are not charged.", jobId: s.job_id as string, href: `/jobs/${s.job_id}/work` });
+        await admin.from("work_sessions").update({ overnight_notified_at: new Date().toISOString() }).eq("id", s.id);
+        report.clocksOvernight = (report.clocksOvernight ?? 0) + 1;
+      }
+      const { data: bs } = await admin.from("bodyshop_clockings").select("id, job_id, staff_id, person:staff!bodyshop_clockings_staff_id_fkey(display_name), job:jobs(job_number, department, vehicle:vehicles(make:vehicle_makes(name), model:vehicle_models(name)))").eq("closed_reason", "end_of_shift").gte("ended_at", since).is("overnight_notified_at", null);
+      for (const c of bs ?? []) {
+        const job = c.job as unknown as { job_number: string; department: string | null; vehicle?: { make?: { name: string } | null; model?: { name: string } | null } | null } | null;
+        const who = (c.person as unknown as { display_name: string } | null)?.display_name ?? "someone";
+        await notifyManagers("bodyshop", { type: "clock_overnight", title: `Clock left running overnight: ${carOf(job)}, ${who}`, body: "The clock stopped counting at closing time; the minutes after hours are not charged.", jobId: c.job_id as string, href: `/bodyshop/${c.job_id}` });
+        await admin.from("bodyshop_clockings").update({ overnight_notified_at: new Date().toISOString() }).eq("id", c.id);
+        report.clocksOvernight = (report.clocksOvernight ?? 0) + 1;
+      }
+    }
+  }
+
   // 11. Planning that waits too long on one person: a reminder every working day.
   {
     const { data: stuck } = await admin.from("jobs").select("id, job_number, status, department, gated_in_by, plan_parts_done_at, plan_released_at, plan_date_confirmed_at, stage_entered_at, plan_reminded_at").eq("is_open", true).in("status", ["approved", "waiting_parts"]).limit(100);

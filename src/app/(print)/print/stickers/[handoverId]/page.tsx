@@ -9,6 +9,7 @@ import { getSettings } from "@/lib/settings";
 import { qrUrl, stickerSettings, warrantyMonthsFor, stickerLogoDataUrl, stickerMarkDataUrl } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PrintNow } from "../../../parts/labels/[jobId]/PrintNow";
+import { PrintOne } from "../../../parts/labels/[jobId]/PrintOne";
 
 export const dynamic = "force-dynamic";
 
@@ -45,15 +46,15 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
         const months = warrantyMonthsFor(ss, s.brand);
         const until = new Date(h.confirmed_at ?? h.created_at);
         until.setUTCMonth(until.getUTCMonth() + months);
-        stickers.push(<BatterySticker key={`${partId}-${n}`} size={ss.large} logoUrl={logo} d={{ qr, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, line: batteryLine(item?.description, s.brand, s.model) }} />);
+        stickers.push(<BatterySticker key={`${partId}-${n}`} size={ss.battery} logoUrl={logo} d={{ qr, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, line: batteryLine(item?.description, s.brand, s.model) }} />);
       } else {
         stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={ss.logoPath ? logo : mark} d={{ qr, date, vin8: vin.slice(-8) }} />);
       }
     }
   }
   const battery = plan.some(([, s]) => s.kind === "battery");
-  const w = battery ? Math.max(ss.large, ss.partW) : ss.partW;
-  const hh = battery ? Math.max(ss.large, ss.partH) : ss.partH;
+  const w = battery ? Math.max(ss.battery, ss.partW) : ss.partW;
+  const hh = battery ? Math.max(ss.battery, ss.partH) : ss.partH;
   return (
     <div>
       <style>{stickerPageCss(w, hh)}</style>
@@ -63,7 +64,7 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
         <a href={`/api/pdf/stickers/${handoverId}`}>Download PDF</a>
         <a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a>
       </div>
-      {stickers.length === 0 ? <p style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>No stickers were asked for on this handover.</p> : stickers}
+      {stickers.length === 0 ? <p style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>No stickers were asked for on this handover.</p> : stickers.map((s, i) => <div className="one" key={i} data-sticker-one><PrintOne />{s}</div>)}
     </div>
   );
 }

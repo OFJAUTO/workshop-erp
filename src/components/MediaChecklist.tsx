@@ -51,7 +51,7 @@ export function ChecklistSummary({ check, attempted = false }: { check: Checklis
  * item as done; the page's own refresh brings the same answer when the upload happened on another device.
  * When someone presses the finish button with items missing, those items turn red.
  */
-export function MediaChecklist({ jobId, check: serverCheck, token, carPictureUrl = null }: { jobId: string; check: Checklist; token?: string; /** The current car picture, so "Tap to replace" opens the crop with it. */ carPictureUrl?: string | null }) {
+export function MediaChecklist({ jobId, check: serverCheck, token, carPictureUrl = null, damageChips = [] }: { jobId: string; check: Checklist; token?: string; /** The current car picture, so "Tap to replace" opens the crop with it. */ carPictureUrl?: string | null; /** One-tap words above the damage note (Settings). */ damageChips?: string[] }) {
   const [check, setCheck] = useState(serverCheck);
   const [seen, setSeen] = useState(serverCheck);
   if (seen !== serverCheck) {
@@ -104,7 +104,7 @@ export function MediaChecklist({ jobId, check: serverCheck, token, carPictureUrl
         itemKey={check.majorDamage ? "damage_photo" : null}
         onChecklist={onChecklist}
       />
-      <DamageNote jobId={jobId} initial={check.damageNote} token={token} />
+      <DamageNote jobId={jobId} initial={check.damageNote} token={token} chips={damageChips} />
       {check.complete ? <Notice tone="success">All done. You can close this page.</Notice> : null}
     </div>
   );

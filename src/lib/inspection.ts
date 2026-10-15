@@ -151,16 +151,17 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Interior lights",
   ]),
   section("Air conditioning", ["A/C compressor / expansion valve / condenser / evaporator / pipes", "Cabin filter"]),
-  section("Service items", [], ["Engine oil service due", "Brake fluid change due", "Coolant change due", "Transmission oil service due", "A/C gas recharge", "Software update / service reset"]),
+  section("Service items", [], ["Engine oil service due", "Brake fluid change due", "Coolant change due", "Transmission oil service due", "A/C gas recharge", "Software update", "Software reset", "Coding / programming"]),
   section("Other", ["Other"]),
 ];
 
 /** Tyres: four positions, plus an optional spare. */
 export const TYRE_POSITIONS = [
+  // A walk round the car: front left, rear left, rear right, front right (the same order as the gate-in wheel photos).
   { key: "fl", label: "Front left" },
-  { key: "fr", label: "Front right" },
   { key: "rl", label: "Rear left" },
   { key: "rr", label: "Rear right" },
+  { key: "fr", label: "Front right" },
 ] as const;
 export const TYRE_CONDITIONS = [
   { value: "good", label: "Good" },

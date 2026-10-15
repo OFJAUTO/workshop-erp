@@ -1,5 +1,5 @@
 import { jobHasOilChange } from "./stickers";
-import { breakMinutesBetween, type BreakWindow } from "./working-time";
+import { countedMinutes, type WorkingTime,breakMinutesBetween, type BreakWindow } from "./working-time";
 import "server-only";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
 import { hasCostFloor, isHidden, isUnchosen, type QuoteLine } from "./quotes";
@@ -55,9 +55,11 @@ export const SHIFT_SELECT = "id, staff_id, shift_date, clock_in, clock_out, late
 export const PAUSE_REASONS = ["Waiting for parts", "Waiting for the manager", "Another job", "Break", "Tools or lift busy", "Other"] as const;
 
 /** Minutes of a session, running or finished. */
-export function sessionMinutes(s: Pick<WorkSessionRow, "started_at" | "ended_at" | "minutes"> & { through_break?: boolean }, now = Date.now(), brk: BreakWindow | null = null) {
+export function sessionMinutes(s: Pick<WorkSessionRow, "started_at" | "ended_at" | "minutes"> & { through_break?: boolean }, now = Date.now(), brk: BreakWindow | null = null, wt: WorkingTime | null = null) {
   if (s.minutes !== null && s.minutes !== undefined && s.ended_at) return s.minutes;
   const end = s.ended_at ? Date.parse(s.ended_at) : now;
+  // With the opening hours known, time outside them never counts (a clock left running stops counting at closing).
+  if (wt) return countedMinutes(s.started_at, end, wt, { throughBreak: !!s.through_break });
   const gross = Math.max(0, Math.round((end - Date.parse(s.started_at)) / 60000));
   // The break is not counted against the technician unless he chose to work through it.
   return s.through_break ? gross : Math.max(0, gross - breakMinutesBetween(s.started_at, end, brk));
@@ -145,12 +147,13 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
   const all = (existing ?? []) as { id: string; quotation_line_id: string | null; position: number; title: string; hours_quoted: number | string | null; status: string; is_active: boolean }[];
   const have = new Set(all.filter((e) => e.is_active).map((e) => e.quotation_line_id).filter(Boolean));
   let position = all.reduce((m, e) => Math.max(m, Number(e.position) || 0), 0);
-  // A revised quotation copies its lines under new ids: a work line with the same title moves to the new line instead of being made twice.
+  // A revised quotation copies its lines under new ids: the work line of the line it came from (or one with the same title)
+  // moves to the new line instead of being made twice, so work already started carries on.
   const spare = all.filter((e) => e.is_active && e.quotation_line_id && !wantedIds.has(e.quotation_line_id));
   const rows: Record<string, unknown>[] = [];
   for (const l of wanted) {
     if (have.has(l.id)) continue;
-    const twin = spare.find((e) => e.title === l.title);
+    const twin = spare.find((e) => !!l.revised_from_line_id && e.quotation_line_id === l.revised_from_line_id) ?? spare.find((e) => e.title === l.title);
     if (twin) {
       spare.splice(spare.indexOf(twin), 1);
       await admin.from("work_lines").update({ quotation_line_id: l.id, hours_quoted: hoursFor(l), details: l.details, updated_by: by }).eq("id", twin.id);

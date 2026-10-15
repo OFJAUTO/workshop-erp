@@ -1,3 +1,5 @@
+import { PartsSteps } from "@/components/PartsSteps";
+import { partsSteps, stepPartOf } from "@/lib/parts-steps";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
@@ -7,7 +9,7 @@ import { StageTrack } from "@/components/StageTrack";
 import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
-import { inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
+import { hasLabourChargesLine, tasksFromInspection,inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate } from "@/lib/jobs";
@@ -152,6 +154,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
   const insp = inspection?.inspection ?? null;
+  // The five parts steps as dots (the same rule as the parts page).
+  const [{ data: stepRows }, { data: stepJob }] = await Promise.all([
+    createAdminClient().from("part_items").select("is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status").eq("job_id", id),
+    createAdminClient().from("jobs").select("parts_pricing_done_at, parts_pricing_reopened_at").eq("id", id).maybeSingle(),
+  ]);
+  const partsDots = <PartsSteps size="dots" steps={partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) })} />;
+  const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
   const inspectionMinutes = insp ? inspectionWorkingMinutes(insp, wt) : 0;
   const inspectionOver = !!insp && insp.status === "in_progress" && inspectionOverTarget(insp, wt);
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
@@ -454,7 +463,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
         <Card className={tile(["parts"], "neutral", partItems.length > 0)}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Parts</span>
+          <span className="flex items-center gap-2"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Parts</span>{partsDots}</span>
           <span className="text-sm font-semibold">
             {partItems.length === 0 ? (quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
           </span>
@@ -487,6 +496,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Work</span>
           <span className="text-sm font-semibold">{job.status === "in_work" && job.work_done_at ? `Job finished, waiting on ${managerLabel} to confirm` : work && job.plan_released_at ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} jobs done` : work ? "Planned, not released" : "Not started"}</span>
           {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min used of {work.hoursQuoted.toFixed(1)} h charged{plan?.technicians.length ? ` · ${plan.technicians.filter((t) => !t.left_at).map((t) => t.display_name).join(", ")}` : ""}{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
+          {inspectionTasks.length ? <span className="text-xs text-muted" data-inspection-tasks-count>Labour charges: {inspectionTasks.length} task{inspectionTasks.length === 1 ? "" : "s"} from the inspection on the work order</span> : null}
           {can(role, "viewWorkOrders") && (work || role === "owner") ? <div className="mt-auto"><LinkButton href={`/jobs/${id}/work`} tone={job.status === "in_work" && managesThisJob ? "primary" : "secondary"} size="md">Work order</LinkButton></div> : can(role, "viewWorkOrders") ? (
             <div className="mt-auto flex flex-col gap-1">
               <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Work order</span>

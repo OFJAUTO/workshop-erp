@@ -91,6 +91,8 @@ export type QuoteLine = {
   recovery_mention_free?: boolean;
   /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours the customer pays. */
   hours_estimate?: number | null;
+  /** On a revised quotation: the line of the earlier version this one was copied from (work lines follow it). */
+  revised_from_line_id?: string | null;
   /** Bodyshop lines: the film colour and code (coloured PPF), or the tint shade. */
   film_colour?: string | null;
   film_code?: string | null;
@@ -160,9 +162,14 @@ export type QuoteRow = {
   /** One person edits at a time: who holds the quotation and the last heartbeat. */
   editing_by: string | null;
   editing_at: string | null;
+  /** "Continue anyway" on the markup reminder: who left the parts at the minimum markup, and when (owner's summary). */
+  markup_skipped_at?: string | null;
+  markup_skipped_by?: string | null;
   /** The labour discount (our own labour lines only): a percentage or a fixed amount. Null kind = the old rule (labour and services). */
   discount_kind?: "percent" | "aed" | null;
   discount_value?: number | null;
+  /** What the discount comes off: our labour lines only (default), or labour and our own services as well. Outside work is never discounted. */
+  discount_scope?: "labour" | "labour_services" | null;
   /** Commission we pay someone: internal, never shown to a customer. */
   commission_to?: string | null;
   commission_kind?: "aed" | "percent" | null;
@@ -187,6 +194,7 @@ export type QuoteHeaderForTotals = {
   rounded_total_aed?: number | null;
   discount_kind?: "percent" | "aed" | null;
   discount_value?: number | null;
+  discount_scope?: "labour" | "labour_services" | null;
   commission_kind?: "aed" | "percent" | null;
   commission_value?: number | null;
   materials_cost_aed?: number | null;
@@ -274,7 +282,7 @@ export type PartRequest = {
   removed_reason?: string | null;
 };
 
-export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
+export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** "labour" (hours typed) or "service" (fixed price, typed when there is no default); null keeps the old rule: a price means a service. */ line_kind?: "labour" | "service" | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
 export type ServiceCategory = { id: string; name: string; position: number; is_active: boolean };
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -426,10 +434,29 @@ export function blockOf(l: Pick<QuoteLine, "line_type">): "labour" | "parts" | "
   return "other";
 }
 
-/** The labour discount's base: our own labour lines (hours), never outside fixed-price services, parts or other charges. */
-export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer">) {
-  return l.line_type === "labour" && !isHidden(l);
+/** A fixed-price service of our own (minor service, major service...): a service line with no "our cost" typed on it. Outside work carries its cost. */
+export function isOwnService(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null }) {
+  return l.line_type === "package" && !isHidden(l) && !(Number(l.unit_cost) > 0);
 }
+/** The discount's base: our own labour lines (hours); with the "labour and services" scope our own services too. Never outside work, parts or other charges. */
+export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null }, scope: "labour" | "labour_services" | null | undefined = "labour") {
+  return (l.line_type === "labour" && !isHidden(l)) || (scope === "labour_services" && isOwnService(l));
+}
+/** "Labour discount (10%)", "Labour and services discount", or the old "Discount (10%)": the same words on the screen, the link, the PDF and the invoice. */
+export function discountLabelOf(q: Pick<QuoteHeaderForTotals, "discount_kind" | "discount_value" | "discount_percent" | "discount_scope">): string {
+  const words = q.discount_scope === "labour_services" ? "Labour and services discount" : "Labour discount";
+  if (q.discount_kind === "percent") return `${words} (${q.discount_value}%)`;
+  if (q.discount_kind === "aed") return words;
+  return `Discount (${q.discount_percent ?? 0}%)`;
+}
+/** A service with an explicit kind follows it; otherwise a price means a fixed-price service and no price means labour by the hour. */
+export function isFixedService(s: Pick<Service, "price_aed" | "line_kind">) {
+  return s.line_kind ? s.line_kind === "service" : s.price_aed !== null;
+}
+/** Pinned to the top of the pickers and of Most used: the one standard labour line, and the two services. */
+export const PINNED_LABOUR = ["labour charges"];
+export const PINNED_SERVICES = ["minor service", "major service"];
+export const pinnedRank = (name: string) => { const i = [...PINNED_LABOUR, ...PINNED_SERVICES].indexOf(name.trim().toLowerCase()); return i < 0 ? 99 : i; };
 
 /**
  * The labour discount before the round-off: a percentage or a fixed amount of our own labour lines. Quotations
@@ -437,7 +464,7 @@ export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to
  */
 export function labourDiscountOf(counted: QuoteLine[], q: QuoteHeaderForTotals): { base: number; discount: number } {
   if (q.discount_kind) {
-    const base = round2(counted.filter(takesLabourDiscount).reduce((a, l) => a + lineTotal(l), 0));
+    const base = round2(counted.filter((l) => takesLabourDiscount(l, q.discount_scope)).reduce((a, l) => a + lineTotal(l), 0));
     const v = Number(q.discount_value) || 0;
     const discount = q.discount_kind === "percent" ? round2(base * (Math.min(100, Math.max(0, v)) / 100)) : round2(Math.min(base, Math.max(0, v)));
     return { base, discount };
