@@ -7,6 +7,7 @@ import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { SCANS_BUCKET, attachPrescan, scanKindFor } from "@/lib/scans";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkScansMailbox } from "@/lib/mailbox";
+import { disconnectMailbox } from "@/lib/google-mailbox";
 
 /** The manager attaches an unmatched scan to a job by hand; it is filed by the job's stage like a matched one. */
 export async function attachScan(scanId: string, formData: FormData) {
@@ -51,6 +52,15 @@ export async function checkMailboxNow() {
   revalidatePath("/scans");
   if (!r.ok) redirect(`/scans?error=${encodeURIComponent(r.error ?? "The mailbox could not be read.")}`);
   redirect(`/scans?message=${encodeURIComponent(r.checked === 0 ? `Mailbox checked: nothing new${r.skipped ? ` (${r.skipped} already filed)` : ""}.` : `Mailbox checked: ${r.checked} new email${r.checked === 1 ? "" : "s"}, ${r.stored} file${r.stored === 1 ? "" : "s"} kept, ${r.matched} matched to a car.`)}`);
+}
+
+/** Owner only: the scans mailbox's permission is handed back to Google; Connect signs in again. */
+export async function disconnectMailboxAction() {
+  const staff = await requirePermission("manageSettings");
+  if (staff.role_id !== "owner" || staff.viewingAs) redirect(`/scans?error=${encodeURIComponent("Only the owner disconnects the scans mailbox.")}`);
+  await disconnectMailbox(staff.id);
+  revalidatePath("/scans");
+  redirect(`/scans?message=${encodeURIComponent("Disconnected. The mailbox is no longer read; Connect signs in again.")}`);
 }
 
 /** Owner only: an email that was not a scan report, once read, can be put away. */

@@ -88,6 +88,7 @@ begin
   delete from public.customer_contacts where customer_id = any(cust_ids);
   delete from public.customers where id = any(cust_ids);
   delete from public.inbound_emails where from_email like 'e2e%' or subject like 'e2e %';
+  delete from public.google_mailbox_tokens where mailbox like 'e2e%';
 end $$;
 set session_replication_role = default;
 -- Services saved from a quotation during the tests.

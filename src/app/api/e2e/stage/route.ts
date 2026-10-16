@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number };
+  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number; /** A name for the labour line, given while the quotation is still a draft. */ labourTitle?: string };
   const stage = body.stage ?? "inspection";
   const admin = createAdminClient();
   // Two side doors for the tests: the work order lines of a job, and an open QC round with its items.
@@ -194,6 +194,7 @@ export async function POST(request: NextRequest) {
       { quotation_id: Q1, position: 1, line_type: "part", title: "Front brake pads (PAD-STAGE-1)", source_type: "manual", quantity: 1, unit_cost: 200, markup_percent: 50, unit_price: 300, part_item_id: PA, part_type: "genuine", created_by: advisor.id, updated_by: advisor.id },
     ]);
   }
+  if (body.labourTitle) await admin.from("quotation_lines").update({ title: String(body.labourTitle) }).eq("quotation_id", Q1).eq("line_type", "labour");
   // Ready: approved outright (the lines are in; an approved quotation refuses new lines, so the mark comes last).
   if (stage === "ready") await admin.from("quotations").update({ status: "approved", responded_at: now, approver_name: "Stage Customer", updated_by: advisor.id }).eq("id", Q1);
   await refreshQuoteTotals(Q1, settings, advisor.id);

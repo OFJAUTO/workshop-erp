@@ -7,8 +7,9 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { SCANS_BUCKET } from "@/lib/scans";
-import { attachScan, ignoreScan, dismissInboundEmail, checkMailboxNow } from "./actions";
+import { attachScan, ignoreScan, dismissInboundEmail, checkMailboxNow, disconnectMailboxAction } from "./actions";
 import { mailboxConfigured, type MailboxCheck } from "@/lib/mailbox";
+import { mailboxConnection } from "@/lib/google-mailbox";
 import { scansMailbox } from "@/lib/gmail";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,8 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
   const lastCheck = (settings.scans_mailbox_last_check ?? null) as MailboxCheck | null;
   const mailbox = scansMailbox();
   const configured = mailboxConfigured();
+  const connection = configured ? await mailboxConnection() : null;
+  const ownerHere = role === "owner" && !staff.viewingAs;
 
   const row = (s: Scan) => (
     <li key={s.id} className="py-3 flex flex-col gap-2">
@@ -73,9 +76,14 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
     <>
       <PageHeader title="Scan reports" subtitle={`Autel reports read from ${mailbox || "the scans mailbox"} every five minutes. Matched by the VIN (subject, body or inside the report) to the open job; the rest wait here.`} actions={canAttach ? <form action={checkMailboxNow}><Button type="submit" size="lg" data-check-mailbox>Check the mailbox now</Button></form> : undefined} />
       <div className="flex flex-wrap items-center gap-2 text-sm" data-mailbox-status>
-        {!configured ? <Badge tone="amber">Mailbox not connected yet</Badge> : lastCheck?.at ? <Badge tone={lastCheck.ok ? "green" : "red"}>{lastCheck.ok ? "Mailbox connected" : "Mailbox problem"}</Badge> : <Badge tone="neutral">Not checked yet</Badge>}
-        {lastCheck?.at ? <span className="text-muted">Last checked {formatDateTime(lastCheck.at)}{lastCheck.ok ? ` · ${lastCheck.checked} new, ${lastCheck.stored} file${lastCheck.stored === 1 ? "" : "s"} kept` : `: ${lastCheck.error ?? ""}`}</span> : null}
-        {!configured && role === "owner" ? <span className="text-muted">Add GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_KEY and SCANS_MAILBOX in Vercel (the steps are in the delivery note).</span> : null}
+        {!configured ? <Badge tone="amber">Mailbox not set up yet</Badge> : !connection ? <Badge tone="amber">Mailbox not connected yet</Badge> : connection.last_error ? <Badge tone="red">Mailbox problem</Badge> : <Badge tone="green">Connected as {connection.mailbox}</Badge>}
+        {connection ? <span className="text-muted" data-mailbox-connected>Read only · connected {formatDateTime(connection.connected_at)}{connection.connected_by_name ? ` by ${connection.connected_by_name}` : ""}</span> : null}
+        {connection?.last_error ? <span className="font-semibold text-red" data-mailbox-error>{connection.last_error}</span> : null}
+        {connection && lastCheck?.at ? <span className="text-muted">Last checked {formatDateTime(lastCheck.at)}{lastCheck.ok ? ` · ${lastCheck.checked} new, ${lastCheck.stored} file${lastCheck.stored === 1 ? "" : "s"} kept` : `: ${lastCheck.error ?? ""}`}</span> : null}
+        {!configured && role === "owner" ? <span className="text-muted">Add GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and SCANS_MAILBOX in Vercel (the steps are in the delivery note).</span> : null}
+        {configured && !connection && role !== "owner" ? <span className="text-muted">The owner connects it once.</span> : null}
+        {configured && ownerHere && (!connection || connection.last_error) ? <a href="/api/google/mailbox/connect" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-connect-mailbox>Connect {mailbox || "the scans mailbox"}</a> : null}
+        {connection && ownerHere ? <form action={disconnectMailboxAction}><Button type="submit" tone="ghost" size="md" data-disconnect-mailbox>Disconnect</Button></form> : null}
       </div>
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -104,7 +112,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
           </Card>
           <Card className="flex flex-col gap-3">
             <SectionLabel>Where the reports come from</SectionLabel>
-            <p className="text-xs text-muted">The system reads the mailbox {mailbox || "scans@ofjauto.com"} directly (read only, nothing is moved or deleted), every five minutes and on &quot;Check the mailbox now&quot;. Point the Autel scanner&apos;s email at that address. The one-time Google Workspace and Google Cloud steps, and the three Vercel variable names, are in the delivery note (docs/16-oct-note.md).</p>
+            <p className="text-xs text-muted">The system reads {mailbox || "scans@ofjauto.com"} through a one-time Google sign-in as that account (Connect, above): read only, and Google limits the permission to that one mailbox. Nothing is moved or deleted. It checks every five minutes and on &quot;Check the mailbox now&quot;. Point the Autel scanner&apos;s email at that address. The Google Cloud steps and the three Vercel variable names are in the delivery note (docs/16-oct-note.md).</p>
           </Card>
         </>
       ) : null}

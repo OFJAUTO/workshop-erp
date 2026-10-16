@@ -349,9 +349,9 @@ await section("I scan emails", async () => {
 
 /* ---------------- D3: the oil service sticker and its QC line ---------------- */
 await section("D3 service sticker", async () => {
-  const seed = await api("/api/e2e/stage", { stage: "ready" });
-  const { jobId, quotationId } = seed.json;
-  await sql("update public.quotation_lines set title = 'ENGINE OIL AND FILTER CHANGE' where quotation_id = $1 and line_type = 'labour'", [quotationId]);
+  // The line is named before the customer approves (an approved quotation refuses any change).
+  const seed = await api("/api/e2e/stage", { stage: "ready", labourTitle: "ENGINE OIL AND FILTER CHANGE" });
+  const { jobId } = seed.json;
   const { browser, page } = await browserFor("owner");
   await go(page, `${base}/jobs/${jobId}`);
   const body = await page.textContent("body");

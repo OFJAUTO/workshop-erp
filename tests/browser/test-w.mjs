@@ -4,7 +4,7 @@
 // where the car is picked; the same Gmail message is never filed twice; the page shows the mailbox state and offers
 // "Check the mailbox now"; the old Postmark route is gone.
 //   node --env-file=.env.local tests/browser/test-w.mjs
-import { api, base, browserFor, browserForId, cleanupDb, go, makeChecks, sleep, sql, MANAGER_MECH } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, MANAGER_MECH } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 8 * 60 * 1000).unref();
@@ -73,11 +73,53 @@ const mark = (await sql("select now() as t"))[0]?.t;
   check("5: the five-minute mailbox check refuses without the cron secret", cron.status === 401, String(cron.status));
   const run = await fetch(`${base}/api/cron/mailbox`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ""}` } });
   const rj = await run.json().catch(() => ({}));
-  check("5: with the secret it runs and says the mailbox is not connected here (no Google keys locally)", run.status === 503 && /not set up/i.test(rj.error ?? ""), `${run.status} ${JSON.stringify(rj)}`);
+  check("5: with the secret it runs and says the mailbox is not connected yet", run.status === 503 && /not (set up|connected)/i.test(rj.error ?? ""), `${run.status} ${JSON.stringify(rj)}`);
   const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
   await go(page, `${base}/scans`);
-  check("5: the owner's page names the three Vercel variables while the mailbox is not connected", /SCANS_MAILBOX/.test((await page.locator("[data-mailbox-status]").textContent()) ?? ""));
+  const status = (await page.locator("[data-mailbox-status]").textContent()) ?? "";
+  check("5: the owner's page offers Connect (or names the Vercel variables when they are missing)", (await page.locator("[data-connect-mailbox]").count()) === 1 || /GOOGLE_OAUTH_CLIENT_ID/.test(status), status);
   await browser.close();
+}
+
+// 6. The one-time Google sign-in as scans@ofjauto.com (read only). Run with GOOGLE_OAUTH_CLIENT_ID, _SECRET and SCANS_MAILBOX set on the dev server (test values).
+{
+  const mark6 = (await sql("select now() as t"))[0]?.t;
+  const ownerCookie = await cookieHeader("owner");
+  const r = await fetch(`${base}/api/google/mailbox/connect`, { headers: { cookie: ownerCookie }, redirect: "manual" });
+  const loc = new URL(r.headers.get("location") ?? "http://none/");
+  const setCookie = r.headers.get("set-cookie") ?? "";
+  const state = /erp_mailbox_state=([^;]+)/.exec(setCookie)?.[1] ?? "";
+  check("6: Connect sends the owner to Google's own sign-in page", r.status === 307 && loc.host === "accounts.google.com", `${r.status} ${loc.href.slice(0, 120)}`);
+  check("6: one permission only: read the mail (gmail.readonly)", loc.searchParams.get("scope") === "https://www.googleapis.com/auth/gmail.readonly", loc.searchParams.get("scope"));
+  check("6: scans@ofjauto.com filled in, a lasting permission asked for, back to the ERP's own address", loc.searchParams.get("login_hint") === "scans@ofjauto.com" && loc.searchParams.get("access_type") === "offline" && loc.searchParams.get("prompt") === "consent" && loc.searchParams.get("redirect_uri") === `${base}/api/google/mailbox/callback`, loc.search.slice(0, 300));
+  check("6: a one-time check value travels with it, kept in a cookie only the server reads", !!state && loc.searchParams.get("state") === state && /HttpOnly/i.test(setCookie));
+  const adv = await fetch(`${base}/api/google/mailbox/connect`, { headers: { cookie: await cookieHeader("service_advisor") }, redirect: "manual" });
+  check("6: only the owner can connect", adv.status === 307 && /error=/.test(adv.headers.get("location") ?? "") && !/accounts\.google\.com/.test(adv.headers.get("location") ?? ""), adv.headers.get("location"));
+  const bad = await fetch(`${base}/api/google/mailbox/callback?state=wrong&code=x`, { headers: { cookie: `${ownerCookie}; erp_mailbox_state=${state}` }, redirect: "manual" });
+  const badLoc = decodeURIComponent(bad.headers.get("location") ?? "");
+  check("6: an answer that does not match this browser is refused and nothing is stored", /did not match/.test(badLoc) && ((await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active"))[0]?.n ?? 0) === 0, badLoc);
+  const cancel = await fetch(`${base}/api/google/mailbox/callback?state=${state}&error=access_denied`, { headers: { cookie: `${ownerCookie}; erp_mailbox_state=${state}` }, redirect: "manual" });
+  check("6: cancelled on Google's page: nothing connected", /cancelled/.test(decodeURIComponent(cancel.headers.get("location") ?? "")));
+  const ct = await mail({ connectTest: { refreshToken: "e2e-refresh-token-1234567890" } });
+  check("6: the stored permission is encrypted (the token never appears in the table) and reads back", ct.status === 200 && ct.json.ok === true && ct.json.plainStored === false && ct.json.roundTrip === true, JSON.stringify(ct.json));
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
+  await go(page, `${base}/scans`);
+  const st1 = (await page.locator("[data-mailbox-status]").textContent()) ?? "";
+  check("6: the page says 'Connected as …', read only, with Disconnect", /Connected as e2e-scans@ofjauto\.com/.test(st1) && /Read only/.test(st1) && (await page.locator("[data-disconnect-mailbox]").count()) === 1 && (await page.locator("[data-connect-mailbox]").count()) === 0, st1);
+  await page.locator("[data-check-mailbox]").click();
+  await page.waitForURL(/error=|message=/, { timeout: 30000 }).catch(() => null);
+  await go(page, `${base}/scans`);
+  const st2 = (await page.locator("[data-mailbox-status]").textContent()) ?? "";
+  const told = async () => ((await sql("select count(*)::int as n from public.notifications where type = 'scan_mailbox_problem' and created_at > $1", [mark6]))[0]?.n ?? 0);
+  check("6: a permission Google refuses shows 'Mailbox problem', Google's words and Connect again", /Mailbox problem/.test(st2) && /Connect the mailbox again/.test(st2) && (await page.locator("[data-connect-mailbox]").count()) === 1, st2);
+  const n1 = await told();
+  await fetch(`${base}/api/cron/mailbox`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ""}` } });
+  check("6: the owner is told once, not at every five-minute check", n1 >= 1 && (await told()) === n1, `${n1} then ${await told()}`);
+  await page.locator("[data-disconnect-mailbox]").click();
+  await page.waitForURL(/message=/, { timeout: 20000 }).catch(() => null);
+  check("6: Disconnect closes the permission and Connect is offered again", ((await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active"))[0]?.n ?? 0) === 0 && (await page.locator("[data-connect-mailbox]").count()) === 1);
+  await browser.close();
+  await sql("delete from public.notifications where type = 'scan_mailbox_problem' and created_at > $1", [mark6]);
 }
 
 cleanupDb();

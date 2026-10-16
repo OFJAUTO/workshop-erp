@@ -1,20 +1,21 @@
 import "server-only";
 import { createPrivateKey, createSign } from "node:crypto";
+import { mailboxAccessToken } from "./google-mailbox";
 
 /**
- * Google Workspace (Gmail API) with a service account that may act as a mailbox: sending the supplier LPO from the
- * workshop's mailbox, and reading the scans mailbox (scans@ofjauto.com) for the Autel reports.
+ * Google Workspace (Gmail API).
  *
- * Keys live in Vercel environment variables only:
+ * Sending the supplier LPO from the workshop's mailbox: a service account that may send as that mailbox
+ * (domain-wide delegation with gmail.send). Keys in Vercel only:
  *   GOOGLE_SERVICE_ACCOUNT_EMAIL  the service account's address (…@….iam.gserviceaccount.com)
  *   GOOGLE_SERVICE_ACCOUNT_KEY    its private key (the "private_key" from the JSON file; line breaks may be written as \n)
- *   SCANS_MAILBOX                 the mailbox the scanner's reports arrive in (scans@ofjauto.com)
- * Google Workspace must allow the service account to act as the mailbox (domain-wide delegation): gmail.send for
- * the sending mailbox, gmail.readonly for the scans mailbox. Nothing is ever changed or deleted in the mailbox.
+ *
+ * Reading the scans mailbox (scans@ofjauto.com, SCANS_MAILBOX): a one-time Google sign-in as that account, read only
+ * (src/lib/google-mailbox.ts). No delegation: Google limits the permission to that one mailbox. Nothing is ever
+ * changed or deleted in it.
  */
 
 export const SCOPE_SEND = "https://www.googleapis.com/auth/gmail.send";
-export const SCOPE_READ = "https://www.googleapis.com/auth/gmail.readonly";
 
 /** The scans mailbox address from Vercel, or "" when not set. */
 export function scansMailbox(): string {
@@ -59,8 +60,8 @@ async function accessToken(sub: string, scope: string = SCOPE_SEND): Promise<str
 export type GmailPart = { partId?: string; mimeType?: string; filename?: string; headers?: { name: string; value: string }[]; body?: { attachmentId?: string; size?: number; data?: string }; parts?: GmailPart[] };
 export type GmailMessage = { id: string; threadId?: string; internalDate?: string; payload?: GmailPart };
 
-async function gmailGet<T>(mailbox: string, path: string): Promise<T> {
-  const token = await accessToken(mailbox, SCOPE_READ);
+async function gmailGet<T>(path: string): Promise<T> {
+  const token = await mailboxAccessToken();
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
   const json = (await res.json().catch(() => ({}))) as T & { error?: { message?: string } };
   if (!res.ok) throw new Error(`Google refused reading the mailbox${json?.error?.message ? `: ${json.error.message}` : ""}.`);
@@ -68,19 +69,19 @@ async function gmailGet<T>(mailbox: string, path: string): Promise<T> {
 }
 
 /** The ids of the messages matching a Gmail search (newest first), up to max. */
-export async function listMessages(mailbox: string, q: string, max = 30): Promise<string[]> {
-  const json = await gmailGet<{ messages?: { id: string }[] }>(mailbox, `messages?q=${encodeURIComponent(q)}&maxResults=${max}`);
+export async function listMessages(q: string, max = 30): Promise<string[]> {
+  const json = await gmailGet<{ messages?: { id: string }[] }>(`messages?q=${encodeURIComponent(q)}&maxResults=${max}`);
   return (json.messages ?? []).map((m) => m.id);
 }
 
 /** One message in full: headers, body parts and attachment ids. */
-export async function getMessage(mailbox: string, id: string): Promise<GmailMessage> {
-  return gmailGet<GmailMessage>(mailbox, `messages/${id}?format=full`);
+export async function getMessage(id: string): Promise<GmailMessage> {
+  return gmailGet<GmailMessage>(`messages/${id}?format=full`);
 }
 
 /** The bytes of one attachment. */
-export async function getAttachment(mailbox: string, messageId: string, attachmentId: string): Promise<Buffer> {
-  const json = await gmailGet<{ data?: string }>(mailbox, `messages/${messageId}/attachments/${attachmentId}`);
+export async function getAttachment(messageId: string, attachmentId: string): Promise<Buffer> {
+  const json = await gmailGet<{ data?: string }>(`messages/${messageId}/attachments/${attachmentId}`);
   return fromB64url(json.data ?? "");
 }
 

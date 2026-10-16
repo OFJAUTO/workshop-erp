@@ -1,5 +1,6 @@
 import "server-only";
-import { attachmentsOf, gmailConfigured, getAttachment, getMessage, headerOf, listMessages, scansMailbox, textBodyOf, type GmailMessage } from "./gmail";
+import { attachmentsOf, getAttachment, getMessage, headerOf, listMessages, scansMailbox, textBodyOf, type GmailMessage } from "./gmail";
+import { mailboxConnection, oauthConfigured } from "./google-mailbox";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { readPdfRows } from "./pdf-read";
 import { SCANS_BUCKET, attachPrescan, scanKindFor } from "./scans";
@@ -83,9 +84,9 @@ export async function processMail(mail: MailIn): Promise<MailResult> {
 
 export type MailboxCheck = { ok: boolean; checked: number; stored: number; matched: number; kept: number; skipped: number; error?: string; at: string };
 
-/** The mailbox is read when the Google keys and the mailbox address are in Vercel. */
+/** The Google sign-in is set up in Vercel (client ID, secret, the mailbox address); the owner still connects it once. */
 export function mailboxConfigured(): boolean {
-  return gmailConfigured() && !!scansMailbox();
+  return oauthConfigured() && !!scansMailbox();
 }
 
 /**
@@ -101,9 +102,10 @@ export async function checkScansMailbox(): Promise<MailboxCheck> {
     return r;
   };
   const mailbox = scansMailbox();
-  if (!mailboxConfigured() || !mailbox) return finish({ ok: false, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, at, error: "Mailbox not set up yet: add GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_KEY and SCANS_MAILBOX in Vercel." });
+  if (!mailboxConfigured() || !mailbox) return finish({ ok: false, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, at, error: "Mailbox not set up yet: add GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and SCANS_MAILBOX in Vercel." });
+  if (!(await mailboxConnection())) return finish({ ok: false, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, at, error: "Mailbox not connected yet: the owner presses Connect on the Scan reports page." });
   try {
-    const ids = await listMessages(mailbox, "newer_than:3d", 30);
+    const ids = await listMessages("newer_than:3d", 30);
     if (!ids.length) return finish({ ok: true, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, at });
     const [{ data: seenScans }, { data: seenMails }] = await Promise.all([
       admin.from("inbound_scans").select("gmail_message_id").in("gmail_message_id", ids),
@@ -113,10 +115,10 @@ export async function checkScansMailbox(): Promise<MailboxCheck> {
     const result: MailboxCheck = { ok: true, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, at };
     for (const id of ids) {
       if (seen.has(id)) { result.skipped++; continue; }
-      const msg: GmailMessage = await getMessage(mailbox, id);
+      const msg: GmailMessage = await getMessage(id);
       const attachments: MailAttachmentIn[] = [];
       for (const a of attachmentsOf(msg)) {
-        const bytes = a.data ?? (a.attachmentId ? await getAttachment(mailbox, id, a.attachmentId) : null);
+        const bytes = a.data ?? (a.attachmentId ? await getAttachment(id, a.attachmentId) : null);
         if (bytes) attachments.push({ name: a.filename || "attachment", contentType: a.mimeType, bytes });
       }
       const r = await processMail({ messageId: id, from: headerOf(msg, "From"), subject: headerOf(msg, "Subject") ?? "", text: textBodyOf(msg), attachments });

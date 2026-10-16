@@ -98,6 +98,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "estimate_hours", label: "The technician's estimated hours need the manager's agreement", locked: true },
   { type: "scan_received", label: "An Autel scan report arrived for your car", locked: true },
   { type: "scan_unmatched", label: "An Autel scan report could not be matched to a car", locked: true },
+  { type: "scan_mailbox_problem", label: "The scans mailbox needs to be connected again", locked: true },
   { type: "scan_approval", label: "A technician asks to skip the pre-scan", locked: true },
   { type: "planning", label: "Planning: your turn (Parts, workshop manager, advisor)", locked: true },
   { type: "work_done", label: "A technician pressed Job finished; confirm or send back", locked: true },

@@ -93,41 +93,46 @@ Proof: `npm run test:v` (28 checks).
 
 ## I. Scan reports read from the mailbox (migration 20261102160000)
 
-**What changed.** The system reads the Google Workspace mailbox **scans@ofjauto.com** itself, every five minutes (Vercel cron `/api/cron/mailbox`) and on **Check the mailbox now** on the Scan reports page. Read only: nothing in the mailbox is moved, marked or deleted. For every new email it keeps the PDF and picture attachments, looks for the VIN in the subject, then the body, then inside the PDF's own text, and matches it to the open job for that car. A matched report lands under the job's Scan reports as pre-scan or post-scan by the car's stage (a pre-scan PDF also goes on the inspection as before); the car's advisor, the workshop manager of the department and the technician on the car are told **"Scan report received for [PLATE]"**. A report with no matching car waits in **Unmatched scans** on the Scan reports page, where the car is picked from the open cars with one tap (Attach) or Ignored; the owner and the workshop managers are told "Scan report with no matching car". An email with no report attached is kept under **Other emails** for the owner (as before). Each Gmail message is filed once: a second read never makes a second row. The page shows the state of the mailbox (Mailbox connected / Mailbox problem / Not checked yet, with the time of the last check and what came in). Until the Google keys are in Vercel the page says "Mailbox not connected yet" and names the three variables.
+**What changed.** The system reads the Google Workspace mailbox **scans@ofjauto.com** itself, every five minutes (Vercel cron `/api/cron/mailbox`) and on **Check the mailbox now** on the Scan reports page. Read only: nothing in the mailbox is moved, marked or deleted. For every new email it keeps the PDF and picture attachments, looks for the VIN in the subject, then the body, then inside the PDF's own text, and matches it to the open job for that car. A matched report lands under the job's Scan reports as pre-scan or post-scan by the car's stage (a pre-scan PDF also goes on the inspection as before); the car's advisor, the workshop manager of the department and the technician on the car are told **"Scan report received for [PLATE]"**. A report with no matching car waits in **Unmatched scans** on the Scan reports page, where the car is picked from the open cars with one tap (Attach) or Ignored; the owner and the workshop managers are told "Scan report with no matching car". An email with no report attached is kept under **Other emails** for the owner (as before). Each Gmail message is filed once: a second read never makes a second row. The page shows the state of the mailbox (Mailbox connected / Mailbox problem / Not checked yet, with the time of the last check and what came in). Until the three Google variables are in Vercel the page says "Mailbox not set up yet" and names them; once they are, the owner sees **Connect scans@ofjauto.com** until the one sign-in is done, then **Connected as scans@ofjauto.com** with **Disconnect**.
 
 **Removed.** The old Postmark webhook (`/api/inbound/scan`), its hidden address with "Show the address" / "Generate new token", the "How to set up" Postmark steps on the Scan reports page and the "Scan reports by email" card in Settings. The Postmark instructions in `docs/round-2-delivery-note.md` and `docs/overnight-11-oct-note.md` are superseded by this section.
 
-**One-time set-up in Google (about 10 minutes; do it signed in as the Google Workspace super admin).**
+**One-time set-up: the scans mailbox signs in once (changed the same evening, migration 20261103100000).** The first version asked for a service account with domain-wide delegation, which Google lets read every mailbox of ofjauto.com. It is replaced by a one-time sign-in as scans@ofjauto.com on Google's own page: the system then holds a read-only permission for that one account, and Google itself refuses it anything else. Nothing in Google Workspace admin is needed. The supplier LPO email (gmail.send) keeps its own set-up and is not affected.
 
-Part 1, Google Cloud: a service account that may read Gmail.
-1. Open console.cloud.google.com. Top left, the project picker: if a project for the ERP already exists (made for the supplier LPO email), pick it and go to step 3. Otherwise **New project**, name "OFJ ERP", Create, then pick it.
-2. Left menu **APIs & Services > Library**. Search "Gmail API", open it, **Enable**.
-3. Left menu **IAM & Admin > Service Accounts > + Create service account**. Name "erp-mailbox". Create and continue. Grant no roles (leave both steps empty), **Done**.
-4. Click the new service account. On its **Details** tab open **Advanced settings** and copy the **Client ID** (a long number): you need it in Part 2.
-5. Tab **Keys > Add key > Create new key > JSON > Create**. A file downloads. If instead Google says "Service account key creation is disabled" (new organisations have this on by default): left menu **IAM & Admin > Organization Policies**, make sure the organisation (ofjauto.com) is selected at the top, search "Disable service account key creation", open it, **Manage policy**, choose "Override parent's policy", **Add a rule**, Enforcement **Off**, **Set policy**. Wait a minute and repeat this step. (If that page says you lack permission: **IAM & Admin > IAM**, pick the organisation at the top, **Grant access**, your own address, role **Organization Policy Administrator**, Save, then try again.)
-6. Open the downloaded JSON file in Notepad. Two values go to Vercel in Part 3: `client_email` and `private_key`. Afterwards delete the downloaded file (Recycle Bin too).
+Part 1, Google Cloud (about 5 minutes, signed in as the Workspace super admin, for example aljafomar@… or your admin account):
+1. Open console.cloud.google.com. Top left, the project picker: pick the ERP project if one exists; otherwise **New project**, name "OFJ ERP", **Create**, then pick it.
+2. Left menu (☰) **APIs & Services > Library**. Search "Gmail API", open it, **Enable**.
+3. Left menu **Google Auth Platform** (on older screens: APIs & Services > OAuth consent screen). Press **Get started**. App name **OFJ ERP**, User support email: your address. **Next**. Audience: **Internal** (only ofjauto.com accounts can sign in; nothing goes to Google for review, and the permission never expires by itself). **Next**. Contact email: your address. **Next**, tick the agreement, **Create**.
+4. Still in Google Auth Platform: **Data Access > Add or remove scopes**. In the filter type `gmail.readonly`, tick the one row `.../auth/gmail.readonly` ("Read all resources and their metadata"), **Update**, then **Save** at the bottom. Add nothing else.
+5. **Clients > + Create client**. Application type **Web application**. Name "ERP scans mailbox". Under **Authorized redirect URIs** press **+ Add URI** and paste exactly:
+   `https://erp.ofjauto.com/api/google/mailbox/callback`
+   Leave "Authorized JavaScript origins" empty. **Create**.
+6. A window shows the **Client ID** and the **Client secret**. Keep that window open for Part 2 (or press **Download JSON**; the secret is shown only once on newer screens). Afterwards delete any downloaded file, Recycle Bin too.
 
-Part 2, Google Workspace admin: allow that account to read the mailbox.
-7. Open admin.google.com. Left menu **Security > Access and data control > API controls**. At the bottom, **Manage Domain Wide Delegation > Add new**.
-8. **Client ID**: paste the number from step 4. **OAuth scopes**: paste exactly `https://www.googleapis.com/auth/gmail.readonly` and nothing else (if you later want the supplier LPO email sent from the workshop's mailbox as well, add a comma and `https://www.googleapis.com/auth/gmail.send`). **Authorize**. It can take a few minutes to take effect.
+Part 2, Vercel (the only place the two values ever go):
+7. vercel.com > project **workshop-erp** > **Settings > Environment Variables**. Add three, environment **Production**:
+   - `GOOGLE_OAUTH_CLIENT_ID` = the Client ID (ends in `.apps.googleusercontent.com`).
+   - `GOOGLE_OAUTH_CLIENT_SECRET` = the Client secret.
+   - `SCANS_MAILBOX` = `scans@ofjauto.com` (if you already added it this afternoon, leave it).
+   If you added `GOOGLE_SERVICE_ACCOUNT_EMAIL` and `GOOGLE_SERVICE_ACCOUNT_KEY` this afternoon for the mailbox, they are no longer used for it; keep them only if you want the supplier LPO email sent from the workshop's mailbox.
+8. **Deployments**, the newest one, the three-dot menu, **Redeploy**.
 
-Part 3, Vercel: the three variables (the only place the key ever goes).
-9. vercel.com > the **workshop-erp** project > **Settings > Environment Variables > Add**. Three variables, environment Production (Preview too if you like):
-   - `GOOGLE_SERVICE_ACCOUNT_EMAIL` = the `client_email` from the JSON (ends in `.iam.gserviceaccount.com`).
-   - `GOOGLE_SERVICE_ACCOUNT_KEY` = the `private_key` from the JSON: everything between its quotes, from `-----BEGIN PRIVATE KEY-----` to `-----END PRIVATE KEY-----`. Pasting it with the `\n` written as letters is fine; a multi-line paste is fine too.
-   - `SCANS_MAILBOX` = `scans@ofjauto.com`.
-   `CRON_SECRET` already exists and is reused for the five-minute check.
-10. **Deployments**, the newest one, the three-dot menu, **Redeploy** (variables apply to new deployments only).
-11. Open erp.ofjauto.com/scans and press **Check the mailbox now**. The badge turns "Mailbox connected" with the time; "Mailbox problem" shows Google's words if a step was missed (the usual ones: the scope not authorised yet, step 8; the Gmail API not enabled, step 2; the key pasted short, step 9).
-12. On the Autel scanner, set the report email recipient to scans@ofjauto.com.
+Part 3, the one sign-in (in the ERP, signed in as yourself, the owner):
+9. Open erp.ofjauto.com/scans. Press **Connect scans@ofjauto.com**.
+10. Google's own sign-in page opens with scans@ofjauto.com filled in. Sign in as that account on Google's page (if this browser is already signed in to it, just pick it). The password is typed only on Google's page, never in the ERP, and the ERP never sees it.
+11. Google shows "OFJ ERP wants to access your Google Account: Read all your email messages and settings". Press **Continue** (or **Allow**).
+12. You are back on Scan reports with "Connected: scans@ofjauto.com, read only." The badge reads **Connected as scans@ofjauto.com**; the first check runs straight away, then every five minutes.
+13. On the Autel scanner, set the report email recipient to scans@ofjauto.com.
 
-**A plain word about "only that one mailbox".** Google's domain-wide delegation is, by its design, domain-wide: with the scope above the service account could read any mailbox of ofjauto.com. What limits it to scans@ofjauto.com is the system itself (the mailbox name is fixed by `SCANS_MAILBOX`, the only scope asked for is read-only, and the key lives only in Vercel). If you want Google itself to enforce one mailbox, the way is a one-time sign-in as scans@ofjauto.com on Google's own consent page (an OAuth client instead of a service account): the system then holds a token for that one account only. That is a small change I can build if you prefer it; the rest (matching, notifications, Unmatched scans) stays the same.
+Safety built in: the sign-in is accepted only for the address in `SCANS_MAILBOX`; signing in as anyone else is refused and that permission is handed straight back to Google. Only the owner sees Connect and Disconnect. The permission is stored encrypted in a table only the server can read. If Google withdraws it (the scans password is changed, or the access is removed in that account's Google Account > Security > Third-party access), the page shows "Mailbox problem" with the Connect button and you are told once; press Connect and sign in again. **Disconnect** on the page hands the permission back to Google at once.
+
+If you did the domain-wide delegation steps this afternoon: admin.google.com > Security > Access and data control > API controls > **Manage Domain Wide Delegation**, find the client with `gmail.readonly`, and **Delete** it (keep a `gmail.send` one only if the supplier LPO email uses it).
 
 **Still to delete outside the code** (nothing in the system refers to them any more): the Postmark account and its "OFJ scans" server, if one was ever created; the forwarding rule in the Gmail settings of scans@ofjauto.com, if one was set up; the `inbound` MX record at Squarespace, if it was added. The unused `inbound_scan_token` row in Settings stays in the database (harmless) until the next tidy-up migration.
 
-**The real Autel report test** has to wait for steps 1 to 12: locally there is no Google key, so the proof test feeds reports through the same code the mailbox reader uses (`POST /api/e2e/mailbox`, local only). Once you say the variables are in Vercel, I run the check against the live system with one real report and show the result (the job it landed on, the notifications, the Scan reports page).
+**The real Autel report test** has to wait for steps 1 to 13: locally there is no Google key, so the proof test feeds reports through the same code the mailbox reader uses (`POST /api/e2e/mailbox`, local only). Once you say the variables are in Vercel, I run the check against the live system with one real report and show the result (the job it landed on, the notifications, the Scan reports page).
 
-Proof: `npm run test:w` (14 checks: VIN in the subject, VIN only inside the PDF, unmatched then Attach, one row per Gmail message, the old route gone, the cron refusing without the secret, the page's words). The staff-day suite's email section was rewritten for the mailbox (`npm run test:day1`).
+Proof: `npm run test:w` (26 checks: VIN in the subject, VIN only inside the PDF, unmatched then Attach, one row per Gmail message, the old route gone, the cron refusing without the secret; and the sign-in: Connect goes to Google's page with the one read-only permission, scans@ofjauto.com filled in and a one-time check value, only the owner may connect, a mismatched or cancelled answer stores nothing, the stored permission is encrypted, Connected as / Mailbox problem / Disconnect on the page, the owner told once). The dev server for this test runs with test values for the three Google variables. The staff-day suite's email section was rewritten for the mailbox (`npm run test:day1`).
 
 Lessons: a Next.js route file that renders JSX must be `route.tsx`; a path removed from the public prefixes answers with a redirect to the login page, not 404, so a "gone" check accepts either; a bash heredoc with an apostrophe inside fails as a whole, so long notes go through a file written by the editor and appended.
 
@@ -143,7 +148,7 @@ Lessons: a Next.js route file that renders JSX must be `route.tsx`; a path remov
 | F1 | Done (commit dc0f7d5). |
 | G1 | Done (commit a086ea9, migration 20261102150000, test-v). |
 | H1, H2 | Done (commit a086ea9, test-v). The Windows printer settings are above. |
-| Mailbox 1 to 4 | Done in the code (migration 20261102160000, test-w); the Google and Vercel steps are yours (12 steps above). |
+| Mailbox 1 to 4 | Done in the code (migrations 20261102160000 and 20261103100000, test-w). Reading is by a one-time sign-in as scans@ofjauto.com, not domain-wide delegation. The Google, Vercel and sign-in steps are yours (13 steps above). |
 | Mailbox 5, the real Autel report | Not done yet: it needs the Google keys in Vercel first. I run it the moment you say they are in. |
 
 ## Assumptions
@@ -156,6 +161,7 @@ Lessons: a Next.js route file that renders JSX must be `route.tsx`; a path remov
 - The fixed-asset flag applies to Tools and equipment orders only, at or above the Settings amount (AED 2,000 by default), judged on the order's total before VAT.
 - Sticker sizes default to 40 × 30 mm (part) and 50 × 100 mm (battery and oil service); the part QR is about 19 to 20 mm. The oil sticker's WhatsApp number falls back to the company phone from Settings when the sticker number is empty.
 - One part sticker per unit prints the moment a part is ticked Received; a part received in several deliveries prints the units of that delivery.
+- Mailbox sign-in: the Google app is "Internal" (only ofjauto.com accounts), so Google does not review it and the permission does not expire by itself; it ends when the scans password is changed, the access is removed in that account, or Disconnect is pressed.
 - Mailbox: the reader looks back three days and takes up to 30 emails per run; pictures (JPG, PNG) are kept and attached but only the subject, body and PDF text are read for the VIN; the first VIN found wins; a car matches when it has an open job with that VIN (the newest gate-in if several).
 - Mailbox notifications go to the advisor(s) of the car (who gated it in or sent its approval), the workshop manager(s) of the car's department and the technician on it; unmatched reports go to the owner and the workshop managers.
 - The five-minute cron needs the Vercel Pro plan the project already has.
