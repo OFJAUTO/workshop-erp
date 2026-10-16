@@ -124,7 +124,8 @@ export function formFields(form: HTMLFormElement): { key: string; label: string;
     const required = group.some((x) => x.required) || (el.type === "radio" && group.length > 0 && group.some((x) => x.dataset.required === "true"));
     if (!required) continue;
     seen.add(el.name);
-    const valid = el.type === "radio" ? group.some((x) => x.checked) : el.checkValidity();
+    // validity.valid is read quietly; checkValidity() would fire "invalid" events, which the form guard turns into red messages and a focus.
+    const valid = el.type === "radio" ? group.some((x) => x.checked) : el.validity.valid;
     const labelEl = el.closest("[data-field]") ?? el.closest("label") ?? el.closest("fieldset");
     const label = (labelEl?.querySelector("[data-field-label]")?.textContent ?? labelEl?.textContent ?? el.name).trim().split("\n")[0].slice(0, 40);
     out.push({ key: el.name, label, valid });

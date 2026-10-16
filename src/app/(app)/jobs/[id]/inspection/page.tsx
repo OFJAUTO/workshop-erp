@@ -20,7 +20,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { approveInspection, approveScanNotPossible, confirmPartsList, decideInspectionChange, requestInspectionChange, returnInspection } from "../../inspection-actions";
 import { InspectionForm, type Suggestions } from "@/app/(app)/my-jobs/[id]/InspectionForm";
-import { ApproveForm, RequestChangeForm, ReturnForm, ReviewBar } from "./forms";
+import { ApproveFormLive, RequestChangeForm, ReturnForm, ReviewBar } from "./forms";
 import { PartsListTick } from "@/components/PartsListTick";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -382,7 +382,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           {canApprove && insp.status === "submitted" ? (
             <Card className="flex flex-col gap-4 border-ink">
               <SectionLabel>Workshop manager&apos;s decision</SectionLabel>
-              <ApproveForm action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} groups={noteGroups} usage={noteUsage} reasons={{ raise: reasonsFor(settings, "hours_raise"), lower: reasonsFor(settings, "hours_lower") }} />
+              <ApproveFormLive action={approveInspection.bind(null, id)} hasPrescan={prescans.length > 0} techHours={insp.estimated_hours} groups={noteGroups} usage={noteUsage} reasons={{ raise: reasonsFor(settings, "hours_raise"), lower: reasonsFor(settings, "hours_lower") }} />
               <ReturnForm action={returnInspection.bind(null, id)} reasons={reasonsFor(settings, "send_back")} />
             </Card>
           ) : null}

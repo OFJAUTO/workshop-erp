@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PARTS_LIST_TICKED_EVENT } from "@/components/PartsListTick";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ReasonChips } from "@/components/ReasonChips";
 import { Input, Textarea } from "@/components/ui";
 
 const SAFE_TO_DRIVE = /safe to drive/i;
+
+/** The approval box, remounted (its last refusal forgotten) the moment the parts list tick is saved. */
+export function ApproveFormLive(props: Parameters<typeof ApproveForm>[0]) {
+  const [round, setRound] = useState(0);
+  useEffect(() => {
+    const bump = () => setRound((r) => r + 1);
+    window.addEventListener(PARTS_LIST_TICKED_EVENT, bump);
+    return () => window.removeEventListener(PARTS_LIST_TICKED_EVENT, bump);
+  }, []);
+  return <ApproveForm key={round} {...props} />;
+}
 
 /** Scrolls to the parts list when the server refused the approval because of its tick. */
 function ScrollOnError({ error }: { error: string | null }) {

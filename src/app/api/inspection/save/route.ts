@@ -176,11 +176,13 @@ export async function POST(request: NextRequest) {
       if (String(next[`tyre_${p.key}_danger`] ?? "") === "1" && String(before[`tyre_${p.key}_danger`] ?? "") !== "1") await alertDanger(`${p.label} tyre`, String(next[`tyre_${p.key}_danger_reason`] ?? "") || null);
     }
   }
+  let tickCleared = false;
   if (body.partsList !== undefined) {
     const list = cleanPartsList(body.partsList);
-    // A change to the list after the manager ticked it takes the tick off again.
+    // A change to the list after the manager ticked it takes the tick off again; the screen is told so it shows it at once.
     const changed = JSON.stringify(cleanPartsList(insp.parts_list)) !== JSON.stringify(list);
-    const { error } = await admin.from("inspections").update({ parts_list: list, ...(changed && insp.parts_list_confirmed_at ? { parts_list_confirmed_at: null, parts_list_confirmed_by: null } : {}), ...stamp }).eq("id", insp.id);
+    tickCleared = changed && !!insp.parts_list_confirmed_at;
+    const { error } = await admin.from("inspections").update({ parts_list: list, ...(tickCleared ? { parts_list_confirmed_at: null, parts_list_confirmed_by: null } : {}), ...stamp }).eq("id", insp.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (body.noPartItems !== undefined) {
@@ -211,5 +213,5 @@ export async function POST(request: NextRequest) {
       if (job) await notifyManagers(job.department, { type: "scan_approval", title: `Scan not possible, approve? · ${job.job_number}`, body: `${staff.display_name}: ${patch.scan_not_possible_reason}`, jobId: job.id, href: `/jobs/${job.id}/inspection` });
     }
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, tickCleared });
 }

@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentStaff } from "@/lib/auth";
+import { staffPdfAccess } from "@/lib/pdf/access";
 import { PAYMENT_SELECT, loadInvoice, toPayment } from "@/lib/invoice-data";
 import { renderReceiptPdf } from "@/lib/pdf/invoice-pdf";
 import { pdfResponse } from "@/lib/pdf/response";
-import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -25,9 +24,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     allowed = !!inv && (inv.token === t || from?.token === t);
   }
   if (!allowed) {
-    const staff = await getCurrentStaff();
-    if (!staff) return new NextResponse("Please sign in.", { status: 401 });
-    if (!can(staff.role_id as RoleId, "viewInvoices")) return new NextResponse("Not allowed.", { status: 403 });
+    const access = await staffPdfAccess("document");
+    if ("refused" in access) return access.refused;
   }
   const [invoice, { data: customer }, { data: job }, { data: by }] = await Promise.all([
     payment.invoice_id ? loadInvoice(payment.invoice_id) : Promise.resolve(null),

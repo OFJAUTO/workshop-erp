@@ -219,15 +219,18 @@ export async function approveInspection(jobId: string, _state: FormState, formDa
 }
 
 /** The tick under the parts list: who looked at it and when. Approving needs it; a change to the list clears it. */
-export async function confirmPartsList(jobId: string) {
+export async function confirmPartsList(jobId: string): Promise<{ at?: string; byName?: string; error?: string }> {
   const staff = await requirePermission("approveInspections");
   const bundle = await loadInspection(jobId);
-  if (!bundle || bundle.inspection.status !== "submitted") return;
+  if (!bundle || bundle.inspection.status !== "submitted") return { error: "This report is not waiting for approval." };
   const admin = createAdminClient();
-  await admin.from("inspections").update({ parts_list_confirmed_at: new Date().toISOString(), parts_list_confirmed_by: staff.id, updated_by: staff.id }).eq("id", bundle.inspection.id);
+  const at = new Date().toISOString();
+  const { error } = await admin.from("inspections").update({ parts_list_confirmed_at: at, parts_list_confirmed_by: staff.id, updated_by: staff.id }).eq("id", bundle.inspection.id);
+  if (error) return { error: error.message };
   const count = mergePartsList(cleanPartsList(bundle.inspection.parts_list)).length;
   await logEvent(jobId, staff.id, "parts_list_checked", count ? `Parts list checked by ${staff.display_name} (${count} line${count === 1 ? "" : "s"})` : `${staff.display_name} confirmed no parts are needed`);
   refresh(jobId);
+  return { at, byName: staff.display_name };
 }
 
 /** The manager sends the report back with a reason. */

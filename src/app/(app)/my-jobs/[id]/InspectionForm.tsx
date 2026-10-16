@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
 import { PartPicker } from "@/components/PartPicker";
 import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
@@ -110,7 +111,7 @@ function useAutosave(inspectionId: string) {
       setState("saving");
       try {
         const res = await fetch("/api/inspection/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inspectionId, ...op }) });
-        const data = (await res.json()) as { ok?: boolean; error?: string };
+        const data = (await res.json()) as { ok?: boolean; error?: string; tickCleared?: boolean };
         if (res.status === 423 || res.status === 403 || res.status === 400 || res.status === 404) {
           // Not a connection problem: drop the change and tell the person.
           queue.current.shift();
@@ -122,6 +123,8 @@ function useAutosave(inspectionId: string) {
         queue.current.shift();
         persist();
         setError(null);
+        // The manager's tick under the parts list came off with this change: the tick on screen follows at once.
+        if (data.tickCleared) window.dispatchEvent(new CustomEvent(PARTS_LIST_CHANGED_EVENT));
       } catch {
         setState("offline");
         busy.current = false;
