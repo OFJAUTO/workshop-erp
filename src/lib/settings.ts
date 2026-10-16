@@ -132,6 +132,8 @@ const DEFAULTS = {
   big_job_tags: ["Engine removal", "Transmission removal", "Subframe down", "Special tool", "Outside work"] as string[],
   labour_hours_memory: {} as Record<string, number>,
   inbound_scan_token: "",
+  /** Written by the mailbox reader: when it last ran and what came in. */
+  scans_mailbox_last_check: {} as Record<string, unknown>,
   notification_tone: "marimba",
   notification_tone_owner: "chord",
   notification_remind_minutes: 2,

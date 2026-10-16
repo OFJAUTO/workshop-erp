@@ -4,12 +4,12 @@ import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { SCANS_BUCKET } from "@/lib/scans";
-import { attachScan, ignoreScan, dismissInboundEmail, regenerateInboundToken } from "./actions";
-import { SecretAddress } from "./SecretAddress";
+import { attachScan, ignoreScan, dismissInboundEmail, checkMailboxNow } from "./actions";
+import { mailboxConfigured, type MailboxCheck } from "@/lib/mailbox";
+import { scansMailbox } from "@/lib/gmail";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +35,9 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
   const unmatched = scans.filter((s) => s.status === "unmatched");
   const rest = scans.filter((s) => s.status !== "unmatched");
   const openJobs = ((jobs ?? []) as unknown as { id: string; job_number: string; vehicle: Scan["job"] extends infer J ? (J extends { vehicle: infer V } ? V : never) : never }[]).map((j) => ({ id: j.id, label: `${j.vehicle ? formatPlate(j.vehicle) : j.job_number} · ${j.job_number}${j.vehicle?.vin ? ` · ${j.vehicle.vin}` : ""}` }));
-  const address = `${PRODUCTION_SITE_URL}/api/inbound/scan?token=${settings.inbound_scan_token || "(token not set)"}`;
+  const lastCheck = (settings.scans_mailbox_last_check ?? null) as MailboxCheck | null;
+  const mailbox = scansMailbox();
+  const configured = mailboxConfigured();
 
   const row = (s: Scan) => (
     <li key={s.id} className="py-3 flex flex-col gap-2">
@@ -69,7 +71,12 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHeader title="Scan reports" subtitle="Autel reports that arrived by email. Matched by the VIN in the subject to the open job; the rest wait here." />
+      <PageHeader title="Scan reports" subtitle={`Autel reports read from ${mailbox || "the scans mailbox"} every five minutes. Matched by the VIN (subject, body or inside the report) to the open job; the rest wait here.`} actions={canAttach ? <form action={checkMailboxNow}><Button type="submit" size="lg" data-check-mailbox>Check the mailbox now</Button></form> : undefined} />
+      <div className="flex flex-wrap items-center gap-2 text-sm" data-mailbox-status>
+        {!configured ? <Badge tone="amber">Mailbox not connected yet</Badge> : lastCheck?.at ? <Badge tone={lastCheck.ok ? "green" : "red"}>{lastCheck.ok ? "Mailbox connected" : "Mailbox problem"}</Badge> : <Badge tone="neutral">Not checked yet</Badge>}
+        {lastCheck?.at ? <span className="text-muted">Last checked {formatDateTime(lastCheck.at)}{lastCheck.ok ? ` · ${lastCheck.checked} new, ${lastCheck.stored} file${lastCheck.stored === 1 ? "" : "s"} kept` : `: ${lastCheck.error ?? ""}`}</span> : null}
+        {!configured && role === "owner" ? <span className="text-muted">Add GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_KEY and SCANS_MAILBOX in Vercel (the steps are in the delivery note).</span> : null}
+      </div>
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Card className="flex flex-col gap-3">
@@ -96,27 +103,8 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
             </ul>
           </Card>
           <Card className="flex flex-col gap-3">
-            <SectionLabel>Where the emails come in</SectionLabel>
-            <p className="text-xs text-muted">The endpoint is written for Postmark&apos;s inbound email (the JSON it posts, with the PDF attached). This is the address Postmark posts to; it holds the secret token, so it stays hidden.</p>
-            <SecretAddress address={address} />
-            <form action={regenerateInboundToken}><Button type="submit" tone="secondary" size="md">Generate new token</Button></form>
-            <p className="text-xs text-muted">After a new token: in Postmark open the server, Inbound stream, Settings, and paste the new address into Webhook URL. The old address stops working at once.</p>
-          </Card>
-          <Card className="flex flex-col gap-3">
-            <SectionLabel>How to set up</SectionLabel>
-            <ol className="list-decimal pl-5 text-sm flex flex-col gap-2">
-              <li><span className="font-semibold">Create the account.</span> postmarkapp.com, sign up with accounts@ofjauto.com. The free developer plan takes 100 emails a month; the first paid plan is about 15 US dollars a month for 10,000. Scan reports are a handful a day, so the free plan is enough to start.</li>
-              <li><span className="font-semibold">Make a server with an inbound stream.</span> In Postmark: Servers, Add server, name it &quot;OFJ scans&quot;. Open the server, then the Inbound stream (Default Inbound Stream). Its Settings page shows two things you need: the server&apos;s inbound email address (something like a long code followed by @inbound.postmarkapp.com) and the Webhook URL box.</li>
-              <li><span className="font-semibold">Paste the address above into Webhook URL</span> (Show, then Copy). Tick &quot;Include raw email content&quot; off; leave the rest. Save.</li>
-              <li><span className="font-semibold">The system&apos;s own receiving address.</span> The simplest: enter Postmark&apos;s inbound address (the long one from step 2) in the Autel scanner as the recipient. Nothing else to set up. Every email the scanner sends arrives on this page within a minute.</li>
-              <li><span className="font-semibold">A nicer address, optional: scans@inbound.ofjauto.com.</span> At Squarespace open Domains, ofjauto.com, DNS settings, and add one record only (nothing changes or is removed, including the MX records of ofjauto.com itself):
-                <ul className="list-disc pl-5 mt-1">
-                  <li>Type MX · Host (name) <span className="font-mono">inbound</span> · Priority <span className="font-mono">10</span> · Value (data) <span className="font-mono">inbound.postmarkapp.com</span></li>
-                </ul>
-                Then in Postmark, Inbound stream, Settings, &quot;Inbound domain forwarding&quot;, enter <span className="font-mono">inbound.ofjauto.com</span>. After DNS has spread (up to a few hours) any address at that subdomain works; use <span className="font-mono">scans@inbound.ofjauto.com</span> in the scanner.</li>
-              <li><span className="font-semibold">Forwarding from scans@ofjauto.com instead</span> (Google Workspace): Gmail, Settings, Forwarding, add the receiving address. Gmail sends a confirmation with a code to that address: it shows here under Other emails. Paste the code back into Gmail.</li>
-              <li><span className="font-semibold">Test it.</span> Send any email with a PDF attached to the receiving address, with the car&apos;s VIN in the subject. It appears under Recent scans within a minute, matched to the open job with that VIN.</li>
-            </ol>
+            <SectionLabel>Where the reports come from</SectionLabel>
+            <p className="text-xs text-muted">The system reads the mailbox {mailbox || "scans@ofjauto.com"} directly (read only, nothing is moved or deleted), every five minutes and on &quot;Check the mailbox now&quot;. Point the Autel scanner&apos;s email at that address. The one-time Google Workspace and Google Cloud steps, and the three Vercel variable names, are in the delivery note (docs/16-oct-note.md).</p>
           </Card>
         </>
       ) : null}

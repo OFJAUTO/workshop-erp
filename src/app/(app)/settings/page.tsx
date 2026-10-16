@@ -33,7 +33,6 @@ export default async function SettingsPage() {
   const listTexts: Record<string, string> = {};
   let limits: Record<string, number> = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
   let prescanGate = false;
-  let inboundToken = "";
   let labourJobsText = "";
   let candidates: Record<string, number> = {};
   let docLimits: Record<string, { amber: number; red: number | string }> = {};
@@ -61,7 +60,7 @@ export default async function SettingsPage() {
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
     else if (row.key === "recovery_providers" || row.key === "labour_hours_memory") continue;
-    else if (row.key === "inbound_scan_token") inboundToken = typeof row.value === "string" ? row.value : "";
+    else if (row.key === "inbound_scan_token") continue;
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");
   }
 
@@ -123,12 +122,6 @@ export default async function SettingsPage() {
           />
         </div>
         <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-3">
-            <SectionLabel>Scan reports by email</SectionLabel>
-            <p className="text-xs text-muted">The inbound email service posts every email it receives to this secret address. Give it to the service when you set up the inbound address (see the delivery note for the DNS record and the forward).</p>
-            <code className="break-all rounded-control bg-chip px-3 py-2 text-xs">{`https://erp.ofjauto.com/api/inbound/scan?token=${inboundToken || "(token not set)"}`}</code>
-            <p className="text-xs text-muted">Matched scans attach themselves to the car; the rest wait on the Scan reports page.</p>
-          </Card>
           <Card className="flex flex-col gap-3">
             <SectionLabel right={formatBytes(totalBytes)}>Storage used</SectionLabel>
             <ul className="flex flex-col divide-y divide-line text-sm">

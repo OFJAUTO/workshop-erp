@@ -70,3 +70,92 @@ Lessons: the dev server did not pick up changes to `src/lib/pdf/*` (the PDF rout
 The header of every car page (job card, parts, quotation, inspection, money page, gate-out, work order, technician screen, QC, road test, photos, gate-in details, bodyshop) shows "VIN WDD…" with a Copy button; a car without a VIN shows "VIN: add at gate-in". Internal only: nothing the customer sees.
 
 Proof: `npm run test:u`.
+
+## G1. Workshop orders (migration 20261102150000)
+
+The Stock page's button is now **New workshop order**. The form asks what kind of goods with one tap: **Stock parts** or **Workshop consumables** (the items on the shelf list, each item marked as a part or a consumable in its details), or **Tools and equipment** (typed line by line: item, quantity, cost each). It goes through the same LPO flow (approval by the owner or the head accountant, Ordered, received line by line; a supplier invoice scan or "to follow" at delivery, a price more than AED 1 off flagged for accounts). Stock parts and consumables land on the shelf at delivery with the cost averaged in; tools are simply received. A tools order at or above Settings > "Fixed asset threshold" (AED 2,000 by default) is flagged **Fixed asset**: accounts are told when it is raised and again when it is approved, and the LPO list shows the flag. The supplier invoices tab on the LPO list groups the bills by kind: parts for jobs, stock parts, workshop consumables, tools and equipment. Issuing consumables to a job, low-stock alerts and Reorder work as before.
+
+## H. Stickers (migration 20261102150000)
+
+**H1. Part sticker, 40 × 30 mm.** The QR (about 20 mm) on the left; the logo and the job number on the right; a bold black strip along the bottom with the part name in capitals and "1 OF 2". One sticker per unit. It prints the moment a part is ticked **Received** (the sticker page opens and the print dialog follows by itself; Back returns to where you were), and after a delivery is recorded on an LPO page. A staff member who scans the QR lands on the job's parts trail at that part, with its LPO and the supplier's invoice number; anyone else sees only "OFJ Automotive: genuine part" and "Fitted on 16 Oct 2026".
+
+**H2. Battery warranty and oil service stickers, 50 × 100 mm portrait.** Battery: logo, title, which battery, Installed, the black band "Warranty until" with the date and the months, the QR, the VIN large, "Valid for this vehicle only". The warranty period is chosen on the battery line of the quotation with one tap (12 / 24 / 36 months; the Settings length is the usual one) and the sticker and the warranty record follow it. Oil service: logo, title, serviced on and at, the black band "Next service, whichever comes first" with the date and the mileage, the plate and the VIN, the QR and "Scan to book your next service on WhatsApp", the phone. The QR opens WhatsApp to the number in Settings (the company phone when empty) with "Hi, I'd like to book a service for [PLATE]" already typed (the words are editable in Settings).
+
+**Settings > Stickers.** Width and height of each sticker, the printer name shown on every print page ("Print on Printer 1 (40 × 30 mm)", "Print on Printer 2 (50 × 100 mm)"), the WhatsApp number and message, the usual warranty, the wording, a live preview at twice life size and a test print per sticker. Every sticker page is sized exactly to the sticker with no browser margins.
+
+**Windows printer settings (do this once per printer, on the PC that prints):**
+1. Settings > Bluetooth & devices > Printers & scanners > the label printer > Printer properties > Preferences (or Printing Defaults). Under Paper / Page Setup add a custom size: **Printer 1: width 40 mm, height 30 mm**; **Printer 2: width 50 mm, height 100 mm**. Orientation Portrait. Save it with a name such as "OFJ 40x30" or "OFJ 50x100" and set it as the default size for that printer.
+2. In the same place set the gap/media type to "Label with gap" (or "Die-cut") and the darkness one step above the middle; speed medium.
+3. In Edge or Chrome, when the sticker page opens: choose the printer, Paper size = the custom size you saved, **Scale 100%**, **Margins None**, and untick "Headers and footers" and "Background graphics" stays ticked. Tick "Remember my settings" where offered.
+4. Print the test sticker from Settings > Stickers once per printer and adjust the darkness if the QR is light.
+
+Proof: `npm run test:v` (28 checks).
+
+## I. Scan reports read from the mailbox (migration 20261102160000)
+
+**What changed.** The system reads the Google Workspace mailbox **scans@ofjauto.com** itself, every five minutes (Vercel cron `/api/cron/mailbox`) and on **Check the mailbox now** on the Scan reports page. Read only: nothing in the mailbox is moved, marked or deleted. For every new email it keeps the PDF and picture attachments, looks for the VIN in the subject, then the body, then inside the PDF's own text, and matches it to the open job for that car. A matched report lands under the job's Scan reports as pre-scan or post-scan by the car's stage (a pre-scan PDF also goes on the inspection as before); the car's advisor, the workshop manager of the department and the technician on the car are told **"Scan report received for [PLATE]"**. A report with no matching car waits in **Unmatched scans** on the Scan reports page, where the car is picked from the open cars with one tap (Attach) or Ignored; the owner and the workshop managers are told "Scan report with no matching car". An email with no report attached is kept under **Other emails** for the owner (as before). Each Gmail message is filed once: a second read never makes a second row. The page shows the state of the mailbox (Mailbox connected / Mailbox problem / Not checked yet, with the time of the last check and what came in). Until the Google keys are in Vercel the page says "Mailbox not connected yet" and names the three variables.
+
+**Removed.** The old Postmark webhook (`/api/inbound/scan`), its hidden address with "Show the address" / "Generate new token", the "How to set up" Postmark steps on the Scan reports page and the "Scan reports by email" card in Settings. The Postmark instructions in `docs/round-2-delivery-note.md` and `docs/overnight-11-oct-note.md` are superseded by this section.
+
+**One-time set-up in Google (about 10 minutes; do it signed in as the Google Workspace super admin).**
+
+Part 1, Google Cloud: a service account that may read Gmail.
+1. Open console.cloud.google.com. Top left, the project picker: if a project for the ERP already exists (made for the supplier LPO email), pick it and go to step 3. Otherwise **New project**, name "OFJ ERP", Create, then pick it.
+2. Left menu **APIs & Services > Library**. Search "Gmail API", open it, **Enable**.
+3. Left menu **IAM & Admin > Service Accounts > + Create service account**. Name "erp-mailbox". Create and continue. Grant no roles (leave both steps empty), **Done**.
+4. Click the new service account. On its **Details** tab open **Advanced settings** and copy the **Client ID** (a long number): you need it in Part 2.
+5. Tab **Keys > Add key > Create new key > JSON > Create**. A file downloads. If instead Google says "Service account key creation is disabled" (new organisations have this on by default): left menu **IAM & Admin > Organization Policies**, make sure the organisation (ofjauto.com) is selected at the top, search "Disable service account key creation", open it, **Manage policy**, choose "Override parent's policy", **Add a rule**, Enforcement **Off**, **Set policy**. Wait a minute and repeat this step. (If that page says you lack permission: **IAM & Admin > IAM**, pick the organisation at the top, **Grant access**, your own address, role **Organization Policy Administrator**, Save, then try again.)
+6. Open the downloaded JSON file in Notepad. Two values go to Vercel in Part 3: `client_email` and `private_key`. Afterwards delete the downloaded file (Recycle Bin too).
+
+Part 2, Google Workspace admin: allow that account to read the mailbox.
+7. Open admin.google.com. Left menu **Security > Access and data control > API controls**. At the bottom, **Manage Domain Wide Delegation > Add new**.
+8. **Client ID**: paste the number from step 4. **OAuth scopes**: paste exactly `https://www.googleapis.com/auth/gmail.readonly` and nothing else (if you later want the supplier LPO email sent from the workshop's mailbox as well, add a comma and `https://www.googleapis.com/auth/gmail.send`). **Authorize**. It can take a few minutes to take effect.
+
+Part 3, Vercel: the three variables (the only place the key ever goes).
+9. vercel.com > the **workshop-erp** project > **Settings > Environment Variables > Add**. Three variables, environment Production (Preview too if you like):
+   - `GOOGLE_SERVICE_ACCOUNT_EMAIL` = the `client_email` from the JSON (ends in `.iam.gserviceaccount.com`).
+   - `GOOGLE_SERVICE_ACCOUNT_KEY` = the `private_key` from the JSON: everything between its quotes, from `-----BEGIN PRIVATE KEY-----` to `-----END PRIVATE KEY-----`. Pasting it with the `\n` written as letters is fine; a multi-line paste is fine too.
+   - `SCANS_MAILBOX` = `scans@ofjauto.com`.
+   `CRON_SECRET` already exists and is reused for the five-minute check.
+10. **Deployments**, the newest one, the three-dot menu, **Redeploy** (variables apply to new deployments only).
+11. Open erp.ofjauto.com/scans and press **Check the mailbox now**. The badge turns "Mailbox connected" with the time; "Mailbox problem" shows Google's words if a step was missed (the usual ones: the scope not authorised yet, step 8; the Gmail API not enabled, step 2; the key pasted short, step 9).
+12. On the Autel scanner, set the report email recipient to scans@ofjauto.com.
+
+**A plain word about "only that one mailbox".** Google's domain-wide delegation is, by its design, domain-wide: with the scope above the service account could read any mailbox of ofjauto.com. What limits it to scans@ofjauto.com is the system itself (the mailbox name is fixed by `SCANS_MAILBOX`, the only scope asked for is read-only, and the key lives only in Vercel). If you want Google itself to enforce one mailbox, the way is a one-time sign-in as scans@ofjauto.com on Google's own consent page (an OAuth client instead of a service account): the system then holds a token for that one account only. That is a small change I can build if you prefer it; the rest (matching, notifications, Unmatched scans) stays the same.
+
+**Still to delete outside the code** (nothing in the system refers to them any more): the Postmark account and its "OFJ scans" server, if one was ever created; the forwarding rule in the Gmail settings of scans@ofjauto.com, if one was set up; the `inbound` MX record at Squarespace, if it was added. The unused `inbound_scan_token` row in Settings stays in the database (harmless) until the next tidy-up migration.
+
+**The real Autel report test** has to wait for steps 1 to 12: locally there is no Google key, so the proof test feeds reports through the same code the mailbox reader uses (`POST /api/e2e/mailbox`, local only). Once you say the variables are in Vercel, I run the check against the live system with one real report and show the result (the job it landed on, the notifications, the Scan reports page).
+
+Proof: `npm run test:w` (14 checks: VIN in the subject, VIN only inside the PDF, unmatched then Attach, one row per Gmail message, the old route gone, the cron refusing without the secret, the page's words). The staff-day suite's email section was rewritten for the mailbox (`npm run test:day1`).
+
+Lessons: a Next.js route file that renders JSX must be `route.tsx`; a path removed from the public prefixes answers with a redirect to the login page, not 404, so a "gone" check accepts either; a bash heredoc with an apostrophe inside fails as a whole, so long notes go through a file written by the editor and appended.
+
+## Section by section
+
+| Section | State |
+|---|---|
+| A1, A2, B1 (first part) | Done (commit a6280af, test-q). |
+| B1 to B3 | Done (commit 9f7fad7, migration 20261102090000, test-r). |
+| C1 | Done (commit 71cee1c, test-s). |
+| D1 to D6 | Done (commit 1fba9b4, migrations 20261102120000 and 20261102123000, test-t). |
+| E1 to E6 | Done (commit dc0f7d5, migration 20261102140000, test-u). E6's move of existing tyre rows found nothing to move. |
+| F1 | Done (commit dc0f7d5). |
+| G1 | Done (commit a086ea9, migration 20261102150000, test-v). |
+| H1, H2 | Done (commit a086ea9, test-v). The Windows printer settings are above. |
+| Mailbox 1 to 4 | Done in the code (migration 20261102160000, test-w); the Google and Vercel steps are yours (12 steps above). |
+| Mailbox 5, the real Autel report | Not done yet: it needs the Google keys in Vercel first. I run it the moment you say they are in. |
+
+## Assumptions
+
+- Deposit "% of parts" is a share of the parts' selling price before VAT; "% of total" is a share of the quotation total including VAT; an AED deposit is as typed. The deposit "Tax invoice" option folds into the final invoice the same way a deposit proforma does.
+- "Override / Wait" on the owner's LPO notification: the notification opens the LPO page, where Override asks for the one-tap reason; Wait is simply leaving it.
+- A priced part that changes an approved quotation asks the owner once per part; the owner's Allow is used by one revision.
+- Outside work never takes the labour discount and shows "our cost" only to staff.
+- Existing tyre rows: none had the size in the part number box, so nothing was migrated; new ones are told to use the name.
+- The fixed-asset flag applies to Tools and equipment orders only, at or above the Settings amount (AED 2,000 by default), judged on the order's total before VAT.
+- Sticker sizes default to 40 × 30 mm (part) and 50 × 100 mm (battery and oil service); the part QR is about 19 to 20 mm. The oil sticker's WhatsApp number falls back to the company phone from Settings when the sticker number is empty.
+- One part sticker per unit prints the moment a part is ticked Received; a part received in several deliveries prints the units of that delivery.
+- Mailbox: the reader looks back three days and takes up to 30 emails per run; pictures (JPG, PNG) are kept and attached but only the subject, body and PDF text are read for the VIN; the first VIN found wins; a car matches when it has an open job with that VIN (the newest gate-in if several).
+- Mailbox notifications go to the advisor(s) of the car (who gated it in or sent its approval), the workshop manager(s) of the car's department and the technician on it; unmatched reports go to the owner and the workshop managers.
+- The five-minute cron needs the Vercel Pro plan the project already has.

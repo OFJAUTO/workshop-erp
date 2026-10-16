@@ -326,21 +326,16 @@ await section("E4-E6 load, devices, phone", async () => {
   await bt.close();
 });
 
-/* ---------------- I: scan reports by email ---------------- */
+/* ---------------- I: scan reports by email (read from the mailbox since 16 October) ---------------- */
 await section("I scan emails", async () => {
-  const token = await getSetting("inbound_scan_token");
-  const r = await fetch(`${base}/api/inbound/scan?token=${encodeURIComponent(String(token))}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ FromFull: { Email: "e2e@example.com" }, Subject: "e2e forwarding confirmation", TextBody: "Confirmation code 123456", Attachments: [] }) });
+  const r = await fetch(`${base}/api/e2e/mailbox`, { method: "POST", headers: { "content-type": "application/json", "x-e2e-secret": process.env.E2E_SECRET ?? "" }, body: JSON.stringify({ from: "e2e@example.com", subject: "e2e forwarding confirmation", text: "Your confirmation code is 123456", messageId: `e2e-b-${Date.now()}` }) });
   const j = await r.json().catch(() => ({}));
-  check("an email without a PDF is kept under Other emails (I3)", r.status === 200 && j.kept === true, `${r.status} ${JSON.stringify(j)}`);
+  check("an email without a report is kept under Other emails (I3)", r.status === 200 && j.kept === true, `${r.status} ${JSON.stringify(j)}`);
   const { browser, page } = await browserFor("owner");
   await go(page, `${base}/scans`);
   const body = await page.textContent("body");
   check("Other emails shows the subject and text (I3)", /e2e forwarding confirmation/.test(body ?? "") && /123456/.test(body ?? ""));
-  check("set-up steps on the page (I2)", /How to set up/.test(body ?? "") && /postmarkapp\.com/.test(body ?? "") && /Squarespace/.test(body ?? "") && /inbound\.ofjauto\.com/.test(body ?? ""));
-  check("inbound address hidden behind Show, with Copy and Generate new token (I4)", /Hidden\. It contains the secret token/.test(body ?? "") && (await page.getByRole("button", { name: "Show the address" }).count()) === 1 && (await page.getByRole("button", { name: "Copy" }).count()) === 1 && (await page.getByRole("button", { name: "Generate new token" }).count()) === 1);
-  await page.getByRole("button", { name: "Show the address" }).click();
-  await sleep(300);
-  check("Show reveals the address (I4)", /\/api\/inbound\/scan\?token=/.test(await page.textContent("body")));
+  check("the page says where the reports come from and offers Check the mailbox now (I2)", /Where the reports come from/.test(body ?? "") && (await page.locator("[data-check-mailbox]").count()) === 1);
   await page.getByRole("button", { name: "Put away" }).first().click();
   await page.waitForFunction(() => !/e2e forwarding confirmation/.test(document.body.innerText), null, { timeout: 12000 }).catch(() => null);
   await go(page, `${base}/scans`);
@@ -348,7 +343,7 @@ await section("I scan emails", async () => {
   await browser.close();
   const { browser: bm, page: pm } = await browserForId(MANAGER_MECH);
   await go(pm, `${base}/scans`);
-  check("manager never sees the address or set-up (I4)", !/How to set up|Show the address|Other emails/.test(await pm.textContent("body")));
+  check("manager never sees Other emails (I4)", !/Other emails/.test(await pm.textContent("body")));
   await bm.close();
 });
 

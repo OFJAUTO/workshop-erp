@@ -261,7 +261,7 @@ await section("C LPO flow", async () => {
   // The LPO list: the main one is not listed twice once approved.
   await go(op, `${base}/parts/orders`);
   const listBody = (await op.textContent("body")) ?? "";
-  check("17: the LPO list shows the supplier LPO and not the approved main one", listBody.includes(sub.number) && !new RegExp(`${main.number}(?!-)`).test(listBody.replace(sub.number, "")));
+  check("17: the LPO list shows the supplier LPO (with its main LPO named) and no row for the approved main one", listBody.includes(sub.number) && (await op.locator(`[data-lpo-row='${sub.number}']`).count()) === 1 && (await op.locator(`[data-lpo-row='${main.number}']`).count()) === 0);
 
   /* ---------------- D. Commissions on the monthly report ---------------- */
   console.log("\n== D commissions");

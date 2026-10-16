@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth";
 import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { SCANS_BUCKET, attachPrescan, scanKindFor } from "@/lib/scans";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkScansMailbox } from "@/lib/mailbox";
 
 /** The manager attaches an unmatched scan to a job by hand; it is filed by the job's stage like a matched one. */
 export async function attachScan(scanId: string, formData: FormData) {
@@ -43,16 +44,13 @@ export async function ignoreScan(scanId: string) {
   redirect(`/scans?message=${encodeURIComponent("Ignored. It stays on the list below.")}`);
 }
 
-/** Owner only: a new secret for the inbound address. The old address stops working the moment it is saved. */
-export async function regenerateInboundToken() {
-  const staff = await requirePermission("manageSettings");
-  const admin = createAdminClient();
-  const { randomBytes } = await import("node:crypto");
-  const token = randomBytes(24).toString("hex");
-  await admin.from("settings").update({ value: token }).eq("key", "inbound_scan_token");
-  await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { inbound_scan_token: "regenerated", by: staff.display_name } }).then(() => null, () => null);
+/** "Check now": the scans mailbox is read at once instead of waiting for the next five-minute run. */
+export async function checkMailboxNow() {
+  await requirePermission("approveInspections");
+  const r = await checkScansMailbox();
   revalidatePath("/scans");
-  redirect(`/scans?message=${encodeURIComponent("New token saved. The old address no longer works: paste the new address into the Postmark inbound webhook (Server > Inbound > Settings > Webhook URL).")}`);
+  if (!r.ok) redirect(`/scans?error=${encodeURIComponent(r.error ?? "The mailbox could not be read.")}`);
+  redirect(`/scans?message=${encodeURIComponent(r.checked === 0 ? `Mailbox checked: nothing new${r.skipped ? ` (${r.skipped} already filed)` : ""}.` : `Mailbox checked: ${r.checked} new email${r.checked === 1 ? "" : "s"}, ${r.stored} file${r.stored === 1 ? "" : "s"} kept, ${r.matched} matched to a car.`)}`);
 }
 
 /** Owner only: an email that was not a scan report, once read, can be put away. */

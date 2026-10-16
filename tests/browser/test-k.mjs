@@ -288,7 +288,7 @@ await section("4 rules and data", async () => {
   // B12: the stickers print at their own exact size, each with its size in Settings.
   const sticker = await fetchAs(`/print/service-sticker/${jobId}?serviced_on=2026-10-15&mileage=1200`, "owner");
   const sHtml = sticker.buf ? sticker.buf.toString("utf8") : "";
-  check("B12: the service sticker page prints at its exact size with no margins", sticker.status === 200 && /@page \{ size: 60mm 60mm; margin: 0; \}/.test(sHtml), sHtml.match(/@page[^}]*\}/)?.[0] ?? `status ${sticker.status}`);
+  check("B12: the service sticker page prints at its exact size with no margins", sticker.status === 200 && /@page \{ size: 50mm 100mm; margin: 0; \}/.test(sHtml), sHtml.match(/@page[^}]*\}/)?.[0] ?? `status ${sticker.status}`);
   const stickerSettings = await fetchAs(`/settings/stickers`, "owner");
   const ssHtml = stickerSettings.buf ? stickerSettings.buf.toString("utf8") : "";
   check("B12: the label size per sticker is set in Settings (battery and service)", stickerSettings.status === 200 && /name="sticker_battery_mm"/.test(ssHtml) && /name="sticker_service_mm"/.test(ssHtml));

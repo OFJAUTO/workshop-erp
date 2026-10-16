@@ -56,7 +56,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
                   <Button type="button" tone="ghost" size="md" onClick={() => setEditing(null)}>Cancel</Button>
                 </form>
               ) : (
-                <button type="button" disabled={!canManage} onClick={() => setEditing(l.part_item_id)} className={`ml-auto inline-flex h-7 items-center rounded-full px-2.5 text-[11px] font-bold ${l.received_qty >= l.quantity ? "bg-green-soft text-green" : "border border-line-strong bg-white"}`}>
+                <button type="button" disabled={!canManage} onClick={() => setEditing(l.part_item_id)} data-part-date className={`ml-auto inline-flex h-7 items-center rounded-full px-2.5 text-[11px] font-bold ${l.received_qty >= l.quantity ? "bg-green-soft text-green" : "border border-line-strong bg-white"}`}>
                   {l.received_qty >= l.quantity ? "Here" : l.expected_date ? `Expected ${formatDate(l.expected_date)}` : "No date"}
                 </button>
               )
