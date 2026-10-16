@@ -1,3 +1,4 @@
+import { refuseIfLocked } from "@/lib/quote-lock-server";
 import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
@@ -121,7 +122,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (lockHeldByOther) return NextResponse.json({ error: `${await lockerName()} is editing this quotation. You can read it; changes open once they leave.` }, { status: 423 });
-  if (q.status !== "draft" && q.status !== "pending_owner") return NextResponse.json({ error: "This version has been sent. Revise it to make changes." }, { status: 423 });
+  if (q.status !== "draft" && q.status !== "pending_owner") {
+    // Approved by the customer (or replaced): locked for everyone, whatever the screen; the attempt goes in the quotation's history.
+    const what = body.removeLine ? "remove a line" : body.addLine ? "add a line" : body.patchLine ? `change a line (${Object.keys(body.patchLine).filter((k) => k !== "id").join(", ").replace(/_/g, " ") || "fields"})` : body.header ? `change the ${Object.keys(body.header).join(", ").replace(/_/g, " ")}` : body.reorder ? "reorder the lines" : body.requestPart ? "add a part request" : body.notQuoted ? "mark a finding as not quoted" : "change the quotation";
+    const refused = await refuseIfLocked(q.id, staff.id, what, "quotation editor");
+    if (refused) return NextResponse.json({ error: refused, locked: true }, { status: 423 });
+    return NextResponse.json({ error: "This version has been sent. Revise it to make changes." }, { status: 423 });
+  }
   const settings = await getSettings();
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
   const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;

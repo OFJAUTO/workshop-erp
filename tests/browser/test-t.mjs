@@ -110,8 +110,9 @@ await section("1 deposit choice", async () => {
 /* ---------------- 2. D2: the LPO waits for the deposit; the receipt; the dashboards; the reminder ---------------- */
 await section("2 deposit gate", async () => {
   cleanupDb();
-  const { jobId, quotationId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
-  await sql("update public.quotations set deposit_mode = 'aed', deposit_value = 500, deposit_aed = 500, responded_at = now() - interval '30 hours' where id = $1", [quotationId]);
+  // The deposit is the advisor's choice on the draft; the seed sets it before the customer approves (an approved quotation refuses the change, by design).
+  const { jobId, quotationId } = (await api("/api/e2e/stage", { stage: "approved", deposit: 500 })).json;
+  await sql("update public.quotations set responded_at = now() - interval '30 hours' where id = $1", [quotationId]);
   const token = (await sql("select token from public.quotations where id = $1", [quotationId]))[0]?.token;
   // The owner's dashboard lists it.
   const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 1100 } });

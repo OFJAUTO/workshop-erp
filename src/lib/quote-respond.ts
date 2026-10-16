@@ -1,3 +1,4 @@
+import { replaceProformaAfterRevision } from "./invoice-flow";
 import { dropParts } from "@/lib/drop-parts";
 import "server-only";
 import { finishPartsPlanning } from "./lpo";
@@ -61,6 +62,8 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
     if (gone.length) await dropParts(q.job_id, gone, { id: answer.by ?? null, display_name: answer.name }, "revised");
   }
   await refreshQuoteTotals(quotationId, settings, answer.by ?? "");
+  // A revised quotation approved after the proforma went out: the proforma is remade from the approved lines, payments carried across.
+  if (answer.approve && revisionOfApproved && q.job_id) await replaceProformaAfterRevision(q.job_id, answer.by ?? null, settings);
   const { data: fresh } = await admin.from("quotations").select("approved_total_aed, total_aed").eq("id", quotationId).maybeSingle();
   const totalText = aed(Number(fresh?.approved_total_aed ?? fresh?.total_aed ?? 0));
   const who = answer.via === "estimate" ? "the advisor (unchanged estimate)" : answer.via === "warranty" ? "the owner (warranty repair, free of charge)" : answer.via === "advisor" ? `${answer.name} (advisor, after talking to the customer)` : `${answer.name} (customer link)`;

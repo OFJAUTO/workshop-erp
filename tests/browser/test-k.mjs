@@ -178,9 +178,12 @@ await section("1 quote builder and revision", async () => {
   const text = pdf.buf ? await pdfText(pdf.buf) : "";
   check("B9: line descriptions and the customer's name print in capitals on the PDF", pdf.status === 200 && /E2E EXTRA LABOUR/.test(text) && /STAGE TEST CUSTOMER/.test(text), text.replace(/\s+/g, " ").slice(0, 200));
   await go(page, `${base}/jobs/${jobId}/quote/${v2}`);
-  await until(async () => ((await page.locator("[data-labour-boxes]").count()) ? 1 : null), 30, 500);
-  const nameBox = page.locator("input[id^='name-']").first();
-  check("B9: the quote screen shows the line names in capitals (stored as typed)", (await nameBox.evaluate((el) => getComputedStyle(el).textTransform)) === "uppercase" && (await nameBox.inputValue()) === "E2e extra labour");
+  await until(async () => ((await page.locator("[data-labour-boxes], [data-quote-locked]").count()) ? 1 : null), 30, 500);
+  // Version 2 is approved by now: the screen is the locked view, every name as plain text in capitals (stored as typed).
+  const lockedView = (await page.locator("[data-quote-locked]").count()) === 1;
+  const nameBox = lockedView ? page.locator("[data-locked-line] span.uppercase", { hasText: /e2e extra labour/i }).first() : page.locator("input[id^='name-']").first();
+  const nameText = lockedView ? ((await nameBox.textContent().catch(() => "")) ?? "").trim() : await nameBox.inputValue();
+  check("B9: the quote screen shows the line names in capitals (stored as typed)", (await nameBox.evaluate((el) => getComputedStyle(el).textTransform).catch(() => "")) === "uppercase" && nameText === "E2e extra labour", `locked=${lockedView} text=${nameText}`);
 
   // B15: the step bar on the parts page and the dots on the job card.
   await go(page, `${base}/parts/${jobId}`);

@@ -1,3 +1,5 @@
+import { invoicesForLock } from "@/lib/quote-lock-server";
+import { quoteLockOf } from "@/lib/quote-lock";
 import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
@@ -41,6 +43,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   if (!(role === "owner" || isAdvisor)) redirect(role === "technician" ? "/my-jobs" : role === "gate_in" ? "/gate-in" : `/jobs/${id}`);
   const isOwner = role === "owner";
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
+  // Approved by the customer: locked for everyone (the database refuses too). Who may make a new version depends on the documents out.
+  const lock = quoteLockOf(q, await invoicesForLock(q.job_id), { isOwner });
+  const mayRevise = !staff.viewingAs && (lock.locked ? (lock.reviseBy === "owner_or_allowed" ? isOwner || !!q.revision_allowed_at : lock.reviseBy === "owner" ? isOwner : false) : ["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status));
+  const mayAskRevise = !staff.viewingAs && lock.locked && lock.reviseBy === "owner_or_allowed" && !isOwner && !q.revision_allowed_at;
   // Someone else holding the editing lock (a heartbeat within the last minute and a half): read only for this person.
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
@@ -184,7 +190,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           <>
             <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>
             {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="lg">Inspection report</LinkButton> : null}
-            {canSend && ["sent", "opened", "expired", "declined", "approved", "urgent_requested"].includes(q.status) ? (
+            {mayRevise ? (
               <form action={reviseQuotation.bind(null, q.id)}>
                 <Button type="submit" size="lg" data-revise>Revise quotation</Button>
               </form>
@@ -235,6 +241,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         department={job?.department ?? null}
         settings={editorSettings}
         readOnly={!canEdit}
+        lock={lock}
         lockedBy={lockedBy}
         showProfit
         canSend={canSend}
@@ -255,8 +262,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}
-        onRevise={canSend && (["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status) || (q.status === "approved" && (isOwner || !!q.revision_allowed_at))) ? reviseQuotation.bind(null, q.id) : null}
-        onAskRevise={canSend && q.status === "approved" && !isOwner && !q.revision_allowed_at ? requestRevision.bind(null, q.id) : null}
+        onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null}
+        onAskRevise={mayAskRevise ? requestRevision.bind(null, q.id) : null}
         revision={{ requestedAt: q.revision_requested_at ?? null, requestedBy: requesterName, reason: q.revision_request_reason ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
         reviseReasons={reasonsFor(settings, "revise_after_approval")}
         ownerBox={ownerBox}

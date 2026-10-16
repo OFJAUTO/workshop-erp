@@ -243,3 +243,26 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for ${description} (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
   return { id: inv.id as string, number: inv.number as string, token: inv.token as string, total };
 }
+
+/**
+ * The customer approved a revised quotation after a proforma was already out: the old proforma is cancelled and a new
+ * one is made from the approved lines, with every payment carried across (and converted to the tax invoice at once if
+ * the balance is already covered). A tax invoice is never touched here: a quotation cannot be revised once one exists.
+ */
+export async function replaceProformaAfterRevision(jobId: string, by: string | null, settings: Settings): Promise<InvoiceRow | null> {
+  const admin = createAdminClient();
+  const { data: proRaw } = await admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).order("issued_at", { ascending: false }).limit(1).maybeSingle();
+  if (!proRaw) return null;
+  const old = toInvoice(proRaw as Record<string, unknown>);
+  const { data: who } = by ? await admin.from("staff").select("display_name").eq("id", by).maybeSingle() : { data: null };
+  await admin.from("invoices").update({ status: "cancelled", issue_reason: "Replaced: the quotation was revised and approved again", updated_by: by }).eq("id", old.id);
+  const fresh = await ensureProforma(jobId, by ? { id: by, display_name: who?.display_name ?? "staff" } : null, settings);
+  if (!fresh) return null;
+  if (fresh.kind === "proforma") {
+    await admin.from("payments").update({ invoice_id: fresh.id, updated_by: by }).eq("invoice_id", old.id).eq("is_active", true);
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "proforma_replaced", note: `${old.number} cancelled and ${fresh.number} issued after the revised quotation was approved (${money(fresh.total_aed)})`, created_by: by });
+    const converted = await convertProformaIfPaid(jobId, by, settings);
+    return converted ?? fresh;
+  }
+  return fresh;
+}

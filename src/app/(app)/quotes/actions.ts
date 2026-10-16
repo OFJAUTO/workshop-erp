@@ -1,5 +1,7 @@
 "use server";
 
+import { invoicesForLock, loadQuoteLock, refuseIfLocked } from "@/lib/quote-lock-server";
+import { liveInvoicesOf } from "@/lib/quote-lock";
 import { dropParts } from "@/lib/drop-parts";
 import { createChargeInvoice } from "@/lib/invoice-flow";
 import { COPY_FIELDS, askOwnerForRevision, createNextVersion, missingPricedParts, syncMissingParts } from "@/lib/quote-versions";
@@ -187,6 +189,12 @@ async function makeVersion(quotationId: string, urgentOnly: boolean) {
   const back = q.kind === "estimate" ? `/estimates/${quotationId}` : `/jobs/${q.job_id}/quote/${quotationId}`;
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
   if (!["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"].includes(q.status)) redirect(back);
+  // Locked by a document: with a proforma out only the owner makes a new version; with a tax invoice out nobody does (credit note).
+  const lockInfo = await loadQuoteLock(q.id, { isOwner: staff.role_id === "owner" });
+  if (lockInfo?.lock.locked && (lockInfo.lock.reviseBy === "nobody" || (lockInfo.lock.reviseBy === "owner" && staff.role_id !== "owner"))) {
+    const refused = await refuseIfLocked(q.id, staff.id, "revise the quotation", "quotation page");
+    redirect(`${back}?error=${encodeURIComponent(refused ?? "Locked.")}`);
+  }
   // The customer approved this quotation: the owner revises it directly; anyone else needs the owner's one-time permission.
   if (q.status === "approved" && q.kind === "quotation" && staff.role_id !== "owner") {
     if (!q.revision_allowed_at) redirect(`${back}?error=${encodeURIComponent("The customer approved this quotation. Ask the owner to allow a revision first.")}`);
@@ -213,6 +221,12 @@ export async function requestRevision(quotationId: string, formData: FormData) {
   const back = `/jobs/${q.job_id}/quote/${quotationId}`;
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
   if (q.status !== "approved") redirect(`${back}?error=${encodeURIComponent("Only a quotation the customer approved needs the owner's permission.")}`);
+  // A proforma or a tax invoice is out: not even the asking is open to an advisor (the owner revises, or a credit note settles it).
+  const lockInfo = await loadQuoteLock(q.id);
+  if (lockInfo?.lock.locked && lockInfo.lock.reviseBy !== "owner_or_allowed") {
+    const refused = await refuseIfLocked(q.id, staff.id, "ask for a revision", "quotation page");
+    redirect(`${back}?error=${encodeURIComponent(refused ?? "Locked.")}`);
+  }
   const reason = String(formData.get("reason") ?? "").trim();
   if (reason.length < 3) redirect(`${back}?error=${encodeURIComponent("Write why the quotation has to change.")}`);
   const pending = !!q.revision_requested_at && !q.revision_declined_at && !q.revision_allowed_at;
@@ -234,6 +248,8 @@ export async function decideRevision(quotationId: string, formData: FormData) {
   const now = new Date().toISOString();
   const requester = q.revision_requested_by ? [q.revision_requested_by] : [];
   if (decision === "allow") {
+    const live = liveInvoicesOf(await invoicesForLock(q.job_id));
+    if (live.tax) redirect(`${back}?error=${encodeURIComponent(`Tax invoice ${live.tax.number} has been issued for this job: the quotation cannot be revised any more. Issue a credit note on the invoice page instead.`)}`);
     await admin.from("quotations").update({ revision_allowed_at: now, revision_allowed_by: staff.id, revision_declined_at: null, revision_declined_by: null, revision_decision_note: note, updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "revision_allowed", `${q.number}: the owner allowed one revision${note ? `: ${note}` : ""}`);
     if (q.revision_request_kind === "parts" && q.job_id) {
@@ -457,7 +473,7 @@ export async function completeQuotation(quotationId: string, opts: { /** "Contin
   const q = bundle.quotation;
   const staff = await mayEdit(q.job_id, q.created_by);
   if (!staff) return { error: "Only the job's advisor or the owner can complete it." };
-  if (q.status !== "draft" && q.status !== "pending_owner") return { error: "This version has been sent." };
+  if (q.status !== "draft" && q.status !== "pending_owner") return { error: (await refuseIfLocked(q.id, staff.id, "change the quotation", "quotation page")) ?? "This version has been sent." };
   const settings = await getSettings();
   const admin = createAdminClient();
   const checks = await loadQuoteChecks(q.job_id);
@@ -606,7 +622,7 @@ export async function roundQuotation(quotationId: string, total: number): Promis
   const q = bundle.quotation;
   const staff = await mayEdit(q.job_id, q.created_by);
   if (!staff) return { error: "Not allowed." };
-  if (q.status !== "draft" && q.status !== "pending_owner") return { error: "This version has been sent." };
+  if (q.status !== "draft" && q.status !== "pending_owner") return { error: (await refuseIfLocked(q.id, staff.id, "change the quotation", "quotation page")) ?? "This version has been sent." };
   const whole = Math.round(total);
   if (!Number.isFinite(whole) || whole <= 0 || Math.abs(whole - q.total_aed) > Math.max(10, q.total_aed * 0.02)) return { error: "That rounded total is too far from the quotation total." };
   const admin = createAdminClient();
@@ -624,7 +640,7 @@ export async function keepUrgentOnly(quotationId: string): Promise<{ error?: str
   const q = bundle.quotation;
   const staff = await mayEdit(q.job_id, q.created_by);
   if (!staff) return { error: "Not allowed." };
-  if (q.status !== "draft" && q.status !== "pending_owner") return { error: "This version has been sent." };
+  if (q.status !== "draft" && q.status !== "pending_owner") return { error: (await refuseIfLocked(q.id, staff.id, "change the quotation", "quotation page")) ?? "This version has been sent." };
   const admin = createAdminClient();
   const drop = bundle.lines.filter((l) => l.is_active && blockOf(l) === "labour" && l.urgency !== "urgent");
   const dropIds = new Set(drop.map((l) => l.id));
@@ -649,7 +665,7 @@ export async function addMissingParts(quotationId: string): Promise<{ error?: st
   const q = bundle.quotation;
   const staff = await mayEdit(q.job_id, q.created_by);
   if (!staff) return { error: "Only the job's advisor or the owner can change it." };
-  if (!q.job_id || !["draft", "pending_owner"].includes(q.status)) return { error: "Only a draft can take the parts." };
+  if (!q.job_id || !["draft", "pending_owner"].includes(q.status)) return { error: (await refuseIfLocked(q.id, staff.id, "add parts", "quotation page")) ?? "Only a draft can take the parts." };
   const added = await syncMissingParts(q.job_id, q.id, staff.id);
   refresh(q.job_id, q.id);
   return { ok: true, added };

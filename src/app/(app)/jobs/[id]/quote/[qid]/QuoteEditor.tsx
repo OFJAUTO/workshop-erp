@@ -1,5 +1,7 @@
 "use client";
 
+import type { QuoteLock } from "@/lib/quote-lock";
+import { LockedQuote } from "./LockedQuote";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/components/PartPicker";
@@ -234,6 +236,7 @@ export function QuoteEditor({
   estimatedDays = 0,
   isRevision = false,
   lockedBy = null,
+  lock = null,
 }: {
   quotation: QuoteRow;
   lines: QuoteLine[];
@@ -244,6 +247,8 @@ export function QuoteEditor({
   department: string | null;
   settings: EditorSettings;
   readOnly: boolean;
+  /** Approved by the customer (or replaced, or invoiced): every figure as text, the one action in the bar. */
+  lock?: QuoteLock | null;
   isOwner: boolean;
   showProfit: boolean;
   canSend: boolean;
@@ -828,6 +833,51 @@ export function QuoteEditor({
     );
   };
 
+  const reviseAskDialog = reviseAsk && onAskRevise ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-revise-ask>
+      <form action={onAskRevise} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+        <span className="text-lg font-extrabold">Ask the owner to allow a revision</span>
+        <p className="text-sm text-muted">The customer approved this quotation. Say why it has to change; the owner allows one revision or declines.</p>
+        <ReasonChips name="reason" label="Why?" rows={2} options={reviseReasons} required placeholder="Tap a reason, or type" />
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" size="md" data-ask-revise-send>Ask the owner</Button>
+          <Button type="button" tone="ghost" size="md" onClick={() => setReviseAsk(false)}>Cancel</Button>
+        </div>
+      </form>
+    </div>
+  ) : null;
+  // Approved by the customer, replaced or invoiced: nothing can be typed or removed; the bar carries the one way forward.
+  if (lock?.locked) {
+    const statusText = quotation.status === "approved" ? `Approved${quotation.approver_name ? ` by ${quotation.approver_name}` : ""}${quotation.responded_at ? `, ${formatDayTime(quotation.responded_at)}` : ""}` : quotation.status === "superseded" ? "Replaced by a newer version" : "Locked";
+    return (
+      <>
+        <LockedQuote
+          quotation={quotation}
+          lock={lock}
+          lines={lines}
+          totals={totals}
+          showProfit={showProfit}
+          ownerBox={ownerBox}
+          statusText={statusText}
+          actions={
+            <>
+              {canSend && onRevise ? <form action={onRevise}><Button type="submit" size="md" data-revise-bar>Revise quotation</Button></form> : null}
+              {canSend && !onRevise && onAskRevise ? (
+                revision?.requestedAt && !revision.allowedAt && !revision.declinedAt ? (
+                  <span className="text-xs font-semibold text-amber" data-revise-pending>Owner asked {formatDayTime(revision.requestedAt)}, waiting</span>
+                ) : (
+                  <Button type="button" size="md" onClick={() => setReviseAsk(true)} data-ask-revise>Ask owner to revise</Button>
+                )
+              ) : null}
+              {revision?.declinedAt && !revision.allowedAt ? <span className="text-xs font-semibold text-red" data-revise-declined>Declined by the owner{revision.declinedNote ? `: ${revision.declinedNote}` : ""}</span> : null}
+              {canSend && onRevise && revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
+            </>
+          }
+        />
+        {reviseAskDialog}
+      </>
+    );
+  }
   const margin = totals.net > 0 ? (totals.profit / totals.net) * 100 : 0;
   const marginTone = totals.profit < 0 ? "text-red" : margin >= (settings.goodMarginPercent ?? 25) ? "text-green" : "text-amber";
   const progressText = `${labourDone} of ${namedLabour.length} line${namedLabour.length === 1 ? "" : "s"} done${wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}`;
@@ -1318,19 +1368,7 @@ export function QuoteEditor({
           </div>
         </div>
       ) : null}
-      {reviseAsk && onAskRevise ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-revise-ask>
-          <form action={onAskRevise} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
-            <span className="text-lg font-extrabold">Ask the owner to allow a revision</span>
-            <p className="text-sm text-muted">The customer approved this quotation. Say why it has to change; the owner allows one revision or declines.</p>
-            <ReasonChips name="reason" label="Why?" rows={2} options={reviseReasons} required placeholder="Tap a reason, or type" />
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" size="md" data-ask-revise-send>Ask the owner</Button>
-              <Button type="button" tone="ghost" size="md" onClick={() => setReviseAsk(false)}>Cancel</Button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      {reviseAskDialog}
       {markupAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-markup-ask>
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">

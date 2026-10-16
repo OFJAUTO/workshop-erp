@@ -214,10 +214,10 @@ try {
     if (await sendBtn.count()) {
       await sendBtn.click();
       // The send action takes a second or two: wait for the rounding choice or the message window instead of a fixed pause.
-      await page.getByRole("button", { name: /^AED |Copy/ }).first().waitFor({ timeout: 20000 }).catch(() => null);
-      const round = page.getByRole("button", { name: /^AED .*down/ }).first();
+      await page.locator("[role='dialog']").getByRole("button", { name: /^AED |Copy/ }).first().waitFor({ timeout: 20000 }).catch(() => null);
+      const round = page.locator("[role='dialog']").getByRole("button", { name: /^AED .*down/ }).first();
       if (await round.count()) await round.click();
-      const copy = page.getByRole("button", { name: /Copy/ }).first();
+      const copy = page.locator("[role='dialog']").getByRole("button", { name: /^Copy/ }).first();
       await copy.waitFor({ timeout: 20000 }).catch(() => null);
       if (await copy.count()) { await copy.click(); await sleep(2500); }
     }

@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string };
+  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number };
   const stage = body.stage ?? "inspection";
   const admin = createAdminClient();
   // Two side doors for the tests: the work order lines of a job, and an open QC round with its items.
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     await admin.from("bodyshop_stages").update({ is_active: false }).eq("job_id", BJOB);
     const approvedNow = at !== "sent";
     const qToken = newToken();
-    await admin.from("quotations").upsert({ id: BQ, kind: "quotation", number: "Q-STAGE-B", version: 1, job_id: BJOB, customer_id: CUST, vehicle_id: BVEH, status: approvedNow ? "approved" : "sent", token: qToken, sent_at: now, sent_by: advisor.id, sent_to_name: "Stage Customer", ...(approvedNow ? { responded_at: now, approver_name: "Stage Customer", approved_total_aed: 23100, removal_ack_at: now, removal_ack_name: "Stage Customer" } : {}), created_by: advisor.id, updated_by: advisor.id });
+    await admin.from("quotations").upsert({ id: BQ, kind: "quotation", number: "Q-STAGE-B", version: 1, job_id: BJOB, customer_id: CUST, vehicle_id: BVEH, status: "sent", token: qToken, sent_at: now, sent_by: advisor.id, sent_to_name: "Stage Customer", ...(approvedNow ? { responded_at: now, approver_name: "Stage Customer", approved_total_aed: 23100, removal_ack_at: now, removal_ack_name: "Stage Customer" } : {}), created_by: advisor.id, updated_by: advisor.id });
     const { data: bLines } = await admin.from("quotation_lines").select("id").eq("quotation_id", BQ);
     if (!(bLines ?? []).length) {
       const { data: svcs } = await admin.from("services").select("id, name, bodyshop_kind").in("bodyshop_kind", ["ppf", "tint", "ppf_removal"]);
@@ -112,6 +112,8 @@ export async function POST(request: NextRequest) {
         { quotation_id: BQ, position: 2, line_type: "package", title: svc("ppf_removal")?.name ?? "Old PPF removal", service_id: svc("ppf_removal")?.id ?? null, price_per: "job", quantity: 1, unit_price: 1500, source_type: "manual", urgency: "recommended", created_by: advisor.id, updated_by: advisor.id },
       ]);
     }
+    // The lines go in while the quotation is still open; the approved mark comes after (an approved quotation refuses new lines).
+    if (approvedNow) await admin.from("quotations").update({ status: "approved", updated_by: advisor.id }).eq("id", BQ);
     await refreshQuoteTotals(BQ, settings, advisor.id);
     await admin.from("appointments").upsert({ id: BAPPT, kind: "car_drop", department: "bodyshop", customer_id: CUST, vehicle_id: BVEH, job_id: BJOB, reason: "Bodyshop: Full PPF, tint, old PPF removal", starts_at: now, duration_minutes: 30, advisor_id: advisor.id, status: at === "sent" || at === "approved" ? "booked" : "arrived", created_by: advisor.id, updated_by: advisor.id });
     const people = { manager: managerId, ppfLeader, detailingLeader, paintLeader, installer, detailer, advisor: advisor.id };
@@ -184,7 +186,7 @@ export async function POST(request: NextRequest) {
   await admin.from("part_items").upsert({ id: PA, job_id: JOB, description: "front brake pads", part_number: "pad-stage-1", quantity: 1, cost_aed: 200, availability: "to_order", delivery_date: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10), confirm_status: "confirmed", confirmed_quantity: 1, part_type: "genuine", priced_by: owner.id, priced_at: now, created_by: owner.id, updated_by: owner.id });
   await admin.from("part_requests").upsert({ id: PR1, job_id: JOB, inspection_id: inspectionId, source_type: "request", source_key: REQ1, label: "rear brake discs", requested_text: "set of two", status: "open", quantity: 2, unit: "pcs", created_by: tech1.id, updated_by: tech1.id });
   const token = newToken();
-  await admin.from("quotations").upsert({ id: Q1, kind: "quotation", number: "Q-STAGE-1", version: 1, job_id: JOB, customer_id: CUST, vehicle_id: VEH, status: stage === "ready" ? "approved" : "draft", token, created_by: advisor.id, updated_by: advisor.id, ...(stage === "ready" ? { sent_at: now, sent_by: advisor.id } : {}) });
+  await admin.from("quotations").upsert({ id: Q1, kind: "quotation", number: "Q-STAGE-1", version: 1, job_id: JOB, customer_id: CUST, vehicle_id: VEH, status: "draft", token, created_by: advisor.id, updated_by: advisor.id, ...(body.deposit ? { deposit_mode: "aed", deposit_value: Number(body.deposit) } : {}), ...(stage === "ready" ? { sent_at: now, sent_by: advisor.id } : {}) });
   const { data: existingLines } = await admin.from("quotation_lines").select("id").eq("quotation_id", Q1);
   if (!(existingLines ?? []).length) {
     await admin.from("quotation_lines").insert([
@@ -192,6 +194,8 @@ export async function POST(request: NextRequest) {
       { quotation_id: Q1, position: 1, line_type: "part", title: "Front brake pads (PAD-STAGE-1)", source_type: "manual", quantity: 1, unit_cost: 200, markup_percent: 50, unit_price: 300, part_item_id: PA, part_type: "genuine", created_by: advisor.id, updated_by: advisor.id },
     ]);
   }
+  // Ready: approved outright (the lines are in; an approved quotation refuses new lines, so the mark comes last).
+  if (stage === "ready") await admin.from("quotations").update({ status: "approved", responded_at: now, approver_name: "Stage Customer", updated_by: advisor.id }).eq("id", Q1);
   await refreshQuoteTotals(Q1, settings, advisor.id);
   if (stage === "quote") return NextResponse.json({ jobId: JOB, inspectionId, quotationId: Q1, token, advisor: advisor.display_name });
   // Approved by the customer: planning (approved stage) or straight to Ready, where the proforma prepares itself.

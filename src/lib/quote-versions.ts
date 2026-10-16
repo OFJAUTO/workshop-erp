@@ -1,3 +1,5 @@
+import { invoicesForLock, refuseIfLocked } from "./quote-lock-server";
+import { liveInvoicesOf } from "./quote-lock";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, loadQuotation, logQuoteEvent, minMarkupFor, parentLineFor, refreshQuoteTotals, toLine, toPart } from "@/lib/quote-data";
 import { blockOf, isHidden, type QuoteLine } from "@/lib/quotes";
@@ -75,6 +77,16 @@ export async function quoteTargetFor(jobId: string, by: string | null, change?: 
   if (latest.status === "draft" || latest.status === "pending_owner") return { id: latest.id, created: false };
   if (!REVISABLE.includes(latest.status)) return null;
   const { data: who } = by ? await admin.from("staff").select("display_name").eq("id", by).maybeSingle() : { data: null };
+  // A tax invoice is out: the quotation cannot change any more. The owner hears what Parts changed; a credit note or a new invoice settles it.
+  if (latest.status === "approved") {
+    const live = liveInvoicesOf(await invoicesForLock(jobId));
+    if (live.tax) {
+      await refuseIfLocked(latest.id, by, change ?? "change the parts", "Parts desk");
+      const { data: jobRow } = await admin.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
+      await notifyRoles(["owner"], { type: "revision_request", title: `${change ?? "Parts changed"} · ${jobRow?.job_number ?? ""}: tax invoice ${live.tax.number} already issued`, body: `${latest.number} is locked once a tax invoice is out. Settle the difference with a credit note or a new invoice.`, jobId, href: `/jobs/${jobId}/invoice` });
+      return null;
+    }
+  }
   // The customer approved this quotation: a change from Parts needs the owner's one-time permission first; the owner is asked, the part waits.
   if (latest.status === "approved" && !latest.revision_allowed_at) {
     await askOwnerForRevision({ id: latest.id, number: latest.number, job_id: jobId, pending: !!latest.revision_requested_at && !latest.revision_declined_at }, by, who?.display_name ?? "Parts", change ?? "Parts changed the priced parts");
@@ -127,6 +139,11 @@ export async function syncMissingParts(jobId: string, quotationId: string, by: s
  */
 export async function syncPartLine(jobId: string, partId: string, by: string | null, quotationId?: string): Promise<{ quotationId: string | null; created: boolean; change: "added" | "changed" | "removed" | null }> {
   const admin = createAdminClient();
+  // A version named outright must still be open: an approved or replaced one refuses (and the attempt is written down).
+  if (quotationId) {
+    const refused = await refuseIfLocked(quotationId, by, "change a part line", "Parts desk");
+    if (refused) return { quotationId, created: false, change: null };
+  }
   // What changed, in words, in case the owner has to be asked (the quotation was approved by the customer).
   let changeWords: string | undefined;
   if (!quotationId) {
