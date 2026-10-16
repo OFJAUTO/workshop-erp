@@ -1,5 +1,6 @@
 import { TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel } from "./inspection";
 import type { InspectionBundle } from "./inspection-data";
+import { roadTestSummary, type RoadTestRow, type RoadTestSummary } from "./road-test";
 
 /** One finding of the approved report as the quotation's folded reference shows it, with the keys the services point at (suggest_for). */
 export type ReferenceFinding = {
@@ -19,10 +20,12 @@ export type QuoteReference = {
   findings: ReferenceFinding[];
   managerNote: string | null;
   internalNote: string | null;
+  /** The QC inspector's road test: flagged items first, the good ones as one line. */
+  roadTest: RoadTestSummary;
 };
 
 /** The report folded into a reference strip for the quotation: requests, Bad and Average findings (Required service items too), the tyres, the battery, the manager's notes. */
-export function quoteReferenceOf(b: InspectionBundle, requests: string[]): QuoteReference {
+export function quoteReferenceOf(b: InspectionBundle, requests: string[], roadTest: RoadTestRow | null = null): QuoteReference {
   const findings: ReferenceFinding[] = [];
   for (const i of b.items) {
     const flagged = i.status === "bad" || (i.status === "average" && i.style !== "job");
@@ -68,5 +71,6 @@ export function quoteReferenceOf(b: InspectionBundle, requests: string[]): Quote
     findings,
     managerNote: b.inspection.manager_note ?? null,
     internalNote: b.inspection.manager_note_internal ?? null,
+    roadTest: roadTestSummary(roadTest),
   };
 }

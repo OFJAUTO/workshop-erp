@@ -9,6 +9,7 @@ import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { notifyStaff } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { customerPageMetadata } from "@/lib/customer-pages";
+import { ROAD_TEST_SELECT, roadTestSummary, type RoadTestRow } from "@/lib/road-test";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 
@@ -31,7 +32,8 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
   const plain = (children: React.ReactNode) => <div className="min-h-screen bg-canvas"><main className="mx-auto max-w-2xl px-4 py-8">{children}</main></div>;
   const { data: link } = await admin.from("report_links").select("id, job_id, inspection_id, status, opened_at, created_by").eq("token", token).maybeSingle();
   if (!link) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
-  const [card, bundle] = await Promise.all([loadJobCard(admin, link.job_id), loadInspection(link.job_id)]);
+  const [card, bundle, { data: rt }] = await Promise.all([loadJobCard(admin, link.job_id), loadInspection(link.job_id), admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", link.job_id).maybeSingle()]);
+  const road = roadTestSummary((rt as RoadTestRow | null) ?? null);
   if (!card || !bundle || bundle.inspection.status !== "approved") return plain(<Notice tone="error">This report is not available yet.</Notice>);
   if (!link.opened_at) {
     await admin.from("report_links").update({ opened_at: new Date().toISOString(), status: "opened" }).eq("id", link.id);
@@ -87,6 +89,22 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
           <div className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-1">
             <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Workshop note</span>
             <p className="text-sm whitespace-pre-wrap">{insp.manager_note}</p>
+          </div>
+        ) : null}
+        {road.state === "done" ? (
+          <div className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-1" data-road-test>
+            <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Road test</span>
+            {road.flagged.length ? (
+              road.flagged.map((f) => (
+                <p key={f.key} className="text-sm" data-road-item={f.status}>
+                  <span className={`font-bold ${f.status === "bad" ? "text-red" : "text-amber"}`}>{f.statusLabel}</span> · {f.label}
+                  {f.remarks ? `: ${f.remarks}` : ""}
+                </p>
+              ))
+            ) : (
+              <p className="text-sm">Nothing noted on the road test.</p>
+            )}
+            {road.good.length ? <p className="text-xs text-[#5F6368]">Good: {road.good.join(", ")}</p> : null}
           </div>
         ) : null}
         <p className={`text-base font-bold ${dangers.length ? "text-red" : ""}`}>

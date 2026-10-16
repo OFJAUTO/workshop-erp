@@ -18,6 +18,7 @@ import { loadCatalogue } from "@/lib/parts-catalogue";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { reasonsFor } from "@/lib/reasons";
 import { quoteReferenceOf } from "@/lib/quote-reference";
+import { ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
 
 export const dynamic = "force-dynamic";
 
@@ -71,12 +72,13 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const hoursMemory: Record<string, number> = {};
   for (const [k, v] of Object.entries(memory)) if (!k.includes("|")) hoursMemory[k] = Number(v);
   for (const [k, v] of Object.entries(memory)) if (modelKey && k.startsWith(modelKey + "|")) hoursMemory[k.slice(modelKey.length + 1)] = Number(v);
-  const [catalogue, { data: jobRequests }, { data: sessions }, { data: jobRow }] = await Promise.all([
+  const [catalogue, { data: jobRequests }, { data: sessions }, { data: jobRow }, { data: roadRow }] = await Promise.all([
     loadCatalogue(),
     createAdminClient().from("job_requests").select("text").eq("job_id", id).eq("is_active", true).order("position"),
     // The hours the technicians clocked on the car: once the work is done, labour at cost uses them instead of the estimate.
     createAdminClient().from("work_sessions").select("minutes").eq("job_id", id).eq("is_active", true),
     createAdminClient().from("jobs").select("status, is_open").eq("id", id).maybeSingle(),
+    createAdminClient().from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
   ]);
   const workDone = !!jobRow && (!jobRow.is_open || ["pending_qc", "pending_wash", "ready", "in_delivery", "closed"].includes(String(jobRow.status)));
   const clockedHours = workDone ? Math.round(((sessions ?? []).reduce((a, s) => a + (Number(s.minutes) || 0), 0) / 60) * 100) / 100 : null;
@@ -84,7 +86,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const { data: lastRows } = await createAdminClient().from("quotation_lines").select("service_id, unit_price").eq("line_type", "package").not("service_id", "is", null).not("unit_price", "is", null).gt("unit_price", 0).order("created_at", { ascending: false }).limit(600);
   const lastPrices: Record<string, number> = {};
   for (const r of lastRows ?? []) if (r.service_id && lastPrices[r.service_id] === undefined) lastPrices[r.service_id] = Number(r.unit_price);
-  const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string)) : null;
+  const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string), (roadRow as RoadTestRow | null) ?? null) : null;
 
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").

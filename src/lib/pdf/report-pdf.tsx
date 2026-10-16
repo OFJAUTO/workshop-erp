@@ -1,11 +1,11 @@
 import "server-only";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDateTime } from "@/lib/format";
-import { ITEM_STATUS_LABELS, MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel, type ItemStatus } from "@/lib/inspection";
+import { MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel, type ItemStatus } from "@/lib/inspection";
 import type { InspectionBundle, InspectionMediaRow } from "@/lib/inspection-data";
 import { vehicleTitle, type JobCard } from "@/lib/job-data";
 import { feeNotice } from "@/lib/jobs";
-import { ROAD_TEST_ITEMS, type RoadTestRow } from "@/lib/road-test";
+import { roadTestSummary, type RoadTestRow } from "@/lib/road-test";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -45,7 +45,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
     ...attention.filter((i) => i.dangerous).map((i) => `${i.item_label}${i.dangerous_reason ? `: ${i.dangerous_reason}` : ""}`),
     ...tyres.filter((t) => t.danger).map((t) => `${t.label} tyre${t.dangerReason ? `: ${t.dangerReason}` : ""}`),
   ];
-  const roadFlagged = roadTest?.status === "done" ? ROAD_TEST_ITEMS.filter((it) => roadTest.items[it.key]?.status && roadTest.items[it.key]?.status !== "good") : [];
+  const road = roadTestSummary(roadTest);
 
   // Photos for the items needing attention, shrunk for the PDF.
   const photosFor = (rows: InspectionMediaRow[]) => rows.filter((x) => x.kind === "photo").slice(0, PHOTOS_PER_ITEM);
@@ -97,6 +97,22 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
         </View>
       ) : null}
 
+      {road.state === "done" ? (
+        <View wrap={false}>
+          <Text style={styles.sectionTitle}>Road test   ·   {road.flagged.length ? `${road.flagged.length} noted` : "nothing noted"}</Text>
+          {road.flagged.map((f) => (
+            <View key={f.key} style={[styles.item, { borderColor: f.status === "bad" ? RED : AMBER }]} wrap={false}>
+              <View style={styles.itemHead}>
+                <Tag text={f.statusLabel} color={f.status === "bad" ? RED : AMBER} />
+                <Text style={styles.lineTitle}>{f.label}</Text>
+              </View>
+              {f.remarks ? <Text>{f.remarks}</Text> : null}
+            </View>
+          ))}
+          {road.good.length ? <Text style={styles.small}>Good: {road.good.join("   ·   ")}</Text> : null}
+        </View>
+      ) : null}
+
       <View>
         <Text style={styles.sectionTitle}>Needs attention   ·   {attentionCount}</Text>
         {attentionCount === 0 ? <Text style={styles.small}>Nothing needs attention. The items checked are listed below.</Text> : null}
@@ -135,24 +151,6 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
             <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === "measure.battery"))} />
           </View>
         ) : null}
-        {roadFlagged.length && roadTest ? (
-          <View style={[styles.item, { borderColor: AMBER }]} wrap={false}>
-            <View style={styles.itemHead}>
-              <Tag text="Road test" color={AMBER} />
-              <Text style={styles.lineTitle}>Noted on the road test</Text>
-            </View>
-            {roadFlagged.map((it) => {
-              const v = roadTest.items[it.key];
-              return (
-                <Text key={it.key}>
-                  {it.label}
-                  {v?.status ? `   ·   ${ITEM_STATUS_LABELS[v.status]}` : ""}
-                  {v?.remarks ? `   ·   ${v.remarks}` : ""}
-                </Text>
-              );
-            })}
-          </View>
-        ) : null}
       </View>
 
       <View>
@@ -167,12 +165,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
             </View>
           );
         })}
-        {roadTest?.status === "done" && !roadFlagged.length ? (
-          <View style={{ marginTop: 3 }}>
-            <Text style={styles.groupTitle}>Road test</Text>
-            <Text style={styles.small}>Nothing noted on the road test.</Text>
-          </View>
-        ) : null}
+
         {roadTest?.status === "not_possible" ? (
           <View style={{ marginTop: 3 }}>
             <Text style={styles.groupTitle}>Road test</Text>

@@ -479,6 +479,9 @@ export function QuoteEditor({
   const suggestedFor = (keys: string[]) => (keys.length ? services.filter((s) => (s.suggest_for ?? []).some((k) => keys.includes(k))) : []);
   const quotedKeys = new Set(labourLines.map((l) => `${l.source_type}:${l.source_key}`));
   const unquoted = (reference?.findings ?? []).filter((f) => !quotedKeys.has(`${f.sourceType}:${f.sourceKey}`) && (f.status === "bad" || f.dangerous));
+  // Bad road test items with no job yet are named with the findings.
+  const roadUnquoted = (reference?.roadTest.flagged ?? []).filter((f) => f.status === "bad" && !quotedKeys.has(`item:road:${f.key}`));
+  const unquotedLabels = [...unquoted.map((f) => f.label), ...roadUnquoted.map((f) => `${f.label} (road test)`)];
   const canKeepUrgent = isRevision && !sent && !disabled && labourLines.some((l) => l.urgency === "urgent") && labourLines.some((l) => l.urgency !== "urgent");
   const editHref = (kind: PickerKind) => (canEditList ? `/settings/services?list=${kind === "service" ? "services" : "labour"}` : null);
 
@@ -816,9 +819,10 @@ export function QuoteEditor({
                 <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">{reference.requests.length} request{reference.requests.length === 1 ? "" : "s"}</span>
                 <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">{reference.findings.length} finding{reference.findings.length === 1 ? "" : "s"}</span>
                 {reference.managerNote ? <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">manager&apos;s note</span> : null}
+                {reference.roadTest.state === "done" ? <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">road test: {reference.roadTest.flagged.length ? `${reference.roadTest.flagged.length} noted` : "all good"}</span> : null}
                 <span className="ml-auto text-base font-bold" aria-hidden>{stripOpen ? "▴" : "▾"}</span>
               </span>
-              {unquoted.length && !sent ? <span className="text-xs font-semibold text-amber">Nothing quoted yet for: {unquoted.map((f) => f.label).join(" · ")}</span> : null}
+              {unquotedLabels.length && !sent ? <span className="text-xs font-semibold text-amber">Nothing quoted yet for: {unquotedLabels.join(" · ")}</span> : null}
             </button>
             {stripOpen ? (
               <div className="flex flex-col gap-3 border-t border-line bg-white px-4 pb-3 pt-3 text-sm rounded-b-card">
@@ -827,6 +831,25 @@ export function QuoteEditor({
                     <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">The customer says</span>
                     <ol className="list-decimal pl-5">{reference.requests.map((r, i) => <li key={i}>{r}</li>)}</ol>
                     {reference.requestsNote ? <p className="text-xs text-muted">Technician: {reference.requestsNote}</p> : null}
+                  </div>
+                ) : null}
+                {reference.roadTest.state === "done" ? (
+                  <div className="flex flex-col" data-road-strip>
+                    <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Road test</span>
+                    {reference.roadTest.flagged.map((f) => {
+                      const key = `road:${f.key}`;
+                      const quoted = quotedKeys.has(`item:${key}`);
+                      return (
+                        <div key={f.key} className="flex flex-wrap items-center gap-2 border-t border-line py-1.5" data-road-item={f.status}>
+                          <Badge tone={f.status === "bad" ? "red" : "amber"}>{f.statusLabel}</Badge>
+                          <span className="font-semibold">{f.label}</span>
+                          {f.remarks ? <span className="text-muted">{f.remarks}</span> : null}
+                          {quoted ? <span className="ml-auto text-xs font-semibold text-green">✓ Quoted</span> : !disabled ? <button type="button" onClick={() => setPicker({ kind: "both", sourceType: "item", sourceKey: key, label: `${f.label} (road test)` })} className="ml-auto min-h-9 rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold" data-road-add>+ Add job</button> : null}
+                        </div>
+                      );
+                    })}
+                    {!reference.roadTest.flagged.length ? <p className="border-t border-line pt-1.5 text-xs text-muted">Nothing noted on the road test.</p> : null}
+                    {reference.roadTest.good.length ? <p className="border-t border-line pt-1.5 text-xs text-muted" data-road-good><span className="font-semibold text-green">Good:</span> {reference.roadTest.good.join(", ")}</p> : null}
                   </div>
                 ) : null}
                 {reference.findings.length ? (
@@ -1158,7 +1181,7 @@ export function QuoteEditor({
           services={services}
           usage={usage}
           department={department}
-          suggested={suggestedFor(picker.sourceKey ? (reference?.findings.find((f) => f.sourceKey === picker.sourceKey)?.keys ?? []) : referenceKeys)}
+          suggested={suggestedFor(picker.sourceKey ? (reference?.findings.find((f) => f.sourceKey === picker.sourceKey)?.keys ?? (picker.sourceKey.startsWith("road:") ? [picker.sourceKey] : [])) : referenceKeys)}
           onDone={fromPicker}
           editHref={editHref(picker.kind)}
           onClose={() => setPicker(null)}

@@ -74,6 +74,35 @@ export function roadTestLine(rt: Pick<RoadTestRow, "status" | "decision" | "deci
   return "Road test not done yet";
 }
 
+/** One flagged road test item (Bad or Average) as the report, the quotation strip, the PDF and the customer's link show it. */
+export type RoadTestFlag = { key: RoadTestKey; label: string; status: "bad" | "average"; statusLabel: string; remarks: string | null };
+export type RoadTestSummary = {
+  state: "done" | "not_possible" | "not_needed" | "waiting" | "none";
+  line: string;
+  /** Bad first, then Average. */
+  flagged: RoadTestFlag[];
+  /** The labels of the items found good, for one line. */
+  good: string[];
+};
+
+/** The road test folded for display: the flagged items first (Bad before Average), the good ones as one line. */
+export function roadTestSummary(rt: Pick<RoadTestRow, "status" | "decision" | "decision_note" | "not_possible_reason" | "items"> | null | undefined): RoadTestSummary {
+  if (!rt) return { state: "none", line: "", flagged: [], good: [] };
+  const state: RoadTestSummary["state"] = rt.status === "done" ? "done" : rt.status === "not_possible" ? "not_possible" : rt.decision === "not_needed" ? "not_needed" : rt.decision === "needed" ? "waiting" : "none";
+  const flagged: RoadTestFlag[] = [];
+  const good: string[] = [];
+  if (rt.status === "done") {
+    for (const it of ROAD_TEST_ITEMS) {
+      const v = (rt.items ?? {})[it.key];
+      if (!v?.status) continue;
+      if (v.status === "good") good.push(it.label);
+      else flagged.push({ key: it.key, label: it.label, status: v.status === "bad" ? "bad" : "average", statusLabel: v.status === "bad" ? "Bad" : "Average", remarks: v.remarks?.trim() || null });
+    }
+    flagged.sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
+  }
+  return { state, line: roadTestLine(rt), flagged, good };
+}
+
 /** Problems that stop the road test from being saved as done. */
 export function roadTestProblems(items: RoadTestItems): { key: string; label: string }[] {
   const out: { key: string; label: string }[] = [];

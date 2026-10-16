@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, MEASUREMENTS, TYRE_REPLACE_REASONS, itemStatusLabel, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus, DISC_ACTIONS, DISC_CONDITIONS, LEAK_REPAIRS, LEAK_SEVERITIES, cleanPartsRows, inspectionLimitsOf, toItemState } from "@/lib/inspection";
+import { INSPECTION_STATUS_LABELS, MEASUREMENTS, TYRE_REPLACE_REASONS, itemStatusLabel, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus, DISC_ACTIONS, DISC_CONDITIONS, LEAK_REPAIRS, LEAK_SEVERITIES, cleanPartsRows, inspectionLimitsOf, toItemState } from "@/lib/inspection";
 import { inspectionLocked, inspectionWorkingMinutes, loadInspection, tyreSizeSuggestionFor, type InspectionMediaRow, inspectionDangerous, type InspectionItemRow } from "@/lib/inspection-data";
 import { wheelConditionLines } from "@/lib/wheels";
 import { loadCatalogue } from "@/lib/parts-catalogue";
@@ -12,7 +12,7 @@ import { cleanPartsList, mergePartsList } from "@/lib/parts-list";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { PrescanToggle } from "@/components/PrescanToggle";
-import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_ITEMS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
+import { ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, roadTestSummary, type RoadTestRow } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
@@ -125,6 +125,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   if (!card) notFound();
   const { job, vehicle, requests } = card;
   const roadTest = (rt as RoadTestRow | null) ?? null;
+  const road = roadTestSummary(roadTest);
 
   // Who may open this report.
   const isTech = role === "technician" && job.assigned_to === staff.id;
@@ -254,20 +255,6 @@ export default async function InspectionReportPage({ params }: { params: Promise
           ) : (
             <>
               <Card className="flex flex-col gap-2">
-                <SectionLabel right={`${requests.length}`}>The customer says</SectionLabel>
-                <ol className="flex flex-col gap-1.5">
-                  {requests.map((r, i) => (
-                    <li key={r.id} className="flex gap-3 text-base font-semibold leading-snug">
-                      <span className="w-6 shrink-0 text-muted">{i + 1}.</span>
-                      <span>{r.text}</span>
-                    </li>
-                  ))}
-                </ol>
-                {insp.requests_note ? <p className="text-sm"><span className="text-muted">Technician to the advisor:</span> {insp.requests_note}</p> : null}
-                <Files rows={bundle.media.filter((x) => x.job_request_id)} urls={bundle.mediaUrls} />
-              </Card>
-
-              <Card className="flex flex-col gap-2">
                 <SectionLabel right={partLines.length ? `${partLines.length} line${partLines.length === 1 ? "" : "s"}` : "none"}>Parts list</SectionLabel>
                 {partLines.length ? (
                   <ul className="divide-y divide-line text-sm">
@@ -335,34 +322,56 @@ export default async function InspectionReportPage({ params }: { params: Promise
             </>
           )}
 
-          <Card className="flex flex-col gap-2">
-            <SectionLabel>Road test (QC inspector)</SectionLabel>
-            {roadTest?.decision ? <p className="text-xs text-muted">Workshop manager: {ROAD_TEST_DECISION_LABELS[roadTest.decision]}{roadTest.decision_note ? ` · ${roadTest.decision_note}` : ""}</p> : null}
-            {!roadTest || roadTest.status === "not_started" ? (
-              <p className="text-sm text-muted">{roadTest?.decision === "not_needed" ? "No road test for this car." : "Not done yet."}</p>
-            ) : roadTest.status === "not_possible" ? (
-              <p className="text-sm">Not possible: {roadTest.not_possible_reason}</p>
-            ) : (
-              <ul className="divide-y divide-line text-sm">
-                {ROAD_TEST_ITEMS.map((it) => {
-                  const v = roadTest.items[it.key];
-                  return (
-                    <li key={it.key} className="py-1.5 flex flex-col gap-1">
-                      <span className="flex flex-wrap items-center gap-2">
-                        {v?.status ? <Badge tone={TONE[v.status]}>{ITEM_STATUS_LABELS[v.status]}</Badge> : null}
-                        <span className="font-semibold">{it.label}</span>
-                        {v?.remarks ? <span className="text-muted">· {v.remarks}</span> : null}
-                      </span>
-                      <Files rows={bundle.media.filter((x) => x.item_key === `road.${it.key}`)} urls={bundle.mediaUrls} />
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
         </div>
 
         <div className="flex flex-col gap-6">
+          {/* Top right: what the customer asked for, and the road test right under it (Bad and Average first, Good as one line). */}
+          {!reviewing ? (
+            <Card className="flex flex-col gap-2" data-customer-says>
+              <SectionLabel right={`${requests.length}`}>The customer says</SectionLabel>
+              <ol className="flex flex-col gap-1.5">
+                {requests.map((r, i) => (
+                  <li key={r.id} className="flex gap-3 text-base font-semibold leading-snug">
+                    <span className="w-6 shrink-0 text-muted">{i + 1}.</span>
+                    <span>{r.text}</span>
+                  </li>
+                ))}
+              </ol>
+              {insp.requests_note ? <p className="text-sm"><span className="text-muted">Technician to the advisor:</span> {insp.requests_note}</p> : null}
+              <Files rows={bundle.media.filter((x) => x.job_request_id)} urls={bundle.mediaUrls} />
+            </Card>
+          ) : null}
+          <Card className="flex flex-col gap-2" data-road-test>
+            <SectionLabel right={road.state === "done" ? `${road.flagged.length} noted` : undefined}>Road test</SectionLabel>
+            {roadTest?.decision ? <p className="text-xs text-muted">Workshop manager: {ROAD_TEST_DECISION_LABELS[roadTest.decision]}{roadTest.decision_note ? ` · ${roadTest.decision_note}` : ""}</p> : null}
+            {road.state !== "done" ? (
+              <p className="text-sm text-muted">{road.state === "not_possible" ? `Not possible: ${roadTest?.not_possible_reason ?? ""}` : road.state === "not_needed" ? "No road test for this car." : "Not done yet."}</p>
+            ) : (
+              <>
+                {road.flagged.length ? (
+                  <ul className="divide-y divide-line text-sm">
+                    {road.flagged.map((f) => (
+                      <li key={f.key} className="py-1.5 flex flex-col gap-1" data-road-item={f.status}>
+                        <span className="flex flex-wrap items-center gap-2">
+                          <Badge tone={TONE[f.status]}>{f.statusLabel}</Badge>
+                          <span className="font-semibold">{f.label}</span>
+                          {f.remarks ? <span className="text-muted">· {f.remarks}</span> : null}
+                        </span>
+                        <Files rows={bundle.media.filter((x) => x.item_key === `road.${f.key}`)} urls={bundle.mediaUrls} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm">Nothing noted on the road test.</p>
+                )}
+                {road.good.length ? (
+                  <p className="text-xs text-muted" data-road-good>
+                    <span className="font-semibold text-green">Good:</span> {road.good.join(", ")}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </Card>
           {!reviewing ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel right={`${prescans.length}`}>Pre-scan (fault code report)</SectionLabel>
