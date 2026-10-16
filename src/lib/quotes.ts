@@ -83,6 +83,8 @@ export type QuoteLine = {
   positions?: string[] | null;
   /** A part left off this quotation: stays on the car's list, greyed, counts for nothing, is not ordered. */
   left_off?: boolean;
+  /** A service done outside (lathe work, the Bosch injector service): its cost is typed, it never takes the labour discount. */
+  outside_work?: boolean;
   /** Normal / Full down / Closed box, from Settings. */
   recovery_type?: string | null;
   /** Who pays for the recovery: us (cost only, internal) or the customer (priced on the quotation). */
@@ -165,6 +167,23 @@ export type QuoteRow = {
   /** "Continue anyway" on the markup reminder: who left the parts at the minimum markup, and when (owner's summary). */
   markup_skipped_at?: string | null;
   markup_skipped_by?: string | null;
+  /** The deposit asked for: none, a fixed amount (aed), a percentage of the parts or of the total. */
+  deposit_mode?: "none" | "aed" | "percent_parts" | "percent_total" | null;
+  deposit_value?: number | null;
+  deposit_set_by?: string | null;
+  deposit_set_at?: string | null;
+  deposit_skipped_at?: string | null;
+  deposit_skipped_by?: string | null;
+  /** Revising after the customer's approval: the request and the owner's one-time permission. */
+  revision_requested_at?: string | null;
+  revision_requested_by?: string | null;
+  revision_request_reason?: string | null;
+  revision_request_kind?: "advisor" | "parts" | null;
+  revision_allowed_at?: string | null;
+  revision_allowed_by?: string | null;
+  revision_declined_at?: string | null;
+  revision_declined_by?: string | null;
+  revision_decision_note?: string | null;
   /** The labour discount (our own labour lines only): a percentage or a fixed amount. Null kind = the old rule (labour and services). */
   discount_kind?: "percent" | "aed" | null;
   discount_value?: number | null;
@@ -198,6 +217,9 @@ export type QuoteHeaderForTotals = {
   commission_kind?: "aed" | "percent" | null;
   commission_value?: number | null;
   materials_cost_aed?: number | null;
+  /** The deposit the advisor asked for: a fixed amount, a share of the parts, or a share of the total. */
+  deposit_mode?: string | null;
+  deposit_value?: number | null;
 };
 
 export type PartItem = {
@@ -282,7 +304,7 @@ export type PartRequest = {
   removed_reason?: string | null;
 };
 
-export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** "labour" (hours typed) or "service" (fixed price, typed when there is no default); null keeps the old rule: a price means a service. */ line_kind?: "labour" | "service" | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null };
+export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** "labour" (hours typed) or "service" (fixed price, typed when there is no default); null keeps the old rule: a price means a service. */ line_kind?: "labour" | "service" | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null; /** Outside work: the "our cost" box shows for everyone, never in the labour discount. */ outside_work?: boolean };
 export type ServiceCategory = { id: string; name: string; position: number; is_active: boolean };
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -424,7 +446,10 @@ export type QuoteTotals = {
   totalCost: number;
   profit: number;
   labourMargin: number;
+  /** The deposit the advisor asked for (0 when none). */
   deposit: number;
+  /** What the old rule would suggest: a share of the parts above the Settings threshold. */
+  depositSuggested: number;
 };
 
 /** Which block of the quotation a line sits in: labour and services, parts, or other charges. */
@@ -435,11 +460,11 @@ export function blockOf(l: Pick<QuoteLine, "line_type">): "labour" | "parts" | "
 }
 
 /** A fixed-price service of our own (minor service, major service...): a service line with no "our cost" typed on it. Outside work carries its cost. */
-export function isOwnService(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null }) {
-  return l.line_type === "package" && !isHidden(l) && !(Number(l.unit_cost) > 0);
+export function isOwnService(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null; outside_work?: boolean }) {
+  return l.line_type === "package" && !isHidden(l) && !(Number(l.unit_cost) > 0) && !l.outside_work;
 }
 /** The discount's base: our own labour lines (hours); with the "labour and services" scope our own services too. Never outside work, parts or other charges. */
-export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null }, scope: "labour" | "labour_services" | null | undefined = "labour") {
+export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null; outside_work?: boolean }, scope: "labour" | "labour_services" | null | undefined = "labour") {
   return (l.line_type === "labour" && !isHidden(l)) || (scope === "labour_services" && isOwnService(l));
 }
 /** "Labour discount (10%)", "Labour and services discount", or the old "Discount (10%)": the same words on the screen, the link, the PDF and the invoice. */
@@ -526,8 +551,12 @@ export function quoteTotals(
   const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
   const totalCost = round2(partsCost + labourCost + outsideCost + otherCost + bankCharge + commission + materialsCost);
   const profit = round2(net - totalCost);
+  // The deposit is the advisor's choice on the quotation; the old rule (a share of the parts above a threshold) only suggests.
   const threshold = opts.depositThreshold ?? 0;
-  const deposit = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
+  const depositSuggested = threshold > 0 && partsSell > threshold ? round2(partsSell * ((opts.depositPercent ?? 50) / 100)) : 0;
+  const dv = Math.max(0, Number(q.deposit_value) || 0);
+  const depositRaw = q.deposit_mode === "aed" ? dv : q.deposit_mode === "percent_parts" ? partsSell * (Math.min(100, dv) / 100) : q.deposit_mode === "percent_total" ? total * (Math.min(100, dv) / 100) : 0;
+  const deposit = round2(Math.min(total, Math.max(0, depositRaw)));
   return {
     subtotal, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
@@ -535,6 +564,7 @@ export function quoteTotals(
     otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, materialsCost, totalCost, profit,
     labourMargin: round2(labourSell - discount - labourCost - outsideCost),
     deposit,
+    depositSuggested,
   };
 }
 

@@ -51,6 +51,7 @@ function ServiceFields({ s, categories, suggestOptions, defaultMode = "hours" }:
         <Textarea name="parts_requests" defaultValue={(s?.parts_requests ?? []).join("\n")} rows={2} />
       </Field>
       <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="position_ask" defaultChecked={!!s?.position_ask} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Asks the position</span><span className="block text-xs text-muted">When added to a quotation it asks &quot;Front, rear or both?&quot;; one row carries all the positions.</span></span></label>
+      <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="outside_work" defaultChecked={!!s?.outside_work} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Outside work</span> <span className="text-muted">(lathe work, an outside injector service): the quotation shows an &quot;our cost&quot; box on the line and it never takes the labour discount.</span></span></label>
       <Field label="Suggested for" optional hint="The report findings this job answers. It comes first under Suggested on the quotation. Hold Ctrl (or Cmd) to pick several.">
         <Select name="suggest_for" multiple defaultValue={s?.suggest_for ?? []} className="min-h-32 py-2">
           {suggestOptions.map((o) => (

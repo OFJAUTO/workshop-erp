@@ -89,7 +89,7 @@ export async function loadMoneyRows(settings: Settings, opts: { scope: "open" | 
   const rows: MoneyRowData[] = [];
   const build = (job: NonNullable<InvJoin["job"]>, customer: InvJoin["customer"], invs: typeof invoices): MoneyRowData => {
     const live = invs.map((i) => i.inv).filter((i) => i.status === "issued");
-    const taxInvoice = live.find((i) => i.kind === "tax_invoice") ?? null;
+    const taxInvoice = live.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id) ?? null;
     const proforma = live.find((i) => i.kind === "proforma" && !i.converted_to && !i.deposit_for_quotation_id) ?? null;
     const doc = taxInvoice ?? proforma;
     const pays = doc ? payments.filter((p) => p.invoice_id === doc.id) : [];

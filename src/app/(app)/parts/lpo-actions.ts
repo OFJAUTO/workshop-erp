@@ -1,5 +1,6 @@
 "use server";
 
+import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
@@ -39,6 +40,8 @@ export async function sendLpoForApproval(jobId: string) {
   const r = await createMainLpo(jobId, staff);
   refresh(jobId, r.poId ?? null);
   if (r.error) redirect(`/parts/${jobId}?error=${enc(r.error)}#lpo`);
+  // The deposit has not arrived: the owner hears that the LPO waits on it (override on the LPO page, or wait).
+  if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
   redirect(`/parts/${jobId}?message=${enc(`${r.number} sent for approval. After the one-tap approval, one LPO per supplier appears here with Copy, PDF and Ordered.`)}#lpo`);
 }
 

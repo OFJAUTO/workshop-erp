@@ -13,6 +13,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { autoPauseBreaks, autoPauseEndOfShift } from "@/lib/work-flow";
 import { monthKey, monthLabel, monthlySummary, shiftMonth } from "@/lib/owner-report";
 import { loadDocAlerts } from "@/lib/doc-reminders-data";
+import { depositsWaiting } from "@/lib/deposits";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -324,6 +325,22 @@ export async function GET(request: NextRequest) {
       told++;
     }
     report.paymentWaiting = told;
+  }
+
+  // 19. A deposit asked for on an approved quotation, not received after the waiting limit (24 h by default): the advisor and
+  // accounts are reminded once; the owner's dashboard lists it until it arrives.
+  {
+    const limitHours = Number(settings.payment_waiting_hours) || 24;
+    let told = 0;
+    for (const w of await depositsWaiting()) {
+      if (w.hours < limitHours || w.reminded) continue;
+      const msg = { type: "deposit_overdue", title: `Deposit AED ${w.required.toLocaleString("en-GB")} still not received: ${w.plate}`, body: `${w.quotation} approved ${w.hours} h ago${w.received ? `; AED ${w.received.toLocaleString("en-GB")} received so far` : ""}. Ask the customer; the owner can override on the LPO.`, jobId: w.jobId, href: `/jobs/${w.jobId}/invoice` };
+      await notifyStaff(w.advisorIds, msg);
+      await notifyRoles(["accounts"], msg);
+      await admin.from("quotations").update({ deposit_reminded_at: new Date().toISOString() }).eq("job_id", w.jobId).eq("status", "approved").eq("kind", "quotation");
+      told++;
+    }
+    report.depositOverdue = told;
   }
 
   // 18. Stock: an item below its minimum tells Parts once; on the 1st the monthly count is asked for.

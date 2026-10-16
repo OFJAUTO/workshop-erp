@@ -126,7 +126,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           <span className="text-3xl font-extrabold">{aed(totals.total)}</span>
           {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{discountLabelOf(q)}: − {aed(totals.discount)}</span> : null}
           {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
-          {totals.deposit ? <span className="text-xs text-[#5F6368]">Deposit required on approval: {aed(totals.deposit)}</span> : null}
+          {totals.deposit ? <span className="text-sm font-bold" data-deposit-required>Deposit required: {aed(totals.deposit)}</span> : null}
         </div>
         {hasPpf ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-3 flex flex-col gap-0.5" data-ppf-warranty>

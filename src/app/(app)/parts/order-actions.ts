@@ -1,12 +1,11 @@
 "use server";
 
-import { approvedQuotations } from "@/lib/quote-data";
+import { depositShortText, depositState } from "@/lib/deposits";
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
-import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief, type PoLineRow, type PurchaseOrderRow } from "@/lib/parts-data";
 import { recordStockMovement } from "@/lib/stock";
@@ -93,18 +92,6 @@ export async function markLpoSent(poId: string, method: string): Promise<{ ok?: 
   return { ok: true };
 }
 
-/** The deposit on the job's approved quotation, and what has been received against it. */
-async function depositState(jobId: string) {
-  const admin = createAdminClient();
-  const [{ data: q }, { data: pays }] = await Promise.all([
-    approvedQuotations(jobId).then((qs) => ({ data: qs.length ? { deposit_aed: qs.reduce((a, q) => a + q.deposit_aed, 0) } : null })),
-    admin.from("payments").select(PAYMENT_SELECT).eq("job_id", jobId).eq("is_active", true),
-  ]);
-  const required = Number(q?.deposit_aed) || 0;
-  const received = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + p.amount_aed, 0);
-  return { required, received: round2(received), short: required > 0 && received + 0.005 < required };
-}
-
 /** The owner or the head accountant approves or refuses an LPO. A required deposit must be recorded first, unless the owner overrides. */
 export async function decidePurchaseOrder(poId: string, formData: FormData) {
   const staff = await requirePermission("approvePurchaseOrders");
@@ -127,11 +114,12 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     refresh(po.job_id, poId);
     redirect(`${back}?message=${encodeURIComponent("LPO refused.")}`);
   }
-  const deposit = po.job_id ? await depositState(po.job_id) : { required: 0, received: 0, short: false };
+  const deposit = po.job_id ? await depositState(po.job_id) : null;
   let override: { by: string; reason: string } | null = null;
-  if (deposit.short) {
+  if (deposit?.short) {
     const reason = blankToNull(formData.get("override_reason"));
-    if (role !== "owner") redirect(`${back}?error=${encodeURIComponent(`The quotation needs a deposit of AED ${deposit.required.toLocaleString("en-GB")} and AED ${deposit.received.toLocaleString("en-GB")} has been received. Record the deposit first; only the owner can override.`)}`);
+    // "Deposit AED 28,027 not received yet." Only the owner approves without it, with a reason that is written on the job.
+    if (role !== "owner") redirect(`${back}?error=${encodeURIComponent(`${depositShortText(deposit)} Only the owner can approve without it.`)}`);
     if (!reason || reason.length < 3) redirect(`${back}?error=${encodeURIComponent("The deposit has not been recorded. Write the reason to override.")}`);
     override = { by: staff.id, reason };
   }

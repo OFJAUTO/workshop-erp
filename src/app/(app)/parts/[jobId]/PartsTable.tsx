@@ -57,7 +57,7 @@ type Action = (formData: FormData) => void | Promise<void>;
  * never changes height whatever its state.
  */
 // Written out in full (no string building) so Tailwind sees every class. The one-line layout starts at 110rem (1760 px).
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(10rem,11rem)_6rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] min-[110rem]:grid-cols-[minmax(10rem,11rem)_6rem_17.5rem_12.5rem_4.75rem_3.75rem_5.25rem_14rem_12rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(11rem,14rem)_6rem_4.25rem_3.25rem_5.25rem_14rem_12rem_2.5rem] min-[110rem]:grid-cols-[minmax(12rem,16rem)_6rem_17.5rem_12.5rem_4.25rem_3.25rem_5.25rem_14rem_12rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
 const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
 const STATUS_LINE = "col-span-2 md:col-span-8 min-[110rem]:col-span-10 md:order-3";
 const ONE_LINE_ONLY = "hidden min-[110rem]:block";
@@ -512,12 +512,12 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
 
   return (
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
-      {/* Part: the name (tap to correct it through the picker); a long name wraps onto two lines inside the same height */}
-      <div className="col-span-2 md:col-span-1 h-9 flex items-center gap-1.5 min-w-0">
+      {/* Part: the name (tap to correct it through the picker); a long name wraps onto two or three lines and the row grows with it */}
+      <div className="col-span-2 md:col-span-1 min-h-9 flex items-center gap-1.5 min-w-0">
         {canPrice && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
-        <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`h-9 min-w-0 flex-1 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? undefined : `${name} · tap to correct the name`} data-part-name>
-          <span className="block line-clamp-2 text-[13px] leading-[1.15]">{name}</span>
+        <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
+          <span className="block line-clamp-3 text-[13px] leading-[1.15]">{name}</span>
         </button>
         {row.diagramUrl ? <a href={row.diagramUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold underline underline-offset-4">Diagram</a> : null}
         {editingName && !readOnly ? <PartPicker title={`Correct the name: ${name}`} catalogue={catalogue} selected={[]} itemKey={null} mode="rename" onPick={renameTo} onClose={() => setEditingName(false)} /> : null}

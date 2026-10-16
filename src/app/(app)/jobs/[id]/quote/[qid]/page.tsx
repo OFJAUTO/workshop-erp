@@ -12,7 +12,7 @@ import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { confirmEstimateUnchanged, decideQuoteApproval, declineQuotation, declineToGateOut, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
+import { confirmEstimateUnchanged, decideQuoteApproval, decideRevision, declineQuotation, declineToGateOut, requestRevision, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { loadPricingRows } from "@/lib/parts-pricing";
@@ -23,11 +23,11 @@ import { ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
 export const dynamic = "force-dynamic";
 
 /** The quotation builder for a job. Only the owner and the job's advisor can open it; everyone else goes back to the job card. */
-export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string }> }) {
+export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string; approve?: string; revise?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
-  const { message, error, send } = await searchParams;
+  const { message, error, send, approve } = await searchParams;
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
@@ -88,6 +88,45 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   for (const r of lastRows ?? []) if (r.service_id && lastPrices[r.service_id] === undefined) lastPrices[r.service_id] = Number(r.unit_price);
   const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string), (roadRow as RoadTestRow | null) ?? null) : null;
 
+  // Who approved (for "Approved by Omar, 11:45") and who asked for a revision.
+  const nameIds = [q.owner_approved_by, q.revision_requested_by].filter((x): x is string => !!x);
+  const { data: nameRows } = nameIds.length ? await createAdminClient().from("staff").select("id, display_name").in("id", nameIds) : { data: [] as { id: string; display_name: string }[] };
+  const nameOf = (id: string | null | undefined) => (nameRows ?? []).find((r) => r.id === id)?.display_name ?? null;
+  const approverName = nameOf(q.owner_approved_by);
+  const requesterName = nameOf(q.revision_requested_by);
+  const revisionPending = !!q.revision_requested_at && !q.revision_allowed_at && !q.revision_declined_at;
+  // The owner's box sits in the right column under "Before sending": the approval above the limit, or a revision request.
+  const ownerBox = can(role, "approveQuotes") && (q.status === "pending_owner" || revisionPending) ? (
+    <Card className="flex flex-col gap-3 border-ink" data-owner-box>
+      {q.status === "pending_owner" ? (
+        <>
+          <SectionLabel>Owner&apos;s approval</SectionLabel>
+          <p className="text-sm">{q.owner_approval_reason}</p>
+          <form action={decideQuoteApproval.bind(null, q.id)} className="flex flex-col gap-2">
+            <Textarea name="note" rows={2} placeholder="Note to the advisor (optional)" />
+            <div className="flex gap-2">
+              <Button type="submit" name="decision" value="approve" size="md" autoFocus={approve === "1"} data-owner-approve>Approve</Button>
+              <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Ask for changes</Button>
+            </div>
+          </form>
+        </>
+      ) : null}
+      {revisionPending ? (
+        <>
+          <SectionLabel>Revision requested</SectionLabel>
+          <p className="text-sm"><span className="font-semibold">{requesterName ?? (q.revision_request_kind === "parts" ? "Parts" : "The advisor")}</span>: {q.revision_request_reason}</p>
+          <p className="text-xs text-muted">The customer approved this quotation. Allow one revision, or decline.</p>
+          <form action={decideRevision.bind(null, q.id)} className="flex flex-col gap-2">
+            <Textarea name="note" rows={2} placeholder="Note (optional)" />
+            <div className="flex gap-2">
+              <Button type="submit" name="decision" value="allow" size="md" data-revision-allow>Allow one revision</Button>
+              <Button type="submit" name="decision" value="decline" tone="secondary" size="md" data-revision-decline>Decline</Button>
+            </div>
+          </form>
+        </>
+      ) : null}
+    </Card>
+  ) : null;
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").
   const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
@@ -155,8 +194,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {q.status === "pending_owner" ? <Notice tone="info">Waiting for the owner&apos;s approval: {q.owner_approval_reason}</Notice> : null}
-      {q.owner_approved_at && q.status === "draft" ? <Notice tone="success">Approved by the owner {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice> : null}
+      {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for owner approval ({q.owner_approval_reason}).</Notice></div> : null}
+      {q.owner_approved_at && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
       {bundle.versions.length > 1 ? (
         <p className="text-xs text-muted">
           Versions:{" "}
@@ -213,25 +252,16 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}
-        onRevise={canSend && ["sent", "opened", "expired", "declined", "approved", "urgent_requested"].includes(q.status) ? reviseQuotation.bind(null, q.id) : null}
+        onRevise={canSend && (["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status) || (q.status === "approved" && (isOwner || !!q.revision_allowed_at))) ? reviseQuotation.bind(null, q.id) : null}
+        onAskRevise={canSend && q.status === "approved" && !isOwner && !q.revision_allowed_at ? requestRevision.bind(null, q.id) : null}
+        revision={{ requestedAt: q.revision_requested_at ?? null, requestedBy: requesterName, reason: q.revision_request_reason ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
+        reviseReasons={reasonsFor(settings, "revise_after_approval")}
+        ownerBox={ownerBox}
         autoSend={send === "1"}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
-          {q.status === "pending_owner" && can(role, "approveQuotes") ? (
-            <Card className="flex flex-col gap-3 border-ink">
-              <SectionLabel>Owner&apos;s approval</SectionLabel>
-              <p className="text-sm">{q.owner_approval_reason}</p>
-              <form action={decideQuoteApproval.bind(null, q.id)} className="flex flex-col gap-2">
-                <Textarea name="note" rows={2} placeholder="Note to the advisor (optional)" />
-                <div className="flex gap-2">
-                  <Button type="submit" name="decision" value="approve" size="md">Approve</Button>
-                  <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Ask for changes</Button>
-                </div>
-              </form>
-            </Card>
-          ) : null}
           {q.estimate_id && q.status === "draft" && canSend ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>From the accepted estimate</SectionLabel>

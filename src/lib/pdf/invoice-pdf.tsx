@@ -89,7 +89,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       {fees.length ? <SectionBox title="Other charges" lines={fees} subtotalLabel="Other charges subtotal" /> : null}
       <DocumentTail
         words={amountInWords(invoice.total_aed)}
-        payments={live.map((p) => ({ date: formatDate(p.received_at), method: METHOD_LABELS[p.method] + (p.method === "cheque" && p.cheque_status !== "cleared" ? " (pending)" : ""), amount: p.amount_aed, note: p.method === "cheque" ? p.cheque_number : p.reference }))}
+        payments={live.map((p) => ({ date: formatDate(p.received_at), method: p.is_deposit ? (p.deposit_invoice_number ? `Less deposit invoiced (${p.deposit_invoice_number})` : `Less deposit received (${p.number})`) : METHOD_LABELS[p.method] + (p.method === "cheque" && p.cheque_status !== "cleared" ? " (pending)" : ""), amount: p.amount_aed, note: p.is_deposit ? METHOD_LABELS[p.method] : p.method === "cheque" ? p.cheque_number : p.reference }))}
         bank={!isCredit && bal.state !== "paid" ? company.bank : null}
         totals={
           <TotalsBox
@@ -138,14 +138,14 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
 }
 
 /** A receipt for one payment, on the same template. */
-export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBundle | null, customer: { full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null, job: { job_number: string } | null, settings: Settings, receivedByName: string | null): Promise<Buffer> {
+export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBundle | null, customer: { full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null, job: { job_number: string } | null, settings: Settings, receivedByName: string | null, deposit: { quotationNumber: string | null; quotationTotal: number; received: number; balance: number } | null = null): Promise<Buffer> {
   void receivedByName;
   const currency = currencyOf(settings);
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), invoice?.invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/invoice/${invoice.invoice.token}`) : Promise.resolve(null)]);
   const pending = payment.method === "cheque" && payment.cheque_status !== "cleared";
   const line: DocLine = {
-    description: invoice ? `Payment against ${invoice.invoice.kind === "proforma" ? "proforma invoice" : "invoice"} ${invoice.invoice.number}` : payment.is_deposit ? "Deposit" : "Payment",
+    description: invoice ? `Payment against ${invoice.invoice.kind === "proforma" ? "proforma invoice" : "invoice"} ${invoice.invoice.number}` : deposit ? `Advance payment (deposit)${deposit.quotationNumber ? ` against quotation ${deposit.quotationNumber}` : ""}` : payment.is_deposit ? "Deposit" : "Payment",
     details: [METHOD_LABELS[payment.method], payment.method === "cheque" ? `cheque ${payment.cheque_number ?? ""}${payment.cheque_bank ? `, ${payment.cheque_bank}` : ""}${payment.cheque_date ? `, dated ${formatDate(payment.cheque_date)}` : ""}` : payment.reference].filter(Boolean).join("  ·  "),
     qty: "1",
     rate: payment.amount_aed,
@@ -155,7 +155,7 @@ export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBund
   };
   const doc = (
     <PdfDocument title={`Receipt ${payment.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthe invoice online"} footerLines={[pending ? "This receipt is for a cheque that has not cleared yet. It counts as unpaid until it clears." : "Thank you for your payment."]}>
-      <TitleRow title="RECEIPT" meta={[{ label: "Receipt no.", value: payment.number }, { label: "Date", value: formatDate(payment.received_at) }, invoice ? { label: NUMBER_LABELS[invoice.invoice.kind], value: invoice.invoice.number } : null, job ? { label: "Job card", value: job.job_number } : null]} />
+      <TitleRow title="RECEIPT" meta={[{ label: "Receipt no.", value: payment.number }, { label: "Date", value: formatDate(payment.received_at) }, invoice ? { label: NUMBER_LABELS[invoice.invoice.kind], value: invoice.invoice.number } : null, deposit?.quotationNumber ? { label: "Quotation", value: deposit.quotationNumber } : null, job ? { label: "Job card", value: job.job_number } : null]} />
       <InfoBoxes
         boxes={[
           { title: "Received from", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? customer.full_name : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
@@ -164,7 +164,7 @@ export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBund
       />
       <LinesTable title="Payment" lines={[line]} currency={currency} vatPercent={0} subtotalLabel="Amount received" />
       <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: px(4) }}>
-        <TotalsBlock currency={currency} rows={[]} total={{ label: "Received", value: payment.amount_aed }} status={pending ? { title: "Cheque pending clearance", value: payment.amount_aed } : { title: "Received with thanks", value: payment.amount_aed, note: invoice ? (invoiceBalance(invoice.invoice, invoice.payments).balance > 0 ? `Balance remaining on the invoice ${invoiceBalance(invoice.invoice, invoice.payments).balance.toFixed(2)}` : "Invoice paid in full") : null }} />
+        <TotalsBlock currency={currency} rows={[]} total={{ label: "Received", value: payment.amount_aed }} status={pending ? { title: "Cheque pending clearance", value: payment.amount_aed } : { title: "Received with thanks", value: payment.amount_aed, note: invoice ? (invoiceBalance(invoice.invoice, invoice.payments).balance > 0 ? `Balance remaining on the invoice ${invoiceBalance(invoice.invoice, invoice.payments).balance.toFixed(2)}` : "Invoice paid in full") : deposit ? (deposit.balance > 0 ? `Balance remaining AED ${deposit.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : "Quotation covered in full") : null }} />
       </View>
       <View style={{ marginTop: px(14) }} wrap={false}>
         <Text style={styles.smallTitle}>Amount in words</Text>

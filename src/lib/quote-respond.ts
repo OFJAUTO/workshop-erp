@@ -8,6 +8,7 @@ import { ensureWorkLines } from "./work-data";
 import { LINE_SELECT, PART_SELECT, logQuoteEvent, refreshQuoteTotals, toLine, toPart } from "./quote-data";
 import { aed, isUnchosen, type QuoteLine, type QuoteRow } from "./quotes";
 import { getSettings } from "./settings";
+import { formatPlate } from "./types";
 
 /** Everyone who should hear about a customer's answer: the advisor(s) of the job and the person who sent it. */
 export async function advisorsOf(q: Pick<QuoteRow, "job_id" | "created_by" | "sent_by">): Promise<string[]> {
@@ -156,6 +157,18 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   else if (!extra) await notifyRoles(["parts"], { type: "planning", title: `Send the LPO for approval · ${job.job_number}`, body: `${answer.name} approved ${q.number}. The approved parts are on the Parts list: open the car and press Send LPO for approval.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
   else if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `${answer.name} approved additional work. Open the car and press Send LPO for approval.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
   if (job.assigned_to && extra) await notifyStaff([job.assigned_to], { type: "quote_approved", title: `Additional work approved · ${job.job_number}`, body: "The customer approved the additional work. The new lines are on your work order.", jobId: job.id, href: `/my-jobs/${job.id}` });
+  // A deposit was asked for on the quotation: the advisor and accounts collect it; the LPO waits for it.
+  const { data: dq } = await admin.from("quotations").select("deposit_aed").eq("id", quotationId).maybeSingle();
+  const depositAed = Number(dq?.deposit_aed) || 0;
+  if (depositAed > 0) {
+    const { data: jc } = await admin.from("jobs").select("customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant)").eq("id", job.id).maybeSingle();
+    const jcv = jc as unknown as { customer: { full_name: string; company_name: string | null } | null; vehicle: Parameters<typeof formatPlate>[0] | null } | null;
+    const plate = jcv?.vehicle ? formatPlate(jcv.vehicle) : job.job_number;
+    const who = jcv?.customer?.company_name ?? jcv?.customer?.full_name ?? answer.name;
+    const msg = { type: "deposit_to_collect", title: `Deposit AED ${depositAed.toLocaleString("en-GB")} to collect: ${plate}, ${who}`, body: `${q.number} approved by ${answer.name}. Record the deposit on the job's money page; the LPO waits for it.`, jobId: job.id, href: `/jobs/${job.id}/invoice` };
+    await notifyStaff(advisors, msg);
+    await notifyRoles(["accounts"], msg);
+  }
   return { status };
 }
 

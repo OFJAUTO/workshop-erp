@@ -5,6 +5,7 @@ import { notifyRoles, notifyStaff } from "./notifications";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { round2 } from "./quotes";
+import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 
 type Actor = { id: string; display_name: string } | null;
@@ -77,7 +78,7 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   // Deposits recorded before the proforma count against it.
   await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);
   // A bodyshop deposit proforma folds into this one: its payments move across and it drops out of the balance.
-  const { data: deposits } = await admin.from("invoices").select("id").eq("job_id", jobId).eq("kind", "proforma").eq("is_active", true).is("converted_to", null).not("deposit_for_quotation_id", "is", null).neq("id", inv.id);
+  const { data: deposits } = await admin.from("invoices").select("id").eq("job_id", jobId).in("kind", ["proforma", "tax_invoice"]).eq("is_active", true).is("converted_to", null).not("deposit_for_quotation_id", "is", null).neq("id", inv.id);
   for (const d of deposits ?? []) {
     await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("invoice_id", d.id).eq("is_active", true);
     await admin.from("invoices").update({ converted_to: inv.id, updated_by: by }).eq("id", d.id);
@@ -166,6 +167,48 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
  * A tax invoice for one charge on a declined job (for example DIAGNOSIS): issued at once, paid before the car leaves
  * like any invoice. Nothing comes from a quotation.
  */
+/**
+ * Settings "Deposit document: Tax invoice for the deposit": a tax invoice for the advance payment, VAT taken out of the
+ * amount paid, the deposit payment attached to it. It folds into the final proforma like a deposit proforma, and the
+ * final tax invoice shows "Less deposit invoiced (INV-…)".
+ */
+export async function createDepositInvoice(jobId: string, paymentId: string, amount: number, actor: { id: string | null; display_name: string } | null, settings: Settings): Promise<{ id: string; number: string } | { error: string }> {
+  const admin = createAdminClient();
+  const [{ data: job }, quotes] = await Promise.all([admin.from("jobs").select("id, job_number, customer_id, vehicle_id, gated_in_by").eq("id", jobId).maybeSingle(), approvedQuotations(jobId)]);
+  if (!job) return { error: "Job not found." };
+  const q = quotes[0] ?? null;
+  const vatPercent = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
+  const total = round2(amount);
+  if (!(total > 0)) return { error: "No amount." };
+  const taxable = round2(total / (1 + vatPercent / 100));
+  const vat = round2(total - taxable);
+  const [{ data: customer }, { data: vehicle }] = await Promise.all([
+    admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", job.customer_id).maybeSingle(),
+    admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", job.vehicle_id).maybeSingle(),
+  ]);
+  const v = vehicle as unknown as { kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
+  const number = await nextDocumentNumber("tax_invoice", settings);
+  const token = newToken();
+  const by = actor?.id ?? job.gated_in_by ?? null;
+  const description = `Advance payment (deposit)${q ? ` against quotation ${q.number}` : ""}`;
+  const { data: inv, error } = await admin
+    .from("invoices")
+    .insert({
+      number, kind: "tax_invoice", job_id: jobId, customer_id: job.customer_id, vehicle_id: job.vehicle_id, token, labour_mode: "itemised",
+      subtotal_aed: taxable, discount_aed: 0, taxable_aed: taxable, vat_aed: vat, total_aed: total, agreed_total_aed: null, warranty_credit_aed: 0,
+      issue_reason: "Advance payment (deposit)", deposit_for_quotation_id: q?.id ?? null, prepared_by: job.gated_in_by, issued_by: by, customer_snapshot: customer ?? null,
+      vehicle_snapshot: v ? (v.kind === "loose" ? { title: "Items", variant: null, plate: v.variant ?? "Loose items", vin: null } : { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: v.variant, plate: formatPlate(v), vin: v.vin }) : null,
+      created_by: by, updated_by: by,
+    })
+    .select("id, number")
+    .single();
+  if (error || !inv) return { error: error?.message ?? "Could not make the deposit invoice." };
+  await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: taxable, amount_aed: taxable, vat_aed: vat, total_aed: total, cost_aed: null, quotation_line_id: null, part_item_id: null });
+  await admin.from("payments").update({ invoice_id: inv.id, deposit_invoice_number: inv.number, updated_by: by }).eq("id", paymentId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for the deposit (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
+  return { id: inv.id as string, number: inv.number as string };
+}
+
 export async function createChargeInvoice(jobId: string, actor: Actor, settings: Settings, charge: { description: string; amount: number }): Promise<{ id: string; number: string; token: string; total: number } | { error: string }> {
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, gated_in_by").eq("id", jobId).maybeSingle();

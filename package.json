@@ -27,7 +27,8 @@
     "test:p": "node --env-file=.env.local tests/browser/test-p.mjs",
     "test:q": "node --env-file=.env.local tests/browser/test-q.mjs",
     "test:r": "node --env-file=.env.local tests/browser/test-r.mjs",
-    "test:s": "node --env-file=.env.local tests/browser/test-s.mjs"
+    "test:s": "node --env-file=.env.local tests/browser/test-s.mjs",
+    "test:t": "node --env-file=.env.local tests/browser/test-t.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

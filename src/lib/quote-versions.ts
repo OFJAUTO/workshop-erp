@@ -1,4 +1,4 @@
-import { notifyStaff } from "@/lib/notifications";
+import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, loadQuotation, logQuoteEvent, minMarkupFor, parentLineFor, refreshQuoteTotals, toLine, toPart } from "@/lib/quote-data";
 import { blockOf, isHidden, type QuoteLine } from "@/lib/quotes";
 import { newToken } from "@/lib/media";
@@ -14,7 +14,7 @@ export const COPY_FIELDS = (l: QuoteLine) => ({
   discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer,
   urgency: l.urgency, advisor_added: l.advisor_added, part_type: l.part_type, brand: l.brand, option_group: l.option_group, chosen: l.chosen, recovery_trips: l.recovery_trips,
   recovery_provider: l.recovery_provider, dangerous: l.dangerous, recovery_provider_kind: l.recovery_provider_kind, markup_confirmed: l.markup_confirmed,
-  price_per: l.price_per ?? null, left_off: l.left_off ?? false, recovery_type: l.recovery_type ?? null, hours_estimate: l.hours_estimate ?? null,
+  price_per: l.price_per ?? null, left_off: l.left_off ?? false, outside_work: l.outside_work ?? false, recovery_type: l.recovery_type ?? null, hours_estimate: l.hours_estimate ?? null,
   film_colour: l.film_colour ?? null, film_code: l.film_code ?? null, tint_percent: l.tint_percent ?? null, recovery_paid_by: l.recovery_paid_by ?? null, recovery_mention_free: l.recovery_mention_free ?? false,
 });
 
@@ -68,19 +68,39 @@ export async function createNextVersion(quotationId: string, by: VersionActor, o
  * Where a part change lands on the job's quotation: the open draft when there is one; otherwise the next version is
  * started from the latest sent or approved one, and the advisor is told to send it. Parts never think about versions.
  */
-export async function quoteTargetFor(jobId: string, by: string | null): Promise<{ id: string; created: boolean } | null> {
+export async function quoteTargetFor(jobId: string, by: string | null, change?: string): Promise<{ id: string; created: boolean } | null> {
   const admin = createAdminClient();
-  const { data: latest } = await admin.from("quotations").select("id, number, version, status, job_id, created_by, sent_by").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).neq("status", "cancelled").order("version", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: latest } = await admin.from("quotations").select("id, number, version, status, job_id, created_by, sent_by, revision_allowed_at, revision_requested_at, revision_declined_at").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).neq("status", "cancelled").order("version", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!latest) return null;
   if (latest.status === "draft" || latest.status === "pending_owner") return { id: latest.id, created: false };
   if (!REVISABLE.includes(latest.status)) return null;
   const { data: who } = by ? await admin.from("staff").select("display_name").eq("id", by).maybeSingle() : { data: null };
-  const r = await createNextVersion(latest.id, { id: by ?? latest.created_by ?? "", display_name: who?.display_name ?? "Parts" }, { reason: "parts changed" });
+  // The customer approved this quotation: a change from Parts needs the owner's one-time permission first; the owner is asked, the part waits.
+  if (latest.status === "approved" && !latest.revision_allowed_at) {
+    await askOwnerForRevision({ id: latest.id, number: latest.number, job_id: jobId, pending: !!latest.revision_requested_at && !latest.revision_declined_at }, by, who?.display_name ?? "Parts", change ?? "Parts changed the priced parts");
+    return null;
+  }
+  const r = await createNextVersion(latest.id, { id: by ?? latest.created_by ?? "", display_name: who?.display_name ?? "Parts" }, { reason: latest.status === "approved" ? "parts changed, allowed by the owner" : "parts changed" });
   if ("error" in r) return null;
+  // The permission covers one revision.
+  if (latest.status === "approved") await admin.from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, updated_by: by }).eq("id", latest.id);
   const { data: job } = await admin.from("jobs").select("job_number, gated_in_by").eq("id", jobId).maybeSingle();
   const ids = Array.from(new Set([job?.gated_in_by, latest.created_by, latest.sent_by].filter((x): x is string => !!x)));
   await notifyStaff(ids, { type: "quote_revised_by_parts", title: `Parts changed on ${job?.job_number ?? ""}: send the revised quotation`, body: `${latest.number} version ${r.version} is ready with the change from Parts. Check it and send it to the customer.`, jobId, href: `/jobs/${jobId}/quote/${r.id}?send=1` });
   return { id: r.id, created: true };
+}
+
+/**
+ * A revision of an approved quotation is asked of the owner (the advisor's reason, or what Parts changed). One open
+ * request at a time: a second change while the first waits adds nothing. The owner answers on the quotation page.
+ */
+export async function askOwnerForRevision(q: { id: string; number: string; job_id: string | null; pending: boolean }, by: string | null, byName: string, reason: string, kind: "advisor" | "parts" = "parts") {
+  if (q.pending) return;
+  const admin = createAdminClient();
+  await admin.from("quotations").update({ revision_requested_at: new Date().toISOString(), revision_requested_by: by, revision_request_reason: reason.slice(0, 300), revision_request_kind: kind, revision_allowed_at: null, revision_allowed_by: null, revision_declined_at: null, revision_declined_by: null, revision_decision_note: null, updated_by: by }).eq("id", q.id);
+  await logQuoteEvent(q.id, q.job_id, by, "revision_requested", `${q.number}: ${byName} asks to revise the approved quotation: ${reason}`);
+  const { data: job } = q.job_id ? await admin.from("jobs").select("job_number").eq("id", q.job_id).maybeSingle() : { data: null };
+  await notifyRoles(["owner"], { type: "revision_request", title: kind === "parts" ? `${reason}: allow revised quote?` : `Allow a revised quotation? ${q.number}${job ? ` · ${job.job_number}` : ""}`, body: kind === "parts" ? `${q.number} was approved by the customer. Allow one revision, or decline.` : `${byName}: ${reason}`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}?revise=1` : `/estimates/${q.id}` });
 }
 
 /** The priced parts of a job (Our stock included) with no line on the given quotation. */
@@ -107,7 +127,17 @@ export async function syncMissingParts(jobId: string, quotationId: string, by: s
  */
 export async function syncPartLine(jobId: string, partId: string, by: string | null, quotationId?: string): Promise<{ quotationId: string | null; created: boolean; change: "added" | "changed" | "removed" | null }> {
   const admin = createAdminClient();
-  const target = quotationId ? { id: quotationId, created: false } : await quoteTargetFor(jobId, by);
+  // What changed, in words, in case the owner has to be asked (the quotation was approved by the customer).
+  let changeWords: string | undefined;
+  if (!quotationId) {
+    const [{ data: p0 }, { data: who0 }, { data: onQuote }] = await Promise.all([
+      admin.from("part_items").select("description, cost_aed").eq("id", partId).maybeSingle(),
+      by ? admin.from("staff").select("display_name").eq("id", by).maybeSingle() : Promise.resolve({ data: null }),
+      admin.from("quotation_lines").select("id").eq("part_item_id", partId).eq("is_active", true).limit(1),
+    ]);
+    if (p0) changeWords = `${who0?.display_name ?? "Parts"} ${(onQuote ?? []).length ? "changed" : "added"} ${String(p0.description).toUpperCase()}${p0.cost_aed !== null && p0.cost_aed !== undefined ? `, AED ${Number(p0.cost_aed).toLocaleString("en-GB")}` : ""}`;
+  }
+  const target = quotationId ? { id: quotationId, created: false } : await quoteTargetFor(jobId, by, changeWords);
   if (!target) return { quotationId: null, created: false, change: null };
   const qid = target.id;
   const [{ data: pRaw }, { data: line }] = await Promise.all([

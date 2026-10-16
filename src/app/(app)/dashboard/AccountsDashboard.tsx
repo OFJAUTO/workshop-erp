@@ -6,6 +6,7 @@ import type { CurrentStaff } from "@/lib/auth";
 import { formatDayTime } from "@/lib/format";
 import { METHOD_LABELS } from "@/lib/invoice-data";
 import { loadCounterPaymentsToConfirm, loadMoneyRows, loadMoneyTiles, type MoneyTiles } from "@/lib/money-data";
+import { depositsNotInvoiced } from "@/lib/deposits";
 import type { Settings } from "@/lib/settings";
 import { verifyPaymentAction } from "@/app/(app)/invoices/actions";
 
@@ -65,6 +66,7 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
   const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Dubai" }).format(new Date());
   const awaiting = rows.filter((r) => r.state.current === "payment");
   const others = rows.filter((r) => r.state.current !== "payment");
+  const deposits = await depositsNotInvoiced();
   return (
     <>
       <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders"]} pollMs={60000} />
@@ -72,6 +74,23 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} />
       <CounterPaymentsCard canConfirm={!staff.viewingAs} returnTo="/dashboard" />
+      {deposits.length ? (
+        <section className="flex flex-col gap-3" data-deposits-not-invoiced>
+          <SectionLabel right={`${deposits.length}`}>Deposits received, not yet on an invoice</SectionLabel>
+          <Card className="flex flex-col divide-y divide-line">
+            {deposits.map((d) => (
+              <div key={d.id} className="py-2 flex flex-wrap items-center gap-3 text-sm" data-deposit-not-invoiced={d.number}>
+                <span className="font-bold">{d.plate}</span>
+                <span className="text-muted">{d.customer}</span>
+                <span>{d.number} · {METHOD_LABELS[d.method]} · {formatDayTime(d.received_at)}</span>
+                <span className="ml-auto font-semibold">{money(d.amount_aed)}</span>
+                <LinkButton href={`/jobs/${d.job_id}/invoice`} tone="secondary" size="md">Money page</LinkButton>
+              </div>
+            ))}
+          </Card>
+          <p className="text-xs text-muted">A deposit lands on the proforma the moment it is prepared, and on the tax invoice as &quot;Less deposit received&quot;.</p>
+        </section>
+      ) : null}
       <section className="flex flex-col gap-3" data-awaiting-payment>
         <SectionLabel right={`${awaiting.length}`}>Awaiting payment</SectionLabel>
         {awaiting.length === 0 ? <p className="text-sm text-muted">Nothing outstanding.</p> : awaiting.map((r) => <MoneyRow key={r.jobId} r={r} />)}

@@ -20,6 +20,7 @@ export function ServicePicker({
   usage,
   department,
   onDone,
+  onSaveCustom,
   onClose,
   suggested = [],
   allowCustom = true,
@@ -33,6 +34,8 @@ export function ServicePicker({
   department: string | null;
   /** The picked items in the order they were tapped, then any names typed by hand. */
   onDone: (picked: Service[], custom: string[]) => void;
+  /** "Add and save to the list": the typed name joins the services list (category Custom) as well as the quotation. */
+  onSaveCustom?: (name: string) => void;
   onClose: () => void;
   /** Services that fit the report's findings, shown first. */
   suggested?: Service[];
@@ -109,9 +112,16 @@ export function ServicePicker({
               </button>
             ))}
             {q && !exact && allowCustom ? (
-              <button type="button" onClick={() => { setCustom((cur) => [...cur, query.trim()]); setQuery(""); }} className="min-h-12 rounded-control border border-dashed border-line-strong px-3 text-left text-sm font-bold">
-                + Add &quot;{query.trim()}&quot; as typed
-              </button>
+              <div className="flex flex-col gap-1">
+                <button type="button" onClick={() => { setCustom((cur) => [...cur, query.trim()]); setQuery(""); }} className="min-h-12 rounded-control border border-dashed border-line-strong px-3 text-left text-sm font-bold">
+                  + Add &quot;{query.trim()}&quot; as typed
+                </button>
+                {onSaveCustom ? (
+                  <button type="button" onClick={() => { const name = query.trim(); setCustom((cur) => [...cur, name]); setQuery(""); onSaveCustom(name); }} className="min-h-12 rounded-control border border-dashed border-green px-3 text-left text-sm font-bold text-green" data-save-custom>
+                    + Add &quot;{query.trim()}&quot; and save it to the list
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>

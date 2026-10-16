@@ -49,7 +49,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   ]);
   const depositRequired = Number(q?.deposit_aed) || 0;
   const depositReceived = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + p.amount_aed, 0);
-  const depositShort = depositRequired > 0 && depositReceived + 0.005 < depositRequired ? `Quotation ${q?.number} needs a deposit of AED ${depositRequired.toLocaleString("en-GB")}; AED ${depositReceived.toLocaleString("en-GB")} received. Record the deposit first.` : null;
+  const depositShort = depositRequired > 0 && depositReceived + 0.005 < depositRequired ? `Deposit AED ${depositRequired.toLocaleString("en-GB")} not received yet${depositReceived > 0 ? ` (AED ${depositReceived.toLocaleString("en-GB")} received so far)` : ""}. Quotation ${q?.number}.` : null;
   const canApprove = can(role, "approvePurchaseOrders") && (role === "owner" || staff.is_head_accountant) && !staff.viewingAs;
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;

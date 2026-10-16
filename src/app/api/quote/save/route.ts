@@ -2,7 +2,7 @@ import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
-import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine } from "@/lib/quote-data";
+import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -20,6 +20,8 @@ type LinePatch = {
   hours?: number | string | null;
   /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours. */
   hours_estimate?: number | string | null;
+  /** A service done outside: its cost is typed, never in the labour discount. */
+  outside_work?: boolean;
   /** Bodyshop lines: film colour and code, or the tint shade. */
   film_colour?: string | null;
   film_code?: string | null;
@@ -59,7 +61,7 @@ type Body = {
   /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
   removeLine?: { id: string; keepParts?: boolean; withParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ materials_cost_aed?: number | string | null; commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
+  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ materials_cost_aed?: number | string | null; commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -157,6 +159,7 @@ export async function POST(request: NextRequest) {
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
     if (p.hours_estimate !== undefined) out.hours_estimate = p.hours_estimate === null || p.hours_estimate === "" ? null : parseHours(p.hours_estimate);
+    if (p.outside_work !== undefined) out.outside_work = !!p.outside_work;
     if (p.film_colour !== undefined) out.film_colour = p.film_colour ? String(p.film_colour).trim().slice(0, 60) || null : null;
     if (p.film_code !== undefined) out.film_code = p.film_code ? String(p.film_code).trim().slice(0, 40) || null : null;
     if (p.tint_percent !== undefined) { const tp = n(p.tint_percent); out.tint_percent = tp === null ? null : Math.min(100, Math.max(1, Math.round(tp))); }
@@ -458,6 +461,15 @@ export async function POST(request: NextRequest) {
       const v = n(h.discount_value) ?? 0;
       if (!kind || v <= 0) Object.assign(patch, { discount_kind: null, discount_value: null, discount_percent: 0 });
       else Object.assign(patch, { discount_kind: kind, discount_value: kind === "percent" ? Math.min(100, v) : v, discount_percent: 0 });
+    }
+    // The deposit the advisor asks for: none, a fixed amount, a share of the parts or of the total. Written down with who and when.
+    if (h.deposit_mode !== undefined || h.deposit_value !== undefined) {
+      const { data: curQ } = await admin.from("quotations").select("deposit_mode, deposit_value, number, version").eq("id", q.id).maybeSingle();
+      const mode = h.deposit_mode === undefined ? ((curQ?.deposit_mode as string | null) ?? "none") : ["none", "aed", "percent_parts", "percent_total"].includes(String(h.deposit_mode)) ? String(h.deposit_mode) : "none";
+      const raw = h.deposit_value === undefined ? (curQ?.deposit_value === null || curQ?.deposit_value === undefined ? null : Number(curQ.deposit_value)) : n(h.deposit_value);
+      const value = mode === "none" ? null : raw === null ? null : Math.max(0, mode === "aed" ? raw : Math.min(100, raw));
+      Object.assign(patch, { deposit_mode: mode, deposit_value: value, deposit_set_by: staff.id, deposit_set_at: new Date().toISOString(), ...(mode !== "none" ? { deposit_skipped_at: null, deposit_skipped_by: null } : {}) });
+      if (h.deposit_mode !== undefined && h.deposit_mode !== curQ?.deposit_mode) await logQuoteEvent(q.id, q.job_id, staff.id, "deposit_set", `${curQ?.number ?? ""} v${curQ?.version ?? ""}: deposit ${mode === "none" ? "switched off" : mode === "aed" ? `AED ${value ?? 0}` : `${value ?? 0}% of ${mode === "percent_parts" ? "parts" : "total"}`} by ${staff.display_name}`);
     }
     // What the discount comes off: our labour only (default), or labour and our own services as well.
     if (h.discount_scope !== undefined) patch.discount_scope = h.discount_scope === "labour_services" ? "labour_services" : "labour";

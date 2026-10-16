@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/components/PartPicker";
 import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
@@ -13,7 +13,7 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
-import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation } from "@/app/(app)/quotes/actions";
+import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
 
 type Op = Record<string, unknown>;
@@ -221,6 +221,10 @@ export function QuoteEditor({
   wait = null,
   workshopEstimate = null,
   onRevise = null,
+  onAskRevise = null,
+  revision = null,
+  reviseReasons = [],
+  ownerBox = null,
   autoSend = false,
   completedAt = null,
   estimatedDays = 0,
@@ -257,6 +261,14 @@ export function QuoteEditor({
   workshopEstimate?: { hours: number | null; managerHours: number | null; agreed: boolean } | null;
   /** "Revise quotation" in the bottom bar once the quotation was sent. */
   onRevise?: ((formData: FormData) => Promise<void>) | null;
+  /** The customer approved: the advisor asks the owner for one revision (greyed Revise). */
+  onAskRevise?: ((formData: FormData) => Promise<void>) | null;
+  /** The revision request and the owner's answer, for the words in the bar. */
+  revision?: { requestedAt: string | null; requestedBy: string | null; reason: string | null; allowedAt: string | null; declinedAt: string | null; declinedNote: string | null } | null;
+  /** One-tap reasons for the revision request (Settings). */
+  reviseReasons?: string[];
+  /** The owner's approval box (above the limit) or the revision request, shown under "Before sending". */
+  ownerBox?: ReactNode;
   /** Arriving from "send the revised quotation": complete and open the send window by itself. */
   autoSend?: boolean;
   completedAt?: string | null;
@@ -271,10 +283,14 @@ export function QuoteEditor({
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuUp, setMenuUp] = useState(false);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null });
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
+  const [depositAsk, setDepositAsk] = useState<string | null>(null);
+  const [reviseAsk, setReviseAsk] = useState(false);
+  // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
+  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean }>({});
   const [partsAsk, setPartsAsk] = useState<{ message: string; missing: string[] } | null>(null);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
   const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
@@ -303,6 +319,7 @@ export function QuoteEditor({
   const { save, state, error } = useQuoteAutosave(quotation.id, refresh, onConfirm);
   const lockedName = lockedBy ?? lockLive;
   const disabled = readOnly || !!lockedName;
+  const depositOn = !!header.deposit_mode && header.deposit_mode !== "none";
   const isQuotation = quotation.kind === "quotation";
 
   // Lines changed elsewhere (Parts pricing a part, a refused save, a new line) arrive on refresh; local edits of known lines are kept.
@@ -436,10 +453,15 @@ export function QuoteEditor({
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
   const completed = !!completedAt;
   /** Quotation complete, with the one-time markup reminder when every part is still at the minimum markup. */
-  const completeNow = (skipMarkup: boolean, skipParts = false) => run(async () => {
-    const r = await completeQuotation(quotation.id, { skipMarkup, skipParts });
+  const completeNow = (skipMarkup: boolean, skipParts = false, skipDeposit = false) => run(async () => {
+    if (skipMarkup) skips.current.skipMarkup = true;
+    if (skipParts) skips.current.skipParts = true;
+    if (skipDeposit) skips.current.skipDeposit = true;
+    const r = await completeQuotation(quotation.id, { ...skips.current });
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
+    if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
+    if (r.ok) skips.current = {};
     return r;
   });
   /** "Add them": the missing priced parts join the quotation, then the completion runs again. */
@@ -447,9 +469,11 @@ export function QuoteEditor({
     setPartsAsk(null);
     const a = await addMissingParts(quotation.id);
     if (a.error) return a;
-    const r = await completeQuotation(quotation.id, {});
+    const r = await completeQuotation(quotation.id, { ...skips.current });
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
+    if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
+    if (r.ok) skips.current = {};
     return r;
   });
   // Arriving from "send the revised quotation": complete it (when not yet) so the send window can open.
@@ -494,7 +518,7 @@ export function QuoteEditor({
       setFocusTarget({ id: lineId, field: "amount" });
       return;
     }
-    patch(lineId, { title: s.name, service_id: s.id, line_type: fixed ? "package" : "labour", unit_price: fixed ? s.price_aed : null, price_per: fixed ? (s.price_per ?? "job") : null, quantity: fixed ? Math.max(1, Math.round(Number(s.usual_quantity) || 1)) : 1, ...(!fixed ? { hours: s.default_hours ?? null } : {}) }, true);
+    patch(lineId, { title: s.name, service_id: s.id, line_type: fixed ? "package" : "labour", outside_work: fixed && !!s.outside_work, unit_price: fixed ? s.price_aed : null, price_per: fixed ? (s.price_per ?? "job") : null, quantity: fixed ? Math.max(1, Math.round(Number(s.usual_quantity) || 1)) : 1, ...(!fixed ? { hours: s.default_hours ?? null } : {}) }, true);
     setFocusTarget({ id: lineId, field: "amount" });
   };
   const applyCustom = (lineId: string, title: string) => {
@@ -635,8 +659,8 @@ export function QuoteEditor({
                 <Input id={`amount-${l.id}`} data-amount value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label={perUnit ? `Price per ${l.price_per}` : "Price"} placeholder="0" className={`w-24 text-right min-h-10 px-1 ${blocked && !(l.unit_price && l.unit_price > 0) ? "border-red-bar" : ""}`} />
                 <span className="text-[11px] font-semibold text-muted">AED</span>
               </span>
-              {showProfit && isService ? (
-                <label className="inline-flex items-center gap-1" title="What this outside work costs us: never shown to the customer, counted against profit">
+              {isService && (showProfit || l.outside_work) ? (
+                <label className="inline-flex items-center gap-1" title="What this outside work costs us: never shown to the customer, counted against profit" data-our-cost>
                   <span className="text-[10px] font-semibold text-muted">our cost</span>
                   <Input value={num(l.unit_cost)} placeholder="0" onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our cost" className="w-16 text-right min-h-10 px-1 text-xs" data-our-cost />
                 </label>
@@ -1066,8 +1090,38 @@ export function QuoteEditor({
             <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
             <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
             <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold">{aed(totals.total)}</dd>
-            {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold">{aed(totals.deposit)}</dd></> : null}
+            {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold" data-deposit-row>{aed(totals.deposit)}</dd></> : null}
           </dl>
+          {isQuotation ? (
+            <div className="flex flex-col gap-2 border-t border-line pt-3" data-deposit-box>
+              <label className="flex items-center gap-3 min-h-10 cursor-pointer text-sm font-bold">
+                <input type="checkbox" className="h-5 w-5 accent-ink" disabled={disabled} checked={depositOn} onChange={(e) => setHeaderField(e.target.checked ? { deposit_mode: "aed", deposit_value: totals.depositSuggested || null } : { deposit_mode: "none", deposit_value: null }, true)} data-deposit-switch />
+                Ask for a deposit
+              </label>
+              {!depositOn && totals.depositSuggested ? <p className="text-xs text-muted" data-deposit-hint>Suggested: {aed(totals.depositSuggested)} ({settings.depositPercent}% of parts, parts above {aed(settings.depositThreshold)}). The owner changes this rule in Settings.</p> : null}
+              {depositOn ? (
+                <>
+                  <div className="flex flex-wrap gap-1" data-deposit-chips>
+                    {([["percent_parts", 50, "50% of parts"], ["percent_parts", 100, "100% of parts"], ["percent_total", 50, "50% of total"]] as const).map(([mode, v, label]) => (
+                      <button key={label} type="button" disabled={disabled} aria-pressed={header.deposit_mode === mode && Number(header.deposit_value) === v} onClick={() => setHeaderField({ deposit_mode: mode, deposit_value: v }, true)} className={`min-h-8 rounded-control border px-2.5 text-xs font-semibold ${header.deposit_mode === mode && Number(header.deposit_value) === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex overflow-hidden rounded-control border border-line-strong" data-deposit-unit>
+                      <button type="button" disabled={disabled} aria-pressed={header.deposit_mode === "aed"} onClick={() => setHeaderField({ deposit_mode: "aed", deposit_value: totals.deposit || null }, true)} className={`min-h-9 px-3 text-xs font-bold ${header.deposit_mode === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
+                      <button type="button" disabled={disabled} aria-pressed={header.deposit_mode !== "aed"} onClick={() => setHeaderField({ deposit_mode: header.deposit_mode === "percent_parts" ? "percent_parts" : "percent_total", deposit_value: header.deposit_mode === "aed" && totals.total > 0 && header.deposit_value ? Math.min(100, Math.round((Number(header.deposit_value) / totals.total) * 100)) : header.deposit_value ?? 50 }, true)} className={`min-h-9 px-3 text-xs font-bold ${header.deposit_mode !== "aed" ? "bg-ink text-white" : "bg-white"}`}>%</button>
+                    </span>
+                    <Input value={header.deposit_value === null || header.deposit_value === undefined ? "" : String(header.deposit_value)} onChange={(e) => setHeaderField({ deposit_value: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Deposit" className="w-28" style={{ width: "7rem" }} data-deposit-value />
+                    {header.deposit_mode !== "aed" ? <span className="text-xs text-muted">of {header.deposit_mode === "percent_parts" ? "parts" : "total"}</span> : null}
+                    <span className="ml-auto text-sm font-bold" data-deposit-amount>= {aed(totals.deposit)}</span>
+                  </div>
+                  {totals.depositSuggested ? <p className="text-xs text-muted">Suggested: {aed(totals.depositSuggested)} ({settings.depositPercent}% of parts above {aed(settings.depositThreshold)}).</p> : null}
+                </>
+              ) : null}
+            </div>
+          ) : null}
           {settings.discountLimit > 0 && totals.discountBase > 0 && (totals.discount / totals.discountBase) * 100 > settings.discountLimit + 0.001 ? <p className="text-xs font-semibold text-amber">Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
           {showProfit ? (
             <div className="flex flex-col gap-1 rounded-control bg-chip p-3">
@@ -1171,6 +1225,7 @@ export function QuoteEditor({
           ) : null}
           {fromEstimate && !sent ? <p className="text-xs text-muted">From an accepted estimate: if nothing changed, confirm it below instead of sending again.</p> : null}
         </Card>
+        {ownerBox}
       </div>
 
       {picker ? (
@@ -1183,6 +1238,7 @@ export function QuoteEditor({
           department={department}
           suggested={suggestedFor(picker.sourceKey ? (reference?.findings.find((f) => f.sourceKey === picker.sourceKey)?.keys ?? (picker.sourceKey.startsWith("road:") ? [picker.sourceKey] : [])) : referenceKeys)}
           onDone={fromPicker}
+          onSaveCustom={async (name) => { const r = await saveCustomService(name, picker.kind === "service" ? "service" : "labour"); if (r.error) setActionError(r.error); else refreshWhenIdle(() => router.refresh()); }}
           editHref={editHref(picker.kind)}
           onClose={() => setPicker(null)}
         />
@@ -1226,6 +1282,30 @@ export function QuoteEditor({
               <Button type="button" tone="ghost" size="md" onClick={() => setPartsAsk(null)}>Cancel</Button>
             </div>
           </div>
+        </div>
+      ) : null}
+      {depositAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-deposit-ask>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">{depositAsk}</span>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => { setDepositAsk(null); setHeaderField({ deposit_mode: "aed", deposit_value: totals.depositSuggested || null }, true); document.querySelector<HTMLElement>("[data-deposit-box]")?.scrollIntoView({ block: "center", behavior: "smooth" }); }} data-deposit-add>Add deposit</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { setDepositAsk(null); completeNow(false, false, true); }} data-deposit-skip>Send without deposit</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {reviseAsk && onAskRevise ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-revise-ask>
+          <form action={onAskRevise} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">Ask the owner to allow a revision</span>
+            <p className="text-sm text-muted">The customer approved this quotation. Say why it has to change; the owner allows one revision or declines.</p>
+            <ReasonChips name="reason" label="Why?" rows={2} options={reviseReasons} required placeholder="Tap a reason, or type" />
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" size="md" data-ask-revise-send>Ask the owner</Button>
+              <Button type="button" tone="ghost" size="md" onClick={() => setReviseAsk(false)}>Cancel</Button>
+            </div>
+          </form>
         </div>
       ) : null}
       {markupAsk ? (
@@ -1276,6 +1356,18 @@ export function QuoteEditor({
               ) : null}
               {!sent && completed && canSend ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
               {canSend && sent && onRevise ? <form action={onRevise}><Button type="submit" tone="secondary" size="md" data-revise-bar>Revise quotation</Button></form> : null}
+              {canSend && sent && !onRevise && onAskRevise ? (
+                <span className="inline-flex flex-wrap items-center gap-2" data-ask-revise-bar>
+                  <Button type="button" tone="secondary" size="md" disabled className="opacity-50" title="The customer approved this quotation: the owner must allow a revision">Revise quotation</Button>
+                  {revision?.requestedAt && !revision.allowedAt && !revision.declinedAt ? (
+                    <span className="text-xs font-semibold text-amber" data-revise-pending>Owner asked {formatDayTime(revision.requestedAt)}, waiting</span>
+                  ) : (
+                    <Button type="button" size="md" onClick={() => setReviseAsk(true)} data-ask-revise>Ask owner to revise</Button>
+                  )}
+                  {revision?.declinedAt ? <span className="text-xs font-semibold text-red" data-revise-declined>Declined by the owner{revision.declinedNote ? `: ${revision.declinedNote}` : ""}</span> : null}
+                </span>
+              ) : null}
+              {canSend && sent && onRevise && revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
               {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} again /> : null}
             </span>
           </div>

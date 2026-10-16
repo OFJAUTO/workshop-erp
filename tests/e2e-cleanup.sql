@@ -90,6 +90,10 @@ begin
   delete from public.inbound_emails where from_email like 'e2e%' or subject like 'e2e %';
 end $$;
 set session_replication_role = default;
+-- Services saved from a quotation during the tests.
+set session_replication_role = replica;
+delete from public.services where name ilike 'E2e custom job%';
+set session_replication_role = default;
 select count(*) as left_over_ui from public.customers where phone like '+9715000000%';
 -- Test services and the test customer's leftovers.
 set session_replication_role = replica;

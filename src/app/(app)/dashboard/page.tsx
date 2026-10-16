@@ -21,6 +21,7 @@ import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { AccountsDashboard } from "./AccountsDashboard";
 import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
+import { DepositsWaiting } from "./DepositsWaiting";
 import { WaitingPanel } from "@/components/WaitingPanel";
 
 type Row = JobRow & {
@@ -175,6 +176,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           comebacksAed={profit.comebacks}
         />
       ) : null}
+
+      {role === "owner" ? <DepositsWaiting /> : null}
 
       {role === "service_advisor" || role === "owner" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

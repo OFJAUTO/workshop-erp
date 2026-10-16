@@ -151,7 +151,9 @@ export function OrderedForm({ lines, action }: { lines: Line[]; action: (formDat
 export function DecideForm({ action, depositShort, isOwner, reasons = [] }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean; /** One-tap reasons to approve without the deposit (Settings). */ reasons?: string[] }) {
   return (
     <form action={action} className="flex flex-col gap-2">
-      {depositShort ? <p className="text-sm font-semibold text-red">{depositShort}</p> : null}
+      {depositShort ? <p className="text-sm font-semibold text-red" data-deposit-short>{depositShort}</p> : null}
+      {depositShort && !isOwner ? <p className="text-xs text-muted">Only the owner can approve without the deposit.</p> : null}
+      {depositShort && isOwner ? <p className="text-xs text-muted">Approving now is an override: tap a reason, it is written on the job.</p> : null}
       {depositShort && isOwner ? <ReasonChips name="override_reason" rows={2} options={reasons} placeholder="Reason to approve without the deposit (logged)" /> : null}
       <Textarea name="note" rows={2} placeholder="Note to Parts (optional)" />
       <div className="flex gap-2">

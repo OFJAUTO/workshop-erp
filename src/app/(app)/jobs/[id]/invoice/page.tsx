@@ -18,6 +18,7 @@ import { formatPlate } from "@/lib/types";
 import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
 import { addPayNow, customerSaysPaid, issueInvoice, markReadyToInvoice, recordPayment, setPaymentLink, verifyPaymentAction } from "@/app/(app)/invoices/actions";
 import { ReadySendControl } from "../ReadySendControl";
+import { DepositReceiptSend } from "@/components/DepositReceiptSend";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,16 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const bal = live ? invoiceBalance(live, payments) : null;
   const depositRows = ((deposits ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
   const depositTotal = depositRows.reduce((a, p) => a + p.amount_aed, 0);
+  // The deposit receipt goes to the customer with the quotation's own link token and the message from Settings.
+  const { data: approvedQ } = await createAdminClient().from("quotations").select("token").eq("job_id", id).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("version", { ascending: false }).limit(1).maybeSingle();
+  const quoteToken = approvedQ?.token ?? null;
+  const depositMessage = (amount: number, link: string) =>
+    String(settings.whatsapp_deposit_receipt_template ?? "")
+      .replaceAll("[name]", card.customer?.full_name ?? "")
+      .replaceAll("[make model]", vehicleTitle(card.vehicle))
+      .replaceAll("[plate]", formatPlate(card.vehicle))
+      .replaceAll("[amount]", m(amount))
+      .replaceAll("[link]", link);
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
   const money = moneyState({
     jobStatus: job.status,
@@ -173,7 +184,15 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                   <details className="text-sm">
                     <summary className="cursor-pointer min-h-11 flex items-center font-bold">Deposit before the proforma{depositTotal ? ` · AED ${m(depositTotal)} received` : ""}</summary>
                     <div className="mt-2 flex flex-col gap-2">
-                      {depositRows.map((p) => <p key={p.id} className="text-sm">{p.number} · AED {m(p.amount_aed)} by {METHOD_LABELS[p.method]} · {formatDateTime(p.received_at)}</p>)}
+                      {depositRows.map((p) => (
+                        <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm" data-deposit-row={p.number}>
+                          <span className="font-semibold">{p.number}</span>
+                          <span>AED {m(p.amount_aed)} by {METHOD_LABELS[p.method]}</span>
+                          <span className="text-muted">{formatDateTime(p.received_at)}</span>
+                          <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a>
+                          <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, `${site}/api/pdf/receipt/${p.id}${quoteToken ? `?q=${quoteToken}` : ""}`)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} />
+                        </div>
+                      ))}
                       <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} />
                     </div>
                   </details>

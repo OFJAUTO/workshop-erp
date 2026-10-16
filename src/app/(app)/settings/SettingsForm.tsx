@@ -334,11 +334,17 @@ export function SettingsForm({
               <Field label="Owner approval above (AED)" hint="Quotations above this total need the owner before sending. 0 switches it off.">
                 <Input name="quote_owner_approval_above_aed" defaultValue={v.quote_owner_approval_above_aed} inputMode="numeric" required />
               </Field>
-              <Field label="Deposit threshold (AED)" hint="When the parts on a quotation exceed this, a deposit is shown.">
+              <Field label="Deposit suggestion: parts above (AED)" hint="The deposit is the advisor's choice on each quotation. Above this parts total the system suggests one, and asks before a quotation goes out without a deposit.">
                 <Input name="deposit_threshold_aed" defaultValue={v.deposit_threshold_aed} inputMode="numeric" required />
               </Field>
-              <Field label="Deposit (percent of parts)">
+              <Field label="Deposit suggestion (percent of parts)">
                 <Input name="deposit_percent" defaultValue={v.deposit_percent} inputMode="numeric" required />
+              </Field>
+              <Field label="Deposit document" hint="What the customer gets when a deposit is recorded. Receipt only is the usual choice.">
+                <Select name="deposit_document" defaultValue={v.deposit_document || "receipt"} data-deposit-document>
+                  <option value="receipt">Receipt only</option>
+                  <option value="tax_invoice">Tax invoice for the deposit</option>
+                </Select>
               </Field>
               <Field label="Estimate follow-up (days)" hint="Days after sending an estimate with no reply before the advisor is reminded.">
                 <Input name="estimate_followup_days" defaultValue={v.estimate_followup_days} inputMode="numeric" required />
@@ -612,6 +618,9 @@ export function SettingsForm({
             </Field>
             <Field label="WhatsApp tax invoice message" hint="Sent with the tax invoice link once the proforma is paid. Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_invoice_template" defaultValue={v.whatsapp_invoice_template} rows={3} required />
+            </Field>
+            <Field label="WhatsApp: deposit receipt" hint="[name], [make model], [plate], [amount], [link].">
+              <Textarea name="whatsapp_deposit_receipt_template" defaultValue={v.whatsapp_deposit_receipt_template} rows={3} required />
             </Field>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Follow-up after gate-out (days)" hint="The advisor is reminded to call the customer.">

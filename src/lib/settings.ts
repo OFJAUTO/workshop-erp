@@ -175,6 +175,9 @@ const DEFAULTS = {
   labour_rate_by_department: {} as Record<string, number>,
   deposit_threshold_aed: 5000,
   deposit_percent: 50,
+  /** What the customer gets for a deposit: "receipt" (the usual) or "tax_invoice" (a tax invoice for the advance as well). */
+  deposit_document: "receipt" as "receipt" | "tax_invoice",
+  whatsapp_deposit_receipt_template: "Thank you for your deposit of AED [amount] for [make model] ([plate]). Your receipt is here:\n[link]",
   quote_validity_days: 7,
   quote_owner_approval_above_aed: 0,
   parts_pricing_target_hours: 4,

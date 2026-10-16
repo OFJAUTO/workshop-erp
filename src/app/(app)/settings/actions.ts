@@ -102,6 +102,7 @@ const TEXT_KEYS = [
   "whatsapp_quote_template",
   "whatsapp_quote_revised_template",
   "whatsapp_invoice_template",
+  "whatsapp_deposit_receipt_template",
   "supplier_lpo_from_email",
   "supplier_lpo_email_text",
   "whatsapp_estimate_template",
@@ -287,6 +288,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   }
   // Recovery companies may be an empty list: the ones typed at gate-out are added on their own.
   updates.push({ key: "recovery_companies", value: Array.from(new Set(String(formData.get("recovery_companies") ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, 60) });
+  updates.push({ key: "deposit_document", value: formData.get("deposit_document") === "tax_invoice" ? "tax_invoice" : "receipt" });
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
   updates.push({ key: "advisor_labour_discount", value: formData.get("advisor_labour_discount") === "on" });
   // The quotation's hidden bank charge assumes the highest rate; the real one is taken at payment.
