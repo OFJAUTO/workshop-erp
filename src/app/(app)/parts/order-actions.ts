@@ -134,6 +134,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     redirect(`${back}?message=${encodeURIComponent(`Approved. ${created.map((c) => `${c.number} (${c.supplier})`).join(", ")} ready for Parts to send and mark ordered.`)}`);
   }
   await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} approved: send it to ${po.supplier_name}`, body: `${job?.job_number ?? ""} · approved by ${staff.display_name}`, jobId: po.job_id, href: back });
+  if (po.fixed_asset) await notifyRoles(["accounts"], { type: "fixed_asset", title: `Fixed asset approved: ${po.number}, AED ${po.total_cost_aed.toLocaleString("en-GB")}`, body: `Tools and equipment from ${po.supplier_name}, approved by ${staff.display_name}. Record it in the asset register once it is received.`, href: back });
   refresh(po.job_id, poId);
   redirect(`${back}?message=${encodeURIComponent("Approved. Download the PDF, send it to the supplier, then mark it ordered with the expected dates.")}`);
 }
@@ -216,7 +217,9 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   await notifyStaff(ids, n);
   await notifyManagers(job?.department ?? null, n);
   refresh(po.job_id, poId);
-  redirect(`${back}?message=${encodeURIComponent(`${allIn ? "Received in full. Print the labels and issue the parts." : "Partial delivery recorded."}${invoiceResult?.message ? ` ${invoiceResult.message}` : invoiceResult?.error ? ` Invoice: ${invoiceResult.error}` : allIn ? " Enter the supplier invoice if it came with the delivery." : ""}`)}`);
+  const doneMessage = `${allIn ? "Received in full. The stickers printed; issue the parts." : "Partial delivery recorded. The stickers printed."}${invoiceResult?.message ? ` ${invoiceResult.message}` : invoiceResult?.error ? ` Invoice: ${invoiceResult.error}` : allIn ? " Enter the supplier invoice if it came with the delivery." : ""}`;
+  // The stickers of the parts just received print at once; Back returns to the LPO with the message.
+  redirect(`/parts/labels/${po.job_id}?auto=1&back=${encodeURIComponent(`${back}?message=${encodeURIComponent(doneMessage)}`)}`);
 }
 
 /** The supplier invoice: number and scan (compulsory), or "invoice to follow". A different price corrects the job cost. */

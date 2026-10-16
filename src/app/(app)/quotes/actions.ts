@@ -258,6 +258,21 @@ export async function decideRevision(quotationId: string, formData: FormData) {
   redirect(`${back}?message=${encodeURIComponent("Declined. The approved quotation stands.")}`);
 }
 
+/** The battery warranty the advisor picks on the battery line (12, 24 or 36 months); the sticker and the warranty record follow it. */
+export async function setPartWarranty(partId: string, months: number): Promise<{ ok?: boolean; error?: string }> {
+  const staff = await requirePermission("editQuotes");
+  const m = Math.round(Number(months));
+  if (!Number.isFinite(m) || m < 1 || m > 120) return { error: "Pick 12, 24 or 36 months." };
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, job_id, description").eq("id", partId).maybeSingle();
+  if (!p) return { error: "Part not found." };
+  const { error } = await admin.from("part_items").update({ warranty_months: m, updated_by: staff.id }).eq("id", partId);
+  if (error) return { error: error.message };
+  await admin.from("job_events").insert({ job_id: p.job_id, event_type: "amendment", note: `Battery warranty ${m} months on ${p.description} (${staff.display_name})`, created_by: staff.id });
+  revalidatePath(`/jobs/${p.job_id}`);
+  return { ok: true };
+}
+
 /** A job typed by hand on a quotation, saved to the services list with one tap (category "Custom", the owner tidies it in Settings). */
 export async function saveCustomService(name: string, kind: "labour" | "service"): Promise<{ ok?: boolean; error?: string }> {
   const staff = await requirePermission("editQuotes");

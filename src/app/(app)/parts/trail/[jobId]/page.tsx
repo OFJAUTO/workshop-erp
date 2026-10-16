@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
 type Handover = { stickers?: Record<string, unknown> | null; stickers_printed_at?: string | null; status?: string; id: string; kind: "handover" | "return"; from_staff: string | null; to_staff: string | null; signed_for_by: string | null; pin_used: boolean; items: { description: string; quantity: number; not_received?: boolean }[]; note: string | null; created_at: string; confirmed_at: string | null };
 
 /** The parts trail of one car: every part with its one state and the times behind it, every handover and return, and the part events in between. */
-export default async function PartsTrailPage({ params }: { params: Promise<{ jobId: string }> }) {
+export default async function PartsTrailPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ part?: string }> }) {
+  const { part: highlight } = await searchParams;
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   if (!(can(role, "viewPurchaseOrders") || can(role, "manageWork"))) notFound();
@@ -32,6 +33,10 @@ export default async function PartsTrailPage({ params }: { params: Promise<{ job
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   const rows = (handovers ?? []) as unknown as Handover[];
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), pending_handover_id: (r.pending_handover_id as string | null) ?? null }));
+  // The LPO and the supplier's invoice number behind each part (what a staff scan of the sticker shows).
+  const poIds = Array.from(new Set(parts.map((p) => p.po_id).filter((x): x is string => !!x)));
+  const { data: poRows } = poIds.length ? await admin.from("purchase_orders").select("id, number, supplier_invoice_number").in("id", poIds) : { data: [] as { id: string; number: string; supplier_invoice_number: string | null }[] };
+  const poOf = new Map((poRows ?? []).map((r) => [r.id as string, r as { id: string; number: string; supplier_invoice_number: string | null }]));
   const times = (p: (typeof parts)[number]) => {
     const out: string[] = [];
     if (p.expected_date && (p.order_status === "ordered" || p.order_status === "partly_received")) out.push(`expected ${p.expected_date}`);
@@ -40,6 +45,8 @@ export default async function PartsTrailPage({ params }: { params: Promise<{ job
     if (p.not_received_at) out.push(`not received ${formatDateTime(p.not_received_at)}`);
     if (p.exchange_at) out.push(`wrong or faulty ${formatDateTime(p.exchange_at)}`);
     if (p.not_needed_at) out.push(`not needed ${formatDateTime(p.not_needed_at)}${p.not_needed_reason ? `: ${p.not_needed_reason}` : ""}`);
+    const po = p.po_id ? poOf.get(p.po_id) : null;
+    if (po) out.push(`${po.number}${po.supplier_invoice_number ? ` · supplier invoice ${po.supplier_invoice_number}` : ""}`);
     if (p.disposition_at) out.push(`${p.disposition === "returned" ? "returned to the supplier" : p.disposition === "stock" ? "moved to stock" : p.disposition === "fit_approved" ? "goodwill approved" : "ending asked"} ${formatDateTime(p.disposition_at)}${p.disposition_note ? ` · ${p.disposition_note}` : ""}`);
     return out;
   };
@@ -53,8 +60,8 @@ export default async function PartsTrailPage({ params }: { params: Promise<{ job
           {parts.map((p) => {
             const s = partState(p);
             return (
-              <li key={p.id} className="py-2 flex flex-col gap-1">
-                <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><span className="text-muted">× {Number(p.confirmed_quantity ?? p.quantity) || 1}</span><Badge tone={s.tone}>{s.label}</Badge>{p.replaced_part_id ? <Badge tone="outline">Replacement</Badge> : null}</span>
+              <li key={p.id} id={`part-${p.id}`} className={`py-2 flex flex-col gap-1 ${highlight === p.id ? "bg-amber-soft/50 -mx-2 px-2 rounded-control" : ""}`} data-trail-part={p.id}>
+                <span className="flex flex-wrap items-center gap-2"><span className="font-semibold uppercase">{p.description}</span><span className="text-muted">× {Number(p.confirmed_quantity ?? p.quantity) || 1}</span><Badge tone={s.tone}>{s.label}</Badge>{p.replaced_part_id ? <Badge tone="outline">Replacement</Badge> : null}</span>
                 {times(p).length ? <span className="text-xs text-muted">{times(p).join(" · ")}</span> : null}
               </li>
             );

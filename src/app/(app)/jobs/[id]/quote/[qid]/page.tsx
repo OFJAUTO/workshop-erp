@@ -144,6 +144,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     consumablesDefault: Number(settings.consumables_default_aed) || 0,
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
+    batteryWarrantyMonths: Number(settings.battery_warranty_months) || 12,
     technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
     goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.

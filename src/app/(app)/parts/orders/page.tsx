@@ -18,6 +18,8 @@ const ago = (iso: string) => { const d = daysSince(iso); return d <= 0 ? "today"
 type JobInfo = { id: string; job_number: string; is_open: boolean; vehicle: { kind?: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; customer: { full_name: string; company_name: string | null } | null };
 type LineInfo = { po_id: string; description: string; part_number: string | null; expected_date: string | null; quantity: number | string; received_qty: number | string; invoice_check: string | null };
 
+const ORDER_TYPE_LABELS: Record<"stock_parts" | "consumables" | "tools", string> = { stock_parts: "Stock parts", consumables: "Workshop consumables", tools: "Tools and equipment" };
+
 const TABS = [
   { key: "", label: "All" },
   { key: "pending", label: "Waiting for approval" },
@@ -97,6 +99,13 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
       const c = carLine(items[0]);
       groups.push({ key: jobId, title: c ? `LPOs for this car: ${c.plate} · ${c.car} · ${c.job}${c.open ? "" : " · gated out"}` : "Stock orders", items });
     }
+  } else if (tab === "invoices") {
+    // Accounts see the supplier bills by kind of goods.
+    const kindOf = (po: PurchaseOrderRow) => (po.job_id ? "job" : (po.order_type ?? "stock_parts"));
+    for (const k of ["job", "stock_parts", "consumables", "tools"] as const) {
+      const items = shown.filter((po) => kindOf(po) === k);
+      if (items.length) groups.push({ key: k, title: k === "job" ? "Parts for jobs" : ORDER_TYPE_LABELS[k], items });
+    }
   } else {
     groups.push({ key: "all", title: TABS.find((t) => t.key === tab)?.label ?? "All", items: shown });
   }
@@ -146,7 +155,8 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                 <Link key={p.id} href={`/parts/orders/${p.id}`} className="block" data-lpo-row={p.number}>
                   <Card className={`flex flex-wrap items-center gap-3 hover:border-ink ${red ? "border-red-bar" : ""}`}>
                     <span className="font-extrabold">{p.number}</span>
-                    {p.kind === "stock" ? <Badge tone="ink">Stock order</Badge> : null}
+                    {p.kind === "stock" ? <Badge tone="ink">{ORDER_TYPE_LABELS[p.order_type ?? "stock_parts"]}</Badge> : null}
+                    {p.fixed_asset ? <Badge tone="red">Fixed asset</Badge> : null}
                     {p.parent_id && numberOf.get(p.parent_id) ? <span className="text-xs text-muted">from {numberOf.get(p.parent_id)}</span> : null}
                     <span className="font-semibold">{p.supplier_name}</span>
                     {c ? <span className="text-sm text-muted">{c.plate} · {c.car} · {c.job}</span> : p.kind === "stock" ? <span className="text-sm text-muted">for the shelf</span> : null}

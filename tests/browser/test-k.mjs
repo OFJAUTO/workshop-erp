@@ -141,7 +141,8 @@ await section("1 quote builder and revision", async () => {
   // B14: Remove on the old job asks "Also remove its 1 part?"
   const row = page.locator(`#item-line-${oldLabour?.id}`);
   await row.locator("[data-line-menu] button[aria-label='More for this line']").click();
-  await row.locator("button", { hasText: /^Remove$/ }).click();
+  // The menu floats on top of the page (16 October), so its items live outside the row.
+  await page.locator("[data-floating-menu] button", { hasText: /^Remove$/ }).click();
   const ask = await until(async () => ((await page.locator("[data-remove-parts-ask]").count()) ? 1 : null), 20, 300);
   check("B14: removing a job with a part under it asks 'Also remove its 1 part?'", !!ask && /Also remove its 1 part\?/.test((await page.locator("[data-remove-parts-ask]").textContent().catch(() => "")) ?? ""));
   if (ask) await page.locator("[data-remove-with-parts]").click();

@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "lpo_waiting_deposit", label: "An LPO waits for a deposit that has not arrived (owner)", locked: true },
   { type: "deposit_overdue", label: "A deposit still not received after the waiting limit (advisor, accounts)" },
   { type: "revision_request", label: "Someone asks to revise an approved quotation (owner)", locked: true },
+  { type: "fixed_asset", label: "A tools and equipment order counts as a fixed asset (accounts)", locked: true },
   { type: "sticker_prompt", label: "A sticker or label to print (labels at receipt, battery warranty, oil service)", locked: true },
   { type: "supplier_invoice_mismatch", label: "A supplier invoice price differs from the LPO (accounts)", locked: true },
   { type: "quote_revised_by_parts", label: "Parts changed: revised quotation to send" },

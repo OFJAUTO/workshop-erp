@@ -6,7 +6,7 @@ import { HANDOVER_SELECT, type HandoverRow } from "@/lib/handover";
 import { qrDataUrl } from "@/lib/pdf/qr";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { qrUrl, stickerSettings, warrantyMonthsFor, stickerLogoDataUrl, stickerMarkDataUrl } from "@/lib/stickers";
+import { qrUrl, stickerSettings, warrantyMonthsFor, stickerLogoDataUrl } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PrintNow } from "../../../parts/labels/[jobId]/PrintNow";
 import { PrintOne } from "../../../parts/labels/[jobId]/PrintOne";
@@ -27,13 +27,15 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   const admin = createAdminClient();
   const settings = await getSettings();
   const ss = stickerSettings(settings);
-  const [logo, mark] = await Promise.all([stickerLogoDataUrl(ss), stickerMarkDataUrl()]);
+  const logo = await stickerLogoDataUrl(ss);
   const { data: raw } = await admin.from("part_handovers").select(HANDOVER_SELECT + ", job:jobs(job_number, vehicle:vehicles(vin))").eq("id", handoverId).maybeSingle();
   if (!raw) notFound();
   const h = raw as unknown as HandoverRow & { job: { job_number: string; vehicle: { vin: string | null } | null } | null };
   const vin = h.job?.vehicle?.vin ?? "";
   const date = formatDate(h.confirmed_at ?? h.created_at);
   const plan = Object.entries(h.stickers ?? {});
+  const { data: wmRows } = plan.length ? await admin.from("part_items").select("id, warranty_months").in("id", plan.map(([id]) => id)) : { data: [] as { id: string; warranty_months: number | null }[] };
+  const partMonths = new Map((wmRows ?? []).map((r) => [r.id as string, (r.warranty_months as number | null) ?? null]));
   const first = !h.stickers_printed_at;
   if (first) await admin.from("part_handovers").update({ stickers_printed_at: new Date().toISOString(), updated_by: staff.id }).eq("id", handoverId);
   else if (reprint !== "0") await admin.from("job_events").insert({ job_id: h.job_id, event_type: "sticker_reprint", note: `Stickers of the handover printed again by ${staff.display_name}`, created_by: staff.id });
@@ -43,24 +45,24 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
     const qr = await qrDataUrl(qrUrl(s.code), 300);
     for (let n = 0; n < s.count; n++) {
       if (s.kind === "battery") {
-        const months = warrantyMonthsFor(ss, s.brand);
+        const months = warrantyMonthsFor(ss, s.brand, partMonths.get(partId) ?? null);
         const until = new Date(h.confirmed_at ?? h.created_at);
         until.setUTCMonth(until.getUTCMonth() + months);
-        stickers.push(<BatterySticker key={`${partId}-${n}`} size={ss.battery} logoUrl={logo} d={{ qr, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, line: batteryLine(item?.description, s.brand, s.model) }} />);
+        stickers.push(<BatterySticker key={`${partId}-${n}`} w={ss.batteryW} h={ss.batteryH} logoUrl={logo} d={{ qr, months, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, line: batteryLine(item?.description, s.brand, s.model) }} />);
       } else {
-        stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={ss.logoPath ? logo : mark} d={{ qr, date, vin8: vin.slice(-8) }} />);
+        stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, jobNumber: h.job?.job_number ?? "", name: item?.description ?? "Part", index: n + 1, count: s.count, date }} />);
       }
     }
   }
   const battery = plan.some(([, s]) => s.kind === "battery");
-  const w = battery ? Math.max(ss.battery, ss.partW) : ss.partW;
-  const hh = battery ? Math.max(ss.battery, ss.partH) : ss.partH;
+  const w = battery ? Math.max(ss.batteryW, ss.partW) : ss.partW;
+  const hh = battery ? Math.max(ss.batteryH, ss.partH) : ss.partH;
   return (
     <div>
       <style>{stickerPageCss(w, hh)}</style>
       <div className="bar">
         <span>{stickers.length} sticker{stickers.length === 1 ? "" : "s"} · {h.job?.job_number ?? ""}{first ? "" : " · printed again"}</span>
-        <PrintNow />
+        <PrintNow label={`Print on ${battery ? ss.printerLarge : ss.printerPart}`} />
         <a href={`/api/pdf/stickers/${handoverId}`}>Download PDF</a>
         <a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a>
       </div>

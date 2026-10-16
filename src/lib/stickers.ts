@@ -14,6 +14,17 @@ export type StickerSettings = {
   /** The battery warranty sticker (square, mm) and the oil service sticker (square, mm), each set in Settings. */
   battery: number;
   service: number;
+  /** Portrait sizes of the battery and oil service stickers. */
+  batteryW: number;
+  batteryH: number;
+  serviceW: number;
+  serviceH: number;
+  /** The printer names shown on the print pages. */
+  printerPart: string;
+  printerLarge: string;
+  /** The WhatsApp booking link behind the oil service sticker's QR. */
+  whatsappNumber: string;
+  whatsappText: string;
   partTypes: string[];
   batteryRequired: boolean;
   serviceRequired: boolean;
@@ -39,6 +50,14 @@ export function stickerSettings(settings: Settings): StickerSettings {
     large: Number(settings.sticker_large_mm) || 60,
     battery: Number(settings.sticker_battery_mm) || Number(settings.sticker_large_mm) || 60,
     service: Number(settings.sticker_service_mm) || Number(settings.sticker_large_mm) || 60,
+    batteryW: Number(settings.sticker_battery_w_mm) || 50,
+    batteryH: Number(settings.sticker_battery_h_mm) || 100,
+    serviceW: Number(settings.sticker_service_w_mm) || 50,
+    serviceH: Number(settings.sticker_service_h_mm) || 100,
+    printerPart: String(settings.sticker_printer_part || "Printer 1 (40 × 30 mm)"),
+    printerLarge: String(settings.sticker_printer_large || "Printer 2 (50 × 100 mm)"),
+    whatsappNumber: String(settings.sticker_service_whatsapp_number ?? ""),
+    whatsappText: String(settings.sticker_service_whatsapp_text || "Hi, I'd like to book a service for [PLATE]"),
     partTypes: Array.isArray(settings.sticker_part_types) ? (settings.sticker_part_types as string[]).map((t) => t.toLowerCase()) : [],
     batteryRequired: settings.sticker_battery_required !== false,
     serviceRequired: settings.sticker_service_required !== false,
@@ -50,20 +69,23 @@ export function stickerSettings(settings: Settings): StickerSettings {
     servicePhone: settings.sticker_service_show_phone !== false,
     logoUrl: "/logo.svg",
     logoPath: String(settings.sticker_logo_url || ""),
-    wording: { part: "", battery: "Battery warranty", battery_valid: "Valid for this vehicle only", service: "Service", service_band: "Next service, whichever comes first", ...w },
+    wording: { part: "", battery: "Battery warranty", battery_valid: "Valid for this vehicle only", service: "Service", service_band: "Next service, whichever comes first", service_scan: "Scan to book your next service on WhatsApp", ...w },
     phone: String(settings.company_phone ?? ""),
   };
 }
 
-/** A battery by its name or type: main or auxiliary, any brand. */
-export function isBatteryPart(p: { description?: string | null; part_type?: string | null; sticker_kind?: string | null }): boolean {
-  if (p.sticker_kind === "battery") return true;
-  if (p.sticker_kind === "part") return false;
-  return /\bbatter(y|ies)\b/i.test(p.description ?? "") || /\bbattery\b/i.test(p.part_type ?? "");
+export { isBatteryPart } from "./battery";
+
+/** The WhatsApp link behind the oil service sticker's QR: the Settings number (else the company phone) and the message with the plate filled in. */
+export function serviceWhatsAppUrl(ss: StickerSettings, plate: string): string {
+  const digits = (ss.whatsappNumber || ss.phone || "").replace(/\D/g, "");
+  const text = ss.whatsappText.replaceAll("[PLATE]", plate.trim() || "my car");
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
-/** Warranty length for a brand (Settings per brand, else the standard length). */
-export function warrantyMonthsFor(ss: StickerSettings, brand: string | null | undefined): number {
+/** Warranty length: the months chosen on the part's line, else Settings per brand, else the standard length. */
+export function warrantyMonthsFor(ss: StickerSettings, brand: string | null | undefined, partMonths?: number | null): number {
+  if (partMonths && partMonths > 0) return Math.round(partMonths);
   const b = (brand ?? "").trim().toLowerCase();
   if (b) for (const [k, v] of Object.entries(ss.warrantyByBrand)) if (k.trim().toLowerCase() === b && Number(v) > 0) return Number(v);
   return ss.warrantyMonths;

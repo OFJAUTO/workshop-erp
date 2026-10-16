@@ -7,6 +7,7 @@ import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
 import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
+import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { formatDayTime } from "@/lib/format";
@@ -14,7 +15,7 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
-import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService } from "@/app/(app)/quotes/actions";
+import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
 
 type Op = Record<string, unknown>;
@@ -130,6 +131,8 @@ export type EditorSettings = {
   clockedHours?: number | null;
   /** Bodyshop packages have no fixed price: the last price typed for each, shown as a small hint. */
   lastPrices?: Record<string, number>;
+  /** The usual battery warranty (Settings), shown as the ticked choice until the advisor picks another. */
+  batteryWarrantyMonths?: number;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -289,6 +292,12 @@ export function QuoteEditor({
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
   const [depositAsk, setDepositAsk] = useState<string | null>(null);
+  // The battery warranty picked on a battery line (12, 24, 36 months), kept here until the page refreshes.
+  const [warranty, setWarrantyMap] = useState<Record<string, number>>({});
+  const pickWarranty = (partId: string, months: number) => {
+    setWarrantyMap((p) => ({ ...p, [partId]: months }));
+    run(() => setPartWarranty(partId, months));
+  };
   const [reviseAsk, setReviseAsk] = useState(false);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
   const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean }>({});
@@ -996,6 +1005,19 @@ export function QuoteEditor({
                             {part?.cost_aed === null && !leftOff ? <Badge tone="amber">Waiting for the price</Badge> : null}
                             {veryHigh && !unchosen ? <Badge tone="amber">{l.markup_confirmed ? `Markup ${markup}%, confirmed` : "Confirm the markup"}</Badge> : null}
                             {optionOff ? <span>Option, not used</span> : null}
+                            {part && isBatteryPart(part) && !unchosen ? (
+                              <span className="inline-flex items-center gap-1" data-warranty={part.id}>
+                                <span>Warranty</span>
+                                {WARRANTY_CHOICES.map((m) => {
+                                  const on = (warranty[part.id] ?? part.warranty_months ?? settings.batteryWarrantyMonths ?? 12) === m;
+                                  return (
+                                    <button key={m} type="button" disabled={disabled} aria-pressed={on} onClick={() => pickWarranty(part.id, m)} className={`min-h-6 rounded-control border px-1.5 text-[11px] font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-warranty-months={m}>
+                                      {m} m
+                                    </button>
+                                  );
+                                })}
+                              </span>
+                            ) : null}
                           </div>
                         </td>
                         <td className="py-2 pr-2 align-top text-xs text-muted whitespace-nowrap">{customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? ""}</td>

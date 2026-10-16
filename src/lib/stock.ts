@@ -11,11 +11,13 @@ import { createAdminClient } from "./supabase/admin";
  */
 export type StockActor = { id: string | null; display_name: string };
 export type MovementKind = "in" | "out" | "count" | "adjust" | "return";
-export type StockItemRow = { id: string; name: string; unit: string; quantity: number; minimum_level: number; unit_cost: number; part_number: string | null; supplier_id: string | null; reorder_quantity: number; last_counted_at: string | null; low_notified_at: string | null };
+export type StockItemRow = { /** A stock part on the shelf, or a workshop consumable. */ item_type: "part" | "consumable"; id: string; name: string; unit: string; quantity: number; minimum_level: number; unit_cost: number; part_number: string | null; supplier_id: string | null; reorder_quantity: number; last_counted_at: string | null; low_notified_at: string | null };
 
-export const STOCK_ITEM_SELECT = "id, name, unit, quantity, minimum_level, unit_cost, part_number, supplier_id, reorder_quantity, last_counted_at, low_notified_at";
+export const STOCK_ITEM_SELECT = "id, name, unit, quantity, minimum_level, unit_cost, part_number, supplier_id, reorder_quantity, last_counted_at, low_notified_at, item_type";
+export const ITEM_TYPE_LABELS: Record<"part" | "consumable", string> = { part: "Stock part", consumable: "Consumable" };
 
 export const toStockItem = (r: Record<string, unknown>): StockItemRow => ({
+  item_type: (r.item_type === "consumable" ? "consumable" : "part") as "part" | "consumable",
   id: String(r.id),
   name: String(r.name ?? ""),
   unit: String(r.unit ?? "pc"),

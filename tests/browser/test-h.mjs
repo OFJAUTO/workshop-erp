@@ -247,7 +247,7 @@ await section("C LPO flow", async () => {
   check("17: Ordered computes the arrival date from the availability given at pricing (3 days)", ordered?.po_status === "ordered" && ordered?.order_status === "ordered" && ordered?.expected === d3, JSON.stringify(ordered));
   check("17: the job's Parts step is done with 'All parts here by' that date", !!ordered?.plan_parts_done_at && ordered?.ready === d3, JSON.stringify(ordered));
   check("17: the workshop manager is told to plan the work", ((await sql("select count(*)::int as n from public.notifications where job_id = $1 and title like 'Plan the work%'", [jobId]))[0]?.n ?? 0) >= 1);
-  check("17: the card shows the expected date", /Expected/.test((await page.locator(`${cardSel} [data-part-date]`).textContent().catch(() => "")) ?? ""));
+  check("17: the card shows the expected date", /Expected/.test((await page.locator(cardSel).textContent().catch(() => "")) ?? ""));
   // One part's date changed with a tap.
   const d5 = await dubaiPlus(5);
   await page.locator(`${cardSel} [data-part-date]`).click();

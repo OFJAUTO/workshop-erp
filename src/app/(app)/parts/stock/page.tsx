@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { Badge, Button, Card, ChoiceButtons, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDayTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
-import { STOCK_ITEM_SELECT, isLow, toStockItem } from "@/lib/stock";
+import { ITEM_TYPE_LABELS, STOCK_ITEM_SELECT, isLow, toStockItem } from "@/lib/stock";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { issueStock } from "../order-actions";
@@ -50,7 +50,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
       <PageHeader
         title="Stock"
         subtitle={`${items.length} item${items.length === 1 ? "" : "s"}${low.length ? ` · ${low.length} below minimum` : ""}${lastCount ? ` · last count ${formatDate(lastCount)}` : " · never counted"}`}
-        actions={<><LinkButton href="/parts/stock?order=1" size="lg">Stock order</LinkButton><LinkButton href="/parts/stock?count=1" tone="secondary" size="lg">Monthly count</LinkButton><LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton></>}
+        actions={<><LinkButton href="/parts/stock?order=1" size="lg" data-new-workshop-order>New workshop order</LinkButton><LinkButton href="/parts/stock?count=1" tone="secondary" size="lg">Monthly count</LinkButton><LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton></>}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -64,18 +64,29 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
 
       {orderMode ? (
         <Card className="flex flex-col gap-3 border-ink" data-stock-order-form>
-          <SectionLabel>Stock order</SectionLabel>
-          <p className="text-xs text-muted">One supplier, the items and quantities. It goes to the owner or the head accountant for approval like any LPO; the delivery lands on the shelf with the cost averaged in.</p>
-          <form action={createStockOrder} className="flex flex-col gap-3">
+          <SectionLabel>New workshop order</SectionLabel>
+          <p className="text-xs text-muted">One supplier, what kind of goods, the items and quantities. It goes to the owner or the head accountant for approval like any LPO; stock parts and consumables land on the shelf at delivery with the cost averaged in; tools and equipment at or above AED {(Number(settings.fixed_asset_threshold_aed) || 2000).toLocaleString("en-GB")} are flagged for accounts as a fixed asset.</p>
+          <style>{`.wo-form:has(input[name="order_type"][value="tools"]:checked) .wo-stock { display: none } .wo-form:not(:has(input[name="order_type"][value="tools"]:checked)) .wo-tools { display: none } .wo-form:has(input[name="order_type"][value="consumables"]:checked) .wo-item-part { display: none } .wo-form:has(input[name="order_type"][value="stock_parts"]:checked) .wo-item-consumable { display: none }`}</style>
+          <form action={createStockOrder} className="flex flex-col gap-3 wo-form">
+            <ChoiceButtons name="order_type" columns={3} defaultValue={reorderItem?.item_type === "consumable" ? "consumables" : "stock_parts"} options={[{ value: "stock_parts", label: "Stock parts" }, { value: "consumables", label: "Workshop consumables" }, { value: "tools", label: "Tools and equipment", hint: "fixed asset above the Settings amount" }]} />
             <label className="flex flex-col gap-1 max-w-sm"><span className="text-xs font-semibold text-muted">Supplier</span>
               <Select name="supplier_id" required defaultValue={reorderItem?.supplier_id ?? ""}><option value="">Choose…</option>{(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
             </label>
-            <ul className="divide-y divide-line">
+            <ul className="divide-y divide-line wo-stock">
               {items.map((i) => (
-                <li key={i.id} className="py-2 flex flex-wrap items-center gap-3 text-sm" data-order-line={i.id}>
+                <li key={i.id} className={`py-2 flex flex-wrap items-center gap-3 text-sm wo-item-${i.item_type}`} data-order-line={i.id}>
                   <span className="flex-1 min-w-48 font-semibold">{i.name}{i.part_number ? <span className="text-muted font-normal"> · {i.part_number}</span> : null}<span className="block text-xs text-muted font-normal">{i.quantity} {i.unit} on the shelf · minimum {i.minimum_level}{isLow(i) ? " · below minimum" : ""}</span></span>
                   <label className="flex items-center gap-2 text-xs font-semibold text-muted">Qty <Input name={`qty__${i.id}`} inputMode="decimal" defaultValue={reorderItem?.id === i.id && i.reorder_quantity ? String(i.reorder_quantity) : ""} placeholder={i.reorder_quantity ? String(i.reorder_quantity) : "0"} className="w-24" /></label>
                   <label className="flex items-center gap-2 text-xs font-semibold text-muted">Cost each <Input name={`cost__${i.id}`} inputMode="decimal" placeholder={i.unit_cost.toFixed(2)} className="w-28" /></label>
+                </li>
+              ))}
+            </ul>
+            <ul className="divide-y divide-line wo-tools" data-tools-lines>
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <li key={n} className="py-2 flex flex-wrap items-center gap-3 text-sm">
+                  <Input name={`tool_desc__${n}`} placeholder={`Tool or equipment ${n}`} className="flex-1 min-w-48" />
+                  <label className="flex items-center gap-2 text-xs font-semibold text-muted">Qty <Input name={`tool_qty__${n}`} inputMode="decimal" className="w-20" /></label>
+                  <label className="flex items-center gap-2 text-xs font-semibold text-muted">Cost each <Input name={`tool_cost__${n}`} inputMode="decimal" className="w-28" /></label>
                 </li>
               ))}
             </ul>
@@ -113,6 +124,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
                 <li key={i.id} className={`py-2 flex flex-col gap-1 ${isLow(i) ? "bg-red-soft/40 -mx-2 px-2 rounded-control" : ""}`} data-stock-item={i.id} data-low={isLow(i) ? "1" : undefined}>
                   <div className="flex flex-wrap items-center gap-3 text-sm">
                     <span className="font-semibold">{i.name}</span>
+                    {i.item_type === "consumable" ? <Badge tone="outline">Consumable</Badge> : null}
                     {i.part_number ? <span className="text-xs text-muted">{i.part_number}</span> : null}
                     <span className={`font-extrabold ${isLow(i) ? "text-red" : ""}`} data-stock-qty>{i.quantity} {i.unit}</span>
                     <span className="text-xs text-muted">minimum {i.minimum_level} · reorder {i.reorder_quantity || "–"} · avg cost {money(i.unit_cost)} · worth {money(i.quantity * i.unit_cost)}</span>
@@ -127,6 +139,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
                         <input type="hidden" name="id" value={i.id} />
                         <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="font-semibold text-muted">Item</span><Input name="name" defaultValue={i.name} /></label>
                         <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Part number</span><Input name="part_number" defaultValue={i.part_number ?? ""} className="w-36" textCase="upper" /></label>
+                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Kind</span><Select name="item_type" defaultValue={i.item_type} className="w-36">{(["part", "consumable"] as const).map((t) => <option key={t} value={t}>{ITEM_TYPE_LABELS[t]}</option>)}</Select></label>
                         <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Unit</span><Input name="unit" defaultValue={i.unit} className="w-16" /></label>
                         <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Minimum</span><Input name="minimum_level" defaultValue={String(i.minimum_level)} inputMode="decimal" className="w-20" /></label>
                         <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Reorder qty</span><Input name="reorder_quantity" defaultValue={String(i.reorder_quantity)} inputMode="decimal" className="w-20" /></label>
@@ -150,6 +163,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
             <form action={saveStockItemDetails} className="flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="text-xs font-semibold text-muted">Item</span><Input name="name" required placeholder="For example: Engine oil 5W-40, 1 L" /></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Part number</span><Input name="part_number" className="w-36" textCase="upper" /></label>
+              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Kind</span><Select name="item_type" defaultValue="part" className="w-36" data-new-item-type>{(["part", "consumable"] as const).map((t) => <option key={t} value={t}>{ITEM_TYPE_LABELS[t]}</option>)}</Select></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Unit</span><Input name="unit" defaultValue="pc" className="w-16" /></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Opening qty</span><Input name="quantity" defaultValue="0" inputMode="decimal" className="w-24" /></label>
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cost each</span><Input name="unit_cost" defaultValue="0" inputMode="decimal" className="w-24" /></label>
@@ -177,7 +191,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
           </Card>
         </div>
         <Card className="flex flex-col gap-3 border-ink">
-          <SectionLabel>Issue to a job</SectionLabel>
+          <SectionLabel>Issue to a job (parts and consumables)</SectionLabel>
           <form action={issueStock} className="flex flex-col gap-3">
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Item</span>
               <Select name="stock_item" required><option value="">Choose…</option>{items.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.quantity} {i.unit})</option>)}</Select>

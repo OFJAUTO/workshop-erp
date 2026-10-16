@@ -81,7 +81,9 @@ export async function receivePartAction(jobId: string, partId: string) {
   revalidatePath(`/parts/${jobId}`);
   revalidatePath(`/jobs/${jobId}`);
   if (r.error) redirect(`/parts/${jobId}?error=${encodeURIComponent(r.error)}#received`);
-  redirect(`/parts/${jobId}?message=${encodeURIComponent(r.complete ? "Received. Every part is in: hand them over." : "Received.")}#received`);
+  // The part's stickers print the moment it is ticked received; Back returns to the parts page.
+  const backTo = `/parts/${jobId}?message=${encodeURIComponent(r.complete ? "Received. Every part is in: hand them over." : "Received.")}#received`;
+  redirect(`/parts/labels/${jobId}?part=${partId}&auto=1&back=${encodeURIComponent(backTo)}`);
 }
 
 /**

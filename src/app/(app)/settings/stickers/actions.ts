@@ -23,6 +23,14 @@ export async function saveStickerSettings(formData: FormData) {
     { key: "sticker_large_mm", value: num("sticker_large_mm", 30, 120, "Battery and service sticker size") },
     { key: "sticker_battery_mm", value: num("sticker_battery_mm", 30, 120, "Battery sticker size") },
     { key: "sticker_service_mm", value: num("sticker_service_mm", 30, 120, "Service sticker size") },
+    { key: "sticker_battery_w_mm", value: num("sticker_battery_w_mm", 20, 200, "Battery sticker width") },
+    { key: "sticker_battery_h_mm", value: num("sticker_battery_h_mm", 20, 200, "Battery sticker height") },
+    { key: "sticker_service_w_mm", value: num("sticker_service_w_mm", 20, 200, "Service sticker width") },
+    { key: "sticker_service_h_mm", value: num("sticker_service_h_mm", 20, 200, "Service sticker height") },
+    { key: "sticker_printer_part", value: (blankToNull(formData.get("sticker_printer_part")) ?? "Printer 1 (40 × 30 mm)").slice(0, 80) },
+    { key: "sticker_printer_large", value: (blankToNull(formData.get("sticker_printer_large")) ?? "Printer 2 (50 × 100 mm)").slice(0, 80) },
+    { key: "sticker_service_whatsapp_number", value: String(formData.get("sticker_service_whatsapp_number") ?? "").replace(/\D/g, "").slice(0, 20) },
+    { key: "sticker_service_whatsapp_text", value: (blankToNull(formData.get("sticker_service_whatsapp_text")) ?? "Hi, I'd like to book a service for [PLATE]").slice(0, 200) },
     { key: "battery_warranty_months", value: Math.round(num("battery_warranty_months", 1, 120, "Battery warranty")) },
     { key: "service_interval_months", value: Math.round(num("service_interval_months", 1, 60, "Next service months")) },
     { key: "service_interval_km", value: Math.round(num("service_interval_km", 500, 100000, "Next service km")) },
@@ -39,7 +47,7 @@ export async function saveStickerSettings(formData: FormData) {
     if (m) byBrand[m[1]] = Number(m[2]);
   }
   updates.push({ key: "battery_warranty_by_brand", value: byBrand });
-  updates.push({ key: "sticker_wording", value: { part: blankToNull(formData.get("w_part")) ?? "", battery: blankToNull(formData.get("w_battery")) ?? "Battery warranty", battery_valid: blankToNull(formData.get("w_battery_valid")) ?? "Valid for this vehicle only", service: blankToNull(formData.get("w_service")) ?? "Service", service_band: blankToNull(formData.get("w_service_band")) ?? "Next service, whichever comes first" } });
+  updates.push({ key: "sticker_wording", value: { part: blankToNull(formData.get("w_part")) ?? "", battery: blankToNull(formData.get("w_battery")) ?? "Battery warranty", battery_valid: blankToNull(formData.get("w_battery_valid")) ?? "Valid for this vehicle only", service: blankToNull(formData.get("w_service")) ?? "Service", service_band: blankToNull(formData.get("w_service_band")) ?? "Next service, whichever comes first", service_scan: blankToNull(formData.get("w_service_scan")) ?? "Scan to book your next service on WhatsApp" } });
   for (const u of updates) await admin.from("settings").update({ value: u.value }).eq("key", u.key);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { stickers: Object.fromEntries(updates.map((u) => [u.key, u.value])), by: staff.display_name } }).then(() => null, () => null);
   revalidatePath("/settings/stickers");

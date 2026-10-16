@@ -134,10 +134,13 @@ export async function confirmHandover(handoverId: string, who: { actor: Actor; p
   for (const it of refused) await admin.from("part_items").update({ pending_handover_id: null, not_received_at: now, tech_received_qty: 0, updated_by: who.actor.id }).eq("id", it.id);
   const items = h.items.map((it) => (refused.some((r) => r.id === it.id) ? { ...it, not_received: true } : it));
   await admin.from("part_handovers").update({ status: "confirmed", confirmed_at: now, confirmed_by: signedForBy ? who.actor.id : tech.id, pin_used: !signedForBy, signed_for_by: signedForBy, signed_at_counter: !!who.atCounter, device_id: who.deviceId ?? null, items, updated_by: who.actor.id }).eq("id", h.id);
-  // Batteries: the warranty starts today, per brand, for this car only.
+  // Batteries: the warranty starts today, the months chosen on the line (else per brand), for this car only.
+  const planIds = Object.keys(h.stickers ?? {});
+  const { data: wmRows } = planIds.length ? await admin.from("part_items").select("id, warranty_months").in("id", planIds) : { data: [] as { id: string; warranty_months: number | null }[] };
+  const partMonths = new Map((wmRows ?? []).map((r) => [r.id as string, (r.warranty_months as number | null) ?? null]));
   for (const [partId, plan] of Object.entries(h.stickers ?? {})) {
     if (plan.kind !== "battery" || refused.some((r) => r.id === partId)) continue;
-    const months = warrantyMonthsFor(ss, plan.brand);
+    const months = warrantyMonthsFor(ss, plan.brand, partMonths.get(partId) ?? null);
     const until = new Date(now);
     until.setUTCMonth(until.getUTCMonth() + months);
     const { data: existing } = await admin.from("battery_warranties").select("id").eq("part_item_id", partId).eq("is_active", true).limit(1);
