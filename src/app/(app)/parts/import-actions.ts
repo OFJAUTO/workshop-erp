@@ -7,7 +7,7 @@ import { ocrEnabled, ocrTable } from "@/lib/import-ocr";
 import { readPdfRows, renderPdfPages } from "@/lib/pdf-read";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type RowValues, type SupplierOption } from "@/lib/parts-rows";
-import { parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult } from "@/lib/price-import";
+import { parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult, importAvailabilityNote } from "@/lib/price-import";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -199,7 +199,7 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
     const a = line.availability;
     // "in stock" / "available" at the supplier = ordered today, here today (Same day); n days = to order; the rest is a note.
     const avail = a?.kind === "same_day" ? { availability: "to_order", days: "0" } : a?.kind === "days" && a.days !== null ? { availability: "to_order", days: String(a.days) } : { availability: base.availability, days: base.days };
-    const note = a?.kind === "back_order" ? "Back order at the supplier" : a?.kind === "confirm" ? `Supplier to confirm${a.text && !/will update|tbc|tba/i.test(a.text) ? ` (${a.text.slice(0, 60)})` : ""}` : null;
+    const note = importAvailabilityNote(a);
     const before = existing?.partId ? await snapshot(existing.partId) : null;
     const row: RowSave = {
       requestId: existing?.requestId ?? null,

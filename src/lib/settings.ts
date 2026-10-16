@@ -110,6 +110,8 @@ const DEFAULTS = {
     { key: "closed_box", label: "Closed box", cost: 400, price: 400 },
   ] as { key: string; label: string; cost: number; price: number }[],
   recovery_companies: [] as string[],
+  /** Tyre models per brand for the tyre details window; learned from what Parts type. */
+  tyre_models: {} as Record<string, string[]>,
   manager_note_groups: {} as Record<string, string[]>,
   fluid_grades: ["0W-20", "0W-30", "0W-40", "5W-30", "5W-40", "5W-50", "10W-40", "ATF", "CVT", "DCT", "75W-90", "80W-90", "DOT 4", "DOT 5.1", "G12", "G13", "R134a", "R1234yf"] as string[],
   labour_actions: ["Remove and replace", "Remove and refit", "Remove and clean", "Remove and inspect", "Repair", "Reseal", "Overhaul", "Adjust", "Tighten", "Lubricate", "Skim", "Bleed", "Flush", "Drain and refill", "Top up", "Recharge", "Balance", "Align", "Calibrate", "Program or code", "Reset", "Diagnose", "Test", "Road test"] as string[],

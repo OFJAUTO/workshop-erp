@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound } from "next/navigation";
@@ -43,6 +44,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const { job, stages, assignments, clockings, signoffs, removedItems, updates, kinds, film, tintPercent, people } = data;
   const v = job.vehicle;
   const admin = createAdminClient();
+  const { data: vinRow } = await admin.from("vehicles").select("vin").eq("id", job.vehicle_id).maybeSingle();
   const isOwner = role === "owner";
   const isBodyshopManager = role === "workshop_manager" && BODYSHOP_DEPTS.includes(staff.department_id ?? "");
   const canManage = !staff.viewingAs && (isOwner || isBodyshopManager);
@@ -94,6 +96,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <span>{job.job_number}{v?.colour ? ` · ${v.colour}` : ""}{seesMoney ? ` · ${customerName}` : ""}</span>
+            <VinCopy vin={vinRow?.vin ?? null} />
             <Badge tone={job.status === "closed" ? "neutral" : job.status === "ready" ? "green" : "ink"}>{statusLabel}</Badge>
             {job.promised_at ? <Badge tone={job.promised_at < today && job.is_open ? "red" : job.promised_at === today ? "amber" : "neutral"}>Handover {formatDate(job.promised_at)}</Badge> : null}
             {kindWords.length ? <span className="text-sm text-muted">{kindWords.join(", ")}{film?.colour || film?.code ? ` · film ${[film.colour, film.code].filter(Boolean).join(" ")}` : ""}{tintPercent ? ` · tint ${tintPercent}%` : ""}</span> : null}

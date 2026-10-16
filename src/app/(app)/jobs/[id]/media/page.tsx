@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { getSettings } from "@/lib/settings";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -39,7 +40,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
       <LiveRefresh tables={["gate_in_media", "gate_ins"]} jobId={id} pollMs={check.complete ? 60000 : 4000} />
       <PageHeader
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
-        subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
+        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(card.vehicle)} · {card.job.job_number}</span><VinCopy vin={card.vehicle.vin} /></span>}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Back to the details form: the photos already taken stay, the damage note is saved as typed, the form keeps its draft. */}

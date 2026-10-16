@@ -128,6 +128,20 @@ export function parseAvailability(s: string | null | undefined): ImportAvailabil
   return { kind: "confirm", days: null, text };
 }
 
+/**
+ * The words for an imported availability that is not a date: a plain number is the supplier's stock ("Supplier stock:
+ * 653"; a negative figure means none, "Out of stock"); "back order" stays; anything else is for the supplier to confirm.
+ */
+export function importAvailabilityNote(a: ImportAvailability | null): string | null {
+  if (!a) return null;
+  if (a.kind === "back_order") return "Back order at the supplier";
+  if (a.kind !== "confirm") return null;
+  const t = (a.text ?? "").trim();
+  const n = /^[-+]?\d+(?:\.\d+)?$/.test(t) ? Number(t) : null;
+  if (n !== null) return n < 0 ? "Out of stock" : `Supplier stock: ${n}`;
+  return `Supplier to confirm${t && !/will update|tbc|tba/i.test(t) ? ` (${t.slice(0, 60)})` : ""}`;
+}
+
 /** A part number with every space and dash taken out, for matching: "A 167 330 68 00" and "A1673306800" are the same part. */
 export function compactPartNumber(s: string | null | undefined): string {
   return String(s ?? "").replace(/[\s\-._/]/g, "").toUpperCase();

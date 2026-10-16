@@ -6,6 +6,7 @@ import { PartPicker } from "@/components/PartPicker";
 import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
 import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ReasonChips } from "@/components/ReasonChips";
+import { FloatingMenu } from "@/components/FloatingMenu";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { formatDayTime } from "@/lib/format";
@@ -282,7 +283,7 @@ export function QuoteEditor({
   /** Lines with a change typed but not yet confirmed by a refresh: the screen's values win over the server's for them. */
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
-  const [menuUp, setMenuUp] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
@@ -677,11 +678,11 @@ export function QuoteEditor({
           <span className="w-24 text-right font-bold">{aed(total)}</span>
           {!disabled ? (
             <span className="relative" data-line-menu>
-              <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuUp(window.innerHeight - e.currentTarget.getBoundingClientRect().bottom < 320); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
+              <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuAnchor(e.currentTarget); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
                 ⋯
               </button>
               {menu ? (
-                <div className={`absolute right-0 z-50 w-60 rounded-card border border-line bg-white py-1 shadow-xl ${menuUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
+                <FloatingMenu anchor={menuAnchor} onClose={() => setMenuFor(null)} width={240} label="More for this line" data-line-menu="">
                   {!l.title.trim() ? <MenuItem label={isService ? "Switch to Labour" : "Switch to Service"} onClick={() => { setMenuFor(null); switchKind(l); }} /> : null}
                   {isQuotation && !l.dangerous ? <MenuItem label={l.urgency === "urgent" ? "Not urgent" : "Mark as urgent"} onClick={() => { setMenuFor(null); patch(l.id, { urgency: l.urgency === "urgent" ? null : "urgent" }, true); }} /> : null}
                   {l.dangerous && isOwner ? <MenuItem label="Switch the safety warning off" onClick={() => { setMenuFor(null); patch(l.id, { dangerous: false, urgency: "urgent" }, true); }} /> : null}
@@ -690,7 +691,7 @@ export function QuoteEditor({
                   {l.line_type === "labour" ? <MenuItem label={isOwner ? "Change rate" : "Raise rate"} onClick={() => { setMenuFor(null); openOnly(l.id, `rate-${l.id}`); }} /> : null}
                   {isOwner || settings.advisorDiscount ? <MenuItem label={isOwner ? "Owner discount" : "Discount"} onClick={() => { setMenuFor(null); openOnly(l.id, `disc-${l.id}`); }} /> : null}
                   <MenuItem label="Remove" red onClick={() => { setMenuFor(null); removeLine(l.id); }} />
-                </div>
+                </FloatingMenu>
               ) : null}
             </span>
           ) : null}

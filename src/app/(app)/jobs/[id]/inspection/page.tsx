@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
@@ -139,7 +140,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   if (!bundle) {
     return (
       <>
-        <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`Inspection · ${formatPlate(vehicle)}`} subtitle={`${vehicleTitle(vehicle)} · ${job.job_number}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary">Job card</LinkButton>} />
+        <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`Inspection · ${formatPlate(vehicle)}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number}</span><VinCopy vin={vehicle.vin} /></span>} actions={<LinkButton href={`/jobs/${id}`} tone="secondary">Job card</LinkButton>} />
         <Notice tone="info">No inspection yet. It starts once a technician is assigned.</Notice>
       </>
     );
@@ -195,6 +196,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
+            <VinCopy vin={vehicle.vin} />
             <Badge tone={insp.status === "approved" ? "green" : insp.status === "returned" ? "red" : insp.status === "submitted" ? "amber" : "outline"}>{INSPECTION_STATUS_LABELS[insp.status]}</Badge>
             {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
             {locked ? <Badge tone="ink">Locked</Badge> : null}

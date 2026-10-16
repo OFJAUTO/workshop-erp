@@ -1,5 +1,6 @@
 "use server";
 
+import { isTyreName, tyreSizeIn, type TyreSpec } from "@/lib/tyres";
 import { syncPartLine } from "@/lib/quote-versions";
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
@@ -280,7 +281,7 @@ export async function removePart(partId: string) {
    Evening of 11 October 2026: the Parts table saves itself row by row.
    --------------------------------------------------------------------------- */
 
-export type RowSave = { requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[] };
+export type RowSave = { /** The tyre details when the row is a tyre (brand, model, size, year, marks). */ tyre?: TyreSpec | null; requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[] };
 
 /**
  * A custom part name typed by Parts (not in the owner's pool) is counted, so names used more than once are
@@ -358,7 +359,8 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   const delivery = availability === "to_order" && daysComplete(daysText) ? dateFromDays(daysText, dubaiDate()) : null;
   const fields = { part_number: (row.part_number ?? "").trim().slice(0, 80) || null, part_type: type, brand: type && type !== "genuine" ? (row.brand ?? "").trim().slice(0, 80) || null : null, list_price_aed: list, discount_percent: discount === null ? null : Math.min(100, Math.max(0, discount)), cost_aed: cost, supplier, availability, delivery_date: delivery };
   // Priced means the same here as on the screen: part number, type, net above 0, supplier, availability (src/lib/parts-rows.ts).
-  const complete = rowState({ part_number: (row.part_number ?? "").trim(), part_type: type ?? "", brand: "", list_price: "", discount: "", cost_aed: cost === null ? "" : String(cost), supplier: supplier ?? "", availability: availability ?? "", days: delivery ? daysText : "", qty: "1" }) === "priced";
+  const tyreRow = isTyreName(row.name) || !!row.tyre;
+  const complete = rowState({ part_number: (row.part_number ?? "").trim(), part_type: type ?? "", brand: "", list_price: "", discount: "", cost_aed: cost === null ? "" : String(cost), supplier: supplier ?? "", availability: availability ?? "", days: delivery ? daysText : "", qty: "1", ...(tyreRow ? { tyre_row: true, tyre_brand: row.tyre?.brand ?? (row.brand ?? ""), tyre_size: row.tyre?.size ?? tyreSizeIn(row.name) } : {}) }) === "priced";
   const now = new Date().toISOString();
   let partId = row.partId;
   const clientKey = row.clientKey ? String(row.clientKey).slice(0, 80) : null;
@@ -452,6 +454,11 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   if (completeNow && partId) {
     await syncLineForPart(jobId, partId, staff.id);
     await tellAdvisorIfComplete(jobId);
+  }
+  // The tyre details: stored with the part; a new brand or model is remembered for next time.
+  if (row.tyre && partId) {
+    await admin.from("part_items").update({ tyre_spec: row.tyre, brand: row.tyre.brand || null, updated_by: staff.id }).eq("id", partId);
+    await learnTyre(row.tyre, settings);
   }
   if (previousCost !== null && cost !== null && cost !== previousCost) changes.push(`${description}: price AED ${previousCost} → AED ${cost}`);
   if (qtyChange) {
@@ -590,4 +597,25 @@ export async function attachDiagram(partId: string, formData: FormData) {
   await admin.from("part_items").update({ diagram_path: path, updated_by: staff.id }).eq("id", partId);
   refresh(p.job_id);
   redirect(`/parts/${p.job_id}?message=${encodeURIComponent("Diagram attached.")}`);
+}
+
+/** A tyre brand or model typed in the tyre details window joins the Settings lists (tyre_brand_custom, tyre_models). */
+async function learnTyre(t: TyreSpec, settings: Awaited<ReturnType<typeof getSettings>>) {
+  const admin = createAdminClient();
+  const brand = t.brand.trim();
+  const model = t.model.trim();
+  if (!brand) return;
+  const brands = ((settings.tyre_brands ?? []) as string[]).map((b) => b.toLowerCase());
+  if (!brands.includes(brand.toLowerCase())) {
+    const custom = { ...((settings.tyre_brand_custom ?? {}) as Record<string, number>) };
+    custom[brand] = (Number(custom[brand]) || 0) + 1;
+    await admin.from("settings").upsert({ key: "tyre_brand_custom", value: custom, label: "Tyre brands typed", description: "Tyre brands typed by hand, counted; offered on the Inspection checklist page." }, { onConflict: "key" });
+  }
+  if (model) {
+    const models = { ...((settings.tyre_models ?? {}) as Record<string, string[]>) };
+    const key = Object.keys(models).find((k) => k.toLowerCase() === brand.toLowerCase()) ?? brand;
+    const list = models[key] ?? [];
+    if (!list.some((m) => m.toLowerCase() === model.toLowerCase())) models[key] = [...list, model].slice(0, 60);
+    await admin.from("settings").upsert({ key: "tyre_models", value: models, label: "Tyre models", description: "Tyre models per brand, offered as one-tap choices in the tyre details window; a model typed there is added by itself." }, { onConflict: "key" });
+  }
 }

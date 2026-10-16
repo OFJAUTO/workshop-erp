@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { notFound } from "next/navigation";
 import { LinkButton, Notice, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -23,7 +24,7 @@ export default async function AmendGateInPage({ params, searchParams }: { params
     <>
       <PageHeader
         title={`${g.is_complete ? "Edit gate-in" : "Gate-in details"} · ${formatPlate(card.vehicle)}`}
-        subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
+        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(card.vehicle)} · {card.job.job_number}</span><VinCopy vin={card.vehicle.vin} /></span>}
         actions={
           <LinkButton href={`/jobs/${id}/media`} tone="secondary" size="lg" data-to-media>
             Photos and video →

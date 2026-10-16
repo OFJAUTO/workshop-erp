@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
@@ -215,6 +216,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
+            <VinCopy vin={vehicle.vin} />
             {isVip ? <Badge tone="ink">VIP</Badge> : null}
             <PriorityBadge priority={job.priority} />
             {job.comeback_of ? <Badge tone="red">Comeback</Badge> : null}

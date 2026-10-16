@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
@@ -138,7 +139,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Invoice · ${formatPlate(vehicle)}`}
-        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]} · {customerName}</span><Badge tone={chipTone}>{money.chip.text}</Badge>{money.waitingHours ? <Badge tone="red">Waiting {money.waitingHours} h</Badge> : null}</span>}
+        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]} · {customerName}</span><VinCopy vin={vehicle.vin} /><Badge tone={chipTone}>{money.chip.text}</Badge>{money.waitingHours ? <Badge tone="red">Waiting {money.waitingHours} h</Badge> : null}</span>}
         actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{live && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${live.id}`} tone="secondary" size="lg">Full record</LinkButton> : null}</>}
       />
       {sp.message ? <Notice tone="success">{sp.message}</Notice> : null}
@@ -312,7 +313,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 <ul className="divide-y divide-line text-sm">
                   {ls.map((l, i) => (
                     <li key={i} className="py-1.5 flex flex-wrap items-center gap-3">
-                      <span className="flex-1 min-w-40 font-semibold">{l.description}{l.section === "fees" ? <Badge tone="red">Fee</Badge> : null}</span>
+                      <span className="flex-1 min-w-40 font-semibold uppercase">{l.description}{l.section === "fees" ? <Badge tone="red">Fee</Badge> : null}</span>
                       <span className="text-muted w-16 text-right">{l.hours !== null ? `${l.hours.toFixed(1)} h` : `× ${l.quantity}`}</span>
                       <span className="w-24 text-right font-semibold">{l.amount_aed === 0 ? "Free" : `AED ${m(l.amount_aed)}`}</span>
                     </li>

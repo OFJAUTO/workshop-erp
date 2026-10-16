@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { notFound } from "next/navigation";
 import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -42,6 +43,7 @@ export default async function RoadTestPage({ params }: { params: Promise<{ jobId
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicleTitle(card.vehicle)}</span>
             <span>· {card.job.job_number}</span>
+            <VinCopy vin={card.vehicle.vin} />
             <Badge tone={rt?.status === "done" ? "green" : rt?.status === "not_possible" ? "neutral" : "amber"}>{ROAD_TEST_STATUS_LABELS[rt?.status ?? "not_started"]}</Badge>
           </span>
         }

@@ -288,6 +288,17 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   }
   // Recovery companies may be an empty list: the ones typed at gate-out are added on their own.
   updates.push({ key: "recovery_companies", value: Array.from(new Set(String(formData.get("recovery_companies") ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, 60) });
+  // Tyre models, one line per brand: "Pirelli: P Zero, Cinturato".
+  {
+    const models: Record<string, string[]> = {};
+    for (const line of String(formData.get("tyre_models") ?? "").split(/\r?\n/)) {
+      const [brand, rest] = line.split(":");
+      const b = (brand ?? "").trim().slice(0, 40);
+      if (!b || rest === undefined) continue;
+      models[b] = Array.from(new Set(rest.split(",").map((m) => m.trim().slice(0, 60)).filter(Boolean))).slice(0, 60);
+    }
+    updates.push({ key: "tyre_models", value: models });
+  }
   updates.push({ key: "deposit_document", value: formData.get("deposit_document") === "tax_invoice" ? "tax_invoice" : "receipt" });
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
   updates.push({ key: "advisor_labour_discount", value: formData.get("advisor_labour_discount") === "on" });

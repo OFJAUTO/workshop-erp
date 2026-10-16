@@ -490,6 +490,9 @@ export function SettingsForm({
             <Field label="Tyre brands (one per line)" hint="The list under the tyre brand box; it filters as the technician types and anything else can still be typed. Brands typed more than once are offered on the Inspection checklist page.">
               <Textarea name="tyre_brands" defaultValue={v.tyre_brands ?? listTexts.tyre_brands} rows={6} required />
             </Field>
+            <Field label="Tyre models (one line per brand)" hint="Brand: model, model. Offered as one-tap choices in the tyre details window on the Parts table; a model typed there is added here by itself." optional>
+              <Textarea name="tyre_models" defaultValue={v.tyre_models ?? listTexts.tyre_models ?? ""} rows={5} placeholder={"Pirelli: P Zero, Cinturato P7\nMichelin: Pilot Sport 4S, Primacy 4"} data-tyre-models-setting />
+            </Field>
             <Field label="Damage note chips (gate-in)" hint="One per line. The one-tap words above the damage note; several can be picked, typing always works too.">
               <Textarea name="damage_note_chips" defaultValue={v.damage_note_chips ?? listTexts.damage_note_chips} rows={6} required data-damage-chips-setting />
             </Field>

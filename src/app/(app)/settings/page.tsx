@@ -54,6 +54,7 @@ export default async function SettingsPage() {
     else if (row.key === "reason_presets") reasonPresets = (row.value as Record<string, string[]>) ?? {};
     else if (row.key === "road_test_chips" || row.key === "road_test_chip_usage" || row.key === "tyre_brand_custom" || row.key === "manager_note_usage" || row.key === "item_suggestions" || row.key === "complaint_keywords" || row.key === "part_pool_custom" || row.key === "custom_jobs_used" || row.key === "manager_note_groups") continue;
     else if (row.key === "known_words") listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join(", ") : "";
+    else if (row.key === "tyre_models") listTexts.tyre_models = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([b, ms]) => `${b}: ${(ms ?? []).join(", ")}`).join("\n");
     else if (row.key === "inspection_limits") limits = { ...limits, ...((row.value as Record<string, number>) ?? {}) };
     else if (row.key === "prescan_gate_enabled") prescanGate = row.value === true;
     else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button" || row.key === "test_mode_enabled" || row.key === "advisor_labour_discount" || row.key === "customer_documents_uppercase") flags[row.key] = row.value === true;

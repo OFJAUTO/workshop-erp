@@ -2,6 +2,7 @@ import "server-only";
 import { dubaiDate } from "@/lib/jobs";
 import { daysFromDate, pricingSummary, rowState, type PricingSummary, type RowFlags, type RowState, type RowValues } from "@/lib/parts-rows";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isTyreName, parseTyreSpec, tyreSizeIn } from "@/lib/tyres";
 
 /**
  * The Parts pricing rows of a job as the server sees them, in the same shape and with the same state function the
@@ -9,7 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * blockers, the job card) goes through here, so one definition of "priced" holds everywhere. Removed rows ("not
  * needed") stay in the list, greyed, and count for nothing.
  */
-export const PRICING_PART_SELECT = "id, part_request_id, description, original_description, part_number, part_type, brand, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status";
+export const PRICING_PART_SELECT = "id, part_request_id, description, original_description, part_number, part_type, brand, tyre_spec, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status";
 export const PRICING_REQUEST_SELECT = "id, label, status, quantity, closed_reason, created_at, removed_at, removed_by, removed_reason";
 
 export type PricingPart = {
@@ -21,6 +22,7 @@ export type PricingPart = {
   part_number: string | null;
   part_type: string | null;
   brand: string | null;
+  tyre_spec?: unknown;
   list_price_aed?: number | string | null;
   discount_percent?: number | string | null;
   cost_aed: number | string | null;
@@ -55,6 +57,7 @@ export function valuesOfPart(p: PricingPart, today: string): RowValues {
     availability: p.availability ?? "",
     days: p.availability === "to_order" ? daysFromDate(p.delivery_date, today) : "",
     qty: String(Number(p.confirmed_quantity ?? p.quantity) || 1),
+    ...tyreValues(p.description, p.tyre_spec, p.brand),
   };
 }
 
@@ -63,9 +66,17 @@ export function flagsOfPart(p: Pick<PricingPart, "removed_at" | "is_active" | "d
   return { removed: !!p.removed_at || p.is_active === false, waitingApproval: p.discount_approval_status === "pending" };
 }
 
+/** The tyre fields of a row: from the stored details, else read off the name. */
+export function tyreValues(name: string, raw: unknown, brand: string | null): Pick<RowValues, "tyre_row" | "tyre_brand" | "tyre_size"> {
+  const spec = parseTyreSpec(raw);
+  const tyre = isTyreName(name) || !!spec;
+  if (!tyre) return {};
+  return { tyre_row: true, tyre_brand: spec?.brand ?? (brand ?? ""), tyre_size: spec?.size ?? tyreSizeIn(name) };
+}
+
 /** The row values of a request that has no part yet: empty, with the usual part type offered. */
 export function valuesOfRequest(r: PricingRequest, defaultType = ""): RowValues {
-  return { part_number: "", part_type: defaultType, brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: String(Number(r.quantity) || 1) };
+  return { part_number: "", part_type: defaultType, brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: String(Number(r.quantity) || 1), ...tyreValues(r.label, null, null) };
 }
 
 export type PricingRow = {

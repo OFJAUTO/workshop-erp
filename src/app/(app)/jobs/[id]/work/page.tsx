@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -79,7 +80,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Work order · ${formatPlate(vehicle)}`}
-        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>}
+        subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]}</span><VinCopy vin={vehicle.vin} />{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>}
         actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{job.status === "pending_qc" ? <LinkButton href={`/qc/${id}`} tone="secondary" size="lg">QC</LinkButton> : null}</>}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
@@ -133,7 +134,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
                 <li key={l.id} className="py-2 flex gap-3 items-start">
                   <span className="w-6 shrink-0 text-muted font-semibold">{i + 1}.</span>
                   <span className="flex-1 min-w-0">
-                    <span className="font-semibold">{l.title}</span>
+                    <span className="font-semibold uppercase">{l.title}</span>
                     {l.details ? <span className="block text-xs text-muted">{l.details}</span> : null}
                     {l.source === "additional" ? <span className="block text-xs text-muted">Additional work</span> : null}
                   </span>
@@ -235,7 +236,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
             {parts.needed.length === 0 ? <p className="text-sm text-muted">No parts needed.</p> : (
               <ul className="text-sm divide-y divide-line">
                 {parts.needed.map((p) => (
-                  <li key={p.id} className="py-1.5 flex flex-wrap items-center gap-2"><span className="font-semibold">{p.description}</span><Badge tone={p.issue_status === "confirmed" ? "green" : p.order_status === "received" ? "amber" : "neutral"}>{p.issue_status === "confirmed" ? "Handed over" : p.order_status === "received" ? "Here, not handed over" : p.expected_date ?? p.delivery_date ? `Coming ${p.expected_date ?? p.delivery_date}` : "Not here yet"}</Badge></li>
+                  <li key={p.id} className="py-1.5 flex flex-wrap items-center gap-2"><span className="font-semibold uppercase">{p.description}</span><Badge tone={p.issue_status === "confirmed" ? "green" : p.order_status === "received" ? "amber" : "neutral"}>{p.issue_status === "confirmed" ? "Handed over" : p.order_status === "received" ? "Here, not handed over" : p.expected_date ?? p.delivery_date ? `Coming ${p.expected_date ?? p.delivery_date}` : "Not here yet"}</Badge></li>
                 ))}
               </ul>
             )}

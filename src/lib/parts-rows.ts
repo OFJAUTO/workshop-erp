@@ -18,6 +18,10 @@ export type RowValues = {
   availability: string;
   /** Whole days until the ordered part arrives ("0" same day, "1" next day). */
   days: string;
+  /** A tyre row: brand and a full size are needed before it counts as priced; no part number is asked for. */
+  tyre_row?: boolean;
+  tyre_brand?: string;
+  tyre_size?: string;
   /** The Parts quantity (the technician's stays on the row for the note). */
   qty: string;
 };
@@ -68,7 +72,7 @@ export const ROW_STATE_WORDS: Record<RowState, string> = {
   not_finished: "not finished",
 };
 
-export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days";
+export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days" | "tyre";
 export type Missing = { field: MissingField; short: string; long: string };
 
 /** Whole days typed: "0", "1", "12". Anything else means the days are still missing. */
@@ -77,7 +81,9 @@ export const daysComplete = (days: string | null | undefined) => /^\d+$/.test(St
 /** What a row still needs before it counts as priced: part number, type, a net price above 0, a supplier and its availability. */
 export function rowMissing(v: RowValues): Missing[] {
   const out: Missing[] = [];
-  if (!v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });
+  if (v.tyre_row) {
+    if (!(v.tyre_brand ?? "").trim() || !/^\d{3}\/\d{2} R\d{2}$/.test(v.tyre_size ?? "")) out.push({ field: "tyre", short: "Tyre size and brand needed", long: "tyre size and brand needed" });
+  } else if (!v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });
   if (!v.part_type.trim()) out.push({ field: "part_type", short: "No type", long: "no type" });
   const netText = v.cost_aed.trim();
   const net = netText === "" ? null : Number(netText.replace(",", "."));

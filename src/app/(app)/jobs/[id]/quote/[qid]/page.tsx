@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
@@ -173,6 +174,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {job?.job_number}</span>
             <span>· {customerName}</span>
+            <VinCopy vin={vehicle?.vin ?? null} />
             <Badge tone={tone}>{QUOTE_STATUS_LABELS[q.status]}</Badge>
             {q.estimate_id ? <Badge tone="neutral">From an estimate</Badge> : null}
           </span>

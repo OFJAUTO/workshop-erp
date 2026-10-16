@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
@@ -272,6 +273,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
+            {!loose ? <VinCopy vin={vehicle.vin} /> : null}
             <PriorityBadge priority={job.priority} />
             {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
             {isVip ? <Badge tone="ink">VIP</Badge> : null}

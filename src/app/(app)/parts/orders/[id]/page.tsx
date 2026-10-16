@@ -122,7 +122,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   <ul className="divide-y divide-line text-sm">
                     {g.lines.map((l) => (
                       <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-2">
-                        <span className="font-semibold">{l.description}</span>
+                        <span className="font-semibold uppercase">{l.description}</span>
                         {typeOf(l.part_item_id) ? <Badge tone="outline">{typeOf(l.part_item_id)}</Badge> : null}
                         {l.part_number ? <span className="text-muted">{l.part_number}</span> : null}
                         <span className="text-muted">× {l.quantity} at {money(l.unit_cost)}</span>
@@ -147,7 +147,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   const late = l.expected_date && l.expected_date < today && l.received_qty < l.quantity;
                   return (
                     <li key={l.id} className="py-2 flex flex-wrap items-center gap-2">
-                      <span className="font-semibold">{l.description}</span>
+                      <span className="font-semibold uppercase">{l.description}</span>
                       {typeOf(l.part_item_id) ? <Badge tone="outline">{typeOf(l.part_item_id)}</Badge> : null}
                       {l.part_number ? <span className="text-muted">{l.part_number}</span> : null}
                       <span className="text-muted">× {l.quantity} at AED {l.unit_cost.toFixed(2)}</span>

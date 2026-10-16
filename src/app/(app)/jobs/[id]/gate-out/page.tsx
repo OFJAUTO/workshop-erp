@@ -1,3 +1,4 @@
+import { VinCopy } from "@/components/VinCopy";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
@@ -58,7 +59,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${job.job_number} · ${declinedOut ? "Declined, car going out" : STATUS_LABELS[job.status]}`} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
+      <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(card.vehicle)} · {job.job_number} · {declinedOut ? "Declined, car going out" : STATUS_LABELS[job.status]}</span>{!loose ? <VinCopy vin={card.vehicle.vin} /> : null}</span>} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {signoff && signoff.hasStages && !signoff.complete ? <Notice tone="info">Release sign-off still needed from {signoff.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. The handover stays locked until all have signed on the bodyshop page.</Notice> : null}

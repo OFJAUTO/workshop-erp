@@ -13,6 +13,9 @@ import { positionsWords, type CatalogueRow } from "@/lib/parts-list";
 import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, splitPart } from "../actions";
 import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 import { bulkDeleteParts, undoBulkDelete } from "../bulk-actions";
+import { FloatingMenu } from "@/components/FloatingMenu";
+import { TyreBuilder } from "@/components/TyreBuilder";
+import { isGenericTyreName, isTyreName, parseTyreSpec, tyreName, tyreSizeIn, type TyreSpec } from "@/lib/tyres";
 import { undoImport } from "../import-actions";
 
 export type TableRow = {
@@ -72,7 +75,7 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null }: { jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" } }: { /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
   const router = useRouter();
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
@@ -83,6 +86,10 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   const [confirmDelete, setConfirmDelete] = useState<null | { count: number; kept: number; keys: TableRow[] | null }>(null);
   const [undo, setUndo] = useState<null | { batch: string; count: number; kept: number }>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  // "Set for ticked": one availability, supplier or type for every ticked row.
+  const [bulkAvail, setBulkAvail] = useState("");
+  const [bulkSupplier, setBulkSupplier] = useState("");
+  const [bulkType, setBulkType] = useState("");
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [importGone, setImportGone] = useState(false);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -181,6 +188,33 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   }
   const notFinished = summary.counts.not_finished;
 
+  /** "Set for ticked": the chosen availability, supplier or type is saved on every ticked row, one save each. */
+  async function applyBulk() {
+    const ticked = rows.filter((r) => selected.has(r.key) && !r.removed && !r.locked);
+    if (!ticked.length || (!bulkAvail && !bulkSupplier && !bulkType)) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    const sup = bulkSupplier === "__stock" ? OUR_STOCK : suppliers.find((s) => s.id === bulkSupplier)?.name ?? "";
+    for (const r of ticked) {
+      const v: RowValues = { ...r.values };
+      if (bulkAvail) Object.assign(v, availabilityFromChoice(bulkAvail as AvailabilityChoice, v.days));
+      if (bulkSupplier) {
+        const s = suppliers.find((x) => x.id === bulkSupplier);
+        const discount = s ? String(supplierDiscount(s, v.part_type)) : v.discount;
+        Object.assign(v, { supplier: sup, discount, cost_aed: netOf(v.list_price, discount) || v.cost_aed });
+        if (isOurStock(sup)) Object.assign(v, { availability: "in_stock", days: "" });
+      }
+      if (bulkType) v.part_type = bulkType;
+      const res = await autoSavePartRow(jobId, { requestId: r.requestId, partId: r.partId, clientKey: r.key, name: r.name, ...v, quantity: v.qty, positions: r.positions });
+      if (res.error) { setBulkError(res.error); break; }
+      setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId: res.partId ?? x.partId, values: v } : x)));
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    setBulkAvail(""); setBulkSupplier(""); setBulkType("");
+    refreshWhenIdle(() => router.refresh());
+  }
+
   /** Rows that can be ticked and deleted: live rows (not already removed). */
   const deletable = rows.filter((r) => !r.removed);
   const allTicked = deletable.length > 0 && deletable.every((r) => selected.has(r.key));
@@ -251,6 +285,25 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           <span className="text-sm font-bold" data-pricing-counter>{summary.text}</span>
           <span className="h-1.5 w-full max-w-xs rounded-full bg-track overflow-hidden"><span className="block h-full bg-ink" style={{ width: `${summary.total ? Math.round((summary.done / summary.total) * 100) : 0}%` }} /></span>
         </div>
+        {canPrice && !pricingLocked && selected.size > 0 ? (
+          <span className="inline-flex flex-wrap items-center gap-1.5 rounded-control border border-ink bg-white px-2 py-1" data-bulk-set>
+            <span className="text-xs font-bold">Set for {selected.size} ticked:</span>
+            <select value={bulkAvail} onChange={(e) => setBulkAvail(e.target.value)} className="h-9 rounded-control border border-line-strong bg-white px-1.5 text-sm" aria-label="Availability for the ticked parts" data-bulk-availability>
+              <option value="">Availability…</option>
+              {AVAILABILITY_CHOICES.filter((c) => c.value !== "other").map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            <select value={bulkSupplier} onChange={(e) => setBulkSupplier(e.target.value)} className="h-9 rounded-control border border-line-strong bg-white px-1.5 text-sm" aria-label="Supplier for the ticked parts" data-bulk-supplier>
+              <option value="">Supplier…</option>
+              <option value="__stock">{OUR_STOCK}</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <select value={bulkType} onChange={(e) => setBulkType(e.target.value)} className="h-9 rounded-control border border-line-strong bg-white px-1.5 text-sm" aria-label="Type for the ticked parts" data-bulk-type>
+              <option value="">Type…</option>
+              {types.map((t) => <option key={t} value={t}>{PART_TYPE_LABELS[t as keyof typeof PART_TYPE_LABELS] ?? t}</option>)}
+            </select>
+            <Button type="button" size="md" onClick={() => void applyBulk()} disabled={bulkBusy || (!bulkAvail && !bulkSupplier && !bulkType)} data-bulk-apply>Apply</Button>
+          </span>
+        ) : null}
         {canPrice && !pricingLocked ? (
           <Button type="button" tone="danger" size="md" onClick={askDelete} disabled={bulkBusy || deletable.length === 0} data-delete-all>
             {selected.size ? `Delete ${selected.size} ticked` : "Delete all"}
@@ -281,7 +334,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
-            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} canPrice={canPrice} pricingLocked={pricingLocked} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
+            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} tyreBrands={tyreBrands} tyreModels={tyreModels} tyreSizes={tyreSizes} canPrice={canPrice} pricingLocked={pricingLocked} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
           ))}
           {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
         </div>
@@ -342,13 +395,17 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   );
 }
 
-function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; canPrice: boolean; pricingLocked: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
+function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, tyreSizes, canPrice, pricingLocked, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; tyreBrands: string[]; tyreModels: Record<string, string[]>; tyreSizes: { front: string; rear: string }; canPrice: boolean; pricingLocked: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
   const router = useRouter();
   const [v, setV] = useState<RowValues>(row.values);
   const [name, setName] = useState(row.name);
   const [partId, setPartId] = useState<string | null>(row.partId);
   const [focused, setFocused] = useState(false);
   const [menu, setMenu] = useState<null | "down" | "up">(null);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  // The tyre details window; the details ride along with the next save.
+  const [tyreOpen, setTyreOpen] = useState(false);
+  const tyreRef = useRef<TyreSpec | null>(null);
   // "Edit part name": the categorised picker in rename mode; one tap picks the new name.
   const [editingName, setEditingName] = useState(false);
   // The technician's words, kept on the row from the moment the name changes (the server stores them on save).
@@ -388,7 +445,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
   const state = stateOf(row, v);
   const missing = state === "not_finished" ? rowMissing(v) : [];
   const complete = state === "priced";
-  const partial = state === "not_finished" && Object.entries(v).some(([k, x]) => k !== "qty" && x.trim() !== "" && !(k === "part_type" && x === (types[0] ?? "")));
+  const partial = state === "not_finished" && Object.entries(v).some(([k, x]) => k !== "qty" && !k.startsWith("tyre_") && String(x ?? "").trim() !== "" && !(k === "part_type" && x === (types[0] ?? "")));
   const red = attempted && state === "not_finished";
   const tone = row.removed ? "border-line bg-canvas opacity-60" : red ? "border-red-bar bg-white" : focused ? `border-ink ${complete ? "bg-green-soft" : "bg-chip"}` : row.waitingApproval ? "border-amber-bar bg-amber-soft/40" : row.unavailable ? "border-line bg-amber-soft/60" : complete ? "border-green bg-green-soft" : "border-line bg-white";
   const supplier = suppliers.find((s) => s.name.toLowerCase() === v.supplier.toLowerCase());
@@ -454,7 +511,9 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
   async function persist(next: RowValues, nextName: string) {
     const run = chain.current.then(async () => {
       setSaving(true);
-      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty, positions: row.positions });
+      const tyre = tyreRef.current;
+      tyreRef.current = null;
+      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty, positions: row.positions, ...(tyre ? { tyre } : {}) });
       setSaving(false);
       if (res.error) {
         setError(res.error);
@@ -479,6 +538,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
     }
     const r = menuRef.current?.getBoundingClientRect();
     // Near the bottom of the screen the menu opens upwards, never under the fixed bar.
+    setMenuAnchor(menuRef.current);
     setMenu(r && window.innerHeight - r.bottom < 340 ? "up" : "down");
   };
   const copyPn = async () => {
@@ -508,7 +568,8 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
   const textCell = (t: string, extra = "") => <span className={`h-9 flex items-center min-w-0 truncate text-sm ${extra}`} title={t}>{t}</span>;
   const wrote = row.original ?? (row.requestId ? origin : null);
   const notes = [row.removed ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, wrote && wrote !== name ? `Technician wrote: ${wrote}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
-  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
+  const detailsInPartNumber = isGenericTyreName(name) && /\s/.test(v.part_number.trim());
+  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : detailsInPartNumber ? { text: "Add the details to the name (tap Tyre details). Part numbers aren't shown to customers.", cls: "font-semibold text-amber" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
 
   return (
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
@@ -517,8 +578,27 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
         {canPrice && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
         <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
-          <span className="block line-clamp-3 text-[13px] leading-[1.15]">{name}</span>
+          <span className="block line-clamp-3 text-[13px] uppercase leading-[1.15]">{name}</span>
         </button>
+        {(isTyreName(name) || v.tyre_row) && !readOnly ? (
+          <button type="button" onClick={() => setTyreOpen(true)} className={`h-9 shrink-0 rounded-control border px-2 text-xs font-bold ${v.tyre_row && (!v.tyre_brand || !v.tyre_size) ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong bg-white"}`} data-tyre-details>
+            Tyre details
+          </button>
+        ) : null}
+        {tyreOpen ? (
+          <TyreBuilder
+            initial={parseTyreSpec(null) ?? (v.tyre_brand || v.tyre_size ? { brand: v.tyre_brand ?? "", model: "", size: v.tyre_size ?? "", year: "", marks: [] } : null)}
+            defaultSize={v.tyre_size || tyreSizeIn(name) || ((row.positions ?? []).some((p) => /rear/i.test(p)) ? tyreSizes.rear : tyreSizes.front) || ""}
+            brands={tyreBrands}
+            models={tyreModels}
+            onApply={(spec) => {
+              setTyreOpen(false);
+              tyreRef.current = spec;
+              queue({ ...latest.current.v, tyre_row: true, tyre_brand: spec.brand, tyre_size: spec.size, brand: spec.brand }, tyreName(spec));
+            }}
+            onClose={() => setTyreOpen(false)}
+          />
+        ) : null}
         {row.diagramUrl ? <a href={row.diagramUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold underline underline-offset-4">Diagram</a> : null}
         {editingName && !readOnly ? <PartPicker title={`Correct the name: ${name}`} catalogue={catalogue} selected={[]} itemKey={null} mode="rename" onPick={renameTo} onClose={() => setEditingName(false)} /> : null}
       </div>
@@ -601,9 +681,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
           <>
             <button ref={menuRef} type="button" onClick={openMenu} aria-label="More for this part" aria-expanded={!!menu} className={`h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>⋯</button>
             {menu ? (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
-                <div className={`absolute right-0 z-50 w-64 rounded-card border border-line bg-white p-1 text-sm shadow-xl flex flex-col ${menu === "up" ? "bottom-10" : "top-10"}`}>
+              <FloatingMenu anchor={menuAnchor} onClose={() => setMenu(null)} label="More for this part" data-part-menu="">
                   {!readOnly ? <MenuItem label="Edit part name" onClick={() => { setMenu(null); setEditingName(true); }} /> : null}
                   {partId && !row.locked ? <MenuItem label="Split into separate parts" onClick={() => { setMenu(null); setSplit(true); }} /> : null}
                   {partId && complete && !row.locked ? <MenuItem label="Add an option for this part" onClick={() => { setMenu(null); onAddOption(); }} /> : null}
@@ -617,8 +695,7 @@ function Row({ jobId, row, suppliers, types, catalogue, canPrice, pricingLocked,
                   {partId && row.locked && !row.removed ? <MenuItem label="Remove: not needed (ordered: choose its ending)" red onClick={() => { setMenu(null); setRemoving("ordered"); }} /> : null}
                   {row.removed ? <MenuItem label="Put back" onClick={() => { setMenu(null); run(() => putBackPart(jobId, removeTarget)); }} /> : null}
                   {!partId && !row.requestId ? <MenuItem label="Remove this row" red onClick={() => { setMenu(null); onRemovedLocal(); }} /> : null}
-                </div>
-              </>
+              </FloatingMenu>
             ) : null}
             {partId ? (
               <form action={attachDiagram.bind(null, partId)} className="hidden">
