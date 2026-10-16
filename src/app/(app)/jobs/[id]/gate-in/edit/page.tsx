@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Notice, PageHeader } from "@/components/ui";
+import { LinkButton, Notice, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { createClient } from "@/lib/supabase/server";
@@ -8,9 +8,11 @@ import { formatPlate } from "@/lib/types";
 import { updateGateIn } from "../../../actions";
 import { GateInForm } from "../../../../gate-in/GateInForm";
 
-export default async function AmendGateInPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AmendGateInPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ from?: string }> }) {
   await requirePermission("editGateIn");
   const { id } = await params;
+  const { from } = await searchParams;
+  const fromMedia = from === "media";
   const supabase = await createClient();
   const card = await loadJobCard(supabase, id);
   if (!card || !card.gateIn) notFound();
@@ -19,9 +21,17 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
 
   return (
     <>
-      <PageHeader title={`Amend gate-in · ${formatPlate(card.vehicle)}`} subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`} />
+      <PageHeader
+        title={`${g.is_complete ? "Edit gate-in" : "Gate-in details"} · ${formatPlate(card.vehicle)}`}
+        subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
+        actions={
+          <LinkButton href={`/jobs/${id}/media`} tone="secondary" size="lg" data-to-media>
+            Photos and video →
+          </LinkButton>
+        }
+      />
       <Notice tone="info">
-        Gate-in time and the person who gated the car in cannot be changed. Every other correction is logged with the original value, the new value, who and when.
+        Gate-in time and the person who gated the car in cannot be changed. Every other change is written in the job&apos;s history: what it was, what it is now, who and when.
       </Notice>
       <div className="max-w-3xl">
         <GateInForm
@@ -29,6 +39,7 @@ export default async function AmendGateInPage({ params }: { params: Promise<{ id
           draftKey={`gate-in-edit-${id}`}
           isElectric={card.vehicle.fuel_type === "electric"}
           mode="edit"
+          returnTo={fromMedia ? "media" : undefined}
           recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string }[]}
           requests={card.requests.map((r) => r.text)}
           requestsLocked={g.is_complete}

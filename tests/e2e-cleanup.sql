@@ -37,6 +37,7 @@ begin
   delete from public.jobs where id = any(job_ids);
   delete from public.declined_work where vehicle_id = any(veh_ids);
   delete from public.vehicles where id = any(veh_ids);
+  delete from public.customer_contacts where customer_id = any(cust_ids);
   delete from public.customers where id = any(cust_ids);
 end $$;
 set session_replication_role = default;
@@ -83,6 +84,7 @@ begin
   delete from public.qr_links where vehicle_id = any(veh_ids);
   delete from public.appointments where customer_id = any(cust_ids);
   delete from public.vehicles where id = any(veh_ids);
+  delete from public.customer_contacts where customer_id = any(cust_ids);
   delete from public.customer_contacts where customer_id = any(cust_ids);
   delete from public.customers where id = any(cust_ids);
   delete from public.inbound_emails where from_email like 'e2e%' or subject like 'e2e %';

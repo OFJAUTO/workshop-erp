@@ -487,6 +487,9 @@ export function SettingsForm({
             <Field label="Damage note chips (gate-in)" hint="One per line. The one-tap words above the damage note; several can be picked, typing always works too.">
               <Textarea name="damage_note_chips" defaultValue={v.damage_note_chips ?? listTexts.damage_note_chips} rows={6} required data-damage-chips-setting />
             </Field>
+            <Field label="Recovery companies (gate-out)" hint="One per line. One-tap choices when a car leaves by recovery; a company typed at gate-out is added here by itself." optional>
+              <Textarea name="recovery_companies" defaultValue={v.recovery_companies ?? listTexts.recovery_companies ?? ""} rows={4} data-recovery-companies-setting />
+            </Field>
             <p className="text-xs text-muted">Tap-first suggestions per checklist item learn from every approved report on their own.</p>
           </Card>
 

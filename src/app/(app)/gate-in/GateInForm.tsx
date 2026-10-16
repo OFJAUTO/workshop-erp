@@ -34,6 +34,7 @@ export function GateInForm({
   estimates = [],
   comebacks = [],
   draftKey,
+  returnTo,
   recoveryTypes = [],
 }: {
   action: FormAction;
@@ -58,6 +59,8 @@ export function GateInForm({
   draftKey?: string;
   /** Normal / Full down / Closed box (Settings): asked when the car came on our recovery, carried onto the quotation. */
   recoveryTypes?: { key: string; label: string }[];
+  /** Where Save returns to: "media" for the photos step (its Back button leads here). */
+  returnTo?: string;
 }) {
   const [arrivedBy, setArrivedBy] = useState(initialValues?.arrived_by ?? "");
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
@@ -71,6 +74,7 @@ export function GateInForm({
           {draftKey ? <FormDraft draftKey={draftKey} skip={["requests"]} /> : null}
           <input type="hidden" name="is_electric" value={isElectric ? "yes" : "no"} />
           {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
+          {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
 
           {pictureMode !== "none" ? (
             <Card className="flex flex-col gap-4">

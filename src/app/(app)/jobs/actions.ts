@@ -6,7 +6,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, type JobStatus, feeNotice } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, labelOf, type JobStatus, feeNotice } from "@/lib/jobs";
 import { addTechnician, applyStageSideEffects } from "@/lib/work-flow";
 import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
@@ -248,7 +248,9 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   const supabase = await createClient();
   const { data: job } = await supabase.from("jobs").select("id, priority, is_open, customer_id, customer:customers(is_vip, vip_note)").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
-  const { data: gi } = await supabase.from("gate_ins").select("is_complete").eq("job_id", jobId).maybeSingle();
+  const { data: gi } = await supabase.from("gate_ins").select("is_complete, arrived_by, recovery_type, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, mileage_unit, mileage_miles, keys_count, keys_keychain, notes, old_parts_return").eq("job_id", jobId).maybeSingle();
+  if (!gi) return { error: "No gate-in record found.", values };
+  const { data: oldRequests } = await supabase.from("job_requests").select("text").eq("job_id", jobId).eq("is_active", true).order("position");
 
   const { error } = await supabase
     .from("gate_ins")
@@ -293,9 +295,39 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
     await supabase.from("jobs").update({ priority: d.priority }).eq("id", jobId);
     await logEvent(supabase, jobId, staff.id, { event_type: "amendment", note: `Priority ${job.priority} → ${d.priority}` });
   }
-  await logEvent(supabase, jobId, staff.id, { event_type: "amendment", note: "Gate-in details amended" });
+  // One history line per changed field: what it was, what it is now (who and when come with the line).
+  const yes = (b: boolean | null | undefined) => (b ? "Yes" : "No");
+  const changes: string[] = [];
+  const cmp = (label: string, before: string | number | null | undefined, after: string | number | null | undefined) => {
+    const a = before === null || before === undefined || before === "" ? "—" : String(before);
+    const b = after === null || after === undefined || after === "" ? "—" : String(after);
+    if (a !== b) changes.push(`${label} changed ${a} → ${b}`);
+  };
+  const settingsNow = await getSettings();
+  const recoveryLabel = (key: string | null | undefined) => ((settingsNow.recovery_types ?? []) as { key: string; label: string }[]).find((t) => t.key === key)?.label ?? key ?? "";
+  cmp("Arrived by", labelOf(ARRIVED_BY, gi.arrived_by), labelOf(ARRIVED_BY, d.arrived_by));
+  if (d.arrived_by === "our_recovery" || gi.arrived_by === "our_recovery") cmp("Recovery type", recoveryLabel(gi.recovery_type), d.arrived_by === "our_recovery" ? recoveryLabel(d.recovery_type) : "");
+  cmp("Condition", labelOf(CONDITIONS, gi.condition), labelOf(CONDITIONS, d.condition));
+  cmp("Fuel level", labelOf(FUEL_LEVELS, gi.fuel_level), d.is_electric === "yes" ? "" : labelOf(FUEL_LEVELS, d.fuel_level));
+  cmp("Battery", gi.battery_percent === null || gi.battery_percent === undefined ? "" : `${gi.battery_percent}%`, d.is_electric === "yes" && d.battery_percent ? `${Number(d.battery_percent)}%` : "");
+  cmp("Cleanliness", labelOf(CLEANLINESS, gi.cleanliness), labelOf(CLEANLINESS, d.cleanliness));
+  cmp("Dash cam", yes(gi.dash_cam), yes(d.dash_cam === "yes"));
+  cmp("Major damage", yes(gi.major_damage), yes(d.major_damage === "yes"));
+  const mileageWords = (km: number | null | undefined, miles: number | null | undefined, unit: string | null | undefined) =>
+    unit === "mi" ? `${Number(miles ?? Math.round(Number(km ?? 0) / 1.609344)).toLocaleString("en-GB")} miles` : `${Number(km ?? 0).toLocaleString("en-GB")} km`;
+  const newMiles = d.mileage_unit === "mi" && d.mileage_entered !== "" && Number.isFinite(Number(d.mileage_entered)) ? Number(d.mileage_entered) : toMiles(Number(d.mileage));
+  cmp("Mileage", mileageWords(gi.mileage, gi.mileage_miles, gi.mileage_unit), mileageWords(Number(d.mileage), newMiles, d.mileage_unit));
+  cmp("Keys", gi.keys_count, Number(d.keys_count));
+  cmp("Keychain", yes(gi.keys_keychain), yes(d.keys_keychain === "yes"));
+  cmp("Old parts returned", yes(gi.old_parts_return), yes(d.old_parts_return === "yes"));
+  if ((gi.notes ?? "") !== (blankToNull(d.notes) ?? "")) changes.push("Notes changed");
+  if (!gi.is_complete && (oldRequests ?? []).map((r) => r.text).join("\n") !== requests.join("\n")) changes.push("Customer requests changed");
+  for (const note of changes) await logEvent(supabase, jobId, staff.id, { event_type: "amendment", note });
   refresh(jobId);
-  redirect(`/jobs/${jobId}${staff.role_id === "gate_in" ? "/media" : ""}?message=` + encodeURIComponent("Amendments saved and logged."));
+  revalidatePath(`/jobs/${jobId}/media`);
+  const returnTo = String(formData.get("return_to") ?? "");
+  const message = changes.length ? `Saved. ${changes.length} change${changes.length === 1 ? "" : "s"} written in the history.` : "Saved, nothing changed.";
+  redirect(`/jobs/${jobId}${returnTo === "media" || staff.role_id === "gate_in" ? "/media" : ""}?message=` + encodeURIComponent(message));
 }
 
 /* ---------------------------------------------------------------------------

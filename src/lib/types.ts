@@ -326,6 +326,8 @@ export type GateInMediaRow = {
   wheel_condition: string[] | null;
   taken_at: string;
   uploaded_by: string | null;
+  /** Taken off by the X (never deleted); the loaders leave these out. */
+  removed_at?: string | null;
 };
 
 export type JobRequestRow = {

@@ -5,7 +5,7 @@ import QRCode from "qrcode";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { FinishGateInButton } from "@/components/FinishGateInButton";
 import { MediaChecklist } from "@/components/MediaChecklist";
-import { Card, PageHeader, SectionLabel } from "@/components/ui";
+import { Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { mediaChecklist } from "@/lib/media";
@@ -17,10 +17,11 @@ import { MediaGallery } from "../MediaGallery";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobMediaPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function JobMediaPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string }> }) {
   const staff = await requirePermission("editGateIn");
   const gateInOnly = staff.role_id === "gate_in";
   const { id } = await params;
+  const { message } = await searchParams;
   const supabase = await createClient();
   const card = await loadJobCard(supabase, id);
   if (!card) notFound();
@@ -39,8 +40,17 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
       <PageHeader
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
         subtitle={`${vehicleTitle(card.vehicle)} · ${card.job.job_number}`}
-        actions={<FinishGateInButton check={check} href={gateInOnly ? "/gate-in" : `/jobs/${id}`} completeLabel={gateInOnly ? "Done, next car" : "Open job card"} />}
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Back to the details form: the photos already taken stay, the damage note is saved as typed, the form keeps its draft. */}
+            <LinkButton href={`/jobs/${id}/gate-in/edit?from=media`} tone="ghost" size="lg" data-back-to-details>
+              ← Back to details
+            </LinkButton>
+            <FinishGateInButton check={check} href={gateInOnly ? "/gate-in" : `/jobs/${id}`} completeLabel={gateInOnly ? "Done, next car" : "Open job card"} />
+          </div>
+        }
       />
+      {message ? <Notice tone="success">{message}</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2">
@@ -60,7 +70,7 @@ export default async function JobMediaPage({ params }: { params: Promise<{ id: s
 
           <Card className="flex flex-col gap-3">
             <SectionLabel right={`${card.media.length}`}>Uploaded so far</SectionLabel>
-            <MediaGallery media={card.media} urls={Object.fromEntries(card.mediaUrls)} damageNote={card.gateIn?.damage_note} compact />
+            <MediaGallery media={card.media} urls={Object.fromEntries(card.mediaUrls)} damageNote={card.gateIn?.damage_note} compact canRemove={staff.role_id === "owner" || !card.gateIn?.is_complete} />
           </Card>
         </div>
       </div>

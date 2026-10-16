@@ -285,6 +285,8 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (list.length === 0) return { error: `Enter at least one line for ${key.replaceAll("_", " ")}.`, values };
     updates.push({ key, value: list });
   }
+  // Recovery companies may be an empty list: the ones typed at gate-out are added on their own.
+  updates.push({ key: "recovery_companies", value: Array.from(new Set(String(formData.get("recovery_companies") ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, 60) });
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
   updates.push({ key: "advisor_labour_discount", value: formData.get("advisor_labour_discount") === "on" });
   // The quotation's hidden bank charge assumes the highest rate; the real one is taken at payment.

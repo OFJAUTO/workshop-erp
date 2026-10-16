@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Lightbox, type LightboxSlide } from "@/components/Lightbox";
 import { formatDateTime } from "@/lib/format";
 import type { GateInMediaRow } from "@/lib/types";
@@ -88,21 +89,48 @@ function captionFor(p: GateInMediaRow, compact: boolean) {
   return parts.join(" · ");
 }
 
+/** The X on a photo or video: one tap asks "Remove?", the second removes. The answer sits on the picture itself. */
+function RemoveX({ onRemove, label }: { onRemove: () => void; label: string }) {
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return ask ? (
+    <div className="absolute inset-x-1 top-1 z-10 flex items-center justify-between gap-1 rounded-control border border-line bg-white/95 px-2 py-1 text-xs shadow" data-remove-ask>
+      <span className="font-semibold">Remove?</span>
+      <span className="flex gap-1">
+        <button type="button" className="rounded-control bg-ink px-2 py-1 font-bold text-white disabled:opacity-50" disabled={busy} onClick={() => { setBusy(true); onRemove(); }} data-remove-yes>
+          Yes
+        </button>
+        <button type="button" className="rounded-control border border-line px-2 py-1 font-bold" onClick={() => setAsk(false)} data-remove-no>
+          No
+        </button>
+      </span>
+    </div>
+  ) : (
+    <button type="button" onClick={() => setAsk(true)} className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-white/90 text-sm font-bold shadow hover:bg-white" aria-label={`Remove: ${label}`} data-media-remove>
+      ×
+    </button>
+  );
+}
+
 function Thumb({
   slide,
   caption,
   onOpen,
   aspect = "aspect-[4/3]",
   small = false,
+  onRemove,
 }: {
   slide: Slide | null;
   caption: string;
   onOpen: () => void;
   aspect?: string;
   small?: boolean;
+  /** Set when this person may take the photo off. */
+  onRemove?: () => void;
 }) {
   return (
-    <figure className="flex flex-col gap-1 min-w-0">
+    <figure className="relative flex flex-col gap-1 min-w-0">
+      {onRemove ? <RemoveX onRemove={onRemove} label={caption} /> : null}
       {slide ? (
         <button type="button" onClick={onOpen} className={`block w-full ${aspect} rounded-card overflow-hidden bg-chip cursor-zoom-in focus-visible:ring-2 focus-visible:ring-ink/40`} aria-label={`Enlarge: ${caption}`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -119,7 +147,7 @@ function Thumb({
 /**
  * Everything recorded for a job: car picture, both videos labelled, the dashboard
  * photo, the two keys photos side by side, the four wheels in one row, then damage
- * photos with the damage note. Photos open full size on tap. Nothing can be removed.
+ * photos with the damage note. Photos open full size on tap. With canRemove, an X takes a photo or video off (marked, never deleted).
  */
 export function MediaGallery({
   media,
@@ -129,6 +157,7 @@ export function MediaGallery({
   compact = false,
   stacked = false,
   hideVideos = false,
+  canRemove = false,
 }: {
   media: GateInMediaRow[];
   urls: Record<string, string>;
@@ -139,8 +168,24 @@ export function MediaGallery({
   stacked?: boolean;
   /** The customer page shows the videos through its own player (fresh addresses, "getting ready" slots). */
   hideVideos?: boolean;
+  /** Anyone doing the gate-in while it is open; only the owner once it is finished. */
+  canRemove?: boolean;
 }) {
   const [open, setOpen] = useState<number | null>(null);
+  const router = useRouter();
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const remove = async (id: string) => {
+    setRemoveError(null);
+    try {
+      const res = await fetch("/api/gate-in-media/remove", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error ?? "Could not remove it.");
+      router.refresh();
+    } catch (e) {
+      setRemoveError(e instanceof Error ? e.message : "Could not remove it.");
+    }
+  };
+  const removeFor = (id: string) => (canRemove ? () => remove(id) : undefined);
   if (media.length === 0 && !carPictureUrl) return hideVideos ? null : <p className="text-sm text-muted">Nothing uploaded yet.</p>;
 
   const videos = hideVideos ? [] : media.filter((m) => m.kind === "video_exterior" || m.kind === "video_interior" || m.kind === "video");
@@ -183,6 +228,7 @@ export function MediaGallery({
           <span className="hidden [@media(hover:hover)]:inline">Click any photo to enlarge</span>
         </p>
       ) : null}
+      {removeError ? <p className="text-sm font-semibold text-red" data-remove-error>{removeError}</p> : null}
 
       {carPictureUrl ? (
         <div className={compact ? "w-full" : "w-full max-w-md"}>
@@ -195,7 +241,8 @@ export function MediaGallery({
           {videos.map((v, i) => {
             const url = urls[v.storage_path];
             return (
-              <figure key={v.id} className="flex flex-col gap-1">
+              <figure key={v.id} className="relative flex flex-col gap-1">
+                {canRemove ? <RemoveX onRemove={() => remove(v.id)} label={KIND_LABEL[v.kind]} /> : null}
                 {url ? (
                   <button type="button" onClick={() => openSlide(videoSlides[i])} className="relative block w-full overflow-hidden rounded-card" aria-label="Play the video">
                     <VideoPreview url={url} />
@@ -216,12 +263,12 @@ export function MediaGallery({
       {dashboard.length || keys.length ? (
         <div className={`grid gap-3 ${cols}`}>
           {dashboard.map((p, i) => (
-            <Thumb key={p.id} slide={dashboardSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(dashboardSlides[i])} />
+            <Thumb key={p.id} slide={dashboardSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(dashboardSlides[i])} onRemove={removeFor(p.id)} />
           ))}
           {keys.length ? (
             <div className="col-span-2 grid grid-cols-2 gap-3 rounded-card border border-line p-2">
               {keys.map((p, i) => (
-                <Thumb key={p.id} slide={keysSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(keysSlides[i])} />
+                <Thumb key={p.id} slide={keysSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(keysSlides[i])} onRemove={removeFor(p.id)} />
               ))}
             </div>
           ) : null}
@@ -238,6 +285,7 @@ export function MediaGallery({
                 slide={wheelSlides[i]}
                 caption={`${WHEEL_LABELS[p.kind as (typeof WHEEL_KINDS)[number]]}${p.wheel_condition?.length ? ` · ${wheelConditionText(p.wheel_condition)}` : ""}`}
                 onOpen={() => openSlide(wheelSlides[i])}
+                onRemove={removeFor(p.id)}
                 aspect="aspect-square"
                 small
               />
@@ -252,7 +300,7 @@ export function MediaGallery({
           {damage.length ? (
             <div className={`grid gap-3 ${cols}`}>
               {damage.map((p, i) => (
-                <Thumb key={p.id} slide={damageSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(damageSlides[i])} />
+                <Thumb key={p.id} slide={damageSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(damageSlides[i])} onRemove={removeFor(p.id)} />
               ))}
             </div>
           ) : null}
@@ -263,7 +311,7 @@ export function MediaGallery({
       {other.length ? (
         <div className={`grid gap-3 ${cols}`}>
           {other.map((p, i) => (
-            <Thumb key={p.id} slide={otherSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(otherSlides[i])} />
+            <Thumb key={p.id} slide={otherSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(otherSlides[i])} onRemove={removeFor(p.id)} />
           ))}
         </div>
       ) : null}

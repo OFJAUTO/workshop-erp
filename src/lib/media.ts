@@ -49,6 +49,7 @@ export async function loadMedia(jobId: string): Promise<GateInMediaRow[]> {
     .from("gate_in_media")
     .select("id, job_id, kind, storage_path, duration_s, caption, wheel_condition, taken_at, uploaded_by")
     .eq("job_id", jobId)
+    .is("removed_at", null)
     .order("taken_at", { ascending: true });
   return (data ?? []) as GateInMediaRow[];
 }

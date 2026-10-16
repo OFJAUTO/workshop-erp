@@ -125,7 +125,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canAssign = can(role, "assignJobs") && managesThisJob && job.is_open;
   const canMove = can(role, "moveJobs") && job.is_open && job.status !== "gate_in_pending";
   const canRequestMove = !can(role, "moveJobs") && can(role, "requestMove") && job.is_open;
-  const canEditGateIn = can(role, "editGateIn") && job.is_open;
+  // Gate-in details can be corrected until the car leaves (every change is written in the history).
+  const canEditGateIn = can(role, "editGateIn") && job.is_open && job.status !== "in_delivery";
+  // Photos and videos: anyone doing the gate-in while it is still open; only the owner once it is finished.
+  const canRemoveMedia = canEditGateIn && (role === "owner" || !check.complete);
   const canSend = can(role, "sendApproval") && job.is_open;
   // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
   const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
@@ -598,8 +601,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <Collapsible title="Gate-in details" right={gateIn ? `${formatDateTime(job.gated_in_at)}` : undefined}>
             {canEditGateIn ? (
               <div>
-                <LinkButton href={`/jobs/${id}/gate-in/edit`} tone="ghost" size="md">
-                  Amend
+                <LinkButton href={`/jobs/${id}/gate-in/edit`} tone="ghost" size="md" data-edit-gate-in>
+                  Edit gate-in
                 </LinkButton>
               </div>
             ) : null}
@@ -669,12 +672,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <Collapsible title="Gate-in photos and videos" right={`${media.length}`}>
             {canEditGateIn && job.is_open ? (
               <div>
-                <LinkButton href={`/jobs/${id}/media`} tone="ghost" size="md">
-                  Add more
+                <LinkButton href={`/jobs/${id}/media`} tone="ghost" size="md" data-add-media>
+                  Add photos or video
                 </LinkButton>
               </div>
             ) : null}
-            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} />
+            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} canRemove={canRemoveMedia} />
           </Collapsible>
 
           <Collapsible title="History" right={`${events.length}`}>

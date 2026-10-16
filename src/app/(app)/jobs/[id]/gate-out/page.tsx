@@ -42,6 +42,9 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const job = card.job;
   const { data: creditCust } = job.customer_id ? await createAdminClient().from("customers").select("credit_terms_days").eq("id", job.customer_id).maybeSingle() : { data: null };
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
+  // Drivers and other people saved on the customer: one tap at "Customer's driver collects".
+  const { data: contactRows } = job.customer_id ? await createAdminClient().from("customer_contacts").select("id, name, phone, relationship").eq("customer_id", job.customer_id).eq("is_active", true).order("name") : { data: [] };
+  const contacts = (contactRows ?? []) as { id: string; name: string; phone: string | null; relationship: string | null }[];
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const blocked = ((bal.state === "no_invoice" && !declinedOut) || bal.balance > 0) && !(bal.state !== "no_invoice" && bal.balance > 0 && creditDays > 0);
@@ -75,7 +78,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             </Card>
           ) : (
             <Card>
-              <GateOutForm finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+              <GateOutForm customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           )}
         </div>

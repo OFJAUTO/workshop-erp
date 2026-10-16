@@ -49,7 +49,7 @@ export default async function SettingsPage() {
     else if (row.key === "stage_target_hours") stageHours = (row.value as Record<string, number>) ?? {};
     else if (row.key === "branches") branchesText = ((row.value as { name: string; address: string }[]) ?? []).map((b) => `${b.name} | ${b.address}`).join("\n");
     else if (row.key === "inspection_checklist" || row.key === "item_suggestions" || row.key === "labour_hours_memory") continue;
-    else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "tyre_brands", "damage_note_chips"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
+    else if (["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "tyre_brands", "damage_note_chips", "recovery_companies"].includes(row.key)) listTexts[row.key] = Array.isArray(row.value) ? (row.value as string[]).join("\n") : "";
     else if (row.key === "doc_reminder_limits") docLimits = (row.value as Record<string, { amber: number; red: number | string }>) ?? {};
     else if (row.key === "reason_presets") reasonPresets = (row.value as Record<string, string[]>) ?? {};
     else if (row.key === "road_test_chips" || row.key === "road_test_chip_usage" || row.key === "tyre_brand_custom" || row.key === "manager_note_usage" || row.key === "item_suggestions" || row.key === "complaint_keywords" || row.key === "part_pool_custom" || row.key === "custom_jobs_used" || row.key === "manager_note_groups") continue;

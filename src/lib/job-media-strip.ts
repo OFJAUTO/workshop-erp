@@ -42,6 +42,7 @@ export async function loadJobMediaSummaries(
     .from("gate_in_media")
     .select("id, job_id, kind, storage_path, duration_s, caption, wheel_condition, taken_at, uploaded_by")
     .in("job_id", jobs.map((j) => j.id))
+    .is("removed_at", null)
     .order("taken_at", { ascending: true });
   const rows = (media ?? []) as GateInMediaRow[];
   const photoRows = rows.filter((m) => !m.kind.startsWith("video"));
