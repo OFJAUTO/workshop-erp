@@ -19,6 +19,7 @@ import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { AccountsDashboard } from "./AccountsDashboard";
+import { PartsDashboard } from "./PartsDashboard";
 import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
 import { DepositsWaiting } from "./DepositsWaiting";
@@ -57,6 +58,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const settings = await getSettings();
   // Accounts see money, not the workshop: their dashboard is the money screen.
   if (role === "accounts") return <AccountsDashboard staff={staff} settings={settings} />;
+  // Parts see parts, not the workshop chips: their dashboard is the parts screen.
+  if (role === "parts") return <PartsDashboard staff={staff} />;
   const workingTime = workingTimeOf(settings);
 
   const supabase = await createClient();

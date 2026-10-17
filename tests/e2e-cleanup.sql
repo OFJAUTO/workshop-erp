@@ -32,6 +32,8 @@ begin
   for t in select table_name from information_schema.columns where table_schema = 'public' and column_name = 'job_id' and table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE') and table_name <> 'jobs' loop
     execute format('delete from public.%I where job_id = any($1)', t) using job_ids;
   end loop;
+  delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where number like 'LPO-E2E-%');
+  delete from public.purchase_orders where number like 'LPO-E2E-%';
   delete from public.recovery_trips where driver_name like 'E2e %' or location_details like 'E2e%';
   delete from public.recovery_drivers where name like 'E2e %';
   delete from public.notifications where job_id = any(job_ids);

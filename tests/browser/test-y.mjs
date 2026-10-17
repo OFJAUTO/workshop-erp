@@ -348,5 +348,59 @@ if (want("F")) {
   await sql("update public.settings set value = $1::jsonb where key = 'technician_cost_rate_by_department'", [JSON.stringify(origRates)]);
 }
 
+/* ================= G: parts arrivals and the parts-only dashboard ================= */
+if (want("G")) {
+  console.log("\n== G parts role");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const dubai = (plus) => new Date(Date.now() + 4 * 3600000 + plus * 86400000).toISOString().slice(0, 10);
+  await sql("insert into public.suppliers (name, phone) values ('E2e Supplier', '+97140000099') on conflict do nothing");
+  // Three parts on order: one due tomorrow, one overdue, one special (20 days' lead).
+  await sql(`insert into public.part_items (job_id, description, quantity, cost_aed, supplier, order_status, expected_date, priced_at, availability, confirm_status)
+    values ($1, 'E2E FILTER SET', 1, 100, 'E2e Supplier', 'ordered', $2, now(), 'to_order', 'confirmed'),
+           ($1, 'E2E BRAKE HOSE', 2, 50, 'E2e Supplier', 'ordered', $3, now(), 'to_order', 'confirmed'),
+           ($1, 'E2E SPECIAL PUMP', 1, 900, 'E2e Supplier', 'ordered', $4, now(), 'to_order', 'confirmed')`,
+    [jobId, dubai(1), dubai(-2), dubai(20)]);
+  // A workshop stock order due tomorrow shows too, marked Stock.
+  await sql("insert into public.purchase_orders (number, kind, status, supplier_name, order_type, verify_token) values ('LPO-E2E-S1', 'stock', 'ordered', 'E2e Supplier', 'consumables', 'e2estok' || substr(md5(random()::text), 1, 12))");
+  await sql("insert into public.purchase_order_lines (po_id, description, quantity, unit_cost, expected_date) select id, 'E2E HAND CLEANER', 6, 10, $1 from public.purchase_orders where number = 'LPO-E2E-S1'", [dubai(1)]);
+
+  const { browser, page } = await browserFor("parts", { viewport: { width: 1500, height: 1200 } });
+  await go(page, `${base}/dashboard`);
+  const nav = await page.locator("nav").first().textContent() ?? "";
+  check("G1: the Parts menu has Parts arrivals and no Calendar", /Parts arrivals/.test(nav) && !/Calendar/.test(nav), nav.slice(0, 160));
+  check("G2: the parts dashboard has the tiles and no workshop chips", (await page.locator("[data-parts-tiles]").count()) === 1 && (await page.locator("[data-parts-tile]").count()) === 7 && !/Customer approval|Car wash|Road test/.test((await page.textContent("body")) ?? ""));
+  check("G2: Waiting on you stays on top", /Waiting on you/i.test((await page.textContent("body")) ?? ""));
+  const tileCount = async (key) => Number(((await page.locator(`[data-parts-tile='${key}']`).textContent()) ?? "").match(/^(\d+)/)?.[1] ?? "-1");
+  check("G2: To price counts the open request, Overdue counts the late part", (await tileCount("to-price")) >= 1 && (await tileCount("overdue")) >= 1, JSON.stringify({ toPrice: await tileCount("to-price"), overdue: await tileCount("overdue") }));
+  const carRow = page.locator(`[data-parts-car='${jobId}']`);
+  check("G2: the car shows with the five dots and one action for its current step", (await carRow.count()) === 1 && (await carRow.locator("[data-parts-dots]").count()) === 1 && (await carRow.locator("[data-parts-action]").count()) === 1);
+
+  await go(page, `${base}/parts/arrivals`);
+  const overdueRow = page.locator("[data-overdue-list] [data-arrival]").filter({ hasText: "E2E BRAKE HOSE" });
+  check("G1: the overdue part sits on top in red with Chase supplier on WhatsApp", (await overdueRow.count()) === 1 && (await overdueRow.locator("[data-chase]").count()) === 1 && ((await overdueRow.locator("[data-chase]").getAttribute("href")) ?? "").includes("wa.me/97140000099"));
+  const dayCard = page.locator(`[data-arrival-day='${dubai(1)}']`);
+  check("G1: tomorrow lists the part with supplier, car and the stock order marked Stock", /E2E FILTER SET/i.test((await dayCard.textContent()) ?? "") && /E2e Supplier/.test((await dayCard.textContent()) ?? "") && /E2E HAND CLEANER/i.test((await dayCard.textContent()) ?? "") && /stock/i.test((await dayCard.locator("[data-arrival]").filter({ hasText: "E2E HAND CLEANER" }).textContent()) ?? ""), ((await dayCard.textContent().catch(() => "")) ?? "").slice(0, 200));
+  // A 20-day part lives past the week view: "Special orders only" lists it whenever it lands.
+  await go(page, `${base}/parts/arrivals?special=1`);
+  const bodySpecial = (await page.textContent("body")) ?? "";
+  check("G1: 'Special orders only' lists the long-lead part, marked, and hides the rest", (await page.locator("[data-special-list]").count()) === 1 && /E2E SPECIAL PUMP/i.test(bodySpecial) && /Special order/.test((await page.locator("[data-special-list] [data-arrival]").filter({ hasText: "E2E SPECIAL PUMP" }).first().textContent()) ?? "") && !/E2E FILTER SET/i.test(bodySpecial), bodySpecial.match(/.{0,60}SPECIAL PUMP.{0,60}/i)?.[0] ?? "");
+  // Move the tomorrow part's date with a reason: the job's dates follow and the advisor hears.
+  await go(page, `${base}/parts/arrivals`);
+  const mark = (await sql("select now() as t"))[0]?.t;
+  const row = page.locator("[data-arrival]").filter({ hasText: "E2E FILTER SET" }).first();
+  await row.locator("[data-move-date]").click();
+  await row.locator("[data-move-date-input]").fill(dubai(6));
+  await row.locator("button", { hasText: /^Supplier delayed$/ }).first().click();
+  await row.locator("[data-move-date-save]").click();
+  await page.waitForURL(/message=/, { timeout: 20000 }).catch(() => null);
+  const moved = await until(async () => { const r = (await sql("select p.expected_date::text as e, j.plan_parts_ready_date::text as ready from public.part_items p join public.jobs j on j.id = p.job_id where p.description ilike 'E2E FILTER SET'"))[0]; return r?.e === dubai(6) ? r : null; }, 30, 500);
+  check("G1: the date moves with the reason and 'All parts here by' follows the latest part", !!moved && moved.ready === dubai(20), JSON.stringify(moved));
+  const toldAdvisor = await until(async () => ((await sql("select count(*)::int as n from public.notifications where title like 'Part delayed on%' and created_at > $1", [mark]))[0]?.n ?? 0) >= 1 ? 1 : null, 30, 500);
+  check("G1: the advisor is told about the delay", !!toldAdvisor);
+  await browser.close();
+  // The no-delete trigger keeps purchase orders: the clean-up SQL (replica mode) removes LPO-E2E-% rows.
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);
