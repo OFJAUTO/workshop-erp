@@ -1,6 +1,7 @@
 /** Shared vocabulary for job cards: the nine-step track, statuses in plain words, timing colours. */
 
-import { workingHoursBetween, type WorkingTime, parseBreak } from "./working-time";
+import { breakForDay, dubaiDayId, workingHoursBetween, type WorkingTime } from "./working-time";
+import { departmentBreakSchedule } from "./breaks";
 
 export const STAGES = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"] as const;
 export type Stage = (typeof STAGES)[number];
@@ -188,9 +189,11 @@ export function formatWait(minutes: number, wt?: WorkingTime) {
 const TONE_RANK: Record<Timing["tone"], number> = { red: 0, amber: 1, green: 2, neutral: 3 };
 
 /** The working-time settings in the shape the stage clock needs. */
-export function workingTimeOf(settings: { opening_hour: number | string; closing_hour: number | string; working_days: string[]; break_mechanical?: unknown; break_bodyshop?: unknown }, side: "mechanical" | "bodyshop" = "mechanical"): WorkingTime {
-  const brk = parseBreak(String((side === "bodyshop" ? settings.break_bodyshop : settings.break_mechanical) ?? "")) ?? (side === "bodyshop" ? { start: "13:30", end: "14:30" } : { start: "12:30", end: "13:30" });
-  return { openHour: Number(settings.opening_hour), closeHour: Number(settings.closing_hour), workingDays: settings.working_days ?? [], breakStart: brk.start, breakEnd: brk.end };
+export function workingTimeOf(settings: { opening_hour: number | string; closing_hour: number | string; working_days: string[]; break_times?: unknown; break_mechanical?: unknown; break_bodyshop?: unknown }, side: "mechanical" | "bodyshop" = "mechanical"): WorkingTime {
+  // The break differs by weekday (Friday is longer): the whole schedule travels with the working time.
+  const breaks = departmentBreakSchedule(settings, side === "bodyshop" ? "bodyshop" : null);
+  const today = breakForDay(breaks, dubaiDayId());
+  return { openHour: Number(settings.opening_hour), closeHour: Number(settings.closing_hour), workingDays: settings.working_days ?? [], breakStart: today?.start ?? null, breakEnd: today?.end ?? null, breaks };
 }
 
 /** Hours spent in the current stage: working hours only when the clock carries the opening hours. */

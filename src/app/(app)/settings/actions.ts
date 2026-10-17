@@ -224,7 +224,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "company_name" && text.length < 2) return { error: "Enter the company name.", values };
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
-    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && key !== "whatsapp_followup_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && key !== "whatsapp_followup_template" && key !== "whatsapp_final_check_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "company_legal_name" && text.length < 2) return { error: "Enter the legal name.", values };
     if (key === "document_currency" && text !== "symbol" && text !== "aed") return { error: "Choose the currency shown on documents.", values };
     if (key === "labour_rate_bodyshop_aed" && text && !(Number(text) >= 0)) return { error: "The bodyshop labour rate must be a number, or empty.", values };
@@ -235,6 +235,23 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   }
 
   if (Number(formData.get("closing_hour")) <= Number(formData.get("opening_hour"))) return { error: "The closing hour must be after the opening hour.", values };
+
+  // Breaks per day and department: "12:30-13:30", or empty for no break that day.
+  {
+    const grid: Record<string, Record<string, string>> = { mechanical: {}, bodyshop: {} };
+    for (const side of ["mechanical", "bodyshop"] as const) {
+      for (const day of ["sat", "sun", "mon", "tue", "wed", "thu", "fri"]) {
+        const raw = String(formData.get(`break__${side}__${day}`) ?? "").trim();
+        if (raw) {
+          const m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(raw);
+          const ok = m && Number(m[1]) < 24 && Number(m[2]) < 60 && Number(m[3]) < 24 && Number(m[4]) < 60 && Number(m[1]) * 60 + Number(m[2]) < Number(m[3]) * 60 + Number(m[4]);
+          if (!ok || !m) return { error: `The ${side} break on ${day.charAt(0).toUpperCase() + day.slice(1)} must look like 12:30-13:30 (start before end), or be empty for no break.`, values };
+          grid[side][day] = `${m[1].padStart(2, "0")}:${m[2]}-${m[3].padStart(2, "0")}:${m[4]}`;
+        } else grid[side][day] = "";
+      }
+    }
+    updates.push({ key: "break_times", value: grid });
+  }
 
   const byMake = overrides(formData, "markup_make__");
   if (typeof byMake === "string") return { error: byMake, values };

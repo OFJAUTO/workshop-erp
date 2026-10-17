@@ -56,6 +56,11 @@ const DEFAULTS = {
   prescan_gate_enabled: true,
   break_mechanical: "12:30-13:30",
   break_bodyshop: "13:30-14:30",
+  /** The break per day of the week and department (Settings > Breaks); "" on a day means no break that day. */
+  break_times: {
+    mechanical: { sat: "12:30-13:30", sun: "12:30-13:30", mon: "12:30-13:30", tue: "12:30-13:30", wed: "12:30-13:30", thu: "12:30-13:30", fri: "12:30-14:00" },
+    bodyshop: { sat: "13:30-14:30", sun: "13:30-14:30", mon: "13:30-14:30", tue: "13:30-14:30", wed: "13:30-14:30", thu: "13:30-14:30", fri: "12:30-14:00" },
+  } as Record<string, Record<string, string>>,
   part_labels_enabled: false,
   sticker_part_width_mm: 40,
   sticker_part_height_mm: 30,

@@ -32,6 +32,7 @@ export function SettingsForm({
   qcChecksText,
   listTexts = {},
   limits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 },
+  breakTimes = {},
   prescanGate = false,
   labourJobsText = "",
   candidates = {},
@@ -59,6 +60,8 @@ export function SettingsForm({
   flags?: Record<string, boolean>;
   docLimits?: Record<string, { amber: number; red: number | string }>;
   reasonPresets?: Record<string, string[]>;
+  /** Settings > Breaks: the window per day of the week and department ("" = no break that day). */
+  breakTimes?: Record<string, Record<string, string>>;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
@@ -297,6 +300,30 @@ export function SettingsForm({
                 <Input name="closing_hour" defaultValue={v.closing_hour} inputMode="numeric" required />
               </Field>
             </div>
+            <Field label="Breaks (per day, per department)" hint="Written as 12:30-13:30; empty = no break that day. Every clock pauses in that break, and labour cost, times shown, planning and due dates leave it out.">
+              <div className="overflow-x-auto">
+                <table className="text-sm" data-break-grid>
+                  <thead>
+                    <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
+                      <th className="py-1 pr-3" />
+                      {["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => <th key={d} className="py-1 pr-2 font-bold">{d.charAt(0).toUpperCase() + d.slice(1)}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {([["mechanical", "Mechanical"], ["bodyshop", "Bodyshop"]] as const).map(([side, label]) => (
+                      <tr key={side}>
+                        <td className="py-1 pr-3 text-sm font-semibold">{label}</td>
+                        {["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => (
+                          <td key={d} className="py-1 pr-2">
+                            <Input name={`break__${side}__${d}`} defaultValue={breakTimes[side]?.[d] ?? ""} placeholder={d === "fri" ? "12:30-14:00" : side === "bodyshop" ? "13:30-14:30" : "12:30-13:30"} className="min-h-10 px-2 text-xs" style={{ width: "6.5rem" }} aria-label={`${label} break on ${d}`} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Field>
             <Field label="Working days" hint="Days that count towards the daily target and the stage timers.">
               <div className="flex flex-wrap gap-2">
                 {DAYS.map((d) => (

@@ -4,9 +4,25 @@
  */
 
 export type BreakWindow = { start: string; end: string };
-export type WorkingTime = { openHour: number; closeHour: number; workingDays: string[]; breakStart?: string | null; breakEnd?: string | null };
+/** One break window per day of the week ("sun".."sat"); a missing or null day has no break. */
+export type BreakSchedule = Partial<Record<string, BreakWindow | null>>;
+/** Wherever a break is taken: one window for every day, or a schedule with a window per weekday. */
+export type BreakLike = BreakWindow | BreakSchedule | null | undefined;
+export type WorkingTime = { openHour: number; closeHour: number; workingDays: string[]; breakStart?: string | null; breakEnd?: string | null; /** The break per weekday; when set it wins over breakStart/breakEnd. */ breaks?: BreakSchedule | null };
 
-const DAY_IDS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+export const DAY_IDS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/** The break that applies on one weekday, whether a single window or a schedule was given. */
+export function breakForDay(b: BreakLike, dayId: string): BreakWindow | null {
+  if (!b) return null;
+  if (typeof (b as BreakWindow).start === "string" && typeof (b as BreakWindow).end === "string") return b as BreakWindow;
+  return (b as BreakSchedule)[dayId] ?? null;
+}
+
+/** Today's weekday id on the Dubai clock. */
+export function dubaiDayId(now = Date.now()): string {
+  return DAY_IDS[new Date(now + DUBAI_OFFSET_MS).getUTCDay()];
+}
 const DUBAI_OFFSET_MS = 4 * 3600000; // Dubai has no daylight saving time.
 const DAY_MS = 86400000;
 
@@ -34,15 +50,18 @@ export function workingHoursBetween(start: Date | string | number, end: Date | s
   const close = clamp(wt.closeHour, 0, 24) * 3600000;
   if (close <= open) return (e - s) / 3600000; // Nonsense settings: fall back to plain hours.
   const days = new Set(wt.workingDays);
-  const brk = wt.breakStart && wt.breakEnd ? { s: clockMs(wt.breakStart), e: clockMs(wt.breakEnd) } : null;
+  const fixed = wt.breakStart && wt.breakEnd ? { start: wt.breakStart, end: wt.breakEnd } : null;
   let total = 0;
   for (let day = Math.floor(s / DAY_MS); day <= Math.floor(e / DAY_MS); day++) {
-    if (!days.has(DAY_IDS[new Date(day * DAY_MS).getUTCDay()])) continue;
+    const dayId = DAY_IDS[new Date(day * DAY_MS).getUTCDay()];
+    if (!days.has(dayId)) continue;
     const from = Math.max(s, day * DAY_MS + open);
     const to = Math.min(e, day * DAY_MS + close);
     if (to > from) {
       total += to - from;
-      if (brk) total -= Math.max(0, Math.min(to, day * DAY_MS + brk.e) - Math.max(from, day * DAY_MS + brk.s));
+      // The break of that weekday (Friday's is longer), from the schedule when one is set.
+      const w = wt.breaks ? breakForDay(wt.breaks, dayId) : fixed;
+      if (w) total -= Math.max(0, Math.min(to, day * DAY_MS + clockMs(w.end)) - Math.max(from, day * DAY_MS + clockMs(w.start)));
     }
   }
   return total / 3600000;
@@ -50,39 +69,45 @@ export function workingHoursBetween(start: Date | string | number, end: Date | s
 
 /** Minutes a clock counts between two moments: inside the opening hours only, the break left out (unless it was worked through). */
 export function countedMinutes(start: Date | string | number, end: Date | string | number, wt: WorkingTime, opts: { throughBreak?: boolean } = {}): number {
-  const w = opts.throughBreak ? { ...wt, breakStart: null, breakEnd: null } : wt;
+  const w = opts.throughBreak ? { ...wt, breakStart: null, breakEnd: null, breaks: null } : wt;
   return Math.max(0, Math.round(workingHoursBetween(start, end, w) * 60));
 }
 
 /** Minutes of a break that fall inside a span of time (Dubai clock), for a technician's clock. */
-export function breakMinutesBetween(start: Date | string | number, end: Date | string | number, brk: BreakWindow | null | undefined): number {
+export function breakMinutesBetween(start: Date | string | number, end: Date | string | number, brk: BreakLike): number {
   if (!brk) return 0;
   const s = toMs(start) + DUBAI_OFFSET_MS;
   const e = toMs(end) + DUBAI_OFFSET_MS;
   if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return 0;
-  const bs = clockMs(brk.start);
-  const be = clockMs(brk.end);
   let total = 0;
   for (let day = Math.floor(s / DAY_MS); day <= Math.floor(e / DAY_MS); day++) {
-    total += Math.max(0, Math.min(e, day * DAY_MS + be) - Math.max(s, day * DAY_MS + bs));
+    const w = breakForDay(brk, DAY_IDS[new Date(day * DAY_MS).getUTCDay()]);
+    if (!w) continue;
+    total += Math.max(0, Math.min(e, day * DAY_MS + clockMs(w.end)) - Math.max(s, day * DAY_MS + clockMs(w.start)));
   }
   return Math.round(total / 60000);
 }
 
 /** Where the Dubai clock is inside the break right now: the break's start and end as moments, or null. */
-export function breakNow(brk: BreakWindow | null | undefined, now = Date.now()): { startsAt: number; endsAt: number; inBreak: boolean } | null {
-  if (!brk) return null;
-  const local = now + DUBAI_OFFSET_MS;
-  const day = Math.floor(local / DAY_MS) * DAY_MS;
-  const startsAt = day + clockMs(brk.start) - DUBAI_OFFSET_MS;
-  const endsAt = day + clockMs(brk.end) - DUBAI_OFFSET_MS;
-  return { startsAt, endsAt, inBreak: now >= startsAt && now < endsAt };
+export function breakNow(brk: BreakLike, now = Date.now()): { startsAt: number; endsAt: number; inBreak: boolean; window: BreakWindow } | null {
+  const w = breakForDay(brk, dubaiDayId(now));
+  if (!w) return null;
+  const day = Math.floor((now + DUBAI_OFFSET_MS) / DAY_MS) * DAY_MS;
+  const startsAt = day + clockMs(w.start) - DUBAI_OFFSET_MS;
+  const endsAt = day + clockMs(w.end) - DUBAI_OFFSET_MS;
+  return { startsAt, endsAt, inBreak: now >= startsAt && now < endsAt, window: w };
 }
 
-/** Working hours in one working day, breaks taken out. */
-export function hoursPerDay(wt: WorkingTime): number {
-  const brk = wt.breakStart && wt.breakEnd ? (clockMs(wt.breakEnd) - clockMs(wt.breakStart)) / 3600000 : 0;
-  return Math.max(0, wt.closeHour - wt.openHour - brk);
+/** Working hours in one working day, the break taken out: that weekday's when given, else the average working day. */
+export function hoursPerDay(wt: WorkingTime, dayId?: string): number {
+  const windowOf = (d: string) => (wt.breaks ? breakForDay(wt.breaks, d) : wt.breakStart && wt.breakEnd ? { start: wt.breakStart, end: wt.breakEnd } : null);
+  const hoursOf = (d: string) => {
+    const w = windowOf(d);
+    return Math.max(0, wt.closeHour - wt.openHour - (w ? (clockMs(w.end) - clockMs(w.start)) / 3600000 : 0));
+  };
+  if (dayId) return hoursOf(dayId);
+  const days = wt.workingDays.length ? wt.workingDays : DAY_IDS;
+  return days.reduce((a, d) => a + hoursOf(d), 0) / days.length;
 }
 
 /** Working hours left in the current week (Dubai), from now to the last working day's close. */
@@ -94,12 +119,13 @@ export function hoursLeftThisWeek(wt: WorkingTime, now = Date.now()): { left: nu
   let total = 0;
   let left = 0;
   for (let d = weekStart; d < weekStart + 7; d++) {
-    if (!wt.workingDays.includes(DAY_IDS[new Date(d * DAY_MS).getUTCDay()])) continue;
-    total += hoursPerDay(wt);
+    const dayId = DAY_IDS[new Date(d * DAY_MS).getUTCDay()];
+    if (!wt.workingDays.includes(dayId)) continue;
+    total += hoursPerDay(wt, dayId);
     const dayOpen = d * DAY_MS + wt.openHour * 3600000 - DUBAI_OFFSET_MS;
     const dayClose = d * DAY_MS + wt.closeHour * 3600000 - DUBAI_OFFSET_MS;
     if (now >= dayClose) continue;
-    if (now <= dayOpen) left += hoursPerDay(wt);
+    if (now <= dayOpen) left += hoursPerDay(wt, dayId);
     else left += workingHoursBetween(now, dayClose, wt);
   }
   return { left: Math.round(left * 10) / 10, total };

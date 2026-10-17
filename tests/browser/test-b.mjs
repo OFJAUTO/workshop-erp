@@ -16,6 +16,7 @@ const dubaiHHMM = (d) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Duba
 let settingsJsonb = true;
 const setSetting = async (key, value) => sql(settingsJsonb ? "update public.settings set value = to_jsonb($2::text) where key = $1" : "update public.settings set value = $2 where key = $1", [key, value]);
 const getSetting = async (key) => { const r = await sql("select value from public.settings where key = $1", [key]); return r[0]?.value; };
+const setJson = async (key, value) => sql("update public.settings set value = $2::jsonb where key = $1", [key, JSON.stringify(value)]);
 
 async function freeTech(jobId) {
   const t = await sql("select s.id from public.staff s where s.role_id = 'technician' and s.is_active and not exists (select 1 from public.work_sessions w where w.technician_id = s.id and w.ended_at is null and w.is_active) order by s.display_name limit 1");
@@ -263,11 +264,11 @@ await section("E2 break", async () => {
   await api("/api/e2e/stage", { stage: "worklines", id: jobId });
   await sql("update public.staff set break_start = null, break_end = null where id = $1", [techId]);
   await sql("insert into public.work_sessions (job_id, technician_id, started_at, created_by, updated_by) values ($1, $2, now() - interval '10 minutes', $2, $2)", [jobId, techId]);
-  const original = await getSetting("break_mechanical");
-  const originalB = await getSetting("break_bodyshop");
+  // Since 17 October the break lives in the per-day grid: today's window is set for both sides.
+  const original = await getSetting("break_times");
   const win = `${dubaiHHMM(new Date(Date.now() - 2 * 60000))}-${dubaiHHMM(new Date(Date.now() + 40 * 60000))}`;
-  await setSetting("break_mechanical", win);
-  await setSetting("break_bodyshop", win);
+  const everyDay = Object.fromEntries(["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => [d, win]));
+  await setJson("break_times", { mechanical: everyDay, bodyshop: everyDay });
   try {
     const { browser, page } = await browserForId(techId, { viewport: { width: 820, height: 1180 }, touch: true });
     await go(page, `${base}/my-jobs/${jobId}`);
@@ -282,8 +283,7 @@ await section("E2 break", async () => {
     check("Keep working starts a session marked through the break (E2)", s2[0]?.ended_at === null && s2[0]?.through_break === true, JSON.stringify(s2));
     await browser.close();
   } finally {
-    await setSetting("break_mechanical", typeof original === "string" ? original : "12:30-13:30");
-    await setSetting("break_bodyshop", typeof originalB === "string" ? originalB : "13:30-14:30");
+    await setJson("break_times", original && typeof original === "object" ? original : { mechanical: {}, bodyshop: {} });
   }
   const { browser: b2, page: p2 } = await browserFor("owner");
   await go(p2, `${base}/team`);

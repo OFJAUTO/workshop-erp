@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ContactButtons, CustomerFront, advisorContact, customerBoxes } from "@/components/CustomerFront";
+import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
@@ -108,7 +108,6 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   );
 
   {
-    const advisor = await advisorContact(admin, [q.sent_by, q.created_by, job?.gated_in_by]);
     return (
       <CustomerFront
         company={company}
@@ -117,7 +116,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         boxes={boxes}
         view={{ href: `/api/pdf/quote/${liveToken}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)", fileName: `OFJ ${isEstimate ? "Estimate" : "Quotation"} ${q.number}${q.version > 1 ? ` v${q.version}` : ""}.pdf` }}
         action={open ? <QuoteResponse token={liveToken} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} /> : null}
-        contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} label="Questions or changes?" />}
+        contact={<ContactButtons phone={company.phone} label="Questions or changes?" />}
       >
         {statusNotes}
         {row.version > 1 && row.sent_at ? <p className="text-xs font-semibold text-[#5F6368]" data-updated-on>Updated on {formatDateTime(row.sent_at)}</p> : null}

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ContactButtons, CustomerFront, advisorContact, customerBoxes } from "@/components/CustomerFront";
+import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { Button, Field, Input, Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -48,7 +48,6 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     await notifyStaff([req.sent_by, job.gated_in_by].filter((x): x is string => !!x), { type: "approval_opened", title: `${req.sent_to_name ?? "The customer"} opened the approval link`, body: `${formatPlate(vehicle)} · ${job.job_number}`, jobId: job.id, href: `/jobs/${job.id}` });
   }
 
-  const advisor = await advisorContact(admin, [req.sent_by, job.gated_in_by]);
   // The videos go to their own player: fresh addresses on Play, and a "getting ready" slot for one still on its way.
   const videoRows = media
     .filter((m) => m.kind === "video" || m.kind === "video_exterior" || m.kind === "video_interior")
@@ -115,7 +114,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
           </div>
         ) : null
       }
-      contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
+      contact={<ContactButtons phone={company.phone} />}
     >
       {approved ? <Notice tone="success">Approved by {req.approver_name} on {formatDateTime(req.approved_at)}. Thank you.</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

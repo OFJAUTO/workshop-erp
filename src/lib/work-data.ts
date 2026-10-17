@@ -1,5 +1,5 @@
 import { jobHasOilChange } from "./stickers";
-import { countedMinutes, type WorkingTime,breakMinutesBetween, type BreakWindow } from "./working-time";
+import { countedMinutes, type WorkingTime,breakMinutesBetween, type BreakLike } from "./working-time";
 import "server-only";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
 import { hasCostFloor, isHidden, isUnchosen, type QuoteLine } from "./quotes";
@@ -55,7 +55,7 @@ export const SHIFT_SELECT = "id, staff_id, shift_date, clock_in, clock_out, late
 export const PAUSE_REASONS = ["Waiting for parts", "Waiting for the manager", "Another job", "Break", "Tools or lift busy", "Other"] as const;
 
 /** Minutes of a session, running or finished. */
-export function sessionMinutes(s: Pick<WorkSessionRow, "started_at" | "ended_at" | "minutes"> & { through_break?: boolean }, now = Date.now(), brk: BreakWindow | null = null, wt: WorkingTime | null = null) {
+export function sessionMinutes(s: Pick<WorkSessionRow, "started_at" | "ended_at" | "minutes"> & { through_break?: boolean }, now = Date.now(), brk: BreakLike = null, wt: WorkingTime | null = null) {
   if (s.minutes !== null && s.minutes !== undefined && s.ended_at) return s.minutes;
   const end = s.ended_at ? Date.parse(s.ended_at) : now;
   // With the opening hours known, time outside them never counts (a clock left running stops counting at closing).

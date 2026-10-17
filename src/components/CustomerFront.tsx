@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { DocViewer } from "./DocViewer";
 import { Logo } from "./Logo";
 
@@ -89,18 +88,13 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
   );
 }
 
-/** Call and WhatsApp to the advisor, first name only: the one place a staff name appears on a customer page. */
-export function ContactButtons({ name, phone, label = null }: { name: string | null; phone: string | null; label?: string | null }) {
-  const digits = (phone ?? "").replace(/[^\d]/g, "");
-  if (!phone && !digits) return null;
-  const first = (name ?? "").split(" ")[0];
+/** One button to the workshop ("Call OFJ"), never a staff name or number: the only contact a customer page carries. */
+export function ContactButtons({ phone, label = null }: { phone: string | null; label?: string | null }) {
+  if (!phone) return null;
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-call-ofj>
       {label ? <span className="text-sm font-bold">{label}</span> : null}
-      <div className="grid grid-cols-2 gap-3">
-        {phone ? <a href={`tel:${phone}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call{first ? ` ${first}` : ""}</a> : null}
-        {digits ? <a href={`https://wa.me/${digits}`} className="flex min-h-14 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-base font-extrabold">WhatsApp</a> : null}
-      </div>
+      <a href={`tel:${phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call OFJ · {phone}</a>
     </div>
   );
 }
@@ -119,10 +113,3 @@ export function customerBoxes(customer: { full_name?: string | null; company_nam
   return out;
 }
 
-/** The advisor behind a customer page: the one who sent the link, else the one who gated the car in. */
-export async function advisorContact(admin: SupabaseClient, ids: (string | null | undefined)[]): Promise<{ name: string; phone: string | null } | null> {
-  const id = ids.find((x): x is string => !!x);
-  if (!id) return null;
-  const [{ data: s }, { data: p }] = await Promise.all([admin.from("staff").select("display_name").eq("id", id).maybeSingle(), admin.from("staff_private").select("phone").eq("staff_id", id).maybeSingle()]);
-  return s ? { name: s.display_name as string, phone: (p?.phone as string | null) ?? null } : null;
-}

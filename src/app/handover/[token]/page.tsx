@@ -45,7 +45,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
       meta={meta}
       boxes={boxes}
       view={data.warranty ? { href: `/api/pdf/warranty/${token}`, label: "View warranty certificate (PDF)" } : null}
-      contact={<ContactButtons name={data.advisor?.name ?? null} phone={data.advisor?.phone ?? null} label="Questions?" />}
+      contact={<ContactButtons phone={company.phone} label="Questions?" />}
     >
       <div className="flex flex-col gap-4" data-handover>
         {data.beforeUrl || data.afterUrl ? (

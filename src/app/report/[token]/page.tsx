@@ -39,14 +39,6 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
     await admin.from("report_links").update({ opened_at: new Date().toISOString(), status: "opened" }).eq("id", link.id);
     await notifyStaff([link.created_by, card.job.gated_in_by].filter((x): x is string => !!x), { type: "report_opened", title: `Customer opened the inspection report · ${card.job.job_number}`, body: formatPlate(card.vehicle), jobId: card.job.id, href: `/jobs/${card.job.id}` });
   }
-  // The advisor's buttons: whoever sent the link, else whoever gated the car in.
-  const advisorId = link.created_by ?? card.job.gated_in_by ?? null;
-  let advisor: { name: string; phone: string | null } | null = null;
-  if (advisorId) {
-    const [{ data: s }, { data: p }] = await Promise.all([admin.from("staff").select("display_name").eq("id", advisorId).maybeSingle(), admin.from("staff_private").select("phone").eq("staff_id", advisorId).maybeSingle()]);
-    if (s) advisor = { name: s.display_name, phone: p?.phone ?? null };
-  }
-
   const insp = bundle.inspection;
   const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY && i.status !== "na");
   const attention = items.filter((i) => i.status === "bad" || (i.status === "average" && i.style !== "job")).sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
@@ -83,7 +75,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
         meta={[{ label: "Job card", value: card.job.job_number }, { label: "Inspected", value: formatDate(insp.submitted_at) }, { label: "Approved", value: formatDate(insp.approved_at) }]}
         boxes={[frontBoxes[1], frontBoxes[0]].filter(Boolean)}
         view={{ href: `/api/pdf/report/${token}`, label: "View report (PDF)", fileName: `OFJ Inspection report ${card.job.job_number}.pdf` }}
-        contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
+        contact={<ContactButtons phone={company.phone} />}
       >
         {insp.manager_note ? (
           <div className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-1">

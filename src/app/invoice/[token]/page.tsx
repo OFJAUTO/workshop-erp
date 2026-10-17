@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ContactButtons, CustomerFront, advisorContact, customerBoxes } from "@/components/CustomerFront";
+import { CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { PayNowButton } from "@/components/PayNowButton";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -58,7 +58,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   );
 
   {
-    const [links, advisor] = await Promise.all([paymentLinksOf(invoice.id), advisorContact(admin, [invoice.issued_by, job?.gated_in_by])]);
+    const links = await paymentLinksOf(invoice.id);
     const link = currentPaymentLink(links);
     return (
       <CustomerFront
@@ -75,7 +75,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
                 <div className="rounded-lg border border-[#D4D4D8] bg-[#F4F4F5] px-4 py-3 flex flex-col gap-2 text-sm">
                   <span className="font-bold">Payment link opened at {formatDateTime(link.opened_at)}</span>
                   <span>Didn&apos;t complete the payment? Ask us for a new link.</span>
-                  {advisor?.phone ? <a href={`https://wa.me/${advisor.phone.replace(/[^\d]/g, "")}`} className="flex min-h-12 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-sm font-extrabold">WhatsApp {advisor.name.split(" ")[0]}</a> : null}
+                  <a href={`tel:${company.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-12 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-sm font-extrabold">Call OFJ · {company.phone}</a>
                 </div>
               ) : null}
               <details className="rounded-lg border border-[#D4D4D8]">
@@ -101,7 +101,6 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
             </div>
           ) : null
         }
-        contact={<ContactButtons name={advisor?.name ?? null} phone={advisor?.phone ?? null} />}
       >
         {error ? <Notice tone="error">{error}</Notice> : null}
         {paidFlag && paid ? <Notice tone="success">Thank you, your payment was received.</Notice> : null}

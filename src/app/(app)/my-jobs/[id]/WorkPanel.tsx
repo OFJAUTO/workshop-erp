@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { breakMinutesBetween, breakNow, type BreakWindow } from "@/lib/working-time";
+import { breakMinutesBetween, breakNow, type BreakLike } from "@/lib/working-time";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea, Input } from "@/components/ui";
 import { ReasonChips } from "@/components/ReasonChips";
@@ -33,7 +33,7 @@ function Since({ from }: { from: string | null }) {
  * The one big countdown on the technician's tablet: the hours charged to the customer minus every
  * technician's clocked time on this car. Green, amber under a fifth left, red once over.
  */
-export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakWindow = null }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; locked: boolean; breakWindow?: BreakWindow | null }) {
+export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakWindow = null }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; locked: boolean; breakWindow?: BreakLike }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running.length) return;
@@ -56,7 +56,7 @@ export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakW
 }
 
 /** Timer, Working and Pause, Leave this job. Sits at the top of the technician's screen. */
-export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, minePause = null, reminders, pauseReasons, leaveReasons = [], canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; /** The technician's own open pause on this car, if any. */ minePause?: { reason: string; since: string } | null; reminders: string[]; pauseReasons: readonly string[]; /** One-tap reasons for leaving a job (Settings). */ leaveReasons?: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakWindow | null; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
+export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, minePause = null, reminders, pauseReasons, leaveReasons = [], canWork, workDone, waitingOnManager, sendBack, qcFailed = null, breakWindow = null, mineThroughBreak = false, keepWorkingAction, startAction, pauseAction, leaveAction }: { hoursCharged: number; minutesUsed: number; running: RunningSession[]; mineRunning: boolean; /** The technician's own open pause on this car, if any. */ minePause?: { reason: string; since: string } | null; reminders: string[]; pauseReasons: readonly string[]; /** One-tap reasons for leaving a job (Settings). */ leaveReasons?: readonly string[]; canWork: boolean; workDone: boolean; waitingOnManager: string; sendBack: string | null; qcFailed?: QcFailed | null; breakWindow?: BreakLike; mineThroughBreak?: boolean; keepWorkingAction?: () => Promise<void>; startAction: () => void; pauseAction: (formData: FormData) => void; leaveAction: (formData: FormData) => void }) {
   const [pausing, setPausing] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [brk, setBrk] = useState(() => breakNow(breakWindow));
@@ -77,7 +77,7 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, min
     <div className="flex flex-col gap-3">
       {brk?.inBreak && canWork && !workDone ? (
         <Card className="border-ink flex flex-col gap-2">
-          <SectionLabel right={`until ${breakWindow?.end ?? ""}`}>Break</SectionLabel>
+          <SectionLabel right={`until ${brk?.window.end ?? ""}`}>Break</SectionLabel>
           <p className="text-[15px] font-semibold">{mineThroughBreak ? "You chose to keep working through the break; it is written down." : "Your clock is paused for the break. It is not counted against you."}</p>
           {!mineThroughBreak && keepWorkingAction ? <form action={keepWorkingAction}><Button type="submit" tone="secondary" size="lg">Keep working</Button></form> : null}
         </Card>

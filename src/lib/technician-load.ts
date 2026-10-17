@@ -1,5 +1,5 @@
 import "server-only";
-import { breakOf } from "./breaks";
+import { breakOf, withBreak } from "./breaks";
 import { sideOfDepartment } from "./inspection";
 import { workingTimeOf } from "./jobs";
 import type { Settings } from "./settings";
@@ -56,7 +56,7 @@ export async function technicianLoads(settings: Settings, side: "mechanical" | "
     const mine = rows.filter((l) => l.staff_id === p.id);
     const wt = workingTimeOf(settings, sideOfDepartment(p.department_id) === "bodyshop" ? "bodyshop" : "mechanical");
     const brk = breakOf(settings, p);
-    const week = hoursLeftThisWeek({ ...wt, breakStart: brk?.start, breakEnd: brk?.end });
+    const week = hoursLeftThisWeek(withBreak(wt, brk));
     const weekHours = week.total || hoursPerDay(wt) * 6;
     let loadHours = 0;
     const cars = mine.map((l) => {

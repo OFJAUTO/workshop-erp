@@ -37,6 +37,7 @@ export default async function SettingsPage() {
   let candidates: Record<string, number> = {};
   let docLimits: Record<string, { amber: number; red: number | string }> = {};
   let reasonPresets: Record<string, string[]> = {};
+  let breakTimes: Record<string, Record<string, string>> = {};
   const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: true, advisor_labour_discount: false, customer_documents_uppercase: false };
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
@@ -60,7 +61,8 @@ export default async function SettingsPage() {
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
     else if (row.key === "recovery_providers" || row.key === "labour_hours_memory") continue;
-    else if (row.key === "inbound_scan_token") continue;
+    else if (row.key === "inbound_scan_token" || row.key === "scans_mailbox_last_check" || row.key === "break_mechanical" || row.key === "break_bodyshop") continue;
+    else if (row.key === "break_times") breakTimes = (row.value as Record<string, Record<string, string>>) ?? {};
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");
   }
 
@@ -119,6 +121,7 @@ export default async function SettingsPage() {
             flags={flags}
             docLimits={docLimits}
             reasonPresets={reasonPresets}
+            breakTimes={breakTimes}
           />
         </div>
         <div className="flex flex-col gap-6">
