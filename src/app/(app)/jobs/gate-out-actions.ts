@@ -13,7 +13,9 @@ import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { recordOwnerReport } from "@/lib/owner-report";
+import { closeJob } from "@/lib/close-job";
+import { createTrip, rememberDriver } from "@/lib/delivery";
+import { isMapLink } from "@/lib/recovery";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -26,19 +28,6 @@ function refresh(jobId: string) {
 async function advisorIds(jobId: string, gatedInBy: string | null) {
   const { data: appr } = await createAdminClient().from("approval_requests").select("sent_by").eq("job_id", jobId);
   return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
-}
-
-async function closeJob(jobId: string, by: string, byName: string, how: string) {
-  const admin = createAdminClient();
-  const settings = await getSettings();
-  const followDays = Number(settings.followup_days) || 3;
-  const due = new Date(Date.now() + followDays * 86400000);
-  const { data: job } = await admin.from("jobs").select("status, gated_in_by").eq("id", jobId).maybeSingle();
-  await admin.from("jobs").update({ status: "closed", stage: "ready", is_open: false, gated_out_at: new Date().toISOString(), gated_out_by: by, followup_due_at: dubaiDate(due) }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "gate_out", from_status: job?.status ?? null, to_status: "closed", note: `Gated out by ${byName}: ${how}`, created_by: by });
-  await admin.from("appointments").update({ status: "done", updated_by: by }).eq("job_id", jobId).eq("kind", "customer_collects").eq("status", "booked");
-  // The owner's report on the job, written now that it is over.
-  await recordOwnerReport(jobId, settings).catch(() => null);
 }
 
 /**
@@ -103,13 +92,14 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   if (method !== "recovery" && !collector) return { error: "Enter the name of the person collecting the car.", values };
   if (method !== "recovery" && formData.get("handover_confirmed") !== "on") return { error: "Tick that the handover is confirmed with the collecting person.", values };
 
-  // Keys
-  const keysReturned = String(formData.get("keys_returned") ?? "");
-  const keychain = formData.get("keychain_returned") === "yes";
+  // Keys: one tick for the gate-in's count ("1 key handed back"); "Different number of keys?" opens the choice with a reason.
+  const sameAsGateIn = formData.get("keys_ok") === "on";
+  const keysReturned = sameAsGateIn ? String(gi.keys_count) : String(formData.get("keys_returned") ?? "");
+  const keychain = sameAsGateIn ? !!gi.keys_keychain : formData.get("keychain_returned") === "yes";
+  if (sameAsGateIn && gi.keys_keychain && formData.get("keychain_ok") !== "on") return { error: "Tick that the keychain was handed back.", values };
+  if (!sameAsGateIn && formData.get("keys_confirmed") !== "yes") return { error: `Tick "${gi.keys_count} key${gi.keys_count === 1 ? "" : "s"} handed back", or open "Different number of keys?".`, values };
   if (!/^\d{1,2}$/.test(keysReturned)) return { error: "Enter the number of keys handed back.", values };
   const keysMatch = Number(keysReturned) === gi.keys_count && keychain === gi.keys_keychain;
-  // A different count than the gate-in is first confirmed in the amber box ("Gate-in recorded 1 key. Confirm 2?").
-  if (!keysMatch && formData.get("keys_confirmed") !== "yes") return { error: "The keys differ from the gate-in. Tap Yes in the amber box to confirm, or No to go back.", values };
   let overrideBy: string | null = null;
   const overrideReason = String(formData.get("override_reason") ?? "").trim();
   if (!keysMatch) {
@@ -146,26 +136,50 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     releaseBy = staff.id;
   }
 
-  // Recovery: our truck, a company from the list, or a typed one (added to the list), and the driver's name.
+  // Recovery: the company, the driver (one tap or a new one, saved), the customer's pin, the day and the time.
   const companyChoice = String(formData.get("delivery_company_choice") ?? "our_truck");
   const typedCompany = blankToNull(formData.get("delivery_company"));
   const company = companyChoice === "our_truck" ? null : companyChoice === "other" ? typedCompany : companyChoice;
-  const deliveryDriver = blankToNull(formData.get("delivery_driver"));
   if (method === "recovery" && companyChoice === "other" && !company) return { error: "Enter the recovery company's name.", values };
-  if (method === "recovery" && !deliveryDriver) return { error: "Enter the driver's name.", values };
+  let driverName = blankToNull(formData.get("delivery_driver"));
+  let driverPhone = blankToNull(formData.get("driver_phone"));
+  let truckPlate = blankToNull(formData.get("truck_plate"));
+  let driverId: string | null = null;
+  const locationUrl = blankToNull(formData.get("location_url"));
+  const locationDetails = blankToNull(formData.get("location_details"));
+  // "Today" is the default chip: an untouched form means today in Dubai.
+  const deliveryDate = blankToNull(formData.get("delivery_date")) ?? dubaiDate(new Date());
+  const slotChoice = String(formData.get("delivery_slot") ?? "afternoon");
+  const slotTime = blankToNull(formData.get("slot_time"));
+  const slot = slotChoice === "exact" ? slotTime : slotChoice;
+  if (method === "recovery") {
+    const choice = String(formData.get("driver_choice") ?? "new");
+    if (choice !== "new") {
+      const { data: d } = await admin.from("recovery_drivers").select("id, name, phone, truck_plate").eq("id", choice).eq("is_active", true).maybeSingle();
+      if (!d) return { error: "Pick the driver again.", values };
+      driverId = d.id;
+      driverName = d.name;
+      driverPhone = d.phone ?? driverPhone;
+      truckPlate = d.truck_plate ?? truckPlate;
+    } else {
+      if (!driverName) return { error: "Enter the driver's name.", values };
+      driverId = await rememberDriver({ name: driverName, phone: driverPhone, truckPlate, company }, staff.id);
+    }
+    if (!locationUrl) return { error: "Paste the customer's location pin (the map link).", values };
+    if (!isMapLink(locationUrl)) return { error: "That is not a map link. Paste the pin the customer sent on WhatsApp or Google Maps.", values };
+    if (slotChoice === "exact" && !slotTime) return { error: "Enter the exact time, or pick Morning, Afternoon or Evening.", values };
+  }
   const delivery = method === "recovery"
     ? {
-        delivery_address: blankToNull(formData.get("delivery_address")),
-        delivery_at: blankToNull(formData.get("delivery_at")) ? new Date(String(formData.get("delivery_at"))).toISOString() : null,
+        delivery_address: locationDetails ?? "Map pin",
+        delivery_at: null,
         delivery_by: companyChoice === "our_truck" ? "our_truck" : "outside",
         delivery_company: company,
-        delivery_driver: deliveryDriver,
-        delivery_fee_aed: Number(String(formData.get("delivery_fee") ?? "").replace(/[^\d.]/g, "")) || null,
+        delivery_driver: driverName,
         left_at: new Date().toISOString(),
         left_by: staff.id,
       }
     : {};
-  if (method === "recovery" && !delivery.delivery_address) return { error: "Enter the delivery address.", values };
 
   const { error } = await admin.from("gate_outs").upsert(
     {
@@ -185,7 +199,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
       balance_due_aed: bal.balance,
       release_approved_by: releaseBy,
       release_reason: releaseBy ? releaseReason : null,
-      notes: blankToNull(formData.get("notes")),
+      notes: null,
       ...delivery,
       created_by: staff.id,
       updated_by: staff.id,
@@ -201,38 +215,26 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   }
   if (bodyshopCar) await afterBodyshopHandover(jobId, blankToNull(formData.get("final_check_date")), staff);
   if (releaseBy) await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Release approved by ${staff.display_name} with ${bal.state === "no_invoice" ? "no invoice" : `AED ${bal.balance.toLocaleString("en-GB")} due`}: ${releaseReason}`, created_by: staff.id });
-  if (overrideBy) await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Keys override by ${staff.display_name}: ${overrideReason}`, created_by: staff.id });
+  if (overrideBy) {
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Keys override by ${staff.display_name}: ${overrideReason}`, created_by: staff.id });
+    // A different key count at gate-out: the owner hears it at once.
+    await notifyRoles(["owner"], { type: "release_approval", title: `Keys differ at gate-out · ${job.job_number}`, body: `Gate-in recorded ${gi.keys_count} key${gi.keys_count === 1 ? "" : "s"}${gi.keys_keychain ? " with keychain" : ""}; handed back ${keysReturned}${keychain ? " with keychain" : ""}. ${staff.display_name}: ${overrideReason}`, jobId, href: `/jobs/${jobId}` });
+  }
 
   if (method === "recovery") {
+    await createTrip({ jobId, kind: "delivery", company, driverId, driverName, driverPhone, truckPlate, locationUrl, locationDetails, date: deliveryDate, slot, by: staff.id });
     await admin.from("jobs").update({ status: "in_delivery", stage: "ready" }).eq("id", jobId);
     await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: job.status, to_status: "in_delivery", note: `Left the workshop for delivery (${delivery.delivery_by === "outside" ? delivery.delivery_company ?? "outside recovery" : "our truck"}, driver ${delivery.delivery_driver}) to ${delivery.delivery_address}, stamped by ${staff.display_name}`, created_by: staff.id });
     const ids = await advisorIds(jobId, job.gated_in_by);
-    await notifyStaff(ids, { type: "delivery", title: `Left workshop for delivery · ${job.job_number}`, body: `To ${delivery.delivery_address}. Mark it delivered with the name and a photo at the door.`, jobId, href: `/jobs/${jobId}/gate-out` });
+    await notifyStaff(ids, { type: "delivery", title: `Left workshop for delivery · ${job.job_number}`, body: "Send the details to the driver from the delivery panel; the job closes itself when he presses Delivered.", jobId, href: `/jobs/${jobId}/gate-out` });
     refresh(jobId);
-    redirect(`/jobs/${jobId}/gate-out?message=${encodeURIComponent("Stamped: left the workshop. Mark it delivered when the customer has it.")}`);
+    redirect(`/jobs/${jobId}/gate-out?message=${encodeURIComponent("Stamped: left the workshop. Now press Send to driver.")}`);
   }
   await closeJob(jobId, staff.id, staff.display_name, `${method === "customer" ? "customer collected" : "customer's driver collected"} (${collector})`);
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=${encodeURIComponent("Gated out. The job is closed.")}`);
 }
 
-/** The delivered stamp: name, time and photo at the door. The job closes. */
-export async function markDelivered(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  const staff = await requirePermission("gateOut");
-  const values = formValues(formData);
-  const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, status, is_open, job_number, gated_in_by").eq("id", jobId).maybeSingle();
-  if (!job || !job.is_open || job.status !== "in_delivery") return { error: "This car is not out for delivery.", values };
-  const to = blankToNull(formData.get("delivered_to"));
-  if (!to) return { error: "Enter the name of the person who received the car.", values };
-  if (formData.get("handover_confirmed") !== "on") return { error: "Tick that the handover is confirmed.", values };
-  await admin.from("gate_outs").update({ delivered_at: new Date().toISOString(), delivered_by: staff.id, delivered_to: to, collector_name: to, handover_confirmed: true, updated_by: staff.id }).eq("job_id", jobId);
-  await closeJob(jobId, staff.id, staff.display_name, `delivered to ${to}`);
-  const ids = await advisorIds(jobId, job.gated_in_by);
-  await notifyStaff(ids, { type: "delivery", title: `Delivered · ${job.job_number}`, body: `Received by ${to}. The job is closed.`, jobId, href: `/jobs/${jobId}` });
-  refresh(jobId);
-  redirect(`/jobs/${jobId}?message=${encodeURIComponent("Delivered. The job is closed.")}`);
-}
 
 /** The advisor records the follow-up call. */
 export async function followUpDone(jobId: string) {

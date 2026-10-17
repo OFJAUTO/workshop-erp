@@ -266,7 +266,10 @@ await section("E2 break", async () => {
   await sql("insert into public.work_sessions (job_id, technician_id, started_at, created_by, updated_by) values ($1, $2, now() - interval '10 minutes', $2, $2)", [jobId, techId]);
   // Since 17 October the break lives in the per-day grid: today's window is set for both sides.
   const original = await getSetting("break_times");
-  const win = `${dubaiHHMM(new Date(Date.now() - 2 * 60000))}-${dubaiHHMM(new Date(Date.now() + 40 * 60000))}`;
+  // Around Dubai midnight "now-2min" is yesterday: the window is clamped to the day it is read on.
+  const winStart = dubaiHHMM(new Date(Date.now() - 2 * 60000));
+  const winEnd = dubaiHHMM(new Date(Date.now() + 40 * 60000));
+  const win = winStart < winEnd ? `${winStart}-${winEnd}` : `00:00-${winEnd < "00:05" ? "00:59" : winEnd}`;
   const everyDay = Object.fromEntries(["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => [d, win]));
   await setJson("break_times", { mechanical: everyDay, bodyshop: everyDay });
   try {

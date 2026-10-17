@@ -286,7 +286,8 @@ await section("11-12 sign-off and going out", async () => {
   check("8: the gate-out offers the final check date (7 to 14 days)", (await op.locator("[data-final-check]").count()) === 1);
   await op.locator("[data-final-check]").fill(d10);
   await op.locator("input[name='collector_name']").fill("Stage Customer");
-  await op.locator("input[name='keys_returned'][value='1']").check({ force: true });
+  await op.locator("input[name='keys_ok']").check();
+  if (await op.locator("input[name='keychain_ok']").count()) await op.locator("input[name='keychain_ok']").check();
   await op.locator("input[name='handover_confirmed']").check();
   const releaseBox = op.locator("[name='release_reason']");
   if (await releaseBox.count()) await releaseBox.fill("E2e test: released with the balance noted");

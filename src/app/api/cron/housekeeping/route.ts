@@ -343,6 +343,26 @@ export async function GET(request: NextRequest) {
     report.depositOverdue = told;
   }
 
+  // 20. A car still "On the way" three hours after loading (or leaving): the advisor is reminded once; he can press
+  // "Mark delivered" and the driver's price follows on the Recovery page.
+  {
+    let told = 0;
+    const { data: trips } = await admin.from("recovery_trips").select("id, job_id, loaded_at, sent_at, created_at, driver_name").eq("kind", "delivery").eq("is_active", true).is("delivered_at", null).is("reminded_at", null);
+    for (const t of trips ?? []) {
+      if (!t.job_id) continue;
+      const since = Date.parse((t.loaded_at ?? t.sent_at ?? t.created_at) as string);
+      if (!(Date.now() - since > 3 * 3600000)) continue;
+      const { data: j } = await admin.from("jobs").select("job_number, status, gated_in_by").eq("id", t.job_id).maybeSingle();
+      if (!j || j.status !== "in_delivery") continue;
+      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", t.job_id);
+      const ids = Array.from(new Set([j.gated_in_by, ...(appr ?? []).map((a) => a.sent_by as string | null)].filter((x): x is string => !!x)));
+      await notifyStaff(ids, { type: "delivery", title: `Still on the way after 3 hours · ${j.job_number}`, body: `The driver (${t.driver_name ?? "driver"}) has not pressed Delivered. Check with him, or press "Mark delivered" on the gate-out page (the price follows on the Recovery page).`, jobId: t.job_id, href: `/jobs/${t.job_id}/gate-out` });
+      await admin.from("recovery_trips").update({ reminded_at: new Date().toISOString() }).eq("id", t.id);
+      told++;
+    }
+    report.deliveryWaiting = told;
+  }
+
   // 18. Stock: an item below its minimum tells Parts once; on the 1st the monthly count is asked for.
   {
     report.stockLow = await notifyLowStock();

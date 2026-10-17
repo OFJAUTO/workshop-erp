@@ -4,7 +4,6 @@ import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
 import { Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
@@ -16,10 +15,15 @@ import { jobBalance } from "@/lib/invoice-data";
 import { approvedKinds, signoffState } from "@/lib/bodyshop";
 import { SIGNOFF_LABELS, addDaysIso } from "@/lib/bodyshop-kinds";
 import { dubaiDate } from "@/lib/jobs";
-import { askReleaseApproval, collectItems, gateOutJob, markDelivered } from "../../gate-out-actions";
+import { askReleaseApproval, collectItems, gateOutJob } from "../../gate-out-actions";
+import { advisorMarkDelivered } from "../../delivery-actions";
+import { activeDeliveryTrip, driverMessageFor, loadDrivers, lastPinOf } from "@/lib/delivery";
+import { onTheWayMessage } from "@/lib/recovery";
+import { getSiteUrl } from "@/lib/site";
+import { DeliveryPanel } from "./DeliveryPanel";
 import { loadJobItems } from "@/lib/loose-items";
 import { CollectItemsForm } from "./CollectItemsForm";
-import { DeliveredForm, GateOutForm } from "./GateOutForm";
+import { GateOutForm } from "./GateOutForm";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +51,12 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const { data: contactRows } = job.customer_id ? await createAdminClient().from("customer_contacts").select("id, name, phone, relationship").eq("customer_id", job.customer_id).eq("is_active", true).order("name") : { data: [] };
   const contacts = (contactRows ?? []) as { id: string; name: string; phone: string | null; relationship: string | null }[];
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at").eq("id", id).maybeSingle();
+  // The delivery pieces: the saved drivers, the returning customer's last pin, and the live trip once stamped out.
+  const [drivers, lastPin, trip] = await Promise.all([loadDrivers(), lastPinOf(job.customer_id), activeDeliveryTrip(id)]);
+  const site = await getSiteUrl();
+  const driverText = trip ? await driverMessageFor(trip, site) : "";
+  const { data: custRow } = job.customer_id ? await createAdminClient().from("customers").select("full_name, company_name, phone").eq("id", job.customer_id).maybeSingle() : { data: null };
+  const customerText = trip ? onTheWayMessage(String(settings.whatsapp_on_the_way_template ?? ""), { name: custRow?.company_name ?? custRow?.full_name ?? "customer", car: vehicleTitle(card.vehicle), truckPlate: trip.truck_plate ?? "", driverName: trip.driver_name ?? "", driverMobile: trip.driver_phone ?? "" }) : "";
   const declinedOut = !!declinedRow?.declined_out_at;
   const blocked = ((bal.state === "no_invoice" && !declinedOut) || bal.balance > 0) && !(bal.state !== "no_invoice" && bal.balance > 0 && creditDays > 0);
   // Bodyshop: the sign-off state, and the final check visit for a PPF car (7 to 14 days, the Settings default).
@@ -67,19 +77,24 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
-          {job.status === "in_delivery" ? (
-            <Card className="flex flex-col gap-3 border-ink">
-              <SectionLabel>Out for delivery</SectionLabel>
-              {card.gateOut ? <p className="text-sm">Left the workshop {formatDateTime(card.gateOut.created_at)} for {(card.gateOut as unknown as { delivery_address: string | null }).delivery_address ?? "the customer"}.</p> : null}
-              <DeliveredForm jobId={id} action={markDelivered.bind(null, id)} />
-            </Card>
+          {job.status === "in_delivery" && trip ? (
+            <DeliveryPanel
+              jobId={id}
+              trip={{ driverName: trip.driver_name, driverPhone: trip.driver_phone, truckPlate: trip.truck_plate, sentAt: trip.sent_at, loadedAt: trip.loaded_at, leftAt: card.gateOut?.created_at ?? trip.created_at }}
+              driverText={driverText}
+              customerText={customerText}
+              customerPhone={custRow?.phone ?? ""}
+              markDeliveredAction={advisorMarkDelivered.bind(null, id)}
+            />
           ) : loose ? (
             <Card>
               <CollectItemsForm action={collectItems.bind(null, id)} items={items.map((it) => ({ id: it.id, label: `${it.quantity > 1 ? `${it.quantity} × ` : ""}${it.item_type}${it.description ? ` · ${it.description}` : ""}`, collected: !!it.collected_at }))} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           ) : (
             <Card>
-              <GateOutForm customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+              <GateOutForm
+            drivers={drivers}
+            lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           )}
         </div>

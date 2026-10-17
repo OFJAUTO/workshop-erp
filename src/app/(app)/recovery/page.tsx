@@ -1,0 +1,157 @@
+import Link from "next/link";
+import { Badge, Button, Card, Empty, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { requireStaff } from "@/lib/auth";
+import { loadDrivers, TRIP_SELECT, type TripRow } from "@/lib/delivery";
+import { formatDate, formatDateTime } from "@/lib/format";
+import { haversineKm, parseCoords, scheduleWords, usualRange } from "@/lib/recovery";
+import { getSettings } from "@/lib/settings";
+import { getSiteUrl } from "@/lib/site";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { formatPlate } from "@/lib/types";
+import { createPickupTrip, decideTrip, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
+import { ReasonChips } from "@/components/ReasonChips";
+
+export const dynamic = "force-dynamic";
+
+const STATUS_LABELS: Record<string, string> = { open: "Booked", claimed: "Claimed", approved: "Approved", queried: "Queried", paid: "Paid" };
+const STATUS_TONES: Record<string, "neutral" | "amber" | "green" | "ink" | "red"> = { open: "neutral", claimed: "amber", approved: "ink", queried: "red", paid: "green" };
+
+/**
+ * The recovery log (owner, advisors and accounts): one row per pick-up or delivery with the pin, the driver's photo
+ * and his claimed price; Claimed -> Approved / Queried -> Paid with one tap; the rough straight-line distance from the
+ * workshop so unusual prices stand out; a monthly view per driver or company with an export for accounts.
+ * This replaces the WhatsApp group where the driver posted photos and prices.
+ */
+export default async function RecoveryPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; month?: string; who?: string; sent?: string }> }) {
+  const staff = await requireStaff();
+  const role = staff.role_id;
+  if (!["owner", "service_advisor", "accounts"].includes(role)) {
+    return <Notice tone="error">The recovery log is for the owner, the advisors and accounts.</Notice>;
+  }
+  const canDecide = (role === "owner" || role === "accounts") && !staff.viewingAs;
+  const { message, error, month: monthParam, who: whoParam, sent } = await searchParams;
+  const month = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7);
+  const admin = createAdminClient();
+  const settings = await getSettings();
+  const site = await getSiteUrl();
+  const home = parseCoords(String(settings.workshop_location_pin ?? ""));
+  const [{ data: rows }, drivers] = await Promise.all([
+    admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).order("created_at", { ascending: false }).limit(400),
+    loadDrivers(),
+  ]);
+  const trips = (rows ?? []) as TripRow[];
+  const jobIds = Array.from(new Set(trips.map((t) => t.job_id).filter((x): x is string => !!x)));
+  const { data: jobs } = jobIds.length ? await admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number)").in("id", jobIds) : { data: [] };
+  const jobOf = new Map((jobs ?? []).map((j) => [j.id, { number: j.job_number as string, plate: j.vehicle ? formatPlate(j.vehicle as unknown as Parameters<typeof formatPlate>[0]) : "" }]));
+  const photoPaths = trips.map((t) => t.photo_path).filter((x): x is string => !!x);
+  const { data: signed } = photoPaths.length ? await admin.storage.from("job-files").createSignedUrls(photoPaths, 3600) : { data: [] };
+  const photoUrl = new Map((signed ?? []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]));
+  const whoOf = (t: TripRow) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
+  const kmOf = (t: TripRow) => (home && t.lat !== null && t.lng !== null ? haversineKm(home, { lat: t.lat, lng: t.lng }) : null);
+  const history = trips.filter((t) => ["approved", "paid"].includes(t.status)).map((t) => ({ km: kmOf(t), price: t.price_aed === null ? null : Number(t.price_aed) }));
+  const inMonth = trips.filter((t) => (t.delivered_at ?? t.created_at).startsWith(month));
+  const whoList = Array.from(new Set(trips.map(whoOf))).sort();
+  const shown = whoParam ? trips.filter((t) => whoOf(t) === whoParam) : trips;
+  const monthTotals = new Map<string, { trips: number; total: number }>();
+  for (const t of inMonth) {
+    const k = whoOf(t);
+    const cur = monthTotals.get(k) ?? { trips: 0, total: 0 };
+    monthTotals.set(k, { trips: cur.trips + 1, total: cur.total + (Number(t.price_aed) || 0) });
+  }
+  const aedText = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+  return (
+    <>
+      <PageHeader title="Recovery" subtitle="Every pick-up and delivery: the pin, the driver's photo and his price. Claimed, then Approved or Queried, then Paid." />
+      {message ? <Notice tone="success">{message}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {!home ? <p className="text-xs text-muted">Distances show once the workshop&apos;s own pin is in Settings (&quot;Workshop location pin&quot;).</p> : null}
+
+      <Card className="flex flex-col gap-3" data-recovery-month>
+        <SectionLabel right={<a href={`/api/export/recovery?month=${month}`} className="underline underline-offset-4">Export for accounts (CSV)</a>}>By driver or company · {month}</SectionLabel>
+        <form className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Month<Input type="month" name="month" defaultValue={month} className="w-40" /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver or company<Select name="who" defaultValue={whoParam ?? ""} className="min-w-48"><option value="">Everyone</option>{whoList.map((w) => <option key={w} value={w}>{w}</option>)}</Select></label>
+          <Button type="submit" tone="secondary" size="md">Show</Button>
+        </form>
+        {monthTotals.size === 0 ? <p className="text-sm text-muted">No trips this month.</p> : (
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted"><th className="py-1 pr-3">Driver or company</th><th className="py-1 pr-3 text-right">Trips</th><th className="py-1 pr-3 text-right">Total</th><th className="py-1 text-right">Average</th></tr></thead>
+            <tbody className="divide-y divide-line">
+              {Array.from(monthTotals.entries()).sort((a, b) => b[1].total - a[1].total).map(([w, s]) => (
+                <tr key={w} data-recovery-who={w}><td className="py-1.5 pr-3 font-semibold">{w}</td><td className="py-1.5 pr-3 text-right">{s.trips}</td><td className="py-1.5 pr-3 text-right font-bold">{aedText(s.total)}</td><td className="py-1.5 text-right">{aedText(s.trips ? s.total / s.trips : 0)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      <Card className="flex flex-col gap-3">
+        <SectionLabel right={`${shown.length}`}>Trips</SectionLabel>
+        {shown.length === 0 ? <Empty title="No trips yet" /> : (
+          <ul className="flex flex-col divide-y divide-line">
+            {shown.slice(0, 120).map((t) => {
+              const j = t.job_id ? jobOf.get(t.job_id) : null;
+              const km = kmOf(t);
+              const price = t.price_aed === null ? null : Number(t.price_aed);
+              const usual = km !== null && t.status === "claimed" ? usualRange(km, history) : null;
+              return (
+                <li key={t.id} className="py-3 flex flex-col gap-1.5" data-trip={t.id} data-trip-status={t.status}>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-bold">{formatDate(t.delivered_at ?? t.created_at)}</span>
+                    <Badge tone="ink">{t.kind === "pickup" ? "Pick-up" : "Delivery"}</Badge>
+                    {j ? <Link href={`/jobs/${t.job_id}`} className="font-semibold underline underline-offset-4">{j.plate} · {j.number}</Link> : <span className="text-muted">{t.location_details ?? "No job"}</span>}
+                    <span className="text-muted">{whoOf(t)}</span>
+                    {t.location_url ? <a href={t.location_url} target="_blank" rel="noreferrer" className="underline underline-offset-4" data-trip-pin>Open the pin</a> : null}
+                    {km !== null ? <span className="text-xs text-muted">≈ {km} km{price && km > 0 ? ` · AED ${(price / km).toFixed(0)}/km` : ""}</span> : null}
+                    {t.photo_path && photoUrl.get(t.photo_path) ? <a href={photoUrl.get(t.photo_path) ?? "#"} target="_blank" rel="noreferrer" className="underline underline-offset-4" data-trip-photo>Photo</a> : null}
+                    <span className="ml-auto inline-flex items-center gap-2">
+                      {price !== null ? <span className="font-bold" data-trip-price>{aedText(price)}</span> : <span className="text-xs text-muted">no price yet</span>}
+                      <Badge tone={STATUS_TONES[t.status]}>{STATUS_LABELS[t.status]}</Badge>
+                    </span>
+                  </div>
+                  {!t.delivered_at ? <p className="text-xs text-muted">{scheduleWords(t.scheduled_date, t.scheduled_slot)}{t.sent_at ? ` · link sent to the driver ${formatDateTime(t.sent_at)}` : t.token ? ` · driver link: ${site}/drive/${t.token}` : ""}{sent === t.id && t.token ? "" : ""}</p> : null}
+                  {t.marked_by && price === null && canDecide ? (
+                    <form action={setTripPrice.bind(null, t.id)} className="flex flex-wrap items-center gap-2">
+                      <Input name="price" inputMode="decimal" placeholder="Driver's price (AED)" className="w-40 min-h-9" data-trip-price-box />
+                      <Button type="submit" tone="secondary" size="md">Save price</Button>
+                    </form>
+                  ) : null}
+                  {usual ? <p className="text-xs font-semibold text-muted" data-trip-usual>Usual for this distance: AED {usual.low.toLocaleString("en-GB")}–{usual.high.toLocaleString("en-GB")} ({usual.n} trips)</p> : null}
+                  {t.status === "queried" && t.query_note ? <p className="text-xs font-semibold text-red">Query: {t.query_note}</p> : null}
+                  {canDecide && price !== null && ["claimed", "queried", "approved"].includes(t.status) ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {t.status !== "approved" ? <form action={decideTrip.bind(null, t.id)}><input type="hidden" name="decision" value="approve" /><Button type="submit" size="md" data-trip-approve>Approve</Button></form> : null}
+                      {t.status === "claimed" ? (
+                        <details className="text-sm"><summary className="cursor-pointer min-h-9 inline-flex items-center rounded-control border border-line-strong bg-white px-3 text-xs font-bold">Query…</summary>
+                          <form action={decideTrip.bind(null, t.id)} className="mt-2 flex flex-wrap items-end gap-2"><input type="hidden" name="decision" value="query" /><ReasonChips name="note" label="What looks wrong?" rows={1} options={["Price looks high for the distance", "Wrong trip", "Two trips claimed as one"]} required placeholder="Tap or type" /><Button type="submit" tone="secondary" size="md" data-trip-query>Send query</Button></form>
+                        </details>
+                      ) : null}
+                      <form action={decideTrip.bind(null, t.id)}><input type="hidden" name="decision" value="paid" /><Button type="submit" tone="secondary" size="md" data-trip-paid>Paid</Button></form>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+
+      <Card className="flex flex-col gap-3" data-new-pickup>
+        <SectionLabel>New pick-up (a car coming in on a truck)</SectionLabel>
+        <form action={createPickupTrip} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver (saved)<Select name="driver_id" defaultValue=""><option value="">Type below instead</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}{d.company ? ` · ${d.company}` : " · Our truck"}</option>)}</Select></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver&apos;s name<Input name="driver_name" required /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver&apos;s mobile<Input name="driver_phone" type="tel" inputMode="tel" /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Company (empty = our truck)<Input name="company" /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Job number (optional)<Input name="job_number" placeholder="J-00123" textCase="upper" /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Pick-up pin (optional)<Input name="location_url" placeholder="Paste the map link" /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Location details<Input name="location_details" placeholder="Villa 23, gate 2" textCase="sentence" /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Date<Input type="date" name="date" /></label>
+          <div className="sm:col-span-2"><Button type="submit" size="md">Save the pick-up</Button></div>
+        </form>
+        <p className="text-xs text-muted">The driver gets the same one-button link: photo on loading, then his price. This page replaces the WhatsApp group.</p>
+      </Card>
+    </>
+  );
+}

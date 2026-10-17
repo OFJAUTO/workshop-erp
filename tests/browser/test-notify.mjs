@@ -399,6 +399,8 @@ try {
     const { browser, page } = await browserForId(advisorId);
     await go(page, `${base}/jobs/${jobId}/gate-out`);
     await page.locator("input[name=collector_name]").fill("Stage Customer");
+    await page.locator("input[name=keys_ok]").check();
+    if (await page.locator("input[name=keychain_ok]").count()) await page.locator("input[name=keychain_ok]").check();
     await page.locator("input[name=handover_confirmed]").first().check();
     await page.getByRole("button", { name: "Gate out and close the job" }).click();
     await submitted(page);

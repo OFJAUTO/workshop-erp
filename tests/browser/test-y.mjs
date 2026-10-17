@@ -2,7 +2,7 @@
 // B1: breaks per weekday and department (the Settings grid, the saved setting, Friday's longer break in the maths).
 // B3: no staff names or WhatsApp on customer pages; the only contact is "Call OFJ" with the company phone.
 //   node --env-file=.env.local tests/browser/test-y.mjs
-import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 10 * 60 * 1000).unref();
@@ -136,6 +136,162 @@ if (want("C")) {
   const onLocked = await until(async () => { const r = (await sql("select commission_status, commission_aed, total_aed from public.quotations where id = $1", [locked.quotationId]))[0]; return r?.commission_status === "approved" && Number(r.commission_aed) === 50 ? r : null; }, 30, 500);
   check("C1: it saves on the approved quotation without touching the customer's total", !!onLocked && Number(onLocked.commission_aed) === 50, JSON.stringify(onLocked));
   await ob3.close();
+}
+
+/* ================= E1: gate-out mirrors gate-in (the owner hears a different count) ================= */
+if (want("E")) {
+  console.log("\n== E1 keys");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const gi = (await sql("select keys_count, keys_keychain from public.gate_ins where job_id = $1", [jobId]))[0];
+  const mark = (await sql("select now() as t"))[0]?.t;
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 1200 } });
+  await go(page, `${base}/jobs/${jobId}/gate-out`);
+  check("E1: one tick with the gate-in's count; keychain tick only when recorded; no notes box", new RegExp(`${gi.keys_count} key`).test((await page.locator("[data-keys-tick]").textContent().catch(() => "")) ?? "") && (await page.locator("[data-keychain-tick]").count()) === (gi.keys_keychain ? 1 : 0) && (await page.locator("input[name='notes']").count()) === 0);
+  await page.locator("[data-keys-differ]").click();
+  const other = gi.keys_count === 2 ? "3" : "2";
+  await page.locator(`input[name="keys_returned"][value="${other}"]`).check({ force: true });
+  await page.locator("[name='override_reason']").fill("E2e: the spare key came back today");
+  await page.locator("input[name='collector_name']").fill("Stage Customer");
+  await page.locator("input[name='handover_confirmed']").check();
+  const releaseBox = page.locator("[name='release_reason']");
+  if (await releaseBox.count()) await releaseBox.fill("E2e test: released with the balance noted");
+  await page.getByRole("button", { name: /Gate out and close the job/ }).click();
+  await submitted(page);
+  const out = (await sql("select go.keys_returned, go.keys_match, go.keys_override_reason, go.notes, j.is_open from public.gate_outs go join public.jobs j on j.id = go.job_id where go.job_id = $1", [jobId]))[0];
+  check("E1: the different count closes the job with the reason logged and no notes", !!out && out.is_open === false && String(out.keys_returned) === other && out.keys_match === false && /spare key/.test(out.keys_override_reason ?? "") && out.notes === null, JSON.stringify(out));
+  const told = await until(async () => ((await sql("select count(*)::int as n from public.notifications where title like 'Keys differ at gate-out%' and created_at > $1", [mark]))[0]?.n ?? 0) >= 1 ? 1 : null, 30, 500);
+  check("E1: the owner is told 'Keys differ at gate-out' with both counts", !!told);
+  await browser.close();
+}
+
+/* ================= D: delivery by recovery, the driver's one button, the recovery log ================= */
+if (want("D")) {
+  console.log("\n== D delivery and recovery");
+  cleanupDb();
+  const PIN = "https://maps.google.com/?q=25.1812,55.2807";
+  await sql("update public.settings set value = to_jsonb('https://maps.google.com/?q=25.0657,55.1713'::text) where key = 'workshop_location_pin'");
+  // The regular driver, saved in Settings.
+  const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1500, height: 1200 } });
+  await go(op, `${base}/settings`);
+  const card = op.locator("[data-recovery-drivers]");
+  await card.locator("input[aria-label=\"Driver's name\"]").fill("E2e Truck Driver");
+  await card.locator("input[aria-label=\"Driver's mobile\"]").fill("+971500000400");
+  await card.locator("input[aria-label='Truck plate']").fill("DXB A 11111");
+  await card.locator("input[name='is_default']").check();
+  await card.locator("[data-driver-save]").click();
+  const drv = await until(async () => (await sql("select id, is_default, truck_plate from public.recovery_drivers where name = 'E2e Truck Driver' and is_active"))[0] ?? null, 30, 500);
+  check("D1: the driver is saved in Settings as the regular one", !!drv && drv.is_default === true && drv.truck_plate === "DXB A 11111", JSON.stringify(drv));
+
+  // Gate-out by recovery: the driver prefilled, the pin pasted, date and time chips, no fee box.
+  const { jobId } = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  await go(op, `${base}/jobs/${jobId}/gate-out`);
+  await op.locator("input[name='leave_method'][value='recovery']").check({ force: true });
+  check("D1: the regular driver is prefilled and the Fee box is gone", /E2e Truck Driver/.test((await op.locator("[data-driver-filled]").textContent().catch(() => "")) ?? "") && !/Fee \(AED\)/.test((await op.textContent("body")) ?? ""));
+  await op.locator("[data-location-url]").fill("not a link");
+  check("D1: a non-map paste is refused in words", (await op.locator("[data-pin-bad]").count()) === 1);
+  await op.locator("[data-location-url]").fill(PIN);
+  check("D1: a valid pin shows Open map", (await op.locator("[data-open-map]").count()) === 1);
+  await op.locator("[data-location-details]").fill("E2e Villa 23, gate 2");
+  await op.locator("[data-date-chips] button", { hasText: /^Tomorrow$/ }).click();
+  await op.locator("[data-time-chips] button", { hasText: /^Evening$/ }).click();
+  await op.locator("input[name='keys_ok']").check();
+  if (await op.locator("input[name='keychain_ok']").count()) await op.locator("input[name='keychain_ok']").check();
+  const releaseBox = op.locator("[name='release_reason']");
+  if (await releaseBox.count()) await releaseBox.fill("E2e test: released with the balance noted");
+  await op.getByRole("button", { name: /Stamp: left the workshop/ }).click();
+  await submitted(op);
+  const trip = await until(async () => (await sql("select id, token, driver_name, driver_phone, truck_plate, lat, lng, scheduled_date, scheduled_slot, location_url from public.recovery_trips where job_id = $1 and kind = 'delivery' and is_active", [jobId]))[0] ?? null, 30, 500);
+  check("D1: the trip carries the driver, the pin's coordinates and the chips' day and time", !!trip && trip.driver_name === "E2e Truck Driver" && Number(trip.lat) === 25.1812 && Number(trip.lng) === 55.2807 && trip.scheduled_slot === "evening" && !!trip.token, JSON.stringify(trip));
+  check("D1: the job is out for delivery", (await sql("select status from public.jobs where id = $1", [jobId]))[0]?.status === "in_delivery");
+
+  // The panel: Send to driver, then "Car loaded: send 'on its way'".
+  await go(op, `${base}/jobs/${jobId}/gate-out`);
+  check("D4: the panel shows status only (no Received by, no photo buttons, no handover tick)", (await op.locator("[data-delivery-panel]").count()) === 1 && !/Received by/.test((await op.textContent("body")) ?? "") && (await op.locator("input[name='handover_confirmed']").count()) === 0);
+  await op.locator("[data-send-driver]").click();
+  const sent = await until(async () => (await sql("select sent_at from public.recovery_trips where id = $1", [trip.id]))[0]?.sent_at ? 1 : null, 30, 500);
+  check("D2: Send to driver records the send", !!sent);
+  await go(op, `${base}/jobs/${jobId}/gate-out`);
+  await op.locator("[data-car-loaded]").click();
+  const msg = await op.locator("[data-on-way-text]").inputValue();
+  check("D3: the customer message is the owner's wording with the blanks filled", /on its way to you on our recovery truck DXB A 11111/.test(msg) && /Driver: E2e Truck Driver, \+971500000400/.test(msg) && /\+971 4 330 3113/.test(msg), msg.slice(0, 160));
+  await op.locator("[data-on-way-send]").click();
+  const loaded = await until(async () => (await sql("select loaded_at from public.recovery_trips where id = $1", [trip.id]))[0]?.loaded_at ? 1 : null, 30, 500);
+  check("D3: the car is marked On the way with the time", !!loaded);
+  await go(op, `${base}/jobs/${jobId}/gate-out`);
+  check("D4: the status line reads 'On the way: left hh:mm · Driver … · Truck …'", /On the way: left \d{2}:\d{2}.*Driver: E2e Truck Driver.*Truck DXB A 11111/.test((await op.locator("[data-delivery-status]").textContent()) ?? ""), (await op.locator("[data-delivery-status]").textContent().catch(() => "")) ?? "");
+
+  // The driver's one-button page.
+  const dpage = await (await fetch(`${base}/drive/${trip.token}`)).text();
+  check("D2: the driver's page is one big button with nothing about prices or invoices", /TAKE PHOTO/.test(dpage) && /DELIVERED/.test(dpage) && !/invoice/i.test(dpage.replace(/<script[\s\S]*?<\/script>/g, "")) , "");
+  const jpg = Buffer.from("/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==", "base64");
+  const fd = new FormData();
+  fd.set("photo", new Blob([jpg], { type: "image/jpeg" }), "door.jpg");
+  fd.set("price", "150");
+  const dr = await fetch(`${base}/api/drive/${trip.token}`, { method: "POST", body: fd });
+  const dj = await dr.json().catch(() => ({}));
+  check("D2: Delivered + photo + price goes through", dr.status === 200 && dj.ok === true, `${dr.status} ${JSON.stringify(dj)}`);
+  const after = await until(async () => { const r = (await sql("select t.status, t.price_aed, t.delivered_at, t.photo_path, j.is_open from public.recovery_trips t join public.jobs j on j.id = t.job_id where t.id = $1", [trip.id]))[0]; return r?.is_open === false ? r : null; }, 30, 500);
+  check("D4: the job closed itself with the price claimed and the photo kept", !!after && after.status === "claimed" && Number(after.price_aed) === 150 && !!after.photo_path, JSON.stringify(after));
+  check("D2: the photo is on the job's files", ((await sql("select count(*)::int as n from public.job_files where job_id = $1 and kind = 'delivery_photo' and storage_path like 'recovery/%'", [jobId]))[0]?.n ?? 0) === 1);
+  const dr2 = await fetch(`${base}/api/drive/${trip.token}`, { method: "POST", body: (() => { const f2 = new FormData(); f2.set("photo", new Blob([jpg], { type: "image/jpeg" }), "x.jpg"); f2.set("price", "99"); return f2; })() });
+  check("D2: the link is dead after it is used", dr2.status === 400 && /Already done/.test(String(((await dr2.json().catch(() => ({}))))?.error ?? "")));
+  check("D2: the page says Done afterwards", /Done\. Thank you!/.test(await (await fetch(`${base}/drive/${trip.token}`)).text()));
+
+  // The recovery log: distance, approve, paid.
+  await go(op, `${base}/recovery`);
+  const row = op.locator(`[data-trip='${trip.id}']`);
+  check("D5: one row with the pin, the photo, the distance and AED 150 claimed", (await row.count()) === 1 && (await row.locator("[data-trip-pin]").count()) === 1 && (await row.locator("[data-trip-photo]").count()) === 1 && /≈ 1[678](\.\d)? km/.test((await row.textContent()) ?? "") && /AED 150/.test((await row.textContent()) ?? ""), ((await row.textContent().catch(() => "")) ?? "").slice(0, 220));
+  await row.locator("[data-trip-approve]").click();
+  await op.waitForURL(/message=/, { timeout: 15000 }).catch(() => null);
+  await go(op, `${base}/recovery`);
+  await op.locator(`[data-trip='${trip.id}'] [data-trip-paid]`).click();
+  const paid = await until(async () => (await sql("select status from public.recovery_trips where id = $1", [trip.id]))[0]?.status === "paid" ? 1 : null, 30, 500);
+  check("D5: Claimed -> Approved -> Paid with one tap each", !!paid);
+  await ob.close();
+
+  // The advisor's backup and the returning customer's pin. The same fixed job id cannot be stamped out twice
+  // (the stamp trigger), so the history that feeds the prefill is planted as an old delivered trip.
+  cleanupDb();
+  const second = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  await sql("insert into public.recovery_trips (job_id, kind, driver_name, location_url, location_details, delivered_at, price_aed, status) values ($1, 'delivery', 'E2e Old Driver', $2, 'E2e Villa 23, gate 2', now() - interval '2 days', 120, 'paid')", [second.jobId, PIN]);
+  // The owner stamps the car out (the balance release is his); the advisor then uses the backup button.
+  const { browser: ab, page: ap } = await browserFor("owner", { viewport: { width: 1500, height: 1200 } });
+  await go(ap, `${base}/jobs/${second.jobId}/gate-out`);
+  await ap.locator("input[name='leave_method'][value='recovery']").check({ force: true });
+  // No saved driver this round (the clean-up removed the E2e one): the new-driver boxes are typed, and he joins the list.
+  await ap.locator("input[name='delivery_driver']").fill("E2e Backup Driver");
+  await ap.locator("input[name='driver_phone']").fill("+971500000401");
+  const prefilled = await ap.locator("[data-location-url]").inputValue();
+  check("D1: the returning customer's last pin and details fill in by themselves", prefilled === PIN && (await ap.locator("[data-location-details]").inputValue()) === "E2e Villa 23, gate 2", prefilled);
+  await ap.locator("[data-location-url]").fill(PIN);
+  await ap.locator("[data-location-details]").fill("E2e Villa 23, gate 2");
+  await ap.locator("input[name='keys_ok']").check();
+  if (await ap.locator("input[name='keychain_ok']").count()) await ap.locator("input[name='keychain_ok']").check();
+  const rb2 = ap.locator("[name='release_reason']");
+  if (await rb2.count()) await rb2.fill("E2e test: released with the balance noted");
+  await ap.getByRole("button", { name: /Stamp: left the workshop/ }).click();
+  await submitted(ap);
+  await ab.close();
+  const { browser: ab3, page: ap3 } = await browserFor("service_advisor", { viewport: { width: 1500, height: 1200 } });
+  await go(ap3, `${base}/jobs/${second.jobId}/gate-out`);
+  await ap3.locator("[data-mark-delivered]").click();
+  await ap.waitForURL(/message=/, { timeout: 20000 }).catch(() => null);
+  const closed2 = await until(async () => ((await sql("select is_open from public.jobs where id = $1", [second.jobId]))[0]?.is_open === false ? 1 : null), 30, 500);
+  const marked = await until(async () => (await sql("select marked_by, price_aed from public.recovery_trips where job_id = $1 and marked_by is not null limit 1", [second.jobId]))[0] ?? null, 30, 500);
+  check("D4: 'Mark delivered' closes the job, logged as marked by the advisor, with no price yet", !!closed2 && !!marked && !!marked.marked_by && marked.price_aed === null, JSON.stringify({ closed2, marked }));
+  check("D4: the history says marked by the advisor", ((await sql("select count(*)::int as n from public.job_events where job_id = $1 and note like 'Marked delivered by%'", [second.jobId]))[0]?.n ?? 0) === 1);
+  await ab3.close();
+  const { browser: ob2, page: op2 } = await browserFor("owner", { viewport: { width: 1500, height: 1200 } });
+  await go(op2, `${base}/recovery`);
+  const priceBox = op2.locator("[data-trip-price-box]").first();
+  check("D5: accounts can type the price later on the Recovery page", (await priceBox.count()) === 1);
+  await priceBox.fill("200");
+  await op2.locator("[data-trip-price-box]").first().locator("xpath=following-sibling::button[1]").click().catch(async () => { await op2.getByRole("button", { name: /^Save price$/ }).first().click(); });
+  const late = await until(async () => { const r = (await sql("select price_aed, status from public.recovery_trips where job_id = $1 and is_active and marked_by is not null order by created_at desc limit 1", [second.jobId]))[0]; return Number(r?.price_aed) === 200 ? r : null; }, 30, 500);
+  check("D5: the late price lands as claimed", !!late && late.status === "claimed", JSON.stringify(late));
+  await ob2.close();
+  await sql("update public.settings set value = to_jsonb(''::text) where key = 'workshop_location_pin'");
 }
 
 cleanupDb();

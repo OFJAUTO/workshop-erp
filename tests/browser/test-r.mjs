@@ -121,16 +121,19 @@ await section("4 gate-out driver and keys", async () => {
   const name = await page.locator('input[name="collector_name"]').inputValue();
   const phone = await page.locator('input[name="collector_phone"]').inputValue();
   check("4: 'Customer collects' is prefilled with the customer's name and phone", name.toLowerCase() === String(cust.full_name).toLowerCase() && phone === cust.phone, JSON.stringify({ name, phone, cust }));
-  // Keys: a different count asks in amber first.
+  // Keys (17 October E1): one tick for the gate-in's count; "Different number of keys?" opens the choice with a reason.
+  check("4: the keys show as one tick with the gate-in's count", (await page.locator("[data-keys-tick]").count()) === 1 && new RegExp(`${gi.keys_count} key${gi.keys_count === 1 ? "" : "s"} handed back`).test((await page.locator("[data-keys-tick]").textContent()) ?? ""), (await page.locator("[data-keys-tick]").textContent().catch(() => "")) ?? "");
+  check("4: the keychain tick shows only when the gate-in recorded one", (await page.locator("[data-keychain-tick]").count()) === (gi.keys_keychain ? 1 : 0));
+  check("4: no notes box on the gate-out", (await page.locator('input[name="notes"]').count()) === 0);
   const other = gi.keys_count === 2 ? "3" : "2";
-  await page.locator(`input[name="keys_returned"][value="${other}"]`).check({ force: true });
+  await page.locator("[data-keys-differ]").click();
   const ask = page.locator('[data-keys-confirm="ask"]');
-  check("4: the amber box asks 'Gate-in recorded 1 key. Confirm 2?'", (await ask.count()) === 1 && new RegExp(`Gate-in recorded ${gi.keys_count} key${gi.keys_count === 1 ? "" : "s"}, ${gi.keys_keychain ? "with" : "no"} keychain\\. Confirm ${other} keys, ${gi.keys_keychain ? "with" : "no"} keychain\\?`).test((await ask.textContent()) ?? ""), (await ask.textContent().catch(() => "")) ?? "");
-  await page.locator("[data-keys-no]").click();
-  check("4: No puts the gate-in count back and closes the box", (await page.locator("[data-keys-confirm]").count()) === 0 && (await page.locator(`input[name="keys_returned"][value="${gi.keys_count}"]`).isChecked()));
+  check("4: 'Different number of keys?' opens the choice with the gate-in named", (await ask.count()) === 1 && new RegExp(`Gate-in recorded ${gi.keys_count} key`).test((await ask.textContent()) ?? ""));
+  await page.locator("[data-keys-same]").click();
+  check("4: 'Back to …' closes the choice and the tick returns", (await page.locator("[data-keys-confirm]").count()) === 0 && (await page.locator("[data-keys-tick]").count()) === 1);
+  await page.locator("[data-keys-differ]").click();
   await page.locator(`input[name="keys_returned"][value="${other}"]`).check({ force: true });
-  await page.locator("[data-keys-yes]").click();
-  check("4: Yes confirms and asks the owner for the reason (written on the job)", (await page.locator('[data-keys-confirm="yes"]').count()) === 1 && (await page.locator('[name="override_reason"]').count()) === 1);
+  check("4: a different count asks the owner for the reason (written on the job; the owner is told)", (await page.locator('[name="override_reason"]').count()) === 1);
   await page.locator('[name="override_reason"]').fill("E2e test: the customer brought the second key today");
   // The customer's driver, a new one: saved on the customer.
   await page.locator('input[name="leave_method"][value="customer_driver"]').check({ force: true });
@@ -170,7 +173,11 @@ await section("5 gate-out recovery", async () => {
   check("5: Other company opens the name box", (await page.locator("[data-new-company]").count()) === 1);
   await page.locator("[data-new-company]").fill("E2e Tow Co");
   await page.locator('[name="delivery_driver"]').fill("E2e Tow Driver");
-  await page.locator('[name="delivery_address"]').fill("E2e Street 1, Dubai");
+  await page.locator("input[name='driver_phone']").fill("+971500000402");
+  await page.locator("[data-location-url]").fill("https://maps.google.com/?q=25.2,55.3");
+  await page.locator("[data-location-details]").fill("E2e Street 1, Dubai");
+  await page.locator("input[name='keys_ok']").check();
+  if (await page.locator("input[name='keychain_ok']").count()) await page.locator("input[name='keychain_ok']").check();
   const releaseBox = page.locator('[name="release_reason"]');
   if (await releaseBox.count()) await releaseBox.fill("E2e test: released with the balance noted");
   await page.getByRole("button", { name: /Stamp: left the workshop/ }).click();

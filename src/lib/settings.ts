@@ -137,6 +137,8 @@ const DEFAULTS = {
   big_job_tags: ["Engine removal", "Transmission removal", "Subframe down", "Special tool", "Outside work"] as string[],
   labour_hours_memory: {} as Record<string, number>,
   inbound_scan_token: "",
+  whatsapp_on_the_way_template: "Dear [name], your [car] is now on its way to you on our recovery truck [truck plate]. Driver: [driver name], [driver mobile]. For anything else, call OFJ Automotive on +971 4 330 3113.",
+  workshop_location_pin: "",
   /** Written by the mailbox reader: when it last ran and what came in. */
   scans_mailbox_last_check: {} as Record<string, unknown>,
   notification_tone: "marimba",

@@ -1,8 +1,10 @@
-import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
+import { Button, Card, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { formatBytes, storageUsage } from "@/lib/storage-usage";
 import { createClient } from "@/lib/supabase/server";
+import { loadDrivers } from "@/lib/delivery";
+import { removeRecoveryDriver, saveRecoveryDriver } from "@/app/(app)/jobs/delivery-actions";
 import { saveSettings } from "./actions";
 import { clearTestDataAction } from "./clear-actions";
 import { ClearTestData } from "./ClearTestData";
@@ -67,6 +69,7 @@ export default async function SettingsPage() {
   }
 
   const departments = (Object.keys(DEPARTMENT_LABELS) as DepartmentId[]).map((id) => ({ id, label: DEPARTMENT_LABELS[id] }));
+  const recoveryDrivers = await loadDrivers();
   const pendingReview = (reviewMakes ?? 0) + (reviewModels ?? 0);
   const totalBytes = usage.reduce((a, b) => a + b.bytes, 0);
 
@@ -125,6 +128,28 @@ export default async function SettingsPage() {
           />
         </div>
         <div className="flex flex-col gap-6">
+          <Card id="drivers" className="flex flex-col gap-3" data-recovery-drivers>
+            <SectionLabel right={`${recoveryDrivers.length}`}>Recovery drivers</SectionLabel>
+            <p className="text-xs text-muted">The regular driver is prefilled at gate-out; the rest are one tap. A driver typed at gate-out joins this list by himself. Empty company = our truck.</p>
+            <ul className="flex flex-col divide-y divide-line text-sm">
+              {recoveryDrivers.map((d) => (
+                <li key={d.id} className="py-2 flex flex-wrap items-center gap-2" data-driver-row>
+                  <span className="font-semibold">{d.name}</span>
+                  <span className="text-xs text-muted">{[d.phone, d.truck_plate ? `Truck ${d.truck_plate}` : null, d.company ?? "Our truck"].filter(Boolean).join(" · ")}</span>
+                  {d.is_default ? <span className="rounded-full bg-chip px-2 py-0.5 text-[11px] font-bold">Regular</span> : null}
+                  <form action={removeRecoveryDriver.bind(null, d.id)} className="ml-auto"><Button type="submit" tone="ghost" size="md">Remove</Button></form>
+                </li>
+              ))}
+            </ul>
+            <form action={saveRecoveryDriver} className="grid grid-cols-2 gap-2">
+              <Input name="name" placeholder="Name" required aria-label="Driver's name" />
+              <Input name="phone" type="tel" inputMode="tel" placeholder="Mobile" aria-label="Driver's mobile" />
+              <Input name="truck_plate" placeholder="Truck plate" aria-label="Truck plate" />
+              <Input name="company" placeholder="Company (empty = our truck)" aria-label="Company" />
+              <label className="col-span-2 flex items-center gap-2 text-xs font-semibold"><input type="checkbox" name="is_default" className="h-5 w-5 accent-ink" />The regular driver (prefilled at gate-out)</label>
+              <div className="col-span-2"><Button type="submit" tone="secondary" size="md" data-driver-save>Add driver</Button></div>
+            </form>
+          </Card>
           <Card className="flex flex-col gap-3">
             <SectionLabel right={formatBytes(totalBytes)}>Storage used</SectionLabel>
             <ul className="flex flex-col divide-y divide-line text-sm">
