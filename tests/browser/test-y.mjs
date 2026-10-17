@@ -100,7 +100,8 @@ if (want("C")) {
   await ap2.locator("[data-commission-edit]").click();
   await ap2.locator("[data-commission-amount]").fill("150");
   await ap2.locator("[data-commission-save]").click();
-  const again = await until(async () => { const r = (await sql("select commission_status, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "pending" && Number(r.commission_value) === 150 ? r : null; }, 30, 500);
+  // The aed figure is the action's last write: wait for it, never read on the status flip alone.
+  const again = await until(async () => { const r = (await sql("select commission_status, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "pending" && Number(r.commission_value) === 150 && Number(r.commission_aed) === 0 ? r : null; }, 30, 500);
   check("C1: an edit after approval waits for the owner again and stops counting", !!again && Number(again.commission_aed) === 0, JSON.stringify(again));
   await ab2.close();
   const { browser: ob2, page: op2 } = await browserFor("owner", { viewport: { width: 1440, height: 1100 } });
@@ -120,7 +121,7 @@ if (want("C")) {
   await op2.locator("[data-commission-amount]").fill("5");
   await op2.locator("[data-commission-fields] button", { hasText: /^% of total before VAT$/ }).click();
   await op2.locator("[data-commission-save]").click();
-  const own = await until(async () => { const r = (await sql("select commission_status, commission_kind, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "approved" && r?.commission_kind === "percent" ? r : null; }, 30, 500);
+  const own = await until(async () => { const r = (await sql("select commission_status, commission_kind, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "approved" && r?.commission_kind === "percent" && Number(r.commission_aed) > 0 ? r : null; }, 30, 500);
   check("C1: the owner's own commission (5%) is approved at once and counted", !!own && Number(own.commission_value) === 5 && Number(own.commission_aed) > 0, JSON.stringify(own));
   await ob2.close();
   // The locked (customer-approved) quotation still takes a commission: it never touches the customer's figures.
@@ -400,6 +401,53 @@ if (want("G")) {
   check("G1: the advisor is told about the delay", !!toldAdvisor);
   await browser.close();
   // The no-delete trigger keeps purchase orders: the clean-up SQL (replica mode) removes LPO-E2E-% rows.
+}
+
+/* ================= B2: the layout holds up at any zoom ================= */
+if (want("Z")) {
+  console.log("\n== B2 zoom");
+  cleanupDb();
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  // Browser zoom means a smaller or larger CSS viewport: 1366 at 125% is 1093 wide, at 80% it is 1708.
+  const widths = [1708, 1518, 1242, 1093, 1025, 911, 745, 656];
+  const pages = [
+    ["quote", `${base}/jobs/${seed.jobId}/quote/${seed.quotationId}`],
+    ["parts", `${base}/parts/${seed.jobId}`],
+    ["job card", `${base}/jobs/${seed.jobId}`],
+    ["gate-in", `${base}/gate-in`],
+  ];
+  const { browser, context } = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
+  for (const [name, url] of pages) {
+    const page = await context.newPage();
+    page.setDefaultTimeout(20000);
+    const bad = [];
+    for (const w of widths) {
+      await page.setViewportSize({ width: w, height: 1000 });
+      await page.goto(url, { waitUntil: "load", timeout: 60000 });
+      await sleep(900);
+      const r = await page.evaluate(() => {
+        const vw = document.documentElement.clientWidth;
+        const sw = document.scrollingElement ? document.scrollingElement.scrollWidth : document.body.scrollWidth;
+        const offenders = [];
+        for (const el of document.querySelectorAll("body *")) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.right <= vw + 1) continue;
+          // Inside a scroll container (a wide table) horizontal overflow is the design.
+          let p = el.parentElement, scrollable = false;
+          while (p) { const o = getComputedStyle(p).overflowX; if (o === "auto" || o === "scroll") { scrollable = true; break; } p = p.parentElement; }
+          if (scrollable) continue;
+          const cls = (el.getAttribute("class") ?? "").slice(0, 60);
+          offenders.push(`<${el.tagName.toLowerCase()} ${cls}> right=${Math.round(rect.right)}`);
+          if (offenders.length >= 3) break;
+        }
+        return { vw, sw, offenders };
+      });
+      if (r.sw > r.vw + 1 || r.offenders.length) bad.push(`${w}px: scroll ${r.sw}>${r.vw}${r.offenders.length ? " · " + r.offenders[0] : ""}`);
+    }
+    check(`B2: ${name} holds up from 80% to 125% zoom at PC and tablet widths`, bad.length === 0, bad.join(" | ").slice(0, 300));
+    await page.close();
+  }
+  await browser.close();
 }
 
 cleanupDb();

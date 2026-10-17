@@ -238,12 +238,17 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
 
   if (Number(formData.get("closing_hour")) <= Number(formData.get("opening_hour"))) return { error: "The closing hour must be after the opening hour.", values };
 
-  // Breaks per day and department: "12:30-13:30", or empty for no break that day.
+  // Breaks per day and department: "12:30-13:30", or empty for no break that day. A box missing from the
+  // post altogether keeps the stored value, so a partial submit can never wipe the grid.
   {
+    const { data: storedRow } = await supabase.from("settings").select("value").eq("key", "break_times").maybeSingle();
+    const stored = (storedRow?.value ?? {}) as Record<string, Record<string, string>>;
     const grid: Record<string, Record<string, string>> = { mechanical: {}, bodyshop: {} };
     for (const side of ["mechanical", "bodyshop"] as const) {
       for (const day of ["sat", "sun", "mon", "tue", "wed", "thu", "fri"]) {
-        const raw = String(formData.get(`break__${side}__${day}`) ?? "").trim();
+        const posted = formData.get(`break__${side}__${day}`);
+        if (posted === null) { grid[side][day] = stored[side]?.[day] ?? ""; continue; }
+        const raw = String(posted ?? "").trim();
         if (raw) {
           const m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(raw);
           const ok = m && Number(m[1]) < 24 && Number(m[2]) < 60 && Number(m[3]) < 24 && Number(m[4]) < 60 && Number(m[1]) * 60 + Number(m[2]) < Number(m[3]) * 60 + Number(m[4]);
