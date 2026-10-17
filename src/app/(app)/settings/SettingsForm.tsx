@@ -288,6 +288,9 @@ export function SettingsForm({
               <Field label="Daily profit target (AED)">
                 <Input name="daily_profit_target_aed" defaultValue={v.daily_profit_target_aed} inputMode="numeric" required />
               </Field>
+              <Field label="Monthly fixed costs (AED)" hint="The break-even line of the owner's target box: rent for both buildings, office and management staff, DEWA, insurance, software. Don't include technicians' pay here if it's already charged as labour cost on jobs.">
+                <Input name="monthly_fixed_costs_aed" defaultValue={v.monthly_fixed_costs_aed} inputMode="numeric" required />
+              </Field>
               <Field label="Target yellow threshold (%)" hint="Below this the panel is red.">
                 <Input name="profit_target_yellow_percent" defaultValue={v.profit_target_yellow_percent} inputMode="numeric" required />
               </Field>

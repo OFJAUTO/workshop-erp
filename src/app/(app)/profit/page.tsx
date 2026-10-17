@@ -15,7 +15,7 @@ export default async function ProfitPage() {
   await requirePermission("viewProfitList");
   const settings = await getSettings();
   const [rows, today] = await Promise.all([jobProfits(settings, { from: daysAgoIso(60), limit: 300 }), dailyProfit(settings)]);
-  const sum = (k: "revenue" | "partsCost" | "otherCost" | "stockCost" | "labourCost" | "bankCharges" | "profit") => rows.reduce((a, r) => a + r[k], 0);
+  const sum = (k: "revenue" | "partsCost" | "otherCost" | "stockCost" | "labourCost" | "bankCharges" | "recoveryCost" | "commission" | "materialsCost" | "profit") => rows.reduce((a, r) => a + r[k], 0);
   return (
     <>
       <PageHeader title="Profit per invoice" subtitle={`Last 60 days · ${rows.length} invoice${rows.length === 1 ? "" : "s"} · today ${aed(today.invoicedProfit)} of the ${aed(today.target)} daily target · this month ${today.carry >= 0 ? "ahead" : "behind"} by ${aed(Math.abs(today.carry))} before today`} />
@@ -26,6 +26,9 @@ export default async function ProfitPage() {
         <span>Stock <span className="font-bold">{aed(sum("stockCost"))}</span></span>
         <span>Clocked labour <span className="font-bold">{aed(sum("labourCost"))}</span></span>
         <span>Bank charges <span className="font-bold">{aed(sum("bankCharges"))}</span></span>
+        <span>Recovery <span className="font-bold">{aed(sum("recoveryCost"))}</span></span>
+        {sum("commission") ? <span>Commissions <span className="font-bold">{aed(sum("commission"))}</span></span> : null}
+        {sum("materialsCost") ? <span>Materials <span className="font-bold">{aed(sum("materialsCost"))}</span></span> : null}
         <span className="text-base">Profit <span className="font-extrabold">{aed(sum("profit"))}</span></span>
       </Card>
       {rows.length === 0 ? <Empty title="No invoices yet" /> : null}
@@ -44,7 +47,7 @@ export default async function ProfitPage() {
               <span className="ml-auto flex gap-4 text-xs text-muted">
                 <span>rev {r.revenue.toFixed(0)}</span>
                 <span>parts {r.partsCost.toFixed(0)}</span>
-                <span>other {(r.otherCost + r.stockCost).toFixed(0)}</span>
+                <span>other {(r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost).toFixed(0)}</span>
                 <span>labour {r.labourCost.toFixed(0)} ({Math.round(r.labourMinutes / 6) / 10} h)</span>
                 <span>bank {r.bankCharges.toFixed(0)}</span>
               </span>

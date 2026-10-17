@@ -176,7 +176,7 @@ export async function buildOwnerReport(jobId: string, settings: Settings): Promi
       discount: inv ? inv.discount_aed : 0,
       partsCost: p ? p.partsCost : 0,
       labourCost: p ? p.labourCost : 0,
-      otherCost: p ? round2(p.otherCost + p.stockCost + p.bankCharges) : 0,
+      otherCost: p ? round2(p.otherCost + p.stockCost + p.bankCharges + p.recoveryCost + p.commission + p.materialsCost) : 0,
       profit: profit === null ? null : round2(profit),
       marginPercent,
       collected: bal.paid,

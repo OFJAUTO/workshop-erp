@@ -164,17 +164,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <WaitingPanel staff={staff} />
 
       {role === "owner" && profit ? (
-        <ProfitPanel
-          targetAed={profit.target}
-          yellowPercent={profit.yellowPercent}
-          invoicedAed={profit.invoicedProfit}
-          collectedAed={profit.collected}
-          monthAed={profit.monthProfit}
-          live
-          provisional={profit.provisional}
-          count={profit.count}
-          comebacksAed={profit.comebacks}
-        />
+        <ProfitPanel live={role === "owner"} target={Number(settings.daily_profit_target_aed) || 0} data={profit} />
       ) : null}
 
       {role === "owner" ? <DepositsWaiting /> : null}

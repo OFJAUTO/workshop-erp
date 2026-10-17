@@ -294,5 +294,59 @@ if (want("D")) {
   await sql("update public.settings set value = to_jsonb(''::text) where key = 'workshop_location_pin'");
 }
 
+/* ================= F: the target box and the labour rate check ================= */
+if (want("F")) {
+  console.log("\n== F target box and labour rate");
+  cleanupDb();
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1500, height: 1100 } });
+  await go(page, `${base}/dashboard`);
+  const box = page.locator("[data-target-box]");
+  check("F1: the owner's target box reads 'Month to date: AED X of AED Y target (Z%)'", (await box.count()) === 1 && /Month to date: AED [\d,]+ of AED [\d,]+ target \(\d+%\)/.test((await page.locator("[data-month-headline]").textContent()) ?? ""), (await page.locator("[data-month-headline]").textContent().catch(() => "")) ?? "");
+  check("F1: the break-even line, the in-progress profit and the pace are on it", /Break-even so far: AED [\d,]+/.test((await page.locator("[data-break-even]").textContent()) ?? "") && /(above|below) break-even/.test((await page.locator("[data-break-even]").textContent()) ?? "") && /In progress \(approved, not invoiced\)/.test((await page.locator("[data-in-progress]").textContent()) ?? "") && /AED [\d,]+ by month end/.test((await page.locator("[data-pace]").textContent()) ?? ""));
+  check("F1: the smaller line shows today's invoiced profit and collections", /Today: AED [\d,]+ invoiced profit.*AED [\d,]+ collected/.test((await page.locator("[data-today-line]").textContent()) ?? ""), (await page.locator("[data-today-line]").textContent().catch(() => "")) ?? "");
+  const inProgressOf = async () => Number((((await page.locator("[data-in-progress]").textContent()) ?? "").match(/AED ([\d,]+) profit/)?.[1] ?? "0").replace(/,/g, ""));
+  const before = await inProgressOf();
+  await api("/api/e2e/stage", { stage: "approved" });
+  await go(page, `${base}/dashboard`);
+  const afterIp = await inProgressOf();
+  check("F1: an approved quotation on an open job joins 'In progress'", afterIp > before, `${before} -> ${afterIp}`);
+
+  // F2: the labour rate check.
+  const origActuals = (await sql("select value from public.settings where key = 'labour_cost_actuals'"))[0]?.value ?? {};
+  const origRates = (await sql("select value from public.settings where key = 'technician_cost_rate_by_department'"))[0]?.value ?? {};
+  await go(page, `${base}/reports/labour-rate`);
+  check("F2: two cards (mechanical and bodyshop) with the hours clocked", (await page.locator("[data-rate-side='mechanical']").count()) === 1 && (await page.locator("[data-rate-side='bodyshop']").count()) === 1 && /h clocked/.test((await page.locator("[data-rate-side='mechanical']").textContent()) ?? ""));
+  const mech = page.locator("[data-rate-side='mechanical']");
+  // The page shows the hours rounded to one decimal; the rate divides by the exact minutes, so the test reads them from the database.
+  const monthNow = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 7);
+  const exact = (await sql(`select coalesce(sum(coalesce(s.minutes, 0)), 0)::int as m from public.work_sessions s join public.jobs j on j.id = s.job_id where s.is_active and s.started_at >= ($1 || '-01T00:00:00+04:00')::timestamptz and s.started_at < (($1 || '-01')::date + interval '1 month')::timestamptz and coalesce(j.department, 'mechanical') not in ('bodyshop', 'paint', 'ppf_tint', 'detailing')`, [monthNow]))[0]?.m ?? 0;
+  const hours = exact / 60;
+  // A believable figure for the data on hand: about AED 85 per clocked hour, so the sanity cap never trips.
+  const cost = Math.max(1, Math.round(hours * 85));
+  await mech.locator("[data-rate-cost]").fill(String(cost));
+  await page.locator("[data-save-actuals]").click();
+  await page.waitForURL(/message=/, { timeout: 20000 }).catch(() => null);
+  await go(page, `${base}/reports/labour-rate`);
+  const realText = ((await page.locator("[data-rate-side='mechanical'] [data-real-rate]").textContent()) ?? "");
+  const expected = hours > 0 ? Math.round(cost / hours) : null;
+  check("F2: the real rate is the typed cost over the clocked hours", expected === null ? realText.includes("—") : new RegExp(`AED ${expected.toLocaleString("en-GB")}/h`).test(realText), `hours ${hours} -> ${realText}`);
+  if (expected !== null) {
+    await page.locator("[data-rate-side='mechanical'] [data-use-rate]").click();
+    const used = await until(async () => { const v = (await sql("select value->>'mechanical' as m from public.settings where key = 'technician_cost_rate_by_department'"))[0]?.m; return Number(v) === expected ? v : null; }, 30, 500);
+    check("F2: 'Use this rate' writes the mechanical cost rate for every job profit", !!used, String(used));
+  } else {
+    check("F2: 'Use this rate' writes the mechanical cost rate for every job profit", false, "no hours clocked this month to divide by");
+  }
+  await browser.close();
+  // Accounts can type the figures but never set the rate.
+  const { browser: cb, page: cp } = await browserFor("accounts", { viewport: { width: 1366, height: 1000 } });
+  await go(cp, `${base}/reports/labour-rate`);
+  check("F2: accounts see the page with the cost boxes and no 'Use this rate'", (await cp.locator("[data-rate-cost]").count()) === 2 && (await cp.locator("[data-use-rate]").count()) === 0);
+  await cb.close();
+  // Everything put back as it was (a live database).
+  await sql("update public.settings set value = $1::jsonb where key = 'labour_cost_actuals'", [JSON.stringify(origActuals)]);
+  await sql("update public.settings set value = $1::jsonb where key = 'technician_cost_rate_by_department'", [JSON.stringify(origRates)]);
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

@@ -1,60 +1,51 @@
 import { Card } from "@/components/ui";
+import type { DailyProfit } from "@/lib/profit";
 
 /**
- * Daily profit target panel, for the owner only. "AED X of AED Y (Z%)" for today, never negative: the
- * percentage starts at 0 and the shortfall of earlier days is not taken off today. Green at or above target,
- * yellow at the threshold, red below. The month so far is shown as information underneath.
+ * The owner's target box. Headline: "Month to date: AED X of AED Y target (Z%)", the target being the daily figure
+ * times the working days passed (Sunday never counts); green on pace, amber behind. Under it: the break-even line
+ * from Settings > Monthly fixed costs, the profit sitting in approved-but-not-invoiced work, the month-end pace, and
+ * a smaller line with today's invoiced profit and collections. Profit is the invoice before VAT minus every job cost;
+ * it stays "(includes N provisional)" while late costs are still to come.
  */
-export function ProfitPanel({
-  targetAed,
-  yellowPercent,
-  invoicedAed,
-  collectedAed,
-  monthAed = 0,
-  live,
-  provisional = 0,
-  count = 0,
-  comebacksAed = 0,
-}: {
-  targetAed: number;
-  yellowPercent: number;
-  invoicedAed: number;
-  collectedAed: number;
-  /** Profit invoiced this month so far, today included. */
-  monthAed?: number;
-  live: boolean;
-  provisional?: number;
-  count?: number;
-  comebacksAed?: number;
-}) {
-  const fmt = (n: number) => `AED ${Math.round(Math.max(0, n)).toLocaleString("en-GB")}`;
-  if (!live) {
+export function ProfitPanel({ live, target, data }: { live: boolean; target: number; data: DailyProfit | null }) {
+  const fmt = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
+  if (!live || !data) {
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-dashed border-line bg-white px-4 py-2 text-sm">
         <span className="text-xs font-extrabold uppercase tracking-[0.08em]">Daily profit target</span>
-        <span className="text-muted">{fmt(targetAed)} per working day</span>
+        <span className="text-muted">{fmt(target)} per working day</span>
       </div>
     );
   }
-  const today = Math.max(0, invoicedAed);
-  const pct = targetAed > 0 ? Math.max(0, Math.round((today / targetAed) * 100)) : 100;
-  const tone = pct >= 100 ? "green" : pct >= yellowPercent ? "amber" : "red";
-  const cls = { green: "bg-green-soft text-green border-green", amber: "bg-amber-soft text-amber border-amber-bar", red: "bg-red-soft text-red border-red-bar" }[tone];
+  const m = data.month;
+  const cls = m.tone === "green" ? "bg-green-soft text-green border-green" : "bg-amber-soft text-amber border-amber-bar";
   return (
-    <Card className={`flex flex-wrap items-center gap-x-10 gap-y-3 border ${cls}`} data-profit-panel>
-      <div className="flex flex-col">
-        <span className="text-xs font-bold uppercase tracking-[0.08em]">Today vs target</span>
-        <span className="text-2xl sm:text-3xl font-extrabold" data-profit-today>{fmt(today)} of {fmt(targetAed)} ({pct}%)</span>
+    <Card className={`flex flex-col gap-2 border ${cls}`} data-profit-panel data-target-box>
+      <span className="text-2xl sm:text-3xl font-extrabold" data-month-headline>
+        Month to date: {fmt(Math.max(0, data.monthProfit))} of {fmt(m.targetSoFar)} target ({m.percent}%)
+      </span>
+      <div className="flex flex-wrap gap-x-10 gap-y-2 text-sm text-ink">
+        <div className="flex flex-col" data-break-even>
+          <span>Break-even so far: <span className="font-bold">{fmt(m.breakEvenSoFar)}</span></span>
+          <span className={m.aboveBreakEven >= 0 ? "font-extrabold text-green" : "font-extrabold text-red"}>
+            {m.aboveBreakEven >= 0 ? `${fmt(m.aboveBreakEven)} above break-even` : `${fmt(-m.aboveBreakEven)} below break-even`}
+          </span>
+        </div>
+        <div className="flex flex-col" data-in-progress>
+          <span>In progress (approved, not invoiced):</span>
+          <span className="font-bold">{fmt(m.inProgress)} profit</span>
+        </div>
+        <div className="flex flex-col" data-pace>
+          <span>At this pace:</span>
+          <span className="font-bold">{fmt(m.pace)} by month end</span>
+        </div>
       </div>
-      <div className="flex flex-col text-sm">
-        <span>Profit invoiced today {fmt(today)}{count ? ` (${count} invoice${count === 1 ? "" : "s"}${provisional ? `, ${provisional} provisional` : ""})` : ""}</span>
-        <span>Collected today {fmt(collectedAed)}</span>
-      </div>
-      <div className="flex flex-col text-sm">
-        <span>Target {fmt(targetAed)} per working day</span>
-        <span>This month so far {fmt(monthAed)}</span>
-      </div>
-      {comebacksAed ? <div className="flex flex-col text-sm"><span className="font-extrabold text-red">Comebacks −{fmt(comebacksAed)}</span><span className="text-xs">lost today on cars back for our fault</span></div> : null}
+      <span className="text-xs text-ink" data-today-line>
+        Today: {fmt(Math.max(0, data.invoicedProfit))} invoiced profit ({data.count} invoice{data.count === 1 ? "" : "s"}) · {fmt(data.collected)} collected
+        {m.provisional ? ` · (includes ${m.provisional} provisional)` : ""}
+        {data.comebacks ? ` · comebacks −${fmt(data.comebacks)}` : ""}
+      </span>
     </Card>
   );
 }
