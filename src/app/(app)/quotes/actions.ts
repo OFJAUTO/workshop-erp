@@ -14,7 +14,8 @@ import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { isUnchosen, ownerApprovalReasons, quoteTotals, recoveryTitle, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, isUnchosen, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { formatPlate } from "@/lib/types";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -713,4 +714,86 @@ export async function declineToGateOut(quotationId: string, formData: FormData) 
   if (job.gated_in_by && job.gated_in_by !== staff.id) await notifyStaff([job.gated_in_by], n);
   refresh(q.job_id, q.id);
   redirect(`/jobs/${q.job_id}?message=${encodeURIComponent(`Declined, car going out.${chargeText || " No charge: the car leaves free."}`)}`);
+}
+
+/** The commission's amount in AED for the messages, from the quotation's own lines and header. */
+async function commissionAmountOf(quotationId: string, kind: "aed" | "percent", value: number): Promise<number> {
+  if (kind === "aed") return round2(value);
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return 0;
+  const totals = quoteTotals(bundle.lines, bundle.quotation);
+  return round2(totals.net * (Math.min(100, Math.max(0, value)) / 100));
+}
+
+/**
+ * The Commission line of the internal box (under Recovery cost): who and how much. Set by the owner it is approved at
+ * once; set or changed by anyone else it waits in amber and the owner is asked ("Approve / Decline / Change amount").
+ * Pending commissions count for nothing; removal is logged (and told to the owner when it was already approved).
+ * An empty "to" removes it. Works on sent and approved quotations too: a commission never touches the customer's figures.
+ */
+export async function saveCommission(quotationId: string, formData: FormData): Promise<{ error?: string; ok?: boolean }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Not allowed." };
+  const isOwner = staff.role_id === "owner";
+  const admin = createAdminClient();
+  const settings = await getSettings();
+  const now = new Date().toISOString();
+  const to = String(formData.get("to") ?? "").trim().slice(0, 80);
+  const plate = bundle.vehicle ? formatPlate(bundle.vehicle) : bundle.job?.job_number ?? q.number;
+  if (!to) {
+    if (!q.commission_to) return { ok: true };
+    const wasApproved = q.commission_status === "approved" || (q.commission_status === null && !!q.commission_to);
+    await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_status: null, commission_set_by: staff.id, commission_set_at: now, commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, updated_by: staff.id }).eq("id", q.id);
+    await refreshQuoteTotals(q.id, settings, staff.id);
+    await logQuoteEvent(q.id, q.job_id, staff.id, "commission_removed", `${q.number}: the commission for ${q.commission_to} was removed by ${staff.display_name}`);
+    if (wasApproved && !isOwner) await notifyRoles(["owner"], { type: "commission_approval", title: `Commission removed on ${plate}`, body: `${staff.display_name} removed the approved commission for ${q.commission_to} on ${q.number}.`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+    refresh(q.job_id, q.id);
+    return { ok: true };
+  }
+  const kind = formData.get("kind") === "percent" ? "percent" : "aed";
+  const v = Number(String(formData.get("value") ?? "").replace(",", "."));
+  if (!Number.isFinite(v) || v <= 0) return { error: "Enter the amount: AED, or a percentage of the total before VAT." };
+  const value = kind === "percent" ? Math.min(100, round2(v)) : round2(v);
+  const status = isOwner ? "approved" : "pending";
+  const { error } = await admin.from("quotations").update({ commission_to: to, commission_kind: kind, commission_value: value, commission_status: status, commission_set_by: staff.id, commission_set_at: now, commission_decided_by: isOwner ? staff.id : null, commission_decided_at: isOwner ? now : null, commission_decision_note: null, updated_by: staff.id }).eq("id", q.id);
+  if (error) return { error: error.message };
+  const people = ((settings.commission_people ?? []) as string[]).map(String);
+  if (!people.includes(to)) await admin.from("settings").upsert({ key: "commission_people", value: [...people, to], label: "Commission: people", description: "People we pay commission to, offered as one-tap choices in the internal box of a quotation." }, { onConflict: "key" });
+  await refreshQuoteTotals(q.id, settings, staff.id);
+  const amount = await commissionAmountOf(q.id, kind, value);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "commission_set", `${q.number}: commission for ${to} (${kind === "percent" ? `${value}% = ${aed(amount)}` : aed(amount)}) ${isOwner ? `set and approved by ${staff.display_name}` : `set by ${staff.display_name}, waiting for the owner`}`);
+  if (!isOwner) await notifyRoles(["owner"], { type: "commission_approval", title: `Commission for ${to}, ${aed(amount)} on ${plate} (${bundle.job?.job_number ?? q.number})`, body: `Asked by ${staff.display_name} on ${q.number}. Approve, decline or change the amount on the quotation.`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+  refresh(q.job_id, q.id);
+  return { ok: true };
+}
+
+/** The owner's answer on a waiting commission: Approve (it starts counting) or Decline (removed, with his note). */
+export async function decideCommission(quotationId: string, formData: FormData): Promise<{ error?: string; ok?: boolean }> {
+  const staff = await requirePermission("approveQuotes");
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  if (q.commission_status !== "pending" || !q.commission_to) return { error: "No commission is waiting on this quotation." };
+  const decision = String(formData.get("decision") ?? "");
+  const note = blankToNull(formData.get("note"));
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+  const amount = await commissionAmountOf(q.id, q.commission_kind ?? "aed", Number(q.commission_value) || 0);
+  if (decision === "approve") {
+    await admin.from("quotations").update({ commission_status: "approved", commission_decided_by: staff.id, commission_decided_at: now, commission_decision_note: note, updated_by: staff.id }).eq("id", q.id);
+    await refreshQuoteTotals(q.id, await getSettings(), staff.id);
+    await logQuoteEvent(q.id, q.job_id, staff.id, "commission_approved", `${q.number}: the owner approved the commission for ${q.commission_to} (${aed(amount)})${note ? `: ${note}` : ""}`);
+    if (q.commission_set_by) await notifyStaff([q.commission_set_by], { type: "commission_approval", title: `Commission approved: ${q.commission_to}, ${aed(amount)}`, body: `${q.number}. It now counts in the job's cost and the monthly list.`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+    refresh(q.job_id, q.id);
+    return { ok: true };
+  }
+  await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_status: "declined", commission_decided_by: staff.id, commission_decided_at: now, commission_decision_note: note, updated_by: staff.id }).eq("id", q.id);
+  await refreshQuoteTotals(q.id, await getSettings(), staff.id);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "commission_declined", `${q.number}: the owner declined the commission for ${q.commission_to} (${aed(amount)})${note ? `: ${note}` : ""}`);
+  if (q.commission_set_by) await notifyStaff([q.commission_set_by], { type: "commission_approval", title: `Commission declined: ${q.commission_to}`, body: `${q.number}${note ? `. Owner: ${note}` : ""}`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+  refresh(q.job_id, q.id);
+  return { ok: true };
 }

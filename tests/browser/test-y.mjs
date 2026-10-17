@@ -64,5 +64,79 @@ if (want("B")) {
   check("B3: the invoice link still shows the amount and the PDF button", /Amount due|Paid, thank you/.test(itext) && /View proforma \(PDF\)|View tax invoice \(PDF\)/.test(itext));
 }
 
+/* ================= C1: commission under Recovery cost, owner approval ================= */
+if (want("C")) {
+  console.log("\n== C1 commission");
+  cleanupDb();
+  const { jobId, quotationId } = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const mark = (await sql("select now() as t"))[0]?.t;
+  const { browser: ab, page: ap } = await browserFor("service_advisor", { viewport: { width: 1440, height: 1100 } });
+  await go(ap, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("C1: one Commission line sits in the internal box, the old bottom section is gone", (await ap.locator("[data-internal-box] [data-commission-line]").count()) === 1 && (await ap.locator("[data-commission-box]").count()) === 0 && (await ap.locator("[data-commission-add]").count()) === 1);
+  const rows = await ap.locator("[data-internal-box] dt").allTextContents();
+  check("C1: the Commission line is directly under Recovery cost", rows.findIndex((t) => /^Commission/.test(t)) === rows.findIndex((t) => /^Recovery cost/.test(t)) + 1, JSON.stringify(rows.slice(0, 6)));
+  await ap.locator("[data-commission-add]").click();
+  await ap.locator("[data-commission-who]").fill("E2e Agent");
+  await ap.locator("[data-commission-amount]").fill("100");
+  await ap.locator("[data-commission-save]").click();
+  const pend = await until(async () => { const r = (await sql("select commission_to, commission_status, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "pending" ? r : null; }, 30, 500);
+  check("C1: an advisor's commission waits for the owner and counts for nothing yet", !!pend && pend.commission_to === "E2e Agent" && Number(pend.commission_aed) === 0, JSON.stringify(pend));
+  await go(ap, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("C1: the line reads amber 'Waiting for owner approval' and profit says '(commission pending)'", (await ap.locator("[data-commission-pending]").count()) === 1 && (await ap.locator("[data-profit-commission-pending]").count()) === 1);
+  const told = (await sql("select title from public.notifications where type = 'commission_approval' and created_at > $1 order by created_at desc limit 1", [mark]))[0];
+  check("C1: the owner is told 'Commission for E2e Agent, AED 100 on [car] ([job])'", /^Commission for E2e Agent, AED 100\.00 on .+ \(J-/.test(told?.title ?? ""), told?.title);
+  await ab.close();
+  // The owner approves on the page.
+  const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1440, height: 1100 } });
+  await go(op, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("C1: the owner sees Approve / Decline / Change amount on the line", (await op.locator("[data-commission-approve]").count()) === 1 && (await op.locator("[data-commission-decline]").count()) === 1 && (await op.locator("[data-commission-change]").count()) === 1);
+  await op.locator("[data-commission-approve]").click();
+  const appr = await until(async () => { const r = (await sql("select commission_status, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "approved" && Number(r.commission_aed) === 100 ? r : null; }, 30, 500);
+  check("C1: approved: it counts in cost (commission_aed 100) and is logged", !!appr && ((await sql("select count(*)::int as n from public.quotation_events where quotation_id = $1 and event_type = 'commission_approved'", [quotationId]))[0]?.n ?? 0) === 1, JSON.stringify(appr));
+  await ob.close();
+  // An advisor's change after approval waits again; the owner declines with a note; it is removed.
+  const { browser: ab2, page: ap2 } = await browserFor("service_advisor", { viewport: { width: 1440, height: 1100 } });
+  await go(ap2, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  await ap2.locator("[data-commission-edit]").click();
+  await ap2.locator("[data-commission-amount]").fill("150");
+  await ap2.locator("[data-commission-save]").click();
+  const again = await until(async () => { const r = (await sql("select commission_status, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "pending" && Number(r.commission_value) === 150 ? r : null; }, 30, 500);
+  check("C1: an edit after approval waits for the owner again and stops counting", !!again && Number(again.commission_aed) === 0, JSON.stringify(again));
+  await ab2.close();
+  const { browser: ob2, page: op2 } = await browserFor("owner", { viewport: { width: 1440, height: 1100 } });
+  await go(op2, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  await op2.locator("[data-commission-decline]").click();
+  await op2.locator("[data-commission-decline-note]").fill("Not on this job");
+  await op2.locator("[data-commission-decline-send]").click();
+  const dec = await until(async () => { const r = (await sql("select commission_to, commission_status, commission_decision_note from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "declined" ? r : null; }, 30, 500);
+  // The advisor's notice is the action's last step: wait for it, never read straight after the row flips.
+  const toldDec = await until(async () => ((await sql("select count(*)::int as n from public.notifications where type = 'commission_approval' and title like 'Commission declined%' and created_at > $1", [mark]))[0]?.n ?? 0) >= 1 ? 1 : null, 30, 500);
+  check("C1: declined: removed with the owner's note, the advisor is told", !!dec && dec.commission_to === null && dec.commission_decision_note === "Not on this job" && !!toldDec, JSON.stringify(dec));
+  await go(op2, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("C1: the line shows the decline and offers + Add again", (await op2.locator("[data-commission-declined]").count()) === 1);
+  // The owner's own commission is approved at once.
+  await op2.locator("[data-commission-declined] [data-commission-add]").click();
+  await op2.locator("[data-commission-who]").fill("E2e Agent");
+  await op2.locator("[data-commission-amount]").fill("5");
+  await op2.locator("[data-commission-fields] button", { hasText: /^% of total before VAT$/ }).click();
+  await op2.locator("[data-commission-save]").click();
+  const own = await until(async () => { const r = (await sql("select commission_status, commission_kind, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_status === "approved" && r?.commission_kind === "percent" ? r : null; }, 30, 500);
+  check("C1: the owner's own commission (5%) is approved at once and counted", !!own && Number(own.commission_value) === 5 && Number(own.commission_aed) > 0, JSON.stringify(own));
+  await ob2.close();
+  // The locked (customer-approved) quotation still takes a commission: it never touches the customer's figures.
+  cleanupDb();
+  const locked = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const { browser: ob3, page: op3 } = await browserFor("owner", { viewport: { width: 1440, height: 1100 } });
+  await go(op3, `${base}/jobs/${locked.jobId}/quote/${locked.quotationId}`);
+  check("C1: the locked view carries the commission line", (await op3.locator("[data-quote-locked]").count()) === 1 && (await op3.locator("[data-commission-add]").count()) === 1);
+  await op3.locator("[data-commission-add]").click();
+  await op3.locator("[data-commission-who]").fill("E2e Agent");
+  await op3.locator("[data-commission-amount]").fill("50");
+  await op3.locator("[data-commission-save]").click();
+  const onLocked = await until(async () => { const r = (await sql("select commission_status, commission_aed, total_aed from public.quotations where id = $1", [locked.quotationId]))[0]; return r?.commission_status === "approved" && Number(r.commission_aed) === 50 ? r : null; }, 30, 500);
+  check("C1: it saves on the approved quotation without touching the customer's total", !!onLocked && Number(onLocked.commission_aed) === 50, JSON.stringify(onLocked));
+  await ob3.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

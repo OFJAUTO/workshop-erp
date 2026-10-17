@@ -149,14 +149,11 @@ await section("A pricing table and PDF import", async () => {
   check("14: the labour discount saves as 10% (percent kind)", !!disc, JSON.stringify(disc));
   await sleep(800);
   check("14: the summary shows 'Labour discount (10%)' in bold green", /Labour discount \(10%\)/.test((await op.locator("[data-labour-discount-row]").textContent().catch(() => "")) ?? "") && /text-green/.test((await op.locator("[data-labour-discount-row]").getAttribute("class").catch(() => "")) ?? ""));
-  // 13. Commission: a typed name joins the list, AED 100.
-  await op.locator("[data-commission-box] button", { hasText: /\+ Name/ }).click();
-  await op.locator("input[aria-label='Commission to']").fill("E2e Agent");
-  await op.keyboard.press("Enter");
-  await until(async () => ((await op.locator("[data-commission-amount]").count()) ? 1 : null), 20, 300);
-  await sleep(1500);
+  // 13. Commission: the owner adds it on the one line under Recovery cost (auto-approved for him); the name joins the list.
+  await op.locator("[data-commission-add]").click();
+  await op.locator("[data-commission-who]").fill("E2e Agent");
   await op.locator("[data-commission-amount]").fill("100");
-  await op.keyboard.press("Tab");
+  await op.locator("[data-commission-save]").click();
   const com = await until(async () => { const r = (await sql("select commission_to, commission_kind, commission_value, commission_aed from public.quotations where id = $1", [quotationId]))[0]; return r?.commission_to === "E2e Agent" && Number(r?.commission_aed) === 100 ? r : null; }, 40, 500);
   check("13: the commission saves (E2e Agent, AED 100) and counts as cost", !!com, JSON.stringify(com));
   const people = (await sql("select value from public.settings where key = 'commission_people'"))[0]?.value;

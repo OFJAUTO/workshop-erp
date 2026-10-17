@@ -200,6 +200,13 @@ export type QuoteRow = {
   removal_ack_name?: string | null;
   commission_paid_at?: string | null;
   commission_paid_by?: string | null;
+  /** Every commission needs the owner's approval (his own are approved at once); pending ones count for nothing. */
+  commission_status?: "pending" | "approved" | "declined" | null;
+  commission_decision_note?: string | null;
+  commission_set_by?: string | null;
+  commission_set_at?: string | null;
+  commission_decided_by?: string | null;
+  commission_decided_at?: string | null;
   created_at: string;
   created_by: string | null;
   updated_at: string;
@@ -216,6 +223,7 @@ export type QuoteHeaderForTotals = {
   discount_scope?: "labour" | "labour_services" | null;
   commission_kind?: "aed" | "percent" | null;
   commission_value?: number | null;
+  commission_status?: string | null;
   materials_cost_aed?: number | null;
   /** The deposit the advisor asked for: a fixed amount, a share of the parts, or a share of the total. */
   deposit_mode?: string | null;
@@ -443,8 +451,10 @@ export type QuoteTotals = {
   /** What the recovery lines cost us (part of otherCost). */
   recoveryCost: number;
   bankCharge: number;
-  /** Commission we pay someone: internal only. */
+  /** Commission we pay someone: internal only, counted once the owner approved it. */
   commission: number;
+  /** A commission waits for the owner: not counted yet, profit shows "(commission pending)". */
+  commissionPending: boolean;
   totalCost: number;
   profit: number;
   labourMargin: number;
@@ -547,9 +557,12 @@ export function quoteTotals(
   // The bank charge: the rate times the total including VAT when a rate is given (live, on the screen); otherwise
   // the automatic hidden Fee line the server keeps, or the old estimate from the card tick.
   const bankCharge = opts.bankChargePercent !== undefined && opts.bankChargePercent > 0 ? round2(total * (opts.bankChargePercent / 100)) : feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? 0 : 0;
-  // Commission: a fixed amount, or a percentage of the total before VAT. Internal only.
+  // Commission: a fixed amount, or a percentage of the total before VAT. Internal only, and counted only once the
+  // owner has approved it (one set before the rule, with no status, stands as approved).
   const cv = Number(q.commission_value) || 0;
-  const commission = q.commission_kind === "percent" ? round2(net * (Math.max(0, cv) / 100)) : q.commission_kind === "aed" ? round2(Math.max(0, cv)) : 0;
+  const commissionAsked = q.commission_kind === "percent" ? round2(net * (Math.max(0, cv) / 100)) : q.commission_kind === "aed" ? round2(Math.max(0, cv)) : 0;
+  const commissionPending = commissionAsked > 0 && q.commission_status === "pending";
+  const commission = commissionPending || q.commission_status === "declined" ? 0 : commissionAsked;
   const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
   const totalCost = round2(partsCost + labourCost + outsideCost + otherCost + bankCharge + commission + materialsCost);
   const profit = round2(net - totalCost);
@@ -563,7 +576,7 @@ export function quoteTotals(
     subtotal, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
-    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, materialsCost, totalCost, profit,
+    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, totalCost, profit,
     labourMargin: round2(labourSell - discount - labourCost - outsideCost),
     deposit,
     depositSuggested,

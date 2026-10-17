@@ -19,6 +19,7 @@ import { aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixed
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
+import { CommissionLine } from "./CommissionLine";
 
 type Op = Record<string, unknown>;
 
@@ -833,6 +834,17 @@ export function QuoteEditor({
     );
   };
 
+  // The Commission line of the internal box: works on sent and approved quotations too (it never touches the customer's figures).
+  const commissionLine = (
+    <CommissionLine
+      quotationId={quotation.id}
+      commission={{ to: quotation.commission_to ?? null, kind: (quotation.commission_kind as "aed" | "percent" | null) ?? null, value: quotation.commission_value ?? null, status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), decisionNote: quotation.commission_decision_note ?? null }}
+      people={settings.commissionPeople ?? []}
+      isOwner={isOwner}
+      net={totals.net}
+      disabled={!canSend}
+    />
+  );
   const reviseAskDialog = reviseAsk && onAskRevise ? (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-revise-ask>
       <form action={onAskRevise} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
@@ -857,6 +869,7 @@ export function QuoteEditor({
           lines={lines}
           totals={totals}
           showProfit={showProfit}
+          commissionLine={commissionLine}
           ownerBox={ownerBox}
           statusText={statusText}
           actions={
@@ -1216,23 +1229,15 @@ export function QuoteEditor({
                 </dt><dd className="text-right" data-labour-cost>{aed(totals.labourCost)}</dd>
                 {totals.outsideCost ? <><dt className="text-muted">Outside work, our cost</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
+                {commissionLine}
                 {department === "bodyshop" || Number(header.materials_cost_aed) > 0 ? <><dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd></> : null}
-                <dt className="text-muted">Commission{header.commission_to ? ` (to ${header.commission_to})` : ""}</dt><dd className="text-right">{aed(totals.commission)}</dd>
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
                 <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
                 <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totals.totalCost)}</dd>
-                <dt className="font-bold">Profit before VAT</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
+                <dt className="font-bold">Profit before VAT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission pending)</span> : null}</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
                 <dt className="text-muted">Labour margin</dt><dd className="text-right">{aed(totals.labourMargin)}</dd>
                 <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-[11px] font-semibold text-amber" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
               </dl>
-              <CommissionBox
-                who={header.commission_to ?? ""}
-                kind={header.commission_kind ?? "aed"}
-                value={header.commission_value}
-                people={settings.commissionPeople ?? []}
-                disabled={disabled}
-                onChange={(f) => setHeaderField(f, true)}
-              />
             </div>
           ) : null}
           {isQuotation ? <p className="text-xs text-muted">Estimated: about {estimatedDays} working day{estimatedDays === 1 ? "" : "s"} after approval. The firm date is set in planning.</p> : null}
@@ -1552,54 +1557,6 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
           <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * Commission in the internal box: who (one tap from the Settings list, or a typed name that joins it) and how much
- * (fixed AED or a percentage of the total before VAT). Never shown to a customer anywhere.
- */
-function CommissionBox({ who, kind, value, people, disabled, onChange }: { who: string; kind: "aed" | "percent"; value: number | null | undefined; people: string[]; disabled: boolean; onChange: (f: { commission_to?: string | null; commission_kind?: "aed" | "percent" | null; commission_value?: number | null }) => void }) {
-  const [typing, setTyping] = useState(false);
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState(value ? String(value) : "");
-  const [seenValue, setSeenValue] = useState(value);
-  if (seenValue !== value) {
-    // A saved figure arriving from the server replaces the box only when it is a real figure that differs from what is typed; an
-    // empty answer (the name saved before any amount) never wipes a number someone is typing.
-    setSeenValue(value);
-    if (value && Number(amount.replace(",", ".")) !== value) setAmount(String(value));
-  }
-  const names = Array.from(new Set([...people, ...(who ? [who] : [])]));
-  const commit = (next: { to?: string | null; kind?: "aed" | "percent"; value?: number | null }) => onChange({ commission_to: next.to === undefined ? (who || null) : next.to, commission_kind: next.kind ?? kind, commission_value: next.value === undefined ? (Number(amount.replace(",", ".")) || null) : next.value });
-  /** The figure as it stands in the box (the number box hands it on a moment after typing stops, or on Enter here). */
-  const commitRaw = (raw: string) => commit({ value: Number(raw.replace(",", ".")) || null });
-  return (
-    <div className="flex flex-col gap-1.5 border-t border-line pt-2 mt-1" data-commission-box>
-      <span className="text-[11px] font-semibold text-muted">Commission (internal, never on anything the customer sees)</span>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {names.map((p) => (
-          <button key={p} type="button" disabled={disabled} onClick={() => commit({ to: who === p ? null : p })} aria-pressed={who === p} className={`min-h-8 rounded-control border px-2.5 text-[11px] font-bold ${who === p ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-commission-person>{who === p ? "✓ " : ""}{p}</button>
-        ))}
-        {typing ? (
-          <span className="inline-flex items-center gap-1">
-            <Input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (name.trim()) commit({ to: name.trim() }); setTyping(false); setName(""); } }} placeholder="Name" autoFocus className="min-h-8 w-32 text-xs" textCase="title" aria-label="Commission to" />
-            <button type="button" onClick={() => { if (name.trim()) commit({ to: name.trim() }); setTyping(false); setName(""); }} className="min-h-8 rounded-control bg-ink px-2 text-[11px] font-bold text-white">Add</button>
-          </span>
-        ) : (
-          <button type="button" disabled={disabled} onClick={() => setTyping(true)} className="min-h-8 rounded-control border border-dashed border-line-strong px-2.5 text-[11px] font-bold">+ Name</button>
-        )}
-      </div>
-      {who ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Input value={amount} onChange={(e) => { setAmount(e.target.value); commitRaw(e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setAmount(e.currentTarget.value); commitRaw(e.currentTarget.value); } }} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Commission amount" className="w-24 text-right min-h-9 text-xs" data-commission-amount />
-          <span className="inline-flex rounded-control border border-line-strong overflow-hidden">
-            <button type="button" disabled={disabled} onClick={() => commit({ kind: "aed" })} aria-pressed={kind === "aed"} className={`min-h-9 px-3 text-[11px] font-bold ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
-            <button type="button" disabled={disabled} onClick={() => commit({ kind: "percent" })} aria-pressed={kind === "percent"} className={`min-h-9 px-3 text-[11px] font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>% of total before VAT</button>
-          </span>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -62,7 +62,7 @@ type Body = {
   /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
   removeLine?: { id: string; keepParts?: boolean; withParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; /** Commission: who, fixed or a percentage of the total before VAT. Internal only. */ materials_cost_aed?: number | string | null; commission_to?: string | null; commission_kind?: string | null; commission_value?: number | string | null };
+  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -480,19 +480,8 @@ export async function POST(request: NextRequest) {
     }
     // What the discount comes off: our labour only (default), or labour and our own services as well.
     if (h.discount_scope !== undefined) patch.discount_scope = h.discount_scope === "labour_services" ? "labour_services" : "labour";
-    // Commission (internal only): who, and a fixed amount or a percentage of the total before VAT. New names join the Settings list.
+    // Commission goes through saveCommission in quotes/actions.ts (the owner's approval), never through this route.
     if (h.materials_cost_aed !== undefined) patch.materials_cost_aed = Math.max(0, n(h.materials_cost_aed) ?? 0);
-    if (h.commission_to !== undefined || h.commission_kind !== undefined || h.commission_value !== undefined) {
-      const { data: curQ } = await admin.from("quotations").select("commission_to, commission_kind, commission_value").eq("id", q.id).maybeSingle();
-      const to = h.commission_to === undefined ? ((curQ?.commission_to as string | null) ?? null) : h.commission_to ? String(h.commission_to).trim().slice(0, 80) : null;
-      const kind = h.commission_kind === "percent" ? "percent" : h.commission_kind === "aed" ? "aed" : h.commission_kind === undefined ? ((curQ?.commission_kind as string | null) ?? "aed") : "aed";
-      const v = h.commission_value === undefined ? Number(curQ?.commission_value) || 0 : n(h.commission_value) ?? 0;
-      Object.assign(patch, { commission_to: to, commission_kind: to && v > 0 ? kind : null, commission_value: to && v > 0 ? (kind === "percent" ? Math.min(100, v) : v) : null });
-      if (to) {
-        const current = ((settings.commission_people ?? []) as string[]).map(String);
-        if (!current.includes(to)) await admin.from("settings").upsert({ key: "commission_people", value: [...current, to], label: "Commission: people", description: "People we pay commission to, offered as one-tap choices in the internal box of a quotation." }, { onConflict: "key" });
-      }
-    }
     if (h.customer_note !== undefined) patch.customer_note = h.customer_note ? String(h.customer_note).trim().slice(0, 2000) : null;
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;

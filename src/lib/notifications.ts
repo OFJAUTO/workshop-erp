@@ -85,6 +85,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "payment_received", label: "Payment received", locked: true },
   { type: "cheque_bounced", label: "A cheque bounced", locked: true },
   { type: "credit_note_approval", label: "A credit note needs the owner's approval", locked: true },
+  { type: "commission_approval", label: "A commission needs the owner's approval", locked: true },
   { type: "release_approval", label: "A car with a balance due needs release approval", locked: true },
   { type: "delivery", label: "A delivery was booked, left or delivered", locked: true },
   { type: "gate_out_followup", label: "Follow-up call due after gate-out", locked: true },
