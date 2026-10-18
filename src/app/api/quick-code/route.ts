@@ -26,6 +26,6 @@ export async function POST(request: NextRequest) {
   // The acting owner signs the phone in as the owner; the real person's id is what the code carries.
   const { error } = await admin.from("quick_codes").insert({ code, job_id: jobId, target, created_by: staff.actingAs?.realId ?? staff.id, expires_at: expiresAt });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const url = `${await getSiteUrl()}/q/${code}`;
+  const url = `${await getSiteUrl()}/k/${code}`;
   return NextResponse.json({ url, qr: await qrDataUrl(url, 300), expiresAt });
 }

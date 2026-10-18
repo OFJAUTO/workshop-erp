@@ -558,12 +558,12 @@ if (want("J")) {
   await until(async () => ((await page.locator("[role='dialog'] textarea").count()) ? 1 : null), 30, 400);
   const msg = (await page.locator("[role='dialog'] textarea").inputValue().catch(() => "")) ?? "";
   check("J: the message greets the saved person, not the company", /^Dear E2e Ahmed,/im.test(msg), msg.slice(0, 60));
-  check("J: the message carries the short link, never the long address", /erp\.ofjauto\.com\/m\/[A-Za-z0-9]{4,}/.test(msg) && !msg.includes("/quote/"), msg.slice(-80));
+  check("J: the message carries the short /q link, never the long address", /erp\.ofjauto\.com\/q\/[A-Za-z0-9]{4,}/.test(msg) && !msg.includes("/quote/"), msg.slice(-80));
   check("J: the message is the tidy template (bold car, signed OFJ)", /\*.+\*/.test(msg) && /OFJ Automotive\s*$/.test(msg), msg.slice(0, 120));
   const quoteUrl = `https://erp.ofjauto.com/quote/${token}`;
   const qCode = (await sql("select code from public.short_links where url = $1", [quoteUrl]))[0]?.code;
-  const r1 = qCode ? await fetch(`${base}/m/${qCode}`, { redirect: "manual" }) : null;
-  check("J: /m/<code> redirects to the full quotation link", !!r1 && [301, 302, 307, 308].includes(r1.status) && (r1.headers.get("location") ?? "") === quoteUrl, `${r1?.status} ${r1?.headers.get("location")}`);
+  const r1 = qCode ? await fetch(`${base}/q/${qCode}`, { redirect: "manual" }) : null;
+  check("J: /q/<code> redirects to the full quotation link", !!r1 && [301, 302, 307, 308].includes(r1.status) && (r1.headers.get("location") ?? "") === quoteUrl, `${r1?.status} ${r1?.headers.get("location")}`);
   await browser.close();
   // The delivery: the driver's message in the agreed format, both links short, the copy buttons, the "on its way" window.
   const driveTok = `e2e-drive-${Date.now()}`;
@@ -577,7 +577,7 @@ if (want("J")) {
   check("J: the driver message leads *DELIVERY · <day> · MORNING*", /\*DELIVERY · [A-Z]{3} \d{1,2} [A-Z]{3} · MORNING\*/.test(html), (html.match(/\*DELIVERY[^\\"]{0,40}/) ?? [""])[0]);
   check("J: the customer line cleans the company name (LLC)", /E2e Luxe Rental LLC/i.test(html));
   check("J: the mobile is spaced +971 50 000 0003", /\+971 50 000 0003/.test(html));
-  check("J: the pin and the driver button are short links (/m/ and /d/)", /erp\.ofjauto\.com\/m\/[A-Za-z0-9]{4,}/.test(html) && /erp\.ofjauto\.com\/d\/[A-Za-z0-9]{4,}/.test(html));
+  check("J: the pin stays a plain Google Maps link; the driver button is a short /d link", /maps\.app\.goo\.gl\/e2eTest123/.test(html) && /erp\.ofjauto\.com\/d\/[A-Za-z0-9]{4,}/.test(html));
   const dCode = (await sql("select code from public.short_links where kind = 'drive' and url like $1", [`%/drive/${driveTok}`]))[0]?.code;
   const r2 = dCode ? await fetch(`${base}/d/${dCode}`, { redirect: "manual" }) : null;
   check("J: /d/<code> opens the driver's one-button page", !!r2 && [301, 302, 307, 308].includes(r2.status) && (r2.headers.get("location") ?? "").endsWith(`/drive/${driveTok}`), `${r2?.status} ${r2?.headers.get("location")}`);

@@ -124,8 +124,8 @@ export async function tripCar(trip: TripRow): Promise<{ plate: string; car: stri
 export async function driverMessageFor(trip: TripRow): Promise<string> {
   const car = await tripCar(trip);
   const drive = await shortFor(`${PRODUCTION_SITE_URL}/drive/${trip.token}`, "drive");
-  const map = trip.location_url ? await shortFor(trip.location_url, "map") : null;
-  return driverMessage({ plate: car.plate, car: car.car, kind: trip.kind, date: trip.scheduled_date, slot: trip.scheduled_slot, customerName: car.customerName, customerPhone: car.customerPhone, locationUrl: trip.location_url, locationDetails: trip.location_details }, { drive, map });
+  // The map pin stays a plain Google Maps link: the driver's app shows the map preview that way.
+  return driverMessage({ plate: car.plate, car: car.car, kind: trip.kind, date: trip.scheduled_date, slot: trip.scheduled_slot, customerName: car.customerName, customerPhone: car.customerPhone, locationUrl: trip.location_url, locationDetails: trip.location_details }, { drive, map: trip.location_url });
 }
 
 /**

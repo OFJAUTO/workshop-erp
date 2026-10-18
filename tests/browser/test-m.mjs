@@ -54,7 +54,7 @@ await section("1 send the proforma", async () => {
   await page.locator("[data-pay-continue]").click();
   await page.locator("textarea").first().waitFor({ timeout: 15000 });
   const msg = await page.locator("textarea").first().inputValue();
-  check("1: the message carries the proforma link, short", /erp\.ofjauto\.com\/m\/[A-Za-z0-9]{4,}/.test(msg) && ((await sql("select url from public.short_links where url like $1", [`%/proforma/${token}`]))[0]?.url ?? "").endsWith(`/proforma/${token}`), msg.slice(0, 80));
+  check("1: the message carries the proforma link, short", /erp\.ofjauto\.com\/i\/[A-Za-z0-9]{4,}/.test(msg) && ((await sql("select url from public.short_links where url like $1", [`%/proforma/${token}`]))[0]?.url ?? "").endsWith(`/proforma/${token}`), msg.slice(0, 80));
   check("1: Share PDF sits in the window", (await page.locator("[data-share-pdf]").count()) === 1);
   await page.getByRole("button", { name: /Copy message and link/ }).click();
   const sent = await until(async () => (await sql("select sent_at, expected_payment_method from public.invoices where id = $1", [proformaId]))[0]?.sent_at ? (await sql("select sent_at, expected_payment_method from public.invoices where id = $1", [proformaId]))[0] : null, 40, 500);

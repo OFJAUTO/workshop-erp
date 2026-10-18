@@ -4,9 +4,9 @@ import { PRODUCTION_SITE_URL } from "./site";
 import { createAdminClient } from "./supabase/admin";
 
 /**
- * Short links for everything we send on WhatsApp: erp.ofjauto.com/m/k3X9 instead of a long address. /m/<code>
- * redirects to the stored address (a Google Maps pin, a quotation, an invoice); /d/<code> is the driver's one-button
- * page. A link is made once per address and reused; WhatsApp makes the bare domain clickable.
+ * Short links for everything we send on WhatsApp: erp.ofjauto.com/q/k3X9 instead of a long address. The prefix
+ * says what it opens: /q a quotation, /i an invoice or proforma, /r a receipt, /d the driver's one-button page,
+ * /m everything else. Every prefix resolves any code; a link is made once per address and reused.
  *
  * Reads pass an abort signal so Next never serves a page's second lookup from its per-request fetch memo (a GET
  * repeated after the insert would otherwise come back empty from the cache); the insert returns its own row.
@@ -23,9 +23,18 @@ function newCode(len: number): string {
 }
 
 /** The short address for a URL, e.g. "erp.ofjauto.com/m/k3X9" (made once, reused). kind "drive" serves under /d. */
+function prefixFor(url: string, kind: "map" | "page" | "drive"): string {
+  if (kind === "drive") return "d";
+  if (kind === "map") return "m";
+  if (url.includes("/quote/")) return "q";
+  if (url.includes("/invoice/") || url.includes("/proforma/")) return "i";
+  if (url.includes("/api/pdf/receipt/")) return "r";
+  return "m";
+}
+
 export async function shortFor(url: string, kind: "map" | "page" | "drive" = "page"): Promise<string> {
   const admin = createAdminClient();
-  const prefix = kind === "drive" ? "d" : "m";
+  const prefix = prefixFor(url, kind);
   const { data: existing } = await admin.from("short_links").select("code").eq("url", url).limit(1).abortSignal(new AbortController().signal).maybeSingle();
   if (existing?.code) return `${SHORT_HOST}/${prefix}/${existing.code}`;
   for (let len = 4; len <= 8; len++) {

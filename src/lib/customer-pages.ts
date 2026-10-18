@@ -11,14 +11,15 @@ import { PRODUCTION_SITE_URL } from "./site";
  * type spelled out, plus the older image_src link that some versions still read.
  */
 export function customerPageMetadata(title: string, description: string, path?: string): Metadata {
-  const url = `${PRODUCTION_SITE_URL}/preview.jpg`;
-  const image = { url, secureUrl: url, width: 1200, height: 630, type: "image/jpeg", alt: "OFJ Automotive" };
+  // A small square image (under 300 px, 7 KB): WhatsApp shows the compact preview, never the huge card.
+  const url = `${PRODUCTION_SITE_URL}/preview-square.jpg`;
+  const image = { url, secureUrl: url, width: 296, height: 296, type: "image/jpeg", alt: "OFJ Automotive" };
   return {
     title,
     description,
     metadataBase: new URL(PRODUCTION_SITE_URL),
     openGraph: { title, description, siteName: "OFJ Automotive", images: [image], type: "website", locale: "en_AE", ...(path ? { url: `${PRODUCTION_SITE_URL}${path}` } : {}) },
-    twitter: { card: "summary_large_image", title, description, images: [url] },
+    twitter: { card: "summary", title, description, images: [url] },
     robots: { index: false, follow: false },
     other: { image_src: url },
     icons: { other: [{ rel: "image_src", url }] },
