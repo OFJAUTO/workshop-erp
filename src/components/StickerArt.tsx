@@ -7,6 +7,7 @@
  * Battery warranty sticker and oil service sticker (50 × 100 mm portrait by default): logo, title, the facts, a black
  * band with the date that matters, the VIN, a QR. The oil sticker's QR opens WhatsApp to book the next service.
  */
+import { FitText } from "./FitText";
 export type PartStickerData = { qr: string; jobNumber: string; name: string; index: number; count: number; date?: string | null };
 export type BatteryStickerData = { qr: string; installed: string; until: string; months: number; vin: string; title: string; valid: string; /** Which battery: "Main battery · Varta AGM 95Ah" or "Auxiliary battery". */ line: string };
 
@@ -30,15 +31,15 @@ export function PartSticker({ w, h, logoUrl, d }: { w: number; h: number; logoUr
         <div style={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={logoUrl} alt="" style={{ height: `${6 * u}mm`, maxWidth: "100%", objectFit: "contain" }} />
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: `${4.2 * u}mm`, fontWeight: 800, letterSpacing: "0.3px", lineHeight: 1 }}>{d.jobNumber}</div>
+          <div style={{ textAlign: "right", width: "100%", minWidth: 0 }}>
+            <FitText text={d.jobNumber} maxMm={4.2 * u} minOneLineMm={2.2 * u} minMm={2.2 * u} allowWrap={false} lineHeight={1} style={{ fontWeight: 800, letterSpacing: "0.3px", textAlign: "right" }} />
             {d.date ? <div style={{ fontSize: `${2.2 * u}mm`, marginTop: `${0.6 * u}mm` }}>{d.date}</div> : null}
           </div>
         </div>
       </div>
       <div style={{ width: "100%", flex: "none", background: "#000", color: "#fff", padding: `${1 * u}mm ${1.5 * u}mm`, fontSize: `${2.7 * u}mm`, fontWeight: 800, textTransform: "uppercase", display: "flex", justifyContent: "space-between", gap: `${2 * u}mm`, lineHeight: 1.15, letterSpacing: "0.2px" }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
-        <span style={{ whiteSpace: "nowrap", flex: "none" }}>{d.index} OF {d.count}</span>
+        <span style={{ flex: 1, minWidth: 0, alignSelf: "center" }}><FitText text={d.name} maxMm={2.7 * u} minOneLineMm={2.2 * u} minMm={1.9 * u} lineHeight={1.12} style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.2px" }} /></span>
+        <span style={{ whiteSpace: "nowrap", flex: "none", alignSelf: "center", fontSize: `${1.9 * u}mm` }}>{d.index} OF {d.count}</span>
       </div>
     </div>
   );

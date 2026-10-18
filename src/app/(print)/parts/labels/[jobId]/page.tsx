@@ -58,7 +58,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
       <style>{stickerPageCss(ss.partW, ss.partH)}</style>
       <div className="bar">
         <span>{labels.length} sticker{labels.length === 1 ? "" : "s"} · {ss.partW} × {ss.partH} mm · {test === "1" ? "test print" : jobNumber}</span>
-        <PrintNow auto={auto === "1" && labels.length > 0} label={`Print on ${ss.printerPart}`} />
+        <PrintNow auto={auto === "1" && labels.length > 0} label={`Print all (${labels.length}) · ${ss.printerPart}`} />
         <a href={backHref} style={{ marginLeft: "auto" }}>Back</a>
       </div>
       {labels.length === 0 ? <p style={{ background: "#fff", padding: 12, fontFamily: "Arial, sans-serif" }}>No received parts to print yet. Stickers appear once a delivery is recorded.</p> : null}

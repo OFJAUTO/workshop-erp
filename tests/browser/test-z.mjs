@@ -232,5 +232,31 @@ if (want("S3")) {
   await pb.close();
 }
 
+/* ================= S4: the part sticker text always fits ================= */
+if (want("S4")) {
+  console.log("\n== S4 part stickers");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const longName = "Front stabiliser link left hand side with bushes";
+  const p1 = (await sql("select id from public.part_items where job_id = $1 and is_active order by created_at limit 1", [jobId]))[0]?.id;
+  await sql("update public.part_items set description = $2, order_status = 'received', received_qty = 1, confirmed_quantity = 1, quantity = 1 where id = $1", [p1, longName]);
+  await sql(`insert into public.part_items (id, job_id, part_request_id, description, quantity, confirmed_quantity, availability, order_status, received_qty, created_by, updated_by)
+             select '22222222-0000-4000-8000-00000000e4aa', job_id, part_request_id, 'Rear stabiliser link right hand side with bushes', 1, 1, availability, 'received', 1, created_by, updated_by from public.part_items where id = $1`, [p1]);
+  const { browser, page } = await browserFor("parts", { viewport: { width: 1100, height: 950 } });
+  await go(page, `${base}/parts/labels/${jobId}`);
+  await until(async () => ((await page.locator("[data-part-sticker]").count()) >= 2 ? 1 : null), 20, 400);
+  await sleep(600); // FitText settles
+  const names = page.locator("[data-part-sticker] [data-fit-text]").filter({ hasText: /stabiliser/i });
+  check("S4: both stickers carry the FULL name, never '…'", (await names.count()) === 2 && !/…/.test((await names.first().textContent()) ?? "") && new RegExp(longName.slice(0, 30), "i").test((await names.first().textContent()) ?? ""), ((await names.first().textContent()) ?? "").slice(0, 60));
+  const fits = await names.evaluateAll((els) => els.map((el) => ({ over: getComputedStyle(el).whiteSpace === "nowrap" && el.scrollWidth > el.clientWidth + 1, wrapped: getComputedStyle(el).whiteSpace === "normal", size: parseFloat(getComputedStyle(el).fontSize), lines: el.querySelector("span")?.getClientRects().length ?? 1 })));
+  check("S4: the long name is shrunk (and wrapped to 2 lines at most), nothing cut off", fits.every((x) => !x.over && (!x.wrapped || x.lines <= 2)), JSON.stringify(fits));
+  check("S4: the two different parts read differently on their stickers", /front stabiliser/i.test((await names.first().textContent()) ?? "") && /rear stabiliser/i.test((await names.nth(1).textContent()) ?? ""));
+  const jobFits = await page.locator("[data-part-sticker] [data-fit-text]").evaluateAll((els) => els.filter((el) => /^J-\d+$/.test((el.textContent ?? "").trim())).map((el) => ({ over: el.scrollWidth > el.clientWidth + 1, oneLine: getComputedStyle(el).whiteSpace === "nowrap" })));
+  check("S4: the job number sits on ONE line, shrunk to fit", jobFits.length >= 2 && jobFits.every((x) => x.oneLine && !x.over), JSON.stringify(jobFits));
+  check("S4: 'Print all (N)' sits at the top and 'Print this one' stays per sticker", /Print all \(2\)/.test((await page.locator(".bar").textContent()) ?? "") && (await page.getByRole("button", { name: "Print this one" }).count()) === 2);
+  await shot(page, "s4-stickers");
+  await browser.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

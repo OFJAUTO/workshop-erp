@@ -88,12 +88,12 @@ await section("2 part sticker", async () => {
   const job = (await sql("select job_number from public.jobs where id = $1", [jobId]))[0]?.job_number;
   check("2: it carries the job number, the part name and '1 OF 2'", text.includes(job) && /front brake pads/i.test(text) && /1 OF 2/.test(text), text.slice(0, 120));
   check("2: the second says '2 OF 2'", /2 OF 2/.test((await stickers.nth(1).textContent()) ?? ""));
-  check("2: the name strip prints in capitals", (await first.locator("span").first().evaluate((el) => getComputedStyle(el.parentElement).textTransform)) === "uppercase");
+  check("2: the name strip prints in capitals", (await first.locator("[data-fit-text]").last().evaluate((el) => getComputedStyle(el).textTransform)) === "uppercase");
   const qrW = parseFloat(await first.locator("img").first().evaluate((el) => el.style.width));
   check("2: the QR on the left is about 20 mm", qrW >= 18 && qrW <= 21, String(qrW));
   const code = (await sql("select code from public.qr_links where kind = 'part' and ref_id = $1", [partId]))[0]?.code;
   check("2: the QR is a short link of this part", !!code);
-  check("2: the print bar names the printer", /Print on Printer 1/.test((await labels.locator(".bar").textContent()) ?? ""));
+  check("2: the print bar has Print all (N) and names the printer", /Print all \(2\)/.test((await labels.locator(".bar").textContent()) ?? "") && /Printer 1/.test((await labels.locator(".bar").textContent()) ?? ""));
   await labels.close();
   // A customer scanning the sticker sees only that it is genuine and when it was fitted.
   await sql("update public.part_items set fitted_at = '2026-10-16T08:00:00Z' where id = $1", [partId]);
