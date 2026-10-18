@@ -343,6 +343,34 @@ export async function GET(request: NextRequest) {
     report.depositOverdue = told;
   }
 
+  // 21. Parts marked ready at the desk, still not received two hours later: one reminder to the car's technicians
+  // and the workshop manager, then quiet.
+  {
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600000).toISOString();
+    const { data: readyRows } = await admin.from("part_items").select("id, job_id, description").eq("is_active", true).neq("issue_status", "confirmed").is("ready_reminder_at", null).not("ready_for_handover_at", "is", null).lt("ready_for_handover_at", twoHoursAgo);
+    const byJob = new Map<string, { ids: string[]; names: string[] }>();
+    for (const r of readyRows ?? []) {
+      const g = byJob.get(r.job_id as string) ?? { ids: [], names: [] };
+      g.ids.push(r.id as string);
+      g.names.push(r.description as string);
+      byJob.set(r.job_id as string, g);
+    }
+    for (const [jobId, g] of byJob) {
+      const { data: job } = await admin.from("jobs").select("id, job_number, is_open, department, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle();
+      if (!job?.is_open) continue;
+      const v = job.vehicle as unknown as (Parameters<typeof formatPlate>[0] & { make: { name: string } | null; model: { name: string } | null }) | null;
+      const plate = v ? formatPlate(v) : (job.job_number as string);
+      const car = v ? [v.make?.name, v.model?.name].filter(Boolean).join(" ") : "";
+      const { data: techRows } = await admin.from("job_technicians").select("staff_id").eq("job_id", jobId).eq("is_active", true).is("done_at", null);
+      const title = `Still at the parts desk: ${g.ids.length} part${g.ids.length === 1 ? "" : "s"} for ${plate}${car ? ` (${car})` : ""}`;
+      const body = g.names.join(", ");
+      const techIds = (techRows ?? []).map((t) => t.staff_id as string);
+      if (techIds.length) await notifyStaff(techIds, { type: "handover", title, body: `${body}. Tick them on your tablet and enter your PIN when you pick them up.`, jobId, href: `/my-jobs/${jobId}` });
+      await notifyManagers((job.department as string | null) ?? null, { type: "handover", title, body, jobId, href: `/jobs/${jobId}/work` });
+      await admin.from("part_items").update({ ready_reminder_at: new Date().toISOString() }).in("id", g.ids);
+    }
+  }
+
   // 20. A car still "On the way" three hours after loading (or leaving): the advisor is reminded once; he can press
   // "Mark delivered" and the driver's price follows on the Recovery page.
   {

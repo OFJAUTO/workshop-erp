@@ -7,7 +7,7 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { PriorityBadge } from "@/components/JobBadges";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { INSPECTION_STATUS_LABELS, ITEM_STATUS_LABELS, formatMinutes, type ChecklistSection, type ItemStatus, inspectionLimitsOf, toItemState } from "@/lib/inspection";
 import { hasLabourChargesLine, tasksFromInspection,inspectionLocked, inspectionWorkingMinutes, loadInspection, inspectionDangerous, tyreSizeSuggestionFor } from "@/lib/inspection-data";
 import { wheelConditionLines } from "@/lib/wheels";
@@ -30,9 +30,7 @@ import { breakOf } from "@/lib/breaks";
 import { getCurrentDevice } from "@/lib/devices";
 import { ScanStepCard } from "./ScanStepCard";
 import { PartsForCar } from "./PartsForCar";
-import { exchangePartAction } from "../../parts/handover-actions";
-import { pendingHandoversFor } from "@/lib/handover";
-import { confirmHandoverOnDevice } from "../../parts/handover-actions";
+import { exchangePartAction, receiveMyParts } from "../../parts/handover-actions";
 import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/work-data";
 import { activeTechnicians } from "@/lib/work-flow";
 import { reasonsFor } from "@/lib/reasons";
@@ -97,23 +95,26 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
   // The work order, once the car is in Work (or back from a failed QC).
   const work = inWork || job.status === "pending_qc" ? await loadWork(id) : null;
-  const [qc, parts, { data: sendBackEvent }, { data: managers }] = work
+  // The parts list loads whatever the stage: receiving on the tablet starts before the car is released to Work.
+  const parts = await jobPartsState(id);
+  const [qc, { data: sendBackEvent }, { data: managers }] = work
     ? await Promise.all([
         latestQc(id),
-        jobPartsState(id),
         createAdminClient().from("job_events").select("note, created_at").eq("job_id", id).eq("event_type", "work_sendback").order("created_at", { ascending: false }).limit(1).maybeSingle(),
         createAdminClient().from("staff").select("display_name, department_id").eq("role_id", "workshop_manager").eq("is_active", true).order("display_name"),
       ])
-    : [null, null, { data: null }, { data: [] as { display_name: string; department_id: string | null }[] }];
+    : [null, { data: null }, { data: [] as { display_name: string; department_id: string | null }[] }];
   const qcFailed = qc && qc.status === "failed" && inWork ? { round: qc.round, items: qc.items.filter((i) => i.result === "fail").map((i) => ({ label: i.label, remark: i.remark })) } : null;
   const panelLines: PanelLine[] = work ? work.lines.map((l) => ({ id: l.id, title: l.title, details: l.details, hours_quoted: l.hours_quoted, status: l.status })) : [];
   // One "Labour charges" line: the inspection's findings are the tasks.
   const inspectionTasks = work && bundle && hasLabourChargesLine(work.lines) ? tasksFromInspection(bundle.items) : [];
-  const panelParts: PanelPart[] = parts ? parts.needed.map((p) => ({ id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, state: p.issue_status === "confirmed" ? "handed" : p.order_status === "received" ? "here" : "coming", when: p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : null })) : [];
+  const confirmerIds = Array.from(new Set((parts?.needed ?? []).map((p) => p.issue_confirmed_by).filter((x): x is string => !!x)));
+  const { data: confirmers } = confirmerIds.length ? await createAdminClient().from("staff").select("id, display_name").in("id", confirmerIds) : { data: [] as { id: string; display_name: string }[] };
+  const confirmerOf = new Map((confirmers ?? []).map((c) => [c.id, c.display_name]));
+  const panelParts: PanelPart[] = parts ? parts.needed.map((p) => ({ id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, state: p.issue_status === "confirmed" ? "handed" : p.ready_for_handover_at ? "ready" : p.order_status === "received" || (p.availability === "in_stock" && p.received_qty > 0) ? "here" : "coming", when: p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : null, receivedBy: p.issue_confirmed_by ? confirmerOf.get(p.issue_confirmed_by) ?? null : null, receivedAt: p.issue_confirmed_at ? formatDayTime(p.issue_confirmed_at) : null })) : [];
   const running: RunningSession[] = work ? work.sessions.filter((s) => !s.ended_at).map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: s.technician_id === staff.id, throughBreak: !!s.through_break })) : [];
   const breakWindow = breakOf(settings, staff);
   const device = await getCurrentDevice();
-  const pendingHandovers = (await pendingHandoversFor(staff.id, id)).map((h) => ({ id: h.id, giverName: h.giverName, plate: h.plate, items: h.items, jobId: h.job_id }));
   const minutesUsed = work ? work.sessions.filter((s) => s.ended_at).reduce((a, s) => a + sessionMinutes(s), 0) : 0;
   const mineThroughBreak = !!work?.sessions.some((s) => !s.ended_at && s.technician_id === staff.id && s.through_break);
   // The technician's own open pause on this car: the main button shows "Paused · reason" with Resume.
@@ -239,7 +240,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         </Card>
       ) : null}
 
-      {!(work && inWork) && pendingHandovers.length ? <PartsForCar jobId={id} handovers={pendingHandovers} confirm={confirmHandoverOnDevice} parts={panelParts} canAct={canWork} exchangeAction={exchangePartAction.bind(null, id)} /> : null}
+      {!(work && inWork) && panelParts.length ? <PartsForCar jobId={id} parts={panelParts} canAct={!!canWork} receive={receiveMyParts.bind(null, id)} exchangeAction={exchangePartAction.bind(null, id)} /> : null}
       {work && inWork ? (
         <>
           <WorkClock
@@ -263,7 +264,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             pauseAction={pauseWorkAction.bind(null, id)}
             leaveAction={leaveJobAction.bind(null, id)}
           />
-          <PartsForCar jobId={id} handovers={pendingHandovers} confirm={confirmHandoverOnDevice} parts={panelParts} canAct={canWork} exchangeAction={exchangePartAction.bind(null, id)} />
+          <PartsForCar jobId={id} parts={panelParts} canAct={!!canWork} receive={receiveMyParts.bind(null, id)} exchangeAction={exchangePartAction.bind(null, id)} />
           {roadTestCard}
           {requestsCard}
           {looseItems.length ? (

@@ -131,7 +131,7 @@ export async function finishMyPart(jobId: string, actor: Actor): Promise<Result>
   // Every part approved for this car must be in a technician's hands (or settled by Parts) before the job can be finished.
   const { data: partRows } = await admin.from("part_items").select("description, order_status, issue_status, return_status, not_needed_at, disposition, exchange_status").eq("job_id", jobId).eq("is_active", true).neq("order_status", "none");
   const waiting = ((partRows ?? []) as { description: string; order_status: string; issue_status: string; return_status: string; not_needed_at: string | null; disposition: string | null; exchange_status: string | null }[]).filter(stillToReceive);
-  if (waiting.length) return { error: `${waiting.length} part${waiting.length === 1 ? " has" : "s have"} not been received by the technician: ${waiting.map((p) => p.description).join(", ")}. Confirm the handover from Parts first, or ask Parts to mark ${waiting.length === 1 ? "it" : "them"} Not needed.` };
+  if (waiting.length) return { error: `${waiting.length} part${waiting.length === 1 ? " has" : "s have"} not been received by the technician: ${waiting.map((p) => p.description).join(", ")}. Receive ${waiting.length === 1 ? "it" : "them"} under "Parts for this car" on your tablet, or ask Parts to mark ${waiting.length === 1 ? "it" : "them"} Not needed.` };
   await closeOpenSessions(actor.id, actor.id, "complete", null, jobId);
   await closeOpenPause(jobId, actor.id, actor.id);
   const now = new Date().toISOString();

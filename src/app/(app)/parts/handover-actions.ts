@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { getCurrentDevice } from "@/lib/devices";
 import { blankToNull } from "@/lib/format";
-import { approveGoodwill, cancelHandover, confirmHandover, exchangePart, partNotNeeded, requestHandover, setDisposition } from "@/lib/handover";
+import { approveGoodwill, exchangePart, markPartsReady, partNotNeeded, receivePartsByTechnician, setDisposition } from "@/lib/handover";
 import { PARTS_BUCKET } from "@/lib/quote-data";
 import { PART_FULL_SELECT, toPartFull } from "@/lib/parts-data";
 import { verifyPin } from "@/lib/pin";
@@ -27,71 +27,26 @@ const fail = (jobId: string, msg: string): never => redirect(`/parts/handover/${
 const actorOf = (s: { id: string; display_name: string; role_id: string }) => ({ id: s.id, display_name: s.display_name, role_id: s.role_id });
 
 /**
- * "Hand over": Parts tick what they are giving now. The technician gets it on his own device and
- * confirms with his PIN there; or he signs at the counter; or a manager signs for him. Stickers
- * are printed on the way when any are asked for.
+ * Parts mark the ticked parts "Ready for handover": the car's technicians and the workshop manager are told.
+ * Receiving happens only on the technician's own tablet, never at the desk.
  */
-export async function handoverParts(jobId: string, formData: FormData) {
+export async function markPartsReadyAction(jobId: string, formData: FormData) {
   const staff = await requirePermission("managePurchaseOrders");
-  const settings = await getSettings();
   const ids = formData.getAll("part").map(String).filter(Boolean);
-  const stickers: Record<string, number> = {};
-  const battery: Record<string, { brand?: string | null; model?: string | null; serial?: string | null }> = {};
-  for (const id of ids) {
-    stickers[id] = Math.max(0, Math.round(Number(formData.get(`stickers__${id}`) ?? 0) || 0));
-    const brand = blankToNull(formData.get(`battery_brand__${id}`));
-    const model = blankToNull(formData.get(`battery_model__${id}`));
-    const serial = blankToNull(formData.get(`battery_serial__${id}`));
-    if (brand || model || serial) battery[id] = { brand, model, serial };
-  }
-  const r = await requestHandover(jobId, actorOf(staff), { technicianId: String(formData.get("technician") ?? ""), partIds: ids, stickers, note: blankToNull(formData.get("note")), battery }, settings);
-  if (r.error || !r.handoverId) fail(jobId, r.error ?? "Could not start the handover.");
-  refresh(jobId);
-  if (formData.get("sign_for") === "on") {
-    const role = staff.role_id as RoleId;
-    if (!(role === "owner" || can(role, "manageWork"))) fail(jobId, "Only the workshop manager or the owner can sign for a technician.");
-    if (!r.stickerCount) {
-      const c = await confirmHandover(r.handoverId!, { actor: actorOf(staff), signedFor: true, pin: String(formData.get("signer_pin") ?? ""), deviceId: (await getCurrentDevice())?.id ?? null }, settings);
-      refresh(jobId);
-      redirect(`/parts/handover/${jobId}?${c.error ? "error" : "message"}=${encodeURIComponent(c.error ?? c.message ?? "Done.")}`);
-    }
-  }
-  if (r.stickerCount) redirect(`/parts/handover/${jobId}?message=${encodeURIComponent(`Handover started. Print the ${r.stickerCount} sticker${r.stickerCount === 1 ? "" : "s"} from the box below (opens in a new tab); then the technician confirms.`)}`);
-  redirect(`/parts/handover/${jobId}?message=${encodeURIComponent(r.message ?? "Waiting for the technician's PIN.")}`);
-}
-
-/** "Sign here" at the counter: the technician types his PIN on the Parts screen. Nothing else opens. */
-export async function signHandoverAtCounter(handoverId: string, formData: FormData) {
-  const staff = await requireStaff();
-  const role = staff.role_id as RoleId;
-  if (!(can(role, "managePurchaseOrders") || can(role, "manageWork"))) redirect("/parts");
-  const settings = await getSettings();
-  const jobId = String(formData.get("job_id") ?? "");
-  const signFor = formData.get("sign_for") === "on";
-  const receivedIds = formData.get("has_ticks") === "1" ? formData.getAll("received").map(String).filter(Boolean) : null;
-  const r = await confirmHandover(handoverId, { actor: actorOf(staff), pin: signFor ? String(formData.get("signer_pin") ?? "") : String(formData.get("pin") ?? ""), atCounter: true, signedFor: signFor, receivedIds, deviceId: (await getCurrentDevice())?.id ?? null }, settings);
+  const r = await markPartsReady(jobId, actorOf(staff), ids);
   refresh(jobId);
   redirect(`/parts/handover/${jobId}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
 }
 
-/** The technician confirms on his own device, with his PIN. */
-export async function confirmHandoverOnDevice(handoverId: string, formData: FormData): Promise<{ error?: string; ok?: boolean; message?: string }> {
+/** The technician ticks the parts on his own tablet and confirms with his own PIN. */
+export async function receiveMyParts(jobId: string, formData: FormData): Promise<{ error?: string; ok?: boolean; message?: string }> {
   const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "Viewing only." };
   const settings = await getSettings();
-  const jobId = String(formData.get("job_id") ?? "");
-  const receivedIds = formData.get("has_ticks") === "1" ? formData.getAll("received").map(String).filter(Boolean) : null;
-  const r = await confirmHandover(handoverId, { actor: actorOf(staff), pin: String(formData.get("pin") ?? ""), receivedIds, deviceId: (await getCurrentDevice())?.id ?? null }, settings);
-  if (jobId) refresh(jobId);
+  const ids = formData.getAll("received").map(String).filter(Boolean);
+  const r = await receivePartsByTechnician(jobId, { technicianId: staff.id, partIds: ids, pin: String(formData.get("pin") ?? ""), deviceId: (await getCurrentDevice())?.id ?? null }, actorOf(staff), settings);
+  if (!r.error) refresh(jobId);
   return r;
-}
-
-/** Parts take a waiting handover back. */
-export async function cancelHandoverAction(handoverId: string, formData: FormData) {
-  const staff = await requirePermission("managePurchaseOrders");
-  const jobId = String(formData.get("job_id") ?? "");
-  const r = await cancelHandover(handoverId, actorOf(staff));
-  refresh(jobId);
-  redirect(`/parts/handover/${jobId}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
 }
 
 /** A part comes back from the workshop to the Parts desk: the reverse handover, with the Parts person's PIN when they have one. */

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { PublicShell } from "@/components/Shell";
 import { Card } from "@/components/ui";
 import { DEPARTMENT_OF_SECTION, SECTION_LABELS, SECTIONS, type Section } from "@/lib/bodyshop-kinds";
@@ -50,6 +51,11 @@ export default async function BodyshopTabletPage({ searchParams }: { searchParam
     };
   });
   const tabletPeople: TabletPerson[] = sectionStaff.map((p) => ({ id: p.id, name: p.name, photoUrl: p.photoUrl, clockedOn: openOf.get(p.id) ?? null }));
+  // Parts marked ready at the desk for the section's cars: the technician receives them here with his PIN.
+  const jobIds = cars.map((c) => c.jobId);
+  const { data: readyRows } = jobIds.length ? await createAdminClient().from("part_items").select("id, job_id, description, received_qty, confirmed_quantity, quantity").in("job_id", jobIds).eq("is_active", true).not("ready_for_handover_at", "is", null).neq("issue_status", "confirmed") : { data: [] as { id: string; job_id: string; description: string; received_qty: number | null; confirmed_quantity: number | null; quantity: number | null }[] };
+  const readyList = (readyRows ?? []) as { id: string; job_id: string; description: string; received_qty: number | null; confirmed_quantity: number | null; quantity: number | null }[];
+  for (const car of cars) car.readyParts = readyList.filter((r) => r.job_id === car.jobId).map((r) => ({ id: r.id, description: r.description, quantity: Number(r.received_qty) || Number(r.confirmed_quantity ?? r.quantity) || 1 }));
   return (
     <PublicShell note={`${SECTION_LABELS[section]} tablet`}>
       <div className="flex-1 flex flex-col gap-4 p-4 sm:p-6">

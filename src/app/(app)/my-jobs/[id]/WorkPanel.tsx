@@ -7,7 +7,7 @@ import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea, Input } fr
 import { ReasonChips } from "@/components/ReasonChips";
 
 export type PanelLine = { id: string; title: string; details: string | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
-export type PanelPart = { id: string; description: string; quantity: number; state: "handed" | "here" | "coming"; when: string | null };
+export type PanelPart = { id: string; description: string; quantity: number; state: "handed" | "ready" | "here" | "coming"; when: string | null; receivedBy: string | null; receivedAt: string | null };
 export type PanelFinding = { id: string; remark: string; parts_needed: string | null; status: "pending" | "approved" | "rejected"; decision_note: string | null; label: string; tone: "neutral" | "amber" | "green" | "red" | "ink" };
 export type QcFailed = { round: number; items: { label: string; remark: string | null }[] };
 export type RunningSession = { since: string; name: string; mine: boolean; throughBreak?: boolean };
@@ -176,17 +176,8 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
             </li>
           ))}
         </ol>
-        {parts.length ? (
-          <ul className="border-t border-line pt-2 flex flex-col gap-1">
-            {parts.map((p) => (
-              <li key={p.id} className="flex items-center gap-2 text-sm">
-                <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${p.state === "handed" ? "bg-green text-white" : p.state === "here" ? "bg-ink text-white" : "bg-chip text-muted"}`}>{p.state === "handed" ? "✓" : p.state === "here" ? "•" : "…"}</span>
-                <span className="font-semibold">{p.description}</span>
-                <span className="text-muted">× {p.quantity}</span>
-                <span className="ml-auto text-xs font-semibold text-muted">{p.state === "handed" ? "Handed to you" : p.state === "here" ? "Here, with Parts" : p.when ? `Coming ${p.when}` : "Coming"}</span>
-              </li>
-            ))}
-          </ul>
+        {parts.some((p) => p.state !== "handed") ? (
+          <p className="border-t border-line pt-2 text-xs font-bold text-amber">{parts.filter((p) => p.state !== "handed").length} part{parts.filter((p) => p.state !== "handed").length === 1 ? "" : "s"} not received yet · see &quot;Parts for this car&quot;</p>
         ) : null}
       </Card>
 

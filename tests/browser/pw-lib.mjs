@@ -67,7 +67,8 @@ export async function freeTech(jobId, departmentId = null) {
   const id = t[0]?.id;
   if (!id) return null;
   if (jobId) {
-    await sql("insert into public.job_technicians (job_id, staff_id) values ($1, $2) on conflict (job_id, staff_id) do update set is_active = true, left_at = null", [jobId, id]);
+    await sql("insert into public.job_technicians (job_id, staff_id) select $1, $2 where not exists (select 1 from public.job_technicians where job_id = $1 and staff_id = $2)", [jobId, id]);
+    await sql("update public.job_technicians set is_active = true, left_at = null, done_at = null where job_id = $1 and staff_id = $2", [jobId, id]);
     await sql("update public.jobs set assigned_to = $2 where id = $1", [jobId, id]);
   }
   return id;

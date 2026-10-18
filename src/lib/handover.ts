@@ -8,6 +8,7 @@ import type { Settings } from "./settings";
 import { ensureQrLink, isBatteryPart, stickerSettings, warrantyMonthsFor } from "./stickers";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { activeTechnicians } from "./work-flow";
 
 export type Actor = { id: string; display_name: string; role_id: string };
 export type Result = { error?: string; ok?: boolean; message?: string };
@@ -35,8 +36,8 @@ export type HandoverRow = {
 export const HANDOVER_SELECT = "id, job_id, kind, status, from_staff, to_staff, confirmed_by, confirmed_at, pin_used, signed_for_by, signed_at_counter, device_id, items, stickers, stickers_printed_at, note, created_at";
 
 async function jobBrief(jobId: string) {
-  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, department, is_open, vehicle_id, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, mileage_unit)").eq("id", jobId).maybeSingle();
-  return data as unknown as { id: string; job_number: string; status: string; department: string | null; is_open: boolean; vehicle_id: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; mileage_unit: string } | null } | null;
+  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, department, is_open, vehicle_id, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, mileage_unit, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle();
+  return data as unknown as { id: string; job_number: string; status: string; department: string | null; is_open: boolean; vehicle_id: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; mileage_unit: string; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null } | null;
 }
 
 /**
@@ -152,6 +153,92 @@ export async function confirmHandover(handoverId: string, who: { actor: Actor; p
   await notifyManagers(job.department ?? null, { type: "handover", title: `Parts handed over · ${job.job_number}`, body: `${received.length} part${received.length === 1 ? "" : "s"} to ${tech.display_name} (${how}).${refusedText}`, jobId: h.job_id, href: `/jobs/${h.job_id}/work` });
   if (h.from_staff) await notifyStaff([h.from_staff], { type: refused.length ? "parts_not_received" : "handover", title: refused.length ? `${tech.display_name} did not receive ${refused.length} part${refused.length === 1 ? "" : "s"} · ${job.job_number}` : `${tech.display_name} confirmed · ${job.job_number}`, body: `${received.length} part${received.length === 1 ? "" : "s"} taken (${how}).${refusedText}`, jobId: h.job_id, href: `/parts/handover/${h.job_id}` });
   return { ok: true, message: refused.length ? `${tech.display_name} has ${received.length} part${received.length === 1 ? "" : "s"}. ${refused.length} not received, back with Parts.` : `${tech.display_name} has the parts.` };
+}
+
+/** A part that is physically at the desk and still needs to reach the technician's hands. */
+function isHereForTech(p: { issue_status: string; return_status: string; pending_handover_id?: string | null; received_qty: number; availability: string | null; order_status: string; po_id: string | null }, approvedPo: Set<string>): boolean {
+  if (p.issue_status === "confirmed" || p.return_status !== "none") return false;
+  const ok = p.availability === "in_stock" || (p.po_id && approvedPo.has(p.po_id)) || p.order_status === "received";
+  return !!ok && p.received_qty > 0;
+}
+
+/**
+ * Parts mark the ticked parts "Ready for handover": the car's technicians and the workshop manager are told at
+ * once ("5 parts ready for you: Dubai S 2618 (Tesla Model Y) at the parts desk"). Receiving happens only on the
+ * technician's own tablet, never at the desk.
+ */
+export async function markPartsReady(jobId: string, actor: Actor, partIds: string[]): Promise<Result & { readyCount?: number }> {
+  const admin = createAdminClient();
+  const job = await jobBrief(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  if (!partIds.length) return { error: "Tick at least one part." };
+  const { data: rows } = await admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id").in("id", partIds).eq("job_id", jobId).eq("is_active", true);
+  const parts = ((rows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), pending_handover_id: r.pending_handover_id as string | null }));
+  const { data: pos } = parts.length ? await admin.from("purchase_orders").select("id, status").in("id", parts.map((p) => p.po_id).filter((x): x is string => !!x)) : { data: [] };
+  const approvedPo = new Set((pos ?? []).filter((p) => !["pending_approval", "cancelled"].includes(p.status)).map((p) => p.id));
+  const ready = parts.filter((p) => isHereForTech(p, approvedPo) && !p.ready_for_handover_at);
+  if (!ready.length) return { error: "Those parts are already marked ready, or not here yet." };
+  const now = new Date().toISOString();
+  await admin.from("part_items").update({ ready_for_handover_at: now, ready_for_handover_by: actor.id, ready_reminder_at: null, updated_by: actor.id }).in("id", ready.map((p) => p.id));
+  const plate = job.vehicle ? formatPlate(job.vehicle) : job.job_number;
+  const car = job.vehicle ? [job.vehicle.make?.name, job.vehicle.model?.name].filter(Boolean).join(" ") : "";
+  const techs = await activeTechnicians(jobId);
+  const title = `${ready.length} part${ready.length === 1 ? "" : "s"} ready for you: ${plate}${car ? ` (${car})` : ""} at the parts desk`;
+  const body = ready.map((p) => `${p.description} × ${p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1}`).join(", ");
+  const techIds = techs.filter((t) => !t.done_at).map((t) => t.staff_id);
+  if (techIds.length) await notifyStaff(techIds, { type: "handover", title, body: `${body}. Tick them on your tablet and enter your PIN when you pick them up.`, jobId, href: `/my-jobs/${jobId}` });
+  await notifyManagers(job.department ?? null, { type: "handover", title: `${ready.length} part${ready.length === 1 ? "" : "s"} ready at the desk · ${plate}${car ? ` (${car})` : ""}`, body: techIds.length ? body : `${body}. No technician on the car yet.`, jobId, href: `/jobs/${jobId}/work` });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_ready", note: `${actor.display_name} marked ${ready.length} part${ready.length === 1 ? "" : "s"} ready for handover: ${ready.map((p) => p.description).join(", ")}`, created_by: actor.id });
+  return { ok: true, readyCount: ready.length, message: techIds.length ? "The technician has been told." : "Marked ready. No technician is on the car yet; the workshop manager has been told." };
+}
+
+/**
+ * The technician receives the ticked parts on his own tablet with his own PIN (on a shared section tablet he
+ * picks his name first). This is the only way parts reach a technician: there is no desk-side confirm.
+ */
+export async function receivePartsByTechnician(jobId: string, input: { technicianId: string; partIds: string[]; pin: string; deviceId?: string | null }, actor: Actor, settings: Settings): Promise<Result> {
+  const admin = createAdminClient();
+  const ss = stickerSettings(settings);
+  const job = await jobBrief(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  if (!input.partIds.length) return { error: "Tick at least one part." };
+  const [{ data: tech }, { data: priv }] = await Promise.all([
+    admin.from("staff").select("id, display_name, role_id, is_active").eq("id", input.technicianId).maybeSingle(),
+    admin.from("staff_private").select("pin_hash").eq("staff_id", input.technicianId).maybeSingle(),
+  ]);
+  if (!tech || !tech.is_active) return { error: "Pick your name first." };
+  if (!priv?.pin_hash) return { error: `${tech.display_name} has no PIN yet. The owner sets one on the Team page.` };
+  if (!verifyPin(String(input.pin ?? ""), priv.pin_hash)) return { error: "That is not your PIN. Try again." };
+  const { data: rows } = await admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id, sticker_kind, battery_model, serial_number, warranty_months").in("id", input.partIds).eq("job_id", jobId).eq("is_active", true);
+  const parts = ((rows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), pending_handover_id: r.pending_handover_id as string | null, sticker_kind: r.sticker_kind as string | null, battery_model: r.battery_model as string | null, serial_number: r.serial_number as string | null, warranty_months: (r.warranty_months as number | null) ?? null }));
+  const { data: pos } = parts.length ? await admin.from("purchase_orders").select("id, status").in("id", parts.map((p) => p.po_id).filter((x): x is string => !!x)) : { data: [] };
+  const approvedPo = new Set((pos ?? []).filter((p) => !["pending_approval", "cancelled"].includes(p.status)).map((p) => p.id));
+  const takeable = parts.filter((p) => isHereForTech(p, approvedPo));
+  if (!takeable.length) return { error: "Those parts were already received, or are not at the desk yet." };
+  const now = new Date().toISOString();
+  const items: HandoverItem[] = takeable.map((p) => ({ id: p.id, description: p.description, part_number: p.part_number, quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1 }));
+  const fromStaff = (takeable.find((p) => p.ready_for_handover_by)?.ready_for_handover_by as string | null) ?? null;
+  const { data: handover, error } = await admin.from("part_handovers").insert({ job_id: jobId, kind: "handover", status: "confirmed", from_staff: fromStaff, to_staff: tech.id, confirmed_by: tech.id, confirmed_at: now, pin_used: true, signed_at_counter: false, device_id: input.deviceId ?? null, items, stickers: {}, created_by: actor.id, updated_by: actor.id }).select("id").single();
+  if (error || !handover) return { error: error?.message ?? "Could not record the receipt." };
+  for (const it of items) {
+    await admin.from("part_items").update({ issue_status: "confirmed", issued_qty: it.quantity, tech_received_qty: it.quantity, not_received_at: null, issued_at: now, issued_by: fromStaff, issue_confirmed_at: now, issue_confirmed_by: tech.id, handover_id: handover.id, pending_handover_id: null, updated_by: actor.id }).eq("id", it.id);
+  }
+  // A battery starts its warranty the day it reaches the technician.
+  for (const p of takeable) {
+    if (!isBatteryPart(p)) continue;
+    const { data: existing } = await admin.from("battery_warranties").select("id").eq("part_item_id", p.id).eq("is_active", true).limit(1);
+    if ((existing ?? []).length) continue;
+    const code = await ensureQrLink("battery", { jobId, vehicleId: job.vehicle_id, refId: p.id }, actor.id);
+    const months = warrantyMonthsFor(ss, p.brand, p.warranty_months);
+    const until = new Date(now);
+    until.setUTCMonth(until.getUTCMonth() + months);
+    await admin.from("battery_warranties").insert({ job_id: jobId, vehicle_id: job.vehicle_id, part_item_id: p.id, handover_id: handover.id, brand: p.brand ?? null, model: p.battery_model ?? null, serial_number: p.serial_number ?? null, installed_on: now.slice(0, 10), warranty_until: until.toISOString().slice(0, 10), qr_code: code, created_by: actor.id, updated_by: actor.id });
+  }
+  const plate = job.vehicle ? formatPlate(job.vehicle) : job.job_number;
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_issued", note: `${tech.display_name} received ${items.length} part${items.length === 1 ? "" : "s"} (PIN on the tablet): ${items.map((i) => i.description).join(", ")}`, created_by: actor.id });
+  await notifyManagers(job.department ?? null, { type: "handover", title: `Parts received · ${job.job_number}`, body: `${tech.display_name} received ${items.length} part${items.length === 1 ? "" : "s"} for ${plate}.`, jobId, href: `/jobs/${jobId}/work` });
+  if (fromStaff) await notifyStaff([fromStaff], { type: "handover", title: `${tech.display_name} received the parts · ${job.job_number}`, body: items.map((i) => `${i.description} × ${i.quantity}`).join(", "), jobId, href: `/parts/handover/${jobId}` });
+  return { ok: true, message: `Received: ${items.length} part${items.length === 1 ? "" : "s"}.` };
 }
 
 /** Parts take a waiting handover back (wrong technician, wrong parts): the parts are free again. */

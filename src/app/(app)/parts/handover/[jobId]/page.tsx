@@ -1,27 +1,22 @@
 import { CopyVin } from "@/components/CopyVin";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { notFound } from "next/navigation";
-import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { pendingHandoversFor } from "@/lib/handover";
 import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
 import { hasNoHome, partState } from "@/lib/part-state";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, toPartFull, type JobBrief } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
-import { isBatteryPart, stickerSettings } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { activeTechnicians } from "@/lib/work-flow";
-import { cancelHandoverAction, dispositionAction, exchangePartAction, handoverParts, notNeededAction, returnToParts, signHandoverAtCounter } from "../../handover-actions";
-import { HandoverForm, ReturnForm, SignForForm, type HandoverPart } from "./HandoverForm";
+import { dispositionAction, exchangePartAction, markPartsReadyAction, notNeededAction, returnToParts } from "../../handover-actions";
+import { ReadyForm, ReturnForm, type DeskPart } from "./HandoverForm";
 import { EndingForm, PartActions, PartStateBadge } from "./PartActions";
 
 export const dynamic = "force-dynamic";
-
-const newTab = "inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm";
 
 /**
  * Hand the parts of one car to the technician: he ticks what he receives and confirms on his device
@@ -37,21 +32,15 @@ export default async function HandoverPage({ params, searchParams }: { params: P
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
-  const ss = stickerSettings(settings);
-  const [{ data: job }, { data: rows }, { data: techs }, onCar, { data: priv }, pending, { data: devices }, { data: names }] = await Promise.all([
+  const [{ data: job }, { data: rows }, { data: priv }, { data: names }] = await Promise.all([
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", jobId).maybeSingle(),
     admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id, sticker_kind, battery_model, serial_number").eq("job_id", jobId).eq("is_active", true).neq("order_status", "none").order("created_at"),
-    admin.from("staff").select("id, display_name").eq("role_id", "technician").eq("is_active", true).order("display_name"),
-    activeTechnicians(jobId),
     admin.from("staff_private").select("pin_hash").eq("staff_id", staff.id).maybeSingle(),
-    pendingHandoversFor(null, jobId),
-    admin.from("devices").select("staff_id").eq("kind", "personal").eq("is_active", true).is("blocked_at", null),
     admin.from("staff").select("id, display_name").eq("is_active", true),
   ]);
   if (!job) notFound();
   const j = job as unknown as JobBrief;
   const nameOf = new Map((names ?? []).map((n) => [n.id, n.display_name]));
-  const personal = new Set((devices ?? []).map((d) => d.staff_id).filter(Boolean));
   const all = ((rows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), pending_handover_id: r.pending_handover_id as string | null, sticker_kind: r.sticker_kind as string | null, battery_model: r.battery_model as string | null, serial_number: r.serial_number as string | null }));
   const noHome = all.filter(hasNoHome);
   const parts = all.filter((p) => p.return_status !== "returned" && !hasNoHome(p));
@@ -59,17 +48,12 @@ export default async function HandoverPage({ params, searchParams }: { params: P
   const approved = new Set((pos ?? []).filter((p) => !["pending_approval", "cancelled"].includes(p.status)).map((p) => p.id));
   const plate = j.vehicle ? formatPlate(j.vehicle) : j.job_number;
   const toHandParts = parts.filter((p) => p.issue_status !== "confirmed" && !p.pending_handover_id);
-  const toHand: HandoverPart[] = toHandParts.map((p) => {
+  const toHand: DeskPart[] = toHandParts.map((p) => {
     const here = p.received_qty > 0 && (p.availability === "in_stock" || p.order_status === "received" || (!!p.po_id && approved.has(p.po_id)));
-    const battery = isBatteryPart(p);
-    const typeDefault = p.part_type ? ss.partTypes.includes(String(p.part_type).toLowerCase()) : false;
-    return { id: p.id, description: p.description, part_number: p.part_number, quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1, ready: here, why: here ? null : p.expected_date ? `Expected ${p.expected_date}` : "Not here yet", battery, defaultStickers: typeDefault ? p.received_qty || 1 : 0, brand: p.brand, model: p.battery_model, serial: p.serial_number, state: partState(p).label, notReceived: !!p.not_received_at };
+    return { id: p.id, description: p.description, part_number: p.part_number, quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1, here, why: here ? null : p.expected_date ? `Expected ${p.expected_date}` : "Not here yet", readyAt: p.ready_for_handover_at ? formatDateTime(p.ready_for_handover_at) : null, notReceived: !!p.not_received_at };
   });
   const handed = parts.filter((p) => p.issue_status === "confirmed");
-  const ordered = (techs ?? []).sort((a, b) => (onCar.some((t) => t.staff_id === a.id) ? -1 : onCar.some((t) => t.staff_id === b.id) ? 1 : 0)).map((t) => ({ id: t.id, display_name: t.display_name, personalDevice: personal.has(t.id) }));
-  const defaultTech = onCar[0]?.staff_id ?? j.assigned_to ?? null;
   const canHand = can(role, "managePurchaseOrders") && !staff.viewingAs && j.is_open;
-  const canSignFor = role === "owner" || can(role, "manageWork");
   const canSettle = !staff.viewingAs && j.is_open;
   const canEnd = !staff.viewingAs && (role === "owner" || can(role, "managePurchaseOrders"));
   const inspBundle = await loadInspection(jobId);
@@ -83,27 +67,30 @@ export default async function HandoverPage({ params, searchParams }: { params: P
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
-      {pending.map((h) => (
-        <Card key={h.id} className="flex flex-col gap-3 border-amber-bar">
-          <div className="flex flex-wrap items-center gap-2">
-            <SectionLabel right={formatDateTime(h.created_at)}>Waiting for {h.takerName} to confirm</SectionLabel>
-            <Badge tone="amber">{h.items.length} part{h.items.length === 1 ? "" : "s"}</Badge>
-            {Object.keys(h.stickers ?? {}).length ? <Badge tone={h.stickers_printed_at ? "green" : "red"}>{h.stickers_printed_at ? "Stickers printed" : "Stickers not printed yet"}</Badge> : null}
-          </div>
-          <p className="text-sm">{h.giverName} is handing {h.items.map((i) => `${i.description} × ${i.quantity}`).join(", ")} to <span className="font-semibold">{h.takerName}</span>. He ticks what he receives on his own screen, under Start work, and confirms with his PIN there. The parts count as with Parts until then.</p>
-          <div className="flex flex-wrap items-start gap-3">
-            {!staff.viewingAs && canSignFor ? <SignForForm jobId={jobId} takerName={h.takerName} signerNeedsPin={role === "workshop_manager"} action={signHandoverAtCounter.bind(null, h.id)} /> : null}
-            {Object.keys(h.stickers ?? {}).length ? <a href={`/print/stickers/${h.id}?back=${encodeURIComponent(back)}`} target="_blank" rel="noreferrer" className={h.stickers_printed_at ? newTab : `${newTab} border-ink`}>{h.stickers_printed_at ? "Print the stickers again" : "Print the stickers (new tab)"}</a> : null}
-            {canHand ? <form action={cancelHandoverAction.bind(null, h.id)}><input type="hidden" name="job_id" value={jobId} /><Button type="submit" tone="ghost" size="md">Cancel this handover</Button></form> : null}
-          </div>
-        </Card>
-      ))}
-
       <Card className="flex flex-col gap-3">
-        <SectionLabel right={`${toHand.filter((p) => p.ready).length} here · ${toHand.filter((p) => !p.ready).length} still coming`}>Hand over</SectionLabel>
-        {toHand.length === 0 ? <p className="text-sm text-muted">{pending.length ? "Every other part is with the technician or waiting for his PIN above." : handed.length ? "Every part on this car is with the technician." : "No parts to hand over on this car."}</p> : !canHand ? <p className="text-sm text-muted">Parts hand them over from this page.</p> : ordered.length === 0 ? <p className="text-sm text-muted">No active technician to hand the parts to.</p> : (
-          <HandoverForm parts={toHand} technicians={ordered} defaultTechnician={defaultTech} plate={plate} canSignFor={canSignFor} signerNeedsPin={role === "workshop_manager"} batteryRequired={ss.batteryRequired} action={handoverParts.bind(null, jobId)} />
-        )}
+        <SectionLabel right={`${toHand.filter((p) => p.here).length} here · ${toHand.filter((p) => !p.here).length} still coming`}>At the desk</SectionLabel>
+        {toHand.length === 0 ? <p className="text-sm text-muted">{handed.length ? "Every part on this car is with the technician." : "No parts to hand over on this car."}</p> : null}
+        {toHand.some((p) => p.readyAt) ? (
+          <ul className="flex flex-col gap-1 text-sm" data-ready-list>
+            {toHand.filter((p) => p.readyAt).map((p) => (
+              <li key={p.id} className="flex items-center gap-2 rounded-control border border-amber-bar bg-white px-2 py-2" data-ready-part={p.id}>
+                <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
+                <span className="ml-auto text-xs font-semibold text-amber">Ready · waiting for the technician, {p.readyAt}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {canHand ? <ReadyForm parts={toHand} action={markPartsReadyAction.bind(null, jobId)} /> : toHand.some((p) => p.here && !p.readyAt) ? <p className="text-sm text-muted">Parts mark them ready from this page.</p> : null}
+        {toHand.some((p) => !p.here) ? (
+          <ul className="flex flex-col gap-1 border-t border-line pt-2 text-sm">
+            {toHand.filter((p) => !p.here).map((p) => (
+              <li key={p.id} className="flex items-center gap-2 px-2">
+                <span className="font-semibold text-muted">{p.description}</span><span className="text-muted">× {p.quantity}</span>
+                <span className="ml-auto text-xs text-muted">{p.why}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {canSettle && toHandParts.length ? (
           <ul className="divide-y divide-line border-t border-line pt-2 text-sm">
             {toHandParts.map((p) => (

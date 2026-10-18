@@ -1,110 +1,45 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Input, Select, Textarea } from "@/components/ui";
+import { Button, Input, Textarea } from "@/components/ui";
 
-export type HandoverPart = { id: string; description: string; part_number: string | null; quantity: number; ready: boolean; why: string | null; battery: boolean; defaultStickers: number; brand: string | null; model: string | null; serial: string | null; /** The part's one state, in words. */ state?: string; /** The technician left it unticked last time. */ notReceived?: boolean };
-export type HandoverTech = { id: string; display_name: string; personalDevice: boolean };
+export type DeskPart = { id: string; description: string; part_number: string | null; quantity: number; here: boolean; why: string | null; readyAt: string | null; notReceived?: boolean };
 
 /**
- * The handover: tick what is going now, a sticker counter per part (locked to the quantity for a
- * battery), the technician, one tap. The technician confirms on his own device or signs at the counter.
+ * Parts tick what is at the desk and press "Ready for handover": the car's technicians and the workshop
+ * manager are told at once. The technician receives on his own tablet with his PIN; nothing happens here.
  */
-export function HandoverForm({ parts, technicians, defaultTechnician, plate, canSignFor, signerNeedsPin = false, batteryRequired, action }: { parts: HandoverPart[]; technicians: HandoverTech[]; defaultTechnician: string | null; plate: string; canSignFor: boolean; /** The workshop manager signs with his own PIN; the owner needs none. */ signerNeedsPin?: boolean; batteryRequired: boolean; action: (formData: FormData) => void }) {
-  const [ticked, setTicked] = useState<Record<string, boolean>>(Object.fromEntries(parts.map((p) => [p.id, p.ready])));
-  const [stickers, setStickers] = useState<Record<string, number>>(Object.fromEntries(parts.map((p) => [p.id, p.battery && batteryRequired ? p.quantity : Math.min(p.quantity, p.defaultStickers)])));
-  const [tech, setTech] = useState(defaultTechnician ?? technicians[0]?.id ?? "");
-  const [signFor, setSignFor] = useState(false);
-  const chosen = parts.filter((p) => p.ready && ticked[p.id]);
-  const count = chosen.length;
-  const stickerCount = chosen.reduce((a, p) => a + (stickers[p.id] ?? 0), 0);
-  const who = technicians.find((t) => t.id === tech);
-  const bump = (p: HandoverPart, d: number) => setStickers((s) => ({ ...s, [p.id]: Math.max(0, Math.min(p.quantity, (s[p.id] ?? 0) + d)) }));
+export function ReadyForm({ parts, action }: { parts: DeskPart[]; action: (formData: FormData) => void }) {
+  const markable = parts.filter((p) => p.here && !p.readyAt);
+  const [unticked, setUnticked] = useState<Set<string>>(new Set());
+  const ticked = markable.filter((p) => !unticked.has(p.id));
+  if (!markable.length) return null;
+  const toggle = (id: string) => setUnticked((u) => { const n = new Set(u); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (
-    <form action={action} className="flex flex-col gap-4">
-      <ul className="divide-y divide-line">
-        {parts.map((p) => {
-          const locked = p.battery && batteryRequired;
+    <form action={action} className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-1">
+        {markable.map((p) => {
+          const on = !unticked.has(p.id);
           return (
-            <li key={p.id} className="py-2.5 flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-3">
-                <label className={`flex items-center gap-3 flex-1 min-w-64 ${p.ready ? "cursor-pointer" : "opacity-60"}`}>
-                  <input type="checkbox" name="part" value={p.id} checked={!!ticked[p.id] && p.ready} disabled={!p.ready} onChange={(e) => setTicked({ ...ticked, [p.id]: e.target.checked })} className="h-6 w-6 accent-ink" />
-                  <span>
-                    <span className="font-semibold">{p.description}</span>
-                    <span className="block text-xs text-muted">{p.part_number ?? "no part number"} · × {p.quantity}{p.battery ? " · battery" : ""}</span>
-                  </span>
-                </label>
-                {!p.ready ? <span className="text-xs font-semibold text-muted">{p.why}</span> : p.notReceived ? <span className="text-xs font-semibold text-amber">Not received last time</span> : null}
-                {p.ready ? (
-                  <span className="inline-flex items-center gap-1 text-xs">
-                    <span className="font-semibold text-muted">{p.battery ? "Warranty stickers" : "Stickers"}</span>
-                    <input type="hidden" name={`stickers__${p.id}`} value={ticked[p.id] ? (stickers[p.id] ?? 0) : 0} />
-                    <button type="button" disabled={locked || !ticked[p.id]} onClick={() => bump(p, -1)} className="h-9 w-9 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One sticker less">−</button>
-                    <span className="w-6 text-center text-sm font-extrabold">{ticked[p.id] ? (stickers[p.id] ?? 0) : 0}</span>
-                    <button type="button" disabled={locked || !ticked[p.id]} onClick={() => bump(p, 1)} className="h-9 w-9 rounded-control border border-line-strong font-bold disabled:opacity-40" aria-label="One sticker more">+</button>
-                  </span>
-                ) : null}
-              </div>
-              {p.battery && p.ready && ticked[p.id] ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-control bg-chip p-2">
-                  <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Brand<Input name={`battery_brand__${p.id}`} defaultValue={p.brand ?? ""} textCase="title" /></label>
-                  <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Model<Input name={`battery_model__${p.id}`} defaultValue={p.model ?? ""} /></label>
-                  <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Serial number (optional)<Input name={`battery_serial__${p.id}`} defaultValue={p.serial ?? ""} textCase="upper" /></label>
-                  <span className="sm:col-span-3 text-[11px] text-muted">The warranty sticker is compulsory for a battery: one per battery, printed before the technician can confirm.</span>
-                </div>
-              ) : null}
+            <li key={p.id}>
+              <button type="button" onClick={() => toggle(p.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
+                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                <span className="flex-1 font-semibold">{p.description}{p.part_number ? <span className="text-muted font-normal"> · {p.part_number}</span> : null}</span>
+                <span>× {p.quantity}</span>
+                {p.notReceived ? <span className="text-xs font-semibold text-amber">Was not received last time</span> : null}
+              </button>
             </li>
           );
         })}
       </ul>
-      <div className="rounded-card border border-ink p-4 flex flex-col gap-3">
-        <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician taking the parts</span>
-          <Select name="technician" value={tech} onChange={(e) => setTech(e.target.value)} required className="w-full sm:w-72">
-            {technicians.map((t) => <option key={t.id} value={t.id}>{t.display_name}{t.personalDevice ? " · own device" : " · signs at the counter"}</option>)}
-          </Select>
-        </label>
-        <p className="text-sm">
-          {who?.personalDevice ? <><Badge tone="green">Own device</Badge> <span className="font-semibold">{who.display_name}</span> gets &quot;{count} part{count === 1 ? "" : "s"} for {plate}&quot; on his device and enters his PIN there.</> : <><Badge tone="amber">Counter</Badge> <span className="font-semibold">{who?.display_name ?? "The technician"}</span> has no personal device: after Hand over, he taps &quot;Sign here&quot; on this screen and types his PIN.</>}
-        </p>
-        {canSignFor ? (
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="sign_for" checked={signFor} onChange={(e) => setSignFor(e.target.checked)} className="h-5 w-5 accent-ink" />I sign for {who?.display_name ?? "the technician"} (manager or owner, logged)</label>
-        ) : null}
-        {signFor && signerNeedsPin ? <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Your own PIN (never the technician&apos;s)<Input name="signer_pin" type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" required autoComplete="off" className="w-32 text-center text-xl tracking-[0.4em]" /></label> : null}
-        <Textarea name="note" rows={1} placeholder="Note (optional)" textCase="sentence" />
-        <div><Button type="submit" size="lg" disabled={count === 0}>{stickerCount ? `Hand over and print ${stickerCount} sticker${stickerCount === 1 ? "" : "s"}` : `Hand over ${count} part${count === 1 ? "" : "s"}`}</Button></div>
-      </div>
+      {ticked.map((p) => <input key={p.id} type="hidden" name="part" value={p.id} />)}
+      <Button type="submit" size="lg" disabled={!ticked.length} data-mark-ready>Ready for handover ({ticked.length})</Button>
+      <p className="text-xs text-muted">The technician and the workshop manager are told at once; he ticks the parts on his own tablet and confirms with his PIN when he picks them up.</p>
     </form>
   );
 }
 
-/**
- * The owner or the workshop manager signs for a technician from their own screen: the owner with no PIN, the
- * manager with his own PIN. The technician's own PIN is never typed on a Parts or advisor screen.
- */
-export function SignForForm({ jobId, takerName, signerNeedsPin, action }: { jobId: string; takerName: string; signerNeedsPin: boolean; action: (formData: FormData) => void }) {
-  const [open, setOpen] = useState(false);
-  const [pin, setPin] = useState("");
-  if (!open) return <Button type="button" tone="secondary" size="md" onClick={() => setOpen(true)}>Sign for {takerName}</Button>;
-  return (
-    <form action={action} className="rounded-card border-2 border-ink p-4 flex flex-col gap-3 bg-white max-w-md">
-      <input type="hidden" name="job_id" value={jobId} />
-      <input type="hidden" name="sign_for" value="on" />
-      <p className="text-base font-bold">Sign for {takerName}: the parts count as received by him, logged under your name.</p>
-      {signerNeedsPin ? (
-        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Your own PIN
-          <Input name="signer_pin" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} pattern="\d{4}" autoFocus autoComplete="off" className="text-center text-2xl tracking-[0.5em] w-40" aria-label="PIN" />
-        </label>
-      ) : <span className="text-xs text-muted">The owner signs without a PIN.</span>}
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="lg" disabled={signerNeedsPin && pin.length !== 4}>Confirm</Button>
-        <Button type="button" tone="ghost" size="lg" onClick={() => { setOpen(false); setPin(""); }}>Cancel</Button>
-      </div>
-    </form>
-  );
-}
-
-/** Parts that come back from the technician: tick them, say why, the Parts person's PIN. */
+/** A part comes back from the workshop to the Parts desk. */
 export function ReturnForm({ parts, needsPin, action }: { parts: { id: string; description: string; quantity: number }[]; needsPin: boolean; action: (formData: FormData) => void }) {
   const [open, setOpen] = useState(false);
   if (!parts.length) return null;

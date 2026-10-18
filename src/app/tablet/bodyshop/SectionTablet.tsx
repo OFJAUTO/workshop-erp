@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui";
 
-export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean };
+export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[] };
 export type TabletPerson = { id: string; name: string; photoUrl: string | null; clockedOn: string | null };
 
 /**
@@ -16,6 +16,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const [carId, setCarId] = useState<string | null>(null);
   const [personId, setPersonId] = useState<string | null>(null);
   const [pin, setPin] = useState("");
+  const [mode, setMode] = useState<"clock" | "parts" | null>(null);
+  const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
   useEffect(() => {
@@ -31,10 +33,13 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const person = people.find((p) => p.id === personId) ?? null;
   const direction: "in" | "out" = person && car && person.clockedOn === car.jobId ? "out" : "in";
 
+  const readyParts = car?.readyParts ?? [];
+  const tickedParts = readyParts.filter((p) => !unticked.has(p.id));
+  const receiving = mode === "parts" && readyParts.length > 0;
   async function submit(fullPin: string) {
     if (!car || !person || busy) return;
     setBusy(true);
-    const res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction }) });
+    const res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(receiving ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "receive_parts", partIds: tickedParts.map((p) => p.id) } : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction }) });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string };
     setBusy(false);
     setPin("");
@@ -45,6 +50,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
     setNote({ text: data.message ?? "Done.", ok: true });
     setPersonId(null);
     setCarId(null);
+    setMode(null);
+    setUnticked(new Set());
     router.refresh();
   }
   const press = (d: string) => {
@@ -91,20 +98,50 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
             ))}
           </div>
         </div>
+      ) : readyParts.length && mode === null ? (
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-3">
+            <Avatar name={person.name} photoUrl={person.photoUrl} size={56} />
+            <span className="text-xl font-extrabold">{person.name}</span>
+          </div>
+          <p className="text-base"><span className="font-bold">{car.plate} · {car.title}</span>: what are you doing?</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <button type="button" onClick={() => setMode("clock")} className="min-h-16 rounded-card border-2 border-line-strong bg-white px-6 text-lg font-extrabold" data-tablet-mode-clock>{direction === "in" ? "Clock in" : "Clock out"}</button>
+            <button type="button" onClick={() => setMode("parts")} className="min-h-16 rounded-card border-2 border-ink bg-white px-6 text-lg font-extrabold" data-tablet-mode-parts>Receive {readyParts.length} part{readyParts.length === 1 ? "" : "s"}</button>
+          </div>
+          <button type="button" onClick={() => { setPersonId(null); setPin(""); }} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-base font-bold">Back</button>
+        </div>
       ) : (
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-3">
             <Avatar name={person.name} photoUrl={person.photoUrl} size={56} />
             <span className="text-xl font-extrabold">{person.name}</span>
           </div>
-          <p className="text-base">{direction === "in" ? "Clock in on" : "Clock out of"} <span className="font-bold">{car.plate} · {car.title}</span>. Your PIN:</p>
+          {receiving ? (
+            <div className="w-full max-w-md flex flex-col gap-1" data-tablet-ready-parts>
+              <p className="text-base">Tick the parts you are taking for <span className="font-bold">{car.plate}</span>:</p>
+              {readyParts.map((p) => {
+                const on = !unticked.has(p.id);
+                return (
+                  <button key={p.id} type="button" onClick={() => setUnticked((u) => { const n = new Set(u); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
+                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                    <span className="flex-1 font-semibold">{p.description}</span>
+                    <span>× {p.quantity}</span>
+                  </button>
+                );
+              })}
+              <p className="text-base mt-2">Then your PIN ({tickedParts.length} ticked):</p>
+            </div>
+          ) : (
+            <p className="text-base">{direction === "in" ? "Clock in on" : "Clock out of"} <span className="font-bold">{car.plate} · {car.title}</span>. Your PIN:</p>
+          )}
           <div className="flex gap-3" aria-label="PIN">{[0, 1, 2, 3].map((i) => <span key={i} className={`h-4 w-4 rounded-full ${pin.length > i ? "bg-ink" : "border border-line-strong"}`} />)}</div>
           <div className="grid grid-cols-3 gap-3" data-pin-pad>
             {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((k, i) => (
               <button key={i} type="button" disabled={busy || k === ""} onClick={() => (k === "⌫" ? setPin((p) => p.slice(0, -1)) : press(k))} className={`h-16 w-20 rounded-card text-2xl font-extrabold ${k === "" ? "invisible" : "border-2 border-line-strong bg-white"}`}>{k}</button>
             ))}
           </div>
-          <button type="button" onClick={() => { setPersonId(null); setPin(""); }} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-base font-bold">Back</button>
+          <button type="button" onClick={() => { if (mode) { setMode(null); } else { setPersonId(null); } setPin(""); }} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-base font-bold">Back</button>
         </div>
       )}
     </div>
