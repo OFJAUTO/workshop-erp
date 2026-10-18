@@ -11,31 +11,39 @@ const BAR: Record<Timing["tone"], string> = {
  * The nine-step track from the dashboard design. Done steps are black, the current step takes the timing colour.
  * When a road test comes before the inspection, the Inspection step shows two halves: the road test, then the inspection.
  */
-export function StageTrack({ stage, timing, compact = false, skip, roadTest = null }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null }) {
+export function StageTrack({ stage, timing, compact = false, skip, roadTest = null, partly = false }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null; /** The current step is part-way (some parts received, the road test done): the box shows amber. */ partly?: boolean }) {
   const stages = skip?.length ? STAGES.filter((s) => !skip.includes(s)) : STAGES;
   const current = stages.indexOf(stage);
+  if (compact) {
+    return (
+      <div className="overflow-x-auto">
+        <div className="grid gap-1 min-w-[360px]" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}>
+          {stages.map((s, i) => {
+            const done = i < current;
+            const now = i === current;
+            return <span key={s} className={`h-1.5 rounded-full ${done ? "bg-green/50" : now ? BAR[timing.tone] : "bg-track"}`} />;
+          })}
+        </div>
+      </div>
+    );
+  }
+  // The stage boxes: one state per box, the same colours everywhere.
   return (
-    <div className="overflow-x-auto">
-      <div className={`grid gap-1 ${compact ? "min-w-[360px]" : "min-w-[520px]"}`} style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}>
+    <div className="overflow-x-auto" data-stage-track>
+      <div className="grid gap-1 min-w-[560px]" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}>
         {stages.map((s, i) => {
           const done = i < current;
           const now = i === current;
-          const split = s === "inspection" && roadTest;
+          const halfDone = now && ((s === "inspection" && roadTest === "done") || partly);
+          const state = done ? "done" : halfDone ? "partly" : now ? "current" : "later";
+          const cls =
+            state === "done" ? "border border-green bg-green-soft text-green"
+            : state === "partly" ? "border-2 border-amber-bar bg-amber-soft text-ink font-bold"
+            : state === "current" ? "border-2 border-ink bg-white text-ink font-bold"
+            : "border border-line bg-chip text-muted";
           return (
-            <div key={s} className="flex flex-col gap-1.5">
-              {split ? (
-                <span className="flex gap-0.5">
-                  <span className={`h-1.5 flex-1 rounded-full ${done || roadTest === "done" ? "bg-green/50" : now ? BAR[timing.tone] : "bg-track"}`} title="Road test" />
-                  <span className={`h-1.5 flex-1 rounded-full ${done ? "bg-green/50" : now && roadTest === "done" ? BAR[timing.tone] : "bg-track"}`} title="Inspection" />
-                </span>
-              ) : (
-                <span className={`h-1.5 rounded-full ${done ? "bg-green/50" : now ? BAR[timing.tone] : "bg-track"}`} />
-              )}
-              {!compact ? (
-                <span className={`text-[11px] ${now ? "font-bold text-ink" : done ? "font-medium text-muted" : "font-medium text-faint"}`}>
-                  {STAGE_LABELS[s]}
-                </span>
-              ) : null}
+            <div key={s} data-stage-box={s} data-state={state} className={`min-h-10 rounded-control px-1 py-1 flex items-center justify-center text-center text-[11px] font-semibold leading-tight ${cls}`} title={s === "inspection" && roadTest ? `Road test ${roadTest === "done" ? "done" : "waiting"} · inspection` : undefined}>
+              <span>{state === "done" ? "✓ " : ""}{STAGE_LABELS[s]}</span>
             </div>
           );
         })}

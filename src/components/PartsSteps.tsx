@@ -10,7 +10,7 @@ export function PartsSteps({ steps, hrefs = {}, size = "bar" }: { steps: PartsSt
   if (size === "dots") {
     return (
       <span className="inline-flex items-center gap-1 align-middle" data-parts-dots title={steps.map((s) => `${s.label}: ${s.state === "done" ? "done" : s.state === "current" ? "now" : "later"}${s.detail ? ` (${s.detail})` : ""}`).join(" · ")}>
-        {steps.map((s) => <span key={s.key} className={`inline-block h-2.5 w-2.5 rounded-full ${s.state === "done" ? "bg-green" : s.state === "current" ? "bg-ink" : "bg-line-strong"}`} data-step-dot={s.key} data-state={s.state} />)}
+        {steps.map((s) => <span key={s.key} className={`inline-block h-2.5 w-2.5 rounded-full ${s.state === "done" ? "bg-green" : s.state === "current" ? "bg-white ring-2 ring-inset ring-ink" : "bg-line-strong"}`} data-step-dot={s.key} data-state={s.state} />)}
       </span>
     );
   }

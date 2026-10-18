@@ -171,7 +171,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     createAdminClient().from("part_items").select("is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status").eq("job_id", id),
     createAdminClient().from("jobs").select("parts_pricing_done_at, parts_pricing_reopened_at, declined_out_at").eq("id", id).maybeSingle(),
   ]);
-  const partsDots = <PartsSteps size="dots" steps={partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) })} />;
+  const partsStepList = partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) });
+  const partsDots = <PartsSteps size="dots" steps={partsStepList} />;
+  // The Parts box on the stage track shows amber once some of its steps are done but not all.
+  const partsPartly = partsStepList.some((st) => st.state === "done") && !partsStepList.every((st) => st.state === "done");
   const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
   // The money side in five steps (one rule with the invoice page and the accounts screens).
   const [{ data: moneyInvRows }, { data: creditCust }] = laterStage
@@ -353,7 +356,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {docAlerts.map((a) => <Badge key={a.key} tone={a.tone === "muted" ? "neutral" : a.tone}>{a.text}</Badge>)}
               </div>
             ) : null}
-            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
+            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} partly={job.stage === "parts" && partsPartly} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>

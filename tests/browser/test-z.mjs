@@ -258,5 +258,35 @@ if (want("S4")) {
   await browser.close();
 }
 
+/* ================= S5: the job card stage boxes ================= */
+if (want("S5")) {
+  console.log("\n== S5 stage boxes");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1360, height: 1000 } });
+  await go(page, `${base}/jobs/${jobId}`);
+  await until(async () => ((await page.locator("[data-stage-track]").count()) ? 1 : null), 20, 400);
+  const doneCls = (await page.locator("[data-stage-box='gate_in']").getAttribute("class")) ?? "";
+  check("S5: a done step is an entire light-green box", (await page.locator("[data-stage-box='gate_in']").getAttribute("data-state")) === "done" && /bg-green-soft/.test(doneCls) && /border-green/.test(doneCls), doneCls);
+  check("S5: every earlier step is green too", (await page.locator("[data-stage-box][data-state='done']").count()) >= 4);
+  const partsState = (await page.locator("[data-stage-box='parts']").getAttribute("data-state")) ?? "";
+  const partsCls = (await page.locator("[data-stage-box='parts']").getAttribute("class")) ?? "";
+  check("S5: the Parts step (part-way: priced, nothing ordered) is amber", partsState === "partly" && /bg-amber-soft/.test(partsCls) && /border-amber-bar/.test(partsCls), `${partsState} ${partsCls}`);
+  const laterCls = (await page.locator("[data-stage-box='work']").getAttribute("class")) ?? "";
+  check("S5: a step not started is grey", (await page.locator("[data-stage-box='work']").getAttribute("data-state")) === "later" && /bg-chip/.test(laterCls) && /text-muted/.test(laterCls), laterCls);
+  check("S5: the parts dots follow the same logic (done green, current white with a black ring)", /bg-green/.test((await page.locator("[data-step-dot='pricing']").getAttribute("class")) ?? "") && /bg-white/.test((await page.locator("[data-step-dot][data-state='current']").first().getAttribute("class")) ?? "") && /ring-ink/.test((await page.locator("[data-step-dot][data-state='current']").first().getAttribute("class")) ?? ""));
+  await page.locator("[data-stage-track]").scrollIntoViewIfNeeded();
+  await shot(page, "s5-jobcard");
+  // A current step with nothing part-way shows white with a black border: Work, once the car is released.
+  await sql("update public.part_items set order_status = 'received', received_qty = greatest(coalesce(confirmed_quantity, quantity, 1), 1), issue_status = 'confirmed', issued_qty = 1, tech_received_qty = 1 where job_id = $1 and is_active", [jobId]);
+  await sql("update public.jobs set status = 'in_work', stage = 'work' where id = $1", [jobId]);
+  await go(page, `${base}/jobs/${jobId}`);
+  const workCls = (await page.locator("[data-stage-box='work']").getAttribute("class")) ?? "";
+  check("S5: the current step is white with a black border", (await page.locator("[data-stage-box='work']").getAttribute("data-state")) === "current" && /border-ink bg-white/.test(workCls), workCls);
+  check("S5: Parts shows done (green) behind it", (await page.locator("[data-stage-box='parts']").getAttribute("data-state")) === "done");
+  await shot(page, "s5-jobcard-work");
+  await browser.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);
