@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Card, Empty, PageHeader, SectionLabel } from "@/components/ui";
+import { HomeHeader } from "@/components/HomeHeader";
+import {Card, Empty, SectionLabel} from "@/components/ui";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { PartsSteps } from "@/components/PartsSteps";
 import type { CurrentStaff } from "@/lib/auth";
@@ -53,7 +54,7 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
 
   return (
     <>
-      <PageHeader title="Parts" subtitle="Your day at a glance: what to price, approve, order, receive and hand over." />
+      <HomeHeader staff={staff} />
       <WaitingPanel staff={staff} />
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-3" data-parts-tiles>
         {tiles.map((t) => (

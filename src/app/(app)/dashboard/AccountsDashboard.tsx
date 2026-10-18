@@ -1,7 +1,8 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { HomeHeader } from "@/components/HomeHeader";
 import { MoneyRow } from "@/components/MoneyRow";
 import { WaitingPanel } from "@/components/WaitingPanel";
-import { Badge, Button, Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
+import {Badge, Button, Card, LinkButton, SectionLabel} from "@/components/ui";
 import type { CurrentStaff } from "@/lib/auth";
 import { formatDayTime } from "@/lib/format";
 import { METHOD_LABELS } from "@/lib/invoice-data";
@@ -63,14 +64,13 @@ export async function CounterPaymentsCard({ canConfirm, returnTo }: { canConfirm
 export async function AccountsDashboard({ staff, settings }: { staff: CurrentStaff; settings: Settings }) {
   const rows = await loadMoneyRows(settings, { scope: "open" });
   const tiles = await loadMoneyTiles(rows);
-  const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Dubai" }).format(new Date());
   const awaiting = rows.filter((r) => r.state.current === "payment");
   const others = rows.filter((r) => r.state.current !== "payment");
   const deposits = await depositsNotInvoiced();
   return (
     <>
       <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders"]} pollMs={60000} />
-      <PageHeader title="Accounts" subtitle={today} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
+      <HomeHeader staff={staff} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} />
       <CounterPaymentsCard canConfirm={!staff.viewingAs} returnTo="/dashboard" />

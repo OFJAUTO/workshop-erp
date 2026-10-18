@@ -484,5 +484,62 @@ if (want("S8")) {
   await ob.close();
 }
 
+/* ================= S10: the dashboard layout and less clutter ================= */
+if (want("S10")) {
+  console.log("\n== S10 dashboard");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1360, height: 1100 } });
+  await go(page, `${base}/dashboard`);
+  const greeting = ((await page.locator("[data-greeting]").textContent()) ?? "").trim();
+  check("S10: the title greets by first name for the Dubai time of day", /^Good (morning|afternoon|evening), [A-Za-z]+$/.test(greeting), greeting);
+  const dateCls = (await page.locator("[data-home-date]").getAttribute("class")) ?? "";
+  check("S10: the date sits under it, bigger and bold", /text-\[17px\]/.test(dateCls) && /font-bold/.test(dateCls), dateCls);
+  check("S10: the search bar is in the top row (grey fill, rounded, the right placeholder)", ((await page.locator("[data-search-input]").first().getAttribute("placeholder")) ?? "").startsWith("Search any car") && /bg-chip/.test((await page.locator("[data-search-input]").first().getAttribute("class")) ?? ""));
+  await page.locator("[data-search-input]").first().fill("3030");
+  await until(async () => ((await page.locator("[data-search-hit]").count()) ? 1 : null), 25, 400);
+  const hit = (await page.locator("[data-search-hit]").first().textContent()) ?? "";
+  check("S10: typing a few letters drops instant results with plate, model and stage", /Dubai S 30303/i.test(hit) && /Porsche/i.test(hit), hit.slice(0, 120));
+  await shot(page, "s10-search");
+  await page.locator("[data-search-hit]").first().click();
+  await page.waitForURL(new RegExp(`/jobs/${jobId}`), { timeout: 15000 }).catch(() => null);
+  check("S10: one tap on a result opens the job card", page.url().includes(`/jobs/${jobId}`), page.url().slice(-50));
+  await go(page, `${base}/dashboard`);
+  // One WAITING ON YOU box; the two old boxes are gone.
+  check("S10: one 'Waiting on you (N)' box replaces the two old boxes", (await page.locator("[data-waiting-panel]").count()) === 1 && !/Proformas to send|Awaiting payment/.test((await page.textContent("body")) ?? ""));
+  const summaryEl = page.locator("[data-waiting-summary]");
+  if (await summaryEl.count()) {
+    await summaryEl.click();
+    check("S10: tapping it opens the list on the same page", (await page.locator("[data-waiting-panel] li").count()) >= 1);
+  } else {
+    check("S10: with nothing waiting it is one line, 'Nothing waiting ✓'", /Nothing waiting ✓/.test((await page.locator("[data-waiting-panel]").textContent()) ?? ""));
+  }
+  // The advisor target in one slim line.
+  check("S10: the team target is one slim line with the ⓘ", /^Team today: AED/.test(((await page.locator("[data-advisor-today]").textContent()) ?? "").trim()) && (await page.locator("[data-advisor-info]").count()) === 1 && (await page.locator("[data-my-month]").count()) === 1);
+  // The slim summary row, with 0 in plain grey and tooltips instead of grey captions.
+  check("S10: the summary boxes are one slim row, label and number on one line", (await page.locator("[data-summary-row]").count()) === 1 && (await page.locator("[data-summary-tile]").count()) === 4);
+  const zeroTiles = await page.locator("[data-summary-tile]").evaluateAll((els) => els.filter((el) => el.textContent?.trim().endsWith("0")).map((el) => el.querySelector("span:last-child")?.className ?? ""));
+  check("S10: a zero reads plain grey", zeroTiles.every((c) => c.includes("text-muted")), JSON.stringify(zeroTiles));
+  // The Pending chip row is gone; the Stage dropdown lists only stages with something in them.
+  check("S10: the Pending chip row is deleted; Stage is a small dropdown", !/>Pending</.test(await page.content()) && (await page.locator("[data-stage-filter]").count()) === 1);
+  const options = await page.locator("[data-stage-filter] option").allTextContents();
+  check("S10: the dropdown holds only options with counts (plus All)", options[0] === "All" && options.slice(1).every((o) => /\(\d+\)/.test(o) && !/\(0\)/.test(o)), options.join(" | "));
+  await shot(page, "s10-advisor-after-live");
+  await browser.close();
+  // Narrow screens: the search drops to its own full-width row under the date.
+  const { browser: mb, page: mp } = await browserFor("service_advisor", { viewport: { width: 390, height: 860 } });
+  await go(mp, `${base}/dashboard`);
+  check("S10: on a narrow screen the search gets its own full-width row", await mp.locator("[data-search-row] [data-search-input]").isVisible());
+  await shot(mp, "s10-advisor-mobile");
+  await mb.close();
+  // Every role's home carries the same greeting and search.
+  for (const [role, name] of [["owner", "owner"], ["accounts", "accounts"], ["parts", "parts"]]) {
+    const { browser: rb, page: rp } = await browserFor(role, { viewport: { width: 1360, height: 1000 } });
+    await go(rp, `${base}/dashboard`);
+    check(`S10: the ${name} home has the greeting and the search`, /^Good (morning|afternoon|evening), /.test(((await rp.locator("[data-greeting]").textContent().catch(() => "")) ?? "").trim()) && (await rp.locator("[data-search-input]").count()) >= 1);
+    await rb.close();
+  }
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

@@ -5,7 +5,7 @@ import { useState, useSyncExternalStore } from "react";
 import { CarPicture } from "@/components/CarPicture";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { StageTrack } from "@/components/StageTrack";
-import { Badge, Card, Empty, Input, SectionLabel, Select } from "@/components/ui";
+import {Badge, Card, Empty, SectionLabel, Select} from "@/components/ui";
 import { PENDING_GROUPS, STATUS_LABELS, type JobStatus, type Priority, type Stage, type Timing } from "@/lib/jobs";
 
 /** One car on the dashboard, already shaped on the server so the list can be filtered and sorted here. */
@@ -118,112 +118,82 @@ const TILES: { key: TileKey; label: string; caption: string; tone: "ink" | "ambe
   { key: "ready", label: "Ready to collect", caption: "Job done, ready or pending payment", tone: "green", match: (r) => r.status === "ready" || r.status === "pending_payment" },
 ];
 
-function normalise(s: string) {
-  return s.toLowerCase().replace(/[\s·-]+/g, "");
-}
 
-function matchesQuery(r: DashRow, q: string) {
-  if (!q) return true;
-  const hay = normalise([r.plate, r.title, r.customer ?? "", r.vin ?? "", r.jobNumber, r.assignee ?? ""].join(" "));
-  return q.split(/\s+/).every((part) => hay.includes(normalise(part)));
-}
 
 /** Search, sort, the four tiles and the Pending chips, all working together on the same list. */
 export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initialPending?: string }) {
-  const [query, setQuery] = useState("");
   const [sort, setSort] = useStoredSort();
   const [tile, setTile] = useState<TileKey>("all");
   const [pending, setPending] = useState<string | null>(PENDING_GROUPS.some((g) => g.key === initialPending) || initialPending === "not_sent" ? (initialPending as string) : null);
 
   const tileDef = TILES.find((t) => t.key === tile) ?? TILES[0];
-  const searched = rows.filter((r) => matchesQuery(r, query.trim()) && tileDef.match(r));
+  const searched = rows.filter((r) => tileDef.match(r));
   const group = PENDING_GROUPS.find((g) => g.key === pending);
   const visible = sortRows(pending === "not_sent" ? searched.filter((r) => r.notSent) : group ? searched.filter((r) => group.statuses.includes(r.status)) : searched, sort);
-  const filtered = query.trim() || tile !== "all" || !!group || pending === "not_sent";
+  const filtered = tile !== "all" || !!group || pending === "not_sent";
+  // Only stages with something in them appear in the dropdown.
+  const stageOptions = [
+    ...PENDING_GROUPS.map((g) => ({ key: g.key, label: g.label, count: searched.filter((r) => g.statuses.includes(r.status)).length })).filter((o) => o.count > 0),
+    ...(searched.some((r) => r.notSent) ? [{ key: "not_sent", label: "Not sent", count: searched.filter((r) => r.notSent).length }] : []),
+  ];
 
   return (
     <>
-      <div className="relative">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by plate, make, model, customer, VIN or job number"
-          aria-label="Search cars"
-          className="pr-12"
-        />
-        {query ? (
-          <button
-            type="button"
-            onClick={() => setQuery("")}
-            aria-label="Clear search"
-            className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-control text-lg font-bold text-muted hover:bg-chip hover:text-ink"
-          >
-            ✕
-          </button>
-        ) : null}
-      </div>
-
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* The summary in ONE slim row: label and number on one line; the explanation lives in the tooltip. */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-2" data-summary-row>
         {TILES.map((t) => {
           const active = tile === t.key;
-          const color = { ink: "text-ink", amber: "text-amber", red: "text-red", green: "text-green" }[t.tone];
+          const n = rows.filter(t.match).length;
+          const color = n === 0 ? "text-muted" : { ink: "text-ink", amber: "text-amber", red: "text-red", green: "text-green" }[t.tone];
           return (
             <button
               key={t.key}
               type="button"
+              title={t.caption}
               onClick={() => setTile(active && t.key !== "all" ? "all" : t.key)}
               aria-pressed={active}
-              className={`text-left rounded-card border bg-white p-5 flex flex-col gap-1 min-h-11 cursor-pointer hover:border-ink ${active ? "border-ink ring-2 ring-ink" : "border-line"}`}
+              data-summary-tile={t.key}
+              className={`flex min-h-12 cursor-pointer items-center justify-between gap-2 rounded-card border bg-white px-3 py-2 text-left hover:border-ink ${active ? "border-2 border-ink" : "border-line"}`}
             >
-              <span className="text-sm font-semibold text-muted">{t.label}</span>
-              <span className={`text-4xl font-extrabold leading-none ${color}`}>{rows.filter(t.match).length}</span>
-              <span className="text-xs text-faint">{t.caption}</span>
+              <span className="truncate text-sm font-semibold">{t.label}</span>
+              <span className={`text-xl font-extrabold leading-none ${color}`}>{n}</span>
             </button>
           );
         })}
       </section>
 
       <section className="flex flex-col gap-3">
-        <SectionLabel>Pending</SectionLabel>
-        <div className="flex flex-wrap gap-2">
-          <PendingChip label="All" count={searched.length} active={!group} onClick={() => setPending(null)} />
-          {PENDING_GROUPS.map((g) => (
-            <PendingChip
-              key={g.key}
-              label={g.label}
-              count={searched.filter((r) => g.statuses.includes(r.status)).length}
-              active={group?.key === g.key}
-              onClick={() => setPending(group?.key === g.key ? null : g.key)}
-            />
-          ))}
-          <PendingChip label="Not sent" count={searched.filter((r) => r.notSent).length} active={pending === "not_sent"} onClick={() => setPending(pending === "not_sent" ? null : "not_sent")} />
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionLabel>Cars{filtered ? ` · ${visible.length} of ${rows.length}` : ""}</SectionLabel>
-          <label className="flex items-center gap-2 text-sm font-semibold text-muted">
-            <span>Sort</span>
-            <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort cars" className="min-w-56">
-              {SORTS.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <span className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-semibold text-muted">
+              <span>Stage</span>
+              <Select value={pending ?? ""} onChange={(e) => setPending(e.target.value || null)} aria-label="Stage filter" className="min-w-44" data-stage-filter>
+                <option value="">All</option>
+                {stageOptions.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label} ({o.count})
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex items-center gap-2 text-sm font-semibold text-muted">
+              <span>Sort</span>
+              <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort cars" className="min-w-56">
+                {SORTS.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </span>
         </div>
         {visible.length === 0 ? (
           <Empty title={rows.length === 0 ? "No cars in the workshop" : "No cars match"}>
             {filtered ? (
               <button
-                type="button"
-                onClick={() => {
-                  setQuery("");
-                  setTile("all");
-                  setPending(null);
-                }}
+                type="button" onClick={() => { setTile("all"); setPending(null); }}
                 className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold"
               >
                 Show all cars
@@ -273,18 +243,3 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
   );
 }
 
-function PendingChip({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`inline-flex min-h-11 items-center gap-2.5 rounded-full border px-4 text-sm font-semibold cursor-pointer ${active ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
-    >
-      {label}
-      <span className={`inline-flex min-w-6 h-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${active ? "bg-white text-ink" : "bg-ink text-white"}`}>
-        {count}
-      </span>
-    </button>
-  );
-}

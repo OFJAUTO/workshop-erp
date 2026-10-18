@@ -1,5 +1,5 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Card, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
+import {Card, SectionLabel} from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatMinutes, type InspectionStatus } from "@/lib/inspection";
@@ -24,7 +24,8 @@ import { AdvisorPanel } from "./AdvisorPanel";
 import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
 import { DepositsWaiting } from "./DepositsWaiting";
-import { WaitingPanel } from "@/components/WaitingPanel";
+import { WaitingPanel, type ExtraWaiting } from "@/components/WaitingPanel";
+import { HomeHeader } from "@/components/HomeHeader";
 
 type Row = JobRow & {
   parts_pricing_done_at?: string | null;
@@ -155,18 +156,26 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     };
   });
 
-  const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Dubai" }).format(now);
+  // "Proformas to send" and "Awaiting payment" fold into the one WAITING ON YOU box.
+  const moneyWaiting: ExtraWaiting[] = [
+    ...toSend.map((j) => {
+      const r = rows.find((x) => x.id === j.id)!;
+      const inv = invoicedJobs.get(j.id);
+      return { jobId: j.id, plate: r.plate, car: r.title, what: inv?.kind === "tax_invoice" ? "Tax invoice to send" : "Proforma to send", amount: inv ? `AED ${Number(inv.total_aed).toLocaleString("en-GB")}` : null, actionLabel: "Send", href: `/jobs/${j.id}` };
+    }),
+    ...awaitingPayment.filter((j) => !toSend.some((t) => t.id === j.id)).map((j) => {
+      const r = rows.find((x) => x.id === j.id)!;
+      const inv = invoicedJobs.get(j.id);
+      return { jobId: j.id, plate: r.plate, car: r.title, what: "Awaiting payment", amount: inv ? `AED ${Number(inv.total_aed).toLocaleString("en-GB")}` : null, actionLabel: "Open", href: `/jobs/${j.id}/invoice` };
+    }),
+  ];
 
   return (
     <>
       <LiveRefresh tables={["jobs", "gate_ins"]} pollMs={60000} />
-      <PageHeader
-        title="Dashboard"
-        subtitle={today}
-        actions={can(role, "gateIn") ? <LinkButton href="/gate-in" size="lg">Gate in a car</LinkButton> : undefined}
-      />
+      <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
-      <WaitingPanel staff={staff} />
+      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? moneyWaiting : []} />
 
       {role === "owner" && profit ? (
         <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />
@@ -175,33 +184,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       {role === "owner" ? <DepositsWaiting /> : null}
 
-      {role === "service_advisor" || role === "owner" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Card className={`flex flex-col gap-2 ${toSend.length ? "border-ink" : ""}`}>
-            <SectionLabel right={`${toSend.length}`}>Proformas to send</SectionLabel>
-            {toSend.length === 0 ? <p className="text-sm text-muted">Nothing to send.</p> : (
-              <ul className="divide-y divide-line text-sm">
-                {toSend.map((j) => { const r = rows.find((x) => x.id === j.id)!; return <li key={j.id} className="py-1.5 flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{r.plate} · {r.title}</span><LinkButton href={`/jobs/${j.id}`} size="md">Send the invoice</LinkButton></li>; })}
-              </ul>
-            )}
-          </Card>
-          <Card className={`flex flex-col gap-2 ${awaitingPayment.length ? "border-ink" : ""}`}>
-            <SectionLabel right={`${awaitingPayment.length}`}>Awaiting payment</SectionLabel>
-            {awaitingPayment.length === 0 ? <p className="text-sm text-muted">Nothing outstanding.</p> : (
-              <ul className="divide-y divide-line text-sm">
-                {awaitingPayment.map((j) => { const r = rows.find((x) => x.id === j.id)!; const inv = invoicedJobs.get(j.id); return <li key={j.id} className="py-1.5 flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{r.plate} · {r.title}{inv ? <span className="text-muted font-normal"> · {inv.number}</span> : null}</span><LinkButton href={`/jobs/${j.id}`} tone="secondary" size="md">Job card</LinkButton></li>; })}
-              </ul>
-            )}
-          </Card>
-        </div>
-      ) : null}
-
-
       <DashboardCars rows={rows} initialPending={pending} />
 
+      {/* Nothing on screen when nothing runs: empty boxes are clutter. */}
+      {onClock.length ? (
       <section className="flex flex-col gap-3">
         <SectionLabel right={`${onClock.length}`}>On the clock</SectionLabel>
-        <Card className={onClock.length ? "" : "border-dashed"}>
+        <Card>
           {onClock.length === 0 ? <p className="text-sm text-muted">No technician has a job clock running.</p> : (
             <ul className="divide-y divide-line text-sm">
               {onClock.map((s) => (
@@ -215,6 +204,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           )}
         </Card>
       </section>
+      ) : null}
     </>
   );
 }

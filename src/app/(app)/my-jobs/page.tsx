@@ -1,10 +1,11 @@
 import { pendingHandoversFor } from "@/lib/handover";
+import { HomeHeader } from "@/components/HomeHeader";
 import Link from "next/link";
 import { CarPicture } from "@/components/CarPicture";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
-import { Badge, Button, Card, Empty, Notice, PageHeader } from "@/components/ui";
+import {Badge, Button, Card, Empty, Notice} from "@/components/ui";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -86,9 +87,8 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
     <>
       {submitted ? <SubmittedOverlay jobNumber={submittedJob?.job_number ?? ""} /> : null}
       <LiveRefresh tables={["jobs", "inspections", "road_tests", "job_technicians", "part_items"]} pollMs={60000} />
-      <PageHeader
-        title="My jobs"
-        subtitle={`${rows.length} car${rows.length === 1 ? "" : "s"} for you`}
+      <HomeHeader
+        staff={staff}
         actions={
           <span className="flex flex-wrap items-center gap-2">
             {shift ? <span className="inline-flex items-center rounded-full bg-green-soft px-3 py-1.5 text-xs font-bold text-green">✓ Clocked in · {formatDateTime(shift.clock_in)}</span> : null}
@@ -98,6 +98,7 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
           </span>
         }
       />
+      <p className="text-sm font-semibold text-muted">{rows.length} car{rows.length === 1 ? "" : "s"} for you</p>
       {message ? <Notice tone="success">{message}</Notice> : null}
       <WaitingPanel staff={staff} />
       {pendingHandovers.map((h) => (
