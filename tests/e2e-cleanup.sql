@@ -155,3 +155,4 @@ delete from public.short_links sl where sl.url like '%/report/%' and not exists 
 delete from public.short_links sl where sl.url like '%/approve/%' and not exists (select 1 from public.approval_requests a where sl.url = 'https://erp.ofjauto.com/approve/' || a.token);
 delete from public.short_links sl where sl.url like '%/drive/%' and not exists (select 1 from public.recovery_trips t where t.token is not null and sl.url = 'https://erp.ofjauto.com/drive/' || t.token);
 delete from public.short_links sl where sl.url like '%/api/pdf/receipt/%' and not exists (select 1 from public.payments p where sl.url like '%/api/pdf/receipt/' || p.id || '%');
+delete from public.short_links where url like '%25.1812,55.2807%'; -- the D test's fixed pin
