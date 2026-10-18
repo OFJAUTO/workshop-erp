@@ -72,11 +72,14 @@ await section("2 part sticker", async () => {
   await sql("update public.part_items set order_status = 'ordered', confirmed_quantity = 2, quantity = 2, description = 'Front brake pads' where id = $1", [partId]);
   const { browser, page } = await browserFor("parts", { viewport: { width: 1366, height: 1000 } });
   await go(page, `${base}/parts/${jobId}`);
-  await page.locator(`[data-receive-part='${partId}']`).click();
-  await page.waitForURL(/\/parts\/labels\//, { timeout: 20000 }).catch(() => null);
-  check("2: ticking Received opens the sticker page at once with auto print", /\/parts\/labels\/.*part=.*auto=1/.test(page.url()), page.url().slice(-120));
+  // The new flow: tick (on by default), Mark received, then Print stickers opens the sticker page in a new tab.
+  await page.locator("[data-mark-received]").click();
+  await page.locator("[data-receive-confirm]").waitFor({ timeout: 15000 });
+  const [labels] = await Promise.all([page.waitForEvent("popup"), page.locator("[data-print-stickers]").click()]);
+  await labels.waitForURL(/\/parts\/labels\//, { timeout: 20000 }).catch(() => null);
+  check("2: Print stickers opens the sticker page at once with auto print", /\/parts\/labels\/.*parts=.*auto=1/.test(labels.url()), labels.url().slice(-120));
   await sleep(800);
-  const stickers = page.locator("[data-part-sticker]");
+  const stickers = labels.locator("[data-part-sticker]");
   check("2: one sticker per unit: 2 stickers for a quantity of 2", (await stickers.count()) === 2);
   const first = stickers.first();
   const size = await first.evaluate((el) => ({ w: el.style.width, h: el.style.height }));
@@ -90,7 +93,8 @@ await section("2 part sticker", async () => {
   check("2: the QR on the left is about 20 mm", qrW >= 18 && qrW <= 21, String(qrW));
   const code = (await sql("select code from public.qr_links where kind = 'part' and ref_id = $1", [partId]))[0]?.code;
   check("2: the QR is a short link of this part", !!code);
-  check("2: the print bar names the printer", /Print on Printer 1/.test((await page.locator(".bar").textContent()) ?? ""));
+  check("2: the print bar names the printer", /Print on Printer 1/.test((await labels.locator(".bar").textContent()) ?? ""));
+  await labels.close();
   // A customer scanning the sticker sees only that it is genuine and when it was fitted.
   await sql("update public.part_items set fitted_at = '2026-10-16T08:00:00Z' where id = $1", [partId]);
   const pub = await fetch(`${base}/s/${code}`);

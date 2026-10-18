@@ -178,5 +178,59 @@ if (want("S2")) {
   await sql("delete from public.payment_links where invoice_id = $1", [pro.id]);
 }
 
+/* ================= S3: the parts screens (LPO cards, receiving, the step bar) ================= */
+if (want("S3")) {
+  console.log("\n== S3 parts screens");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  await sql("update public.part_items set availability = 'to_order', supplier = 'E2e Supplier', cost_aed = 100, order_status = 'to_order', delivery_date = (now() at time zone 'Asia/Dubai' + interval '2 days')::date where job_id = $1 and is_active", [jobId]);
+  // Parts send the LPO; the owner approves it.
+  const { browser: pb, page: pp } = await browserFor("parts", { viewport: { width: 1360, height: 1000 } });
+  await go(pp, `${base}/parts/${jobId}`);
+  await pp.locator("[data-send-lpo]").click();
+  const main = await until(async () => (await sql("select id from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0] ?? null, 30, 400);
+  check("S3: the main LPO waits for approval", !!main?.id);
+  const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1360, height: 1000 } });
+  await go(op, `${base}/parts/orders/${main.id}`);
+  await op.getByRole("button", { name: /^Approve$/ }).click();
+  const sup = await until(async () => (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'supplier' limit 1", [jobId]))[0] ?? null, 30, 400);
+  check("S3: the supplier LPO exists after approval", !!sup?.id);
+  await ob.close();
+  // Pending card: white with a black border. Then Ordered: the whole card light green with "Ordered ✓".
+  await go(pp, `${base}/parts/${jobId}`);
+  await until(async () => ((await pp.locator("[data-supplier-lpo]").count()) ? 1 : null), 20, 400);
+  check("S3: a pending LPO card is white with a black border", (await pp.locator("[data-supplier-lpo][data-ordered='0']").count()) === 1 && /border-ink bg-white/.test((await pp.locator("[data-supplier-lpo]").getAttribute("class")) ?? ""));
+  check("S3: the step bar shows LPO for vendor as the current step", (await pp.locator("[data-step='lpo'][data-state='current']").count()) === 1);
+  await shot(pp, "s3-lpo-pending");
+  await pp.locator("[data-lpo-ordered]").click();
+  await until(async () => ((await sql("select status from public.purchase_orders where id = $1", [sup.id]))[0]?.status === "ordered" ? 1 : null), 30, 400);
+  await go(pp, `${base}/parts/${jobId}`);
+  check("S3: the ordered card turns light green with Ordered ✓", (await pp.locator("[data-supplier-lpo][data-ordered='1']").count()) === 1 && /Ordered ✓/.test((await pp.locator("[data-lpo-state]").textContent()) ?? "") && /border-green bg-green-soft/.test((await pp.locator("[data-supplier-lpo]").getAttribute("class")) ?? ""));
+  check("S3: 'All ordered ✓' shows over the cards", (await pp.locator("[data-all-ordered]").count()) === 1);
+  check("S3: done steps stay green, Parts received is now current", (await pp.locator("[data-step='lpo'][data-state='done']").count()) === 1 && (await pp.locator("[data-step='received'][data-state='current']").count()) === 1);
+  await shot(pp, "s3-lpo-ordered");
+  // Receiving: tick, Mark received, the panel on the same page with stickers and the supplier invoice.
+  check("S3: a tick box per arriving line", (await pp.locator("[data-receive-row]").count()) >= 1);
+  await pp.locator("[data-mark-received]").click();
+  await until(async () => ((await pp.locator("[data-receive-confirm]").count()) ? 1 : null), 15, 300);
+  check("S3: the panel opens on the same page with a sticker switch per part", (await pp.locator("[data-sticker-row]").count()) >= 1 && /Stickers × \d+/.test((await pp.locator("[data-sticker-switch]").first().textContent()) ?? ""));
+  await pp.locator("[data-invoice-number]").fill("SI-E2E-77");
+  await pp.locator("[data-invoice-date]").fill("2026-10-18");
+  await pp.locator("[data-invoice-amount]").fill("105");
+  await shot(pp, "s3-receive-panel");
+  await pp.locator("[data-no-stickers]").click();
+  const rec = await until(async () => ((await sql("select count(*)::int as n from public.part_items where job_id = $1 and order_status = 'received'", [jobId]))[0]?.n ?? 0) > 0 ? 1 : null, 30, 400);
+  check("S3: the ticked parts are received", !!rec);
+  const inv = await until(async () => { const r = (await sql("select supplier_invoice_number, supplier_invoice_date::text as supplier_invoice_date, supplier_invoice_amount, supplier_invoice_status from public.purchase_orders where id = $1", [sup.id]))[0]; return r?.supplier_invoice_number ? r : null; }, 30, 400);
+  check("S3: the supplier invoice lands on the LPO", inv?.supplier_invoice_number === "SI-E2E-77" && String(inv?.supplier_invoice_date).startsWith("2026-10-18") && Number(inv?.supplier_invoice_amount) === 105 && inv?.supplier_invoice_status === "received", JSON.stringify(inv));
+  await until(async () => ((await pp.locator("[data-received-list]").count()) ? 1 : null), 20, 400);
+  await pp.locator("[data-received-list] summary").click();
+  check("S3: received lines stay visible, collapsed and light green", (await pp.locator("[data-received-line]").count()) >= 1);
+  check("S3: the step bar moves on (received done, handover current)", (await pp.locator("[data-step='received'][data-state='done']").count()) === 1 && (await pp.locator("[data-step='handover'][data-state='current']").count()) === 1);
+  check("S3: the ordered line in the card is green", (await pp.locator("[data-lpo-line][data-line-received='1']").count()) >= 1);
+  await shot(pp, "s3-received");
+  await pb.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

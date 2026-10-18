@@ -24,10 +24,11 @@ export async function generateMetadata({ params }: { params: Promise<{ jobId: st
  * the black strip. Opened the moment a part is ticked received (`?part=<id>&auto=1` prints at once). `?test=1`
  * prints one sample. Lives outside the app shell so the print is only the stickers.
  */
-export default async function PartLabelsPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ test?: string; part?: string; auto?: string; back?: string }> }) {
+export default async function PartLabelsPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ test?: string; part?: string; parts?: string; auto?: string; back?: string }> }) {
   const staff = await requirePermission("viewPurchaseOrders");
   const { jobId } = await params;
-  const { test, part, auto, back } = await searchParams;
+  const { test, part, parts: partsCsv, auto, back } = await searchParams;
+  const wanted = new Set((partsCsv ?? "").split(",").map((x) => x.trim()).filter(Boolean));
   const settings = await getSettings();
   const ss = stickerSettings(settings);
   const admin = createAdminClient();
@@ -43,7 +44,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
     labels.push({ key: "test-1", qr, name: "Front brake pads set (sample)", index: 1, count: 2, date: formatDate(new Date().toISOString()) });
   } else {
     const { data } = await admin.from("part_items").select(PART_FULL_SELECT + ", fitted_at").eq("job_id", jobId).eq("is_active", true).gt("received_qty", 0).order("created_at");
-    const parts = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), fitted_at: (r.fitted_at as string | null) ?? null })).filter((p) => !part || p.id === part).filter((p) => p.issue_status !== "confirmed" || !!part);
+    const parts = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), fitted_at: (r.fitted_at as string | null) ?? null })).filter((p) => (!part && !wanted.size) || p.id === part || wanted.has(p.id)).filter((p) => p.issue_status !== "confirmed" || !!part || wanted.has(p.id));
     for (const p of parts) {
       const code = await ensureQrLink("part", { jobId, refId: p.id }, staff.id);
       const qr = await qrDataUrl(qrUrl(code), 300);

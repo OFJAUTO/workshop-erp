@@ -59,15 +59,10 @@ export function partsSteps(i: PartsStepsInput): PartsStep[] {
         approved.length ? `${receivedCount} of ${approved.length} received` : null,
         approved.length ? `${handedCount} of ${approved.length} handed over` : null,
       ];
-  let currentFound = false;
+  // A done step stays green whatever happens around it; the current step is the FIRST unfinished one.
+  const firstUndone = done.findIndex((d) => !d);
   const keys: PartsStepKey[] = ["pricing", "approval", "lpo", "received", "handover"];
-  return keys.map((key, idx) => {
-    let state: PartsStep["state"];
-    if (done[idx] && !currentFound) state = "done";
-    else if (!currentFound) { currentFound = true; state = "current"; }
-    else state = "later";
-    return { key, label: STEP_LABELS[key], state, detail: details[idx] };
-  });
+  return keys.map((key, idx) => ({ key, label: STEP_LABELS[key], state: done[idx] ? "done" as const : idx === firstUndone ? "current" as const : "later" as const, detail: details[idx] }));
 }
 
 /** The parts of a job in the shape the rule reads, from any row that carries the usual columns. */

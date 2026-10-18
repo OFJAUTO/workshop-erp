@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { ReceivePanel } from "./ReceivePanel";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import Link from "next/link";
@@ -23,7 +24,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingDone, reopenPricing } from "../actions";
-import { emailSupplierLpo, markSupplierOrdered, receivePartAction, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { emailSupplierLpo, markSupplierOrdered, receiveTicked, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
@@ -133,6 +134,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const stepParts = parts.map((p) => stepPartOf({ ...p, received_qty: Number(rawById.get(p.id)?.received_qty) || 0, issue_status: String(rawById.get(p.id)?.issue_status ?? "") || null, po_id: (rawById.get(p.id)?.po_id as string | null) ?? null, return_status: String(rawById.get(p.id)?.return_status ?? "none") }));
   const steps = partsSteps({ jobStatus: job.status, pricingDoneAt: job.parts_pricing_done_at, pricingReopenedAt: job.parts_pricing_reopened_at, parts: stepParts.map((sp, i) => ({ ...sp, from_stock: sp.from_stock || lpos.fromStock.some((f) => f.id === parts[i].id) })), mainLpoStatus: lpos.main?.status ?? null, toOrder: lpos.toOrder.length });
   const toReceive = parts.filter((p) => ["ordered", "partly_received"].includes(String(p.order_status)));
+  const receivedParts = parts.filter((p) => String(p.order_status) === "received");
 
   return (
     <>
@@ -185,7 +187,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
 
       {lpos.suppliers.length ? (
         <section id="lpos" className="flex flex-col gap-3" data-supplier-lpos>
-          <SectionLabel right={`${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
+          <SectionLabel right={lpos.suppliers.every((s) => !["approved", "pending_approval"].includes(s.po.status)) ? <span className="font-bold text-green" data-all-ordered>All ordered ✓</span> : `${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
           {lpos.suppliers.map((s) => (
             <SupplierLpoCard key={s.po.id} po={toView(s)} vin={v?.vin ?? null} canManage={canOrder} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={jobId} />
           ))}
@@ -198,18 +200,11 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <LinkButton href={`/parts/labels/${jobId}`} size="lg" className="ml-auto">Print labels ({labelsToPrint.length})</LinkButton>
         </Card>
       ) : null}
-      {toReceive.length ? (
+      {toReceive.length || receivedParts.length ? (
         <Card id="received" className="flex flex-col gap-2" data-received-card>
           <SectionLabel right={steps.find((s) => s.key === "received")?.detail ?? undefined}>Parts received</SectionLabel>
-          <p className="text-xs text-muted">Tick each part as it arrives from the supplier. A partial delivery, a wrong or a damaged part: use the LPO page.</p>
-          <ul className="divide-y divide-line text-sm">
-            {toReceive.map((p) => (
-              <li key={p.id} className="py-1.5 flex items-center gap-2" data-receive-row={p.id}>
-                <span className="flex-1 min-w-0 font-semibold">{p.description}<span className="font-normal text-muted"> · × {Number(p.confirmed_quantity ?? p.quantity) || 1}{p.supplier ? ` · ${p.supplier}` : ""}{orderLabel(p) ? ` · ${orderLabel(p)}` : ""}</span></span>
-                {canOrder ? <form action={receivePartAction.bind(null, jobId, p.id)}><Button type="submit" tone="secondary" size="md" data-receive-part={p.id}>Received</Button></form> : null}
-              </li>
-            ))}
-          </ul>
+          {toReceive.length ? <p className="text-xs text-muted">Tick what arrived, press Mark received, choose the stickers and type the supplier invoice. A wrong or damaged part: use the LPO page.</p> : null}
+          <ReceivePanel jobId={jobId} canAct={!!canOrder} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p) }))} received={receivedParts.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1 }))} />
         </Card>
       ) : null}
 

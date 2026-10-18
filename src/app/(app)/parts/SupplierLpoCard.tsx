@@ -33,18 +33,18 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
   const sentLine = po.emailed_at ? `Sent to supplier by email ${formatDateTime(po.emailed_at)}${po.emailed_to ? ` (${po.emailed_to})` : ""}` : po.sent_at ? `Sent to supplier ${formatDateTime(po.sent_at)}` : null;
 
   return (
-    <div className="rounded-card border border-line bg-white p-4 flex flex-col gap-3" data-supplier-lpo={po.number}>
+    <div className={`rounded-card border-2 p-4 flex flex-col gap-3 ${ordered ? "border-green bg-green-soft" : "border-ink bg-white"}`} data-supplier-lpo={po.number} data-ordered={ordered ? "1" : "0"}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-base font-extrabold uppercase tracking-[0.04em]">{po.supplier_name} LPO</span>
         <span className="text-sm font-semibold text-muted">{po.number}</span>
         <span className={`ml-auto inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-bold ${ordered ? "bg-green-soft text-green" : "bg-chip text-muted"}`} data-lpo-state>
-          {po.status === "received" ? "Received" : po.status === "partly_received" ? "Partly received" : ordered ? `Ordered ${po.ordered_at ? formatDateTime(po.ordered_at) : ""}` : "Approved, not ordered yet"}
+          {po.status === "received" ? "Received ✓" : po.status === "partly_received" ? "Partly received" : ordered ? `Ordered ✓ ${po.ordered_at ? formatDateTime(po.ordered_at) : ""}` : "Approved, not ordered yet"}
         </span>
       </div>
       {sentLine ? <span className="text-xs font-semibold text-green" data-lpo-sent>{sentLine}</span> : null}
       <ul className="divide-y divide-line text-sm">
         {po.lines.map((l) => (
-          <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-2" data-lpo-line>
+          <li key={l.id} className={`py-1.5 flex flex-wrap items-center gap-2 ${l.received_qty >= l.quantity ? "rounded-control bg-green-soft px-2 text-green" : ""}`} data-lpo-line data-line-received={l.received_qty >= l.quantity ? "1" : "0"}>
             {l.part_number ? <span className="font-mono text-xs font-semibold">{l.part_number}</span> : null}
             <span className="font-semibold">{l.description}</span>
             <span className="text-muted">× {l.quantity} · AED {l.unit_cost.toFixed(2)}</span>

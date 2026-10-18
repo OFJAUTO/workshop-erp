@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
-import { receivePartInFull,createMainLpo, orderSupplierLpo, setPartExpected } from "@/lib/lpo";
+import { receivePartInFull, createMainLpo, orderSupplierLpo, setPartExpected } from "@/lib/lpo";
+import { blankToNull } from "@/lib/format";
 import { gmailConfigured, sendGmail } from "@/lib/gmail";
 import { notifyStaff } from "@/lib/notifications";
 import { loadPurchaseOrder } from "@/lib/parts-data";
@@ -122,4 +123,34 @@ export async function emailSupplierLpo(poId: string): Promise<{ error?: string; 
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "lpo_sent", note: `${po.number} emailed to ${to} by ${staff.display_name}`, created_by: staff.id });
   refresh(po.job_id, poId);
   return { message: `Sent to ${to}.` };
+}
+
+/**
+ * "Mark N received" with the stickers and the supplier invoice, all from the parts page: each ticked part is
+ * received in full; the invoice number, date and amount land on the parts' supplier LPOs (empty means to follow).
+ */
+export async function receiveTicked(jobId: string, formData: FormData): Promise<{ error?: string; ok?: boolean; message?: string }> {
+  const staff = await requirePermission("managePurchaseOrders");
+  if (staff.viewingAs) return { error: "Viewing only." };
+  const ids = formData.getAll("part").map(String).filter(Boolean);
+  if (!ids.length) return { error: "Tick at least one part." };
+  for (const id of ids) {
+    const r = await receivePartInFull(id, { id: staff.id, display_name: staff.display_name });
+    if (r.error) return { error: r.error };
+  }
+  const num = blankToNull(formData.get("invoice_number"));
+  const date = blankToNull(formData.get("invoice_date"));
+  const amount = Number(String(formData.get("invoice_amount") ?? "").replace(/[^\d.]/g, "")) || null;
+  if (num || date || amount) {
+    const admin = createAdminClient();
+    const { data: poRows } = await admin.from("part_items").select("po_id").in("id", ids).not("po_id", "is", null);
+    const poIds = Array.from(new Set((poRows ?? []).map((r) => r.po_id as string)));
+    for (const poId of poIds) {
+      await admin.from("purchase_orders").update({ supplier_invoice_number: num, supplier_invoice_date: date, supplier_invoice_amount: amount, supplier_invoice_status: "received", supplier_invoice_at: new Date().toISOString(), supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
+    }
+  }
+  revalidatePath(`/parts/${jobId}`);
+  revalidatePath("/parts");
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.` };
 }
