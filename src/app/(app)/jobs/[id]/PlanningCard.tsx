@@ -1,4 +1,5 @@
 import { Avatar, Button, Card, Input, LinkButton, SectionLabel } from "@/components/ui";
+import { CopyText } from "@/components/CopyText";
 import { formatDate } from "@/lib/format";
 import { formatWait, workingMinutesSince, type JobStatus } from "@/lib/jobs";
 import type { Planning } from "@/lib/planning";
@@ -89,7 +90,10 @@ export function PlanningCard({ jobId, status, plan, role, viewingAs, wt, technic
         </form>
       ) : null}
       {promisedText && whatsapp && customer?.phoneDigits && waMessage ? (
-        <a href={`https://wa.me/${customer.phoneDigits}?text=${encodeURIComponent(waMessage)}`} target="_blank" rel="noreferrer" className="self-start inline-flex min-h-11 items-center rounded-control border border-ink bg-white px-4 text-sm font-bold">Tell the customer on WhatsApp</a>
+        <div className="flex flex-wrap gap-2">
+          <a href={`https://wa.me/${customer.phoneDigits}?text=${encodeURIComponent(waMessage)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-ink bg-white px-4 text-sm font-bold">Tell the customer on WhatsApp</a>
+          <CopyText text={waMessage} />
+        </div>
       ) : null}
       {plan.technicians.length ? <p className="text-xs text-muted">On the car: {plan.technicians.map((t) => `${t.display_name}${t.left_at ? " (left)" : t.done_at ? " (done)" : ""}`).join(", ")}</p> : null}
     </Card>

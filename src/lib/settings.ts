@@ -31,10 +31,10 @@ const DEFAULTS = {
   label_height_mm: 30,
   qc_general_checks: ["No warning lights on the dashboard", "Fluid levels correct", "No leaks under the car", "Wheel bolts torqued", "Tyre pressures set", "Undertrays, covers and clips refitted", "Battery terminals tight", "No tools, rags or old parts left in the car", "Interior clean, no grease marks", "Protective covers removed", "Service indicator reset where a service was done", "Dash cam reconnected if fitted", "Old parts kept for the customer if requested", "Road test after repair"] as string[],
   followup_days: 3,
-  whatsapp_ready_template: "[make model] ([plate]) is ready. Your proforma and the amount due are here:\n[link]\nOnce payment is received, your car is ready to collect.",
-  whatsapp_invoice_template: "Thank you for your payment. The tax invoice for [make model] ([plate]) is here:\n[link]",
+  whatsapp_ready_template: "Dear [name],\n\nYour *[make model]* ([plate]) is ready.\n\nThe proforma and the amount due are here:\n[link]\n\nOnce payment is received, your car is ready to collect.\n\nOFJ Automotive",
+  whatsapp_invoice_template: "Dear [name],\n\nThank you for your payment.\n\nThe tax invoice for your *[make model]* ([plate]) is here:\n[link]\n\nOFJ Automotive",
   whatsapp_followup_template:
-    "Dear [name], thank you for choosing OFJ Automotive for your [make model] ([plate]). We hope everything is running well. If anything needs our attention, please let us know.\nThank you, [advisor], OFJ Automotive",
+    "Dear [name],\n\nThank you for choosing OFJ Automotive for your *[make model]* ([plate]). We hope everything is running well.\n\nIf anything needs our attention, please let us know.\n\nOFJ Automotive",
   /** Hours a sent proforma may wait unpaid before the job card turns amber and the owner is told once. */
   payment_waiting_hours: 24,
   /** Supplier LPOs by email go out from this Google Workspace mailbox (the service account must be allowed to send as it). */
@@ -137,7 +137,7 @@ const DEFAULTS = {
   big_job_tags: ["Engine removal", "Transmission removal", "Subframe down", "Special tool", "Outside work"] as string[],
   labour_hours_memory: {} as Record<string, number>,
   inbound_scan_token: "",
-  whatsapp_on_the_way_template: "Dear [name], your [car] is now on its way to you on our recovery truck [truck plate]. Driver: [driver name], [driver mobile]. For anything else, call OFJ Automotive on +971 4 330 3113.",
+  whatsapp_on_the_way_template: "Dear [name],\n\nYour *[car]* is on its way to you.\n\n*Recovery truck:* [truck plate]\n*Driver:* [driver name], [driver mobile]\n\nFor anything else, call OFJ Automotive on +971 4 330 3113.",
   workshop_location_pin: "",
   /** Written by the mailbox reader: when it last ran and what came in. */
   scans_mailbox_last_check: {} as Record<string, unknown>,
@@ -208,30 +208,30 @@ const DEFAULTS = {
   deposit_percent: 50,
   /** What the customer gets for a deposit: "receipt" (the usual) or "tax_invoice" (a tax invoice for the advance as well). */
   deposit_document: "receipt" as "receipt" | "tax_invoice",
-  whatsapp_deposit_receipt_template: "Thank you for your deposit of AED [amount] for [make model] ([plate]). Your receipt is here:\n[link]",
+  whatsapp_deposit_receipt_template: "Dear [name],\n\nThank you for your deposit of *AED [amount]* for the *[make model]* ([plate]).\n\nYour receipt is here:\n[link]\n\nOFJ Automotive",
   quote_validity_days: 7,
   quote_owner_approval_above_aed: 0,
   parts_pricing_target_hours: 4,
   quote_send_target_hours: 4,
   estimate_followup_days: 2,
-  whatsapp_quote_template: "Your quotation for [make model] ([plate]) is ready:\n[link]",
-  whatsapp_quote_revised_template: "Your quotation for [make model] ([plate]) has been updated:\n[link]",
+  whatsapp_quote_template: "Dear [name],\n\nYour quotation for the *[make model]* ([plate]) is ready:\n[link]\n\nAny questions, just reply here.\n\nOFJ Automotive",
+  whatsapp_quote_revised_template: "Dear [name],\n\nYour quotation for the *[make model]* ([plate]) has been updated:\n[link]\n\nAny questions, just reply here.\n\nOFJ Automotive",
   damage_note_chips: ["Scratches", "Dents", "Stone chips", "Paint peeling", "PPF peeling", "PPF scratched", "Cracked bumper", "Kerbed wheels", "Windscreen chip", "Broken light"] as string[],
-  whatsapp_estimate_template: "Our estimate for [make model] ([plate]) is here:\n[link]\nThe final price is confirmed once the car is with us.",
-  whatsapp_report_template: "The inspection of [make model] ([plate]) is complete. The report is here:\n[link]",
+  whatsapp_estimate_template: "Dear [name],\n\nOur estimate for the *[make model]* ([plate]) is here:\n[link]\n\nThe final price is confirmed once the car is with us.\n\nOFJ Automotive",
+  whatsapp_report_template: "Dear [name],\n\nThe inspection of your *[make model]* ([plate]) is complete.\n\nThe report is here:\n[link]\n\nOFJ Automotive",
   inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],
   appointment_reminder_hours_before: 1,
   appointment_evening_reminder_hour: 18,
   appointment_missed_after_minutes: 30,
   whatsapp_reminder_car_drop:
-    "Dear [name], a reminder that your [car] is booked to be dropped at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
+    "Dear [name],\n\nA reminder that your *[car]* is booked to be dropped at OFJ Automotive tomorrow:\n*[date] at [time]*\nFor: [reason]\n\nPlease reply to confirm.\n\nOFJ Automotive",
   whatsapp_reminder_we_collect:
-    "Dear [name], a reminder that OFJ Automotive will collect your [car] tomorrow, [date] at [time], from [address], for [reason]. Please have the keys ready. Thank you, [advisor], OFJ Automotive",
+    "Dear [name],\n\nA reminder that OFJ Automotive will collect your *[car]* tomorrow:\n*[date] at [time]*\nFrom: [address]\nFor: [reason]\n\nPlease have the keys ready.\n\nOFJ Automotive",
   whatsapp_reminder_customer_collects:
-    "Dear [name], your [car] is ready for collection at OFJ Automotive tomorrow, [date] at [time]. Thank you, [advisor], OFJ Automotive",
+    "Dear [name],\n\nYour *[car]* is ready for collection at OFJ Automotive tomorrow:\n*[date] at [time]*\n\nOFJ Automotive",
   whatsapp_reminder_template:
-    "Dear [name], a reminder of your appointment at OFJ Automotive tomorrow, [date] at [time], for [reason]. Please reply to confirm. Thank you, [advisor], OFJ Automotive",
-  whatsapp_approval_template: "[make model] ([plate]) has been received at OFJ Automotive. Please review the check-in and approve the inspection:\n[link]",
+    "Dear [name],\n\nA reminder of your appointment at OFJ Automotive tomorrow:\n*[date] at [time]*\nFor: [reason]\n\nPlease reply to confirm.\n\nOFJ Automotive",
+  whatsapp_approval_template: "Dear [name],\n\nYour *[make model]* ([plate]) has been received at OFJ Automotive.\n\nPlease review the check-in and approve the inspection:\n[link]\n\nOFJ Automotive",
   // The bodyshop (14 October 2026): the PPF warranty and care texts, the old-film note, the three customer updates, the final check.
   ppf_brand_name: "OFJ PPF",
   ppf_warranty_years: 10,
@@ -239,10 +239,10 @@ const DEFAULTS = {
   ppf_care_text: "Wait 7 days before the first wash. Hand wash or touchless only; no automatic brushes. Use pH-neutral shampoo and microfibre only. Remove bird droppings, tree sap and insects as soon as you can. No wax or sealant with petroleum distillates; a PPF-safe sealant is fine. Keep pressure washers 50 cm away and off the film edges.",
   ppf_removal_note: "We take great care removing old film, but paint underneath can occasionally lift.",
   bodyshop_final_check_days: 10,
-  whatsapp_bodyshop_arrived_template: "[make model] ([plate]) has arrived at OFJ Automotive and is in good hands:\n[link]",
-  whatsapp_bodyshop_film_template: "Film is going on [make model] ([plate]):\n[link]",
-  whatsapp_bodyshop_ready_template: "[make model] ([plate]) is ready for collection. Your handover page, warranty and care instructions:\n[link]",
-  whatsapp_final_check_template: "Dear [name], a reminder of the final check of [make model] ([plate]) at OFJ Automotive tomorrow, [date] at [time]. Thank you, [advisor], OFJ Automotive",
+  whatsapp_bodyshop_arrived_template: "Dear [name],\n\nYour *[make model]* ([plate]) has arrived at OFJ Automotive and is in good hands.\n\nFollow the progress here:\n[link]\n\nOFJ Automotive",
+  whatsapp_bodyshop_film_template: "Dear [name],\n\nFilm is going on your *[make model]* ([plate]).\n\nSee the progress here:\n[link]\n\nOFJ Automotive",
+  whatsapp_bodyshop_ready_template: "Dear [name],\n\nYour *[make model]* ([plate]) is ready for collection.\n\nYour handover page, warranty and care instructions:\n[link]\n\nOFJ Automotive",
+  whatsapp_final_check_template: "Dear [name],\n\nA reminder of the final check of your *[make model]* ([plate]) at OFJ Automotive tomorrow:\n*[date] at [time]*\n\nOFJ Automotive",
 };
 
 export type Settings = typeof DEFAULTS;

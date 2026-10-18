@@ -126,6 +126,7 @@ const TEXT_KEYS = [
   "document_currency",
   "labour_rate_bodyshop_aed",
   "whatsapp_ready_template",
+  "whatsapp_on_the_way_template",
   "whatsapp_followup_template",
   "dangerous_customer_text",
   "dangerous_customer_text_ar",

@@ -9,7 +9,9 @@ import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
-import { getSiteUrl } from "@/lib/site";
+import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
+import { shortFor } from "@/lib/short-links";
+import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { reviseQuotation } from "@/app/(app)/quotes/actions";
@@ -37,7 +39,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const services = await loadServices(staff.id);
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_estimate_template
-    .replaceAll("[name]", customerName)
+    .replaceAll("[name]", greetingNameOf(customer))
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
@@ -119,6 +121,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         canSend={!staff.viewingAs}
         isOwner={isOwner}
         siteUrl={site}
+        shortLink={q.token ? await shortFor(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : null}
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={false}

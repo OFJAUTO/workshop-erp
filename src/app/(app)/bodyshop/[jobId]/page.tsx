@@ -14,7 +14,9 @@ import { approvedQuotations } from "@/lib/quote-data";
 import { aed } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { getSiteUrl } from "@/lib/site";
+import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
+import { shortFor } from "@/lib/short-links";
+import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { JOB_FILE_SELECT, signJobFiles } from "@/lib/work-data";
@@ -72,13 +74,15 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const customerName = data.customer?.company_name ?? data.customer?.full_name ?? "Customer";
   const carName = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   const phoneDigits = (data.customer?.phone ?? "").replace(/[^\d]/g, "");
-  const fill = (tpl: string, link: string) => tpl.replaceAll("[make model]", [v?.make?.name, v?.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", v ? formatPlate(v) : "").replaceAll("[name]", customerName).replaceAll("[link]", link);
-  const updateStates: UpdateState[] = (["arrived", "film", "ready"] as const).map((kind) => {
+  const fill = (tpl: string, link: string) => tpl.replaceAll("[make model]", [v?.make?.name, v?.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", v ? formatPlate(v) : "").replaceAll("[name]", greetingNameOf(data.customer)).replaceAll("[link]", link);
+  const updateStates: UpdateState[] = [];
+  for (const kind of ["arrived", "film", "ready"] as const) {
     const u = updates.find((x) => x.kind === kind);
-    const link = kind === "ready" ? (job.bodyshop_handover_token ? `${site}/handover/${job.bodyshop_handover_token}` : null) : u ? `${site}/progress/${u.token}` : null;
+    const long = kind === "ready" ? (job.bodyshop_handover_token ? `${PRODUCTION_SITE_URL}/handover/${job.bodyshop_handover_token}` : null) : u ? `${PRODUCTION_SITE_URL}/progress/${u.token}` : null;
+    const link = long ? await shortFor(long) : null;
     const tpl = String(kind === "arrived" ? settings.whatsapp_bodyshop_arrived_template : kind === "film" ? settings.whatsapp_bodyshop_film_template : settings.whatsapp_bodyshop_ready_template);
-    return { kind, title: kind === "arrived" ? "Your car has arrived" : kind === "film" ? "Film is going on" : "Your car is ready for collection", photoId: u?.photo_id ?? null, token: u?.token ?? null, sentAt: u?.sent_at ?? null, message: link ? fill(tpl, link) : null };
-  });
+    updateStates.push({ kind, title: kind === "arrived" ? "Your car has arrived" : kind === "film" ? "Film is going on" : "Your car is ready for collection", photoId: u?.photo_id ?? null, token: u?.token ?? null, sentAt: u?.sent_at ?? null, message: link ? fill(tpl, link) : null });
+  }
   const booked = job.status === "booked";
   const statusLabel = booked ? "Booked, not arrived" : job.status === "in_work" ? "In the bodyshop" : job.status === "ready" || job.status === "pending_payment" ? "Ready, waiting for the handover" : job.status === "closed" ? "Handed over" : job.status.replaceAll("_", " ");
   const openClockBy = new Set(clockings.filter((c) => !c.ended_at).map((c) => c.staff_id));

@@ -3,6 +3,8 @@
  * the driver's message and the schedule words. Pure rules; the server side lives in src/lib/delivery.ts.
  */
 
+import { cleanCompanyName, formatPhone } from "./messages";
+
 const MAP_HOSTS = ["google.com", "www.google.com", "maps.google.com", "goo.gl", "maps.app.goo.gl", "maps.apple.com", "wa.me"];
 
 /** A pasted customer pin: a Google (or Apple) Maps link, long or short. */
@@ -50,15 +52,24 @@ export function scheduleWords(date: string | null | undefined, slot: string | nu
   return [day, t ? t.toLowerCase() === t ? t : t : ""].filter(Boolean).join(", ") || "time to be agreed";
 }
 
-/** The plain message to the driver, the customer's pin forwarded as it is, his one-button link at the end. */
-export function driverMessage(t: { plate: string; car: string; kind: "delivery" | "pickup"; date: string | null; slot: string | null; customerName: string | null; customerPhone: string | null; locationUrl: string | null; locationDetails: string | null }, link: string): string {
+/** The driver's message: a bold heading, the car, the customer with a tidy mobile, the pin and his one-button link, both short. */
+export function driverMessage(t: { plate: string; car: string; kind: "delivery" | "pickup"; date: string | null; slot: string | null; customerName: string | null; customerPhone: string | null; locationUrl: string | null; locationDetails: string | null }, links: { drive: string; map: string | null }): string {
+  const d = t.date ? new Date(`${t.date}T12:00:00Z`) : null;
+  const day = d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }) : "";
+  const slot = t.slot ? (SLOT_LABELS[t.slot] ?? t.slot) : "";
+  const heading = [t.kind === "pickup" ? "Pick-up" : "Delivery", day, slot].filter(Boolean).join(" · ").toUpperCase();
+  const where = [t.locationDetails, links.map ?? (links.map === null && t.locationUrl ? t.locationUrl : null)].filter(Boolean).join(" ");
   return [
-    `${t.plate} · ${t.car} · ${scheduleWords(t.date, t.slot)}`,
-    `Customer: ${[t.customerName, t.customerPhone].filter(Boolean).join(", ") || "-"}`,
-    t.locationUrl ? `Location: ${t.locationUrl}` : null,
-    t.locationDetails || null,
-    `When ${t.kind === "pickup" ? "loaded" : "delivered"}, press here: ${link}`,
-  ].filter(Boolean).join("\n");
+    `*${heading}*`,
+    t.plate || null,
+    t.car || null,
+    "",
+    `*Customer:* ${cleanCompanyName(t.customerName) || "-"}`,
+    `*Mobile:* ${formatPhone(t.customerPhone) || "-"}`,
+    where ? `*Location:* ${where}` : null,
+    "",
+    `*When ${t.kind === "pickup" ? "loaded" : "delivered"}, tap:* ${links.drive}`,
+  ].filter((x) => x !== null).join("\n");
 }
 
 /** The owner's template with the blanks filled; the advisor may still tweak the text for one customer. */
@@ -68,7 +79,7 @@ export function onTheWayMessage(template: string, f: { name: string; car: string
     .replaceAll("[car]", f.car)
     .replaceAll("[truck plate]", f.truckPlate || "-")
     .replaceAll("[driver name]", f.driverName || "-")
-    .replaceAll("[driver mobile]", f.driverMobile || "-");
+    .replaceAll("[driver mobile]", formatPhone(f.driverMobile) || "-");
 }
 
 /** "Usual for this distance: AED X–Y" from our own history: trips within ±25% of the distance, at least three of them. */

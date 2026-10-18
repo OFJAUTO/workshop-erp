@@ -19,7 +19,7 @@ import { askReleaseApproval, collectItems, gateOutJob } from "../../gate-out-act
 import { advisorMarkDelivered } from "../../delivery-actions";
 import { activeDeliveryTrip, driverMessageFor, loadDrivers, lastPinOf } from "@/lib/delivery";
 import { onTheWayMessage } from "@/lib/recovery";
-import { getSiteUrl } from "@/lib/site";
+import { greetingNameOf } from "@/lib/messages";
 import { DeliveryPanel } from "./DeliveryPanel";
 import { loadJobItems } from "@/lib/loose-items";
 import { CollectItemsForm } from "./CollectItemsForm";
@@ -53,10 +53,9 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at").eq("id", id).maybeSingle();
   // The delivery pieces: the saved drivers, the returning customer's last pin, and the live trip once stamped out.
   const [drivers, lastPin, trip] = await Promise.all([loadDrivers(), lastPinOf(job.customer_id), activeDeliveryTrip(id)]);
-  const site = await getSiteUrl();
-  const driverText = trip ? await driverMessageFor(trip, site) : "";
+  const driverText = trip ? await driverMessageFor(trip) : "";
   const { data: custRow } = job.customer_id ? await createAdminClient().from("customers").select("full_name, company_name, phone").eq("id", job.customer_id).maybeSingle() : { data: null };
-  const customerText = trip ? onTheWayMessage(String(settings.whatsapp_on_the_way_template ?? ""), { name: custRow?.company_name ?? custRow?.full_name ?? "customer", car: vehicleTitle(card.vehicle), truckPlate: trip.truck_plate ?? "", driverName: trip.driver_name ?? "", driverMobile: trip.driver_phone ?? "" }) : "";
+  const customerText = trip ? onTheWayMessage(String(settings.whatsapp_on_the_way_template ?? ""), { name: greetingNameOf(custRow), car: vehicleTitle(card.vehicle), truckPlate: trip.truck_plate ?? "", driverName: trip.driver_name ?? "", driverMobile: trip.driver_phone ?? "" }) : "";
   const declinedOut = !!declinedRow?.declined_out_at;
   const blocked = ((bal.state === "no_invoice" && !declinedOut) || bal.balance > 0) && !(bal.state !== "no_invoice" && bal.balance > 0 && creditDays > 0);
   // Bodyshop: the sign-off state, and the final check visit for a PPF car (7 to 14 days, the Settings default).

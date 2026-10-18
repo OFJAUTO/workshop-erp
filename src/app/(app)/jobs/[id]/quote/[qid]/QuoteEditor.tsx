@@ -218,6 +218,7 @@ export function QuoteEditor({
   showProfit,
   canSend,
   siteUrl,
+  shortLink = null,
   messageTemplate,
   phoneDigits,
   fromEstimate,
@@ -257,6 +258,8 @@ export function QuoteEditor({
   showProfit: boolean;
   canSend: boolean;
   siteUrl: string;
+  /** The short address for the quotation link (erp.ofjauto.com/m/xxxx). */
+  shortLink?: string | null;
   messageTemplate: string;
   phoneDigits: string;
   fromEstimate: boolean;
@@ -1441,7 +1444,7 @@ export function QuoteEditor({
                   {pending ? "Checking…" : isQuotation ? "Quotation complete" : "Estimate complete"}
                 </Button>
               ) : null}
-              {!sent && completed && canSend ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
+              {!sent && completed && canSend ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
               {canSend && sent && onRevise ? <form action={onRevise}><Button type="submit" tone="secondary" size="md" data-revise-bar>Revise quotation</Button></form> : null}
               {canSend && sent && !onRevise && onAskRevise ? (
                 <span className="inline-flex flex-wrap items-center gap-2" data-ask-revise-bar>
@@ -1455,7 +1458,7 @@ export function QuoteEditor({
                 </span>
               ) : null}
               {canSend && sent && onRevise && revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
-              {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} again /> : null}
+              {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} again /> : null}
             </span>
           </div>
         </div>

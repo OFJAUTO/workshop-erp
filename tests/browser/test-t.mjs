@@ -162,7 +162,7 @@ await section("2 deposit gate", async () => {
   check("2: the money page lists the deposit with Receipt and Send receipt", (await row.count()) === 1 && (await row.locator(`[data-send-receipt='${pay?.number}']`).count()) === 1);
   await row.locator(`[data-send-receipt='${pay?.number}']`).click();
   const dlg = await until(async () => { const t = await op.locator("[role='dialog']").first().textContent().catch(() => null); return t && /receipt/i.test(t) ? t : null; }, 20, 300);
-  check("2: Send receipt opens the message with the receipt link and Share PDF", !!dlg && /api\/pdf\/receipt\//.test(dlg) && /Share PDF/.test(dlg), (dlg ?? "").slice(0, 200));
+  check("2: Send receipt opens the message with the receipt link (short) and Share PDF", !!dlg && /erp\.ofjauto\.com\/m\/[A-Za-z0-9]{4,}/.test(dlg) && /Share PDF/.test(dlg), (dlg ?? "").slice(0, 200));
   await op.keyboard.press("Escape");
   // The receipt PDF: "Advance payment", the quotation, "Balance remaining"; the customer opens it with the quotation's token.
   const rcpt = await fetch(`${base}/api/pdf/receipt/${pay.id}`, { headers: { cookie: await cookieHeader("owner") } });

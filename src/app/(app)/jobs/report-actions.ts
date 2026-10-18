@@ -1,13 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { shortFor } from "@/lib/short-links";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { getCurrentStaff } from "@/lib/auth";
 import { loadInspection } from "@/lib/inspection-data";
 import { newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export type ReportLinkState = { error?: string; ok?: boolean; id?: string; token?: string };
+export type ReportLinkState = { error?: string; ok?: boolean; id?: string; token?: string; /** The short address for the message (erp.ofjauto.com/m/xxxx). */ short?: string };
 
 /**
  * Owner or advisor creates the customer's link to the approved inspection report.
@@ -34,7 +36,7 @@ export async function createReportLink(jobId: string, _prev: ReportLinkState, _f
     await admin.from("job_events").insert({ job_id: jobId, event_type: "report_link_created", note: `Inspection report link created by ${staff.display_name}`, created_by: staff.id });
   }
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, id: row.id, token: row.token };
+  return { ok: true, id: row.id, token: row.token, short: await shortFor(`${PRODUCTION_SITE_URL}/report/${row.token}`) };
 }
 
 /** Records that the link went to the customer (Open WhatsApp or Copy link). */

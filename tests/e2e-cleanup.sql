@@ -145,3 +145,13 @@ delete from public.stock_items where name ilike 'e2e %';
 delete from public.suppliers where name ilike 'e2e %' and not exists (select 1 from public.purchase_orders where supplier_id = suppliers.id);
 set session_replication_role = default;
 select count(*) as left_over_stock from public.stock_items where name ilike 'e2e %';
+
+-- Short links left behind by tests: anything marked e2e, and anything whose target row is gone.
+delete from public.short_links where url ilike '%e2e%';
+delete from public.short_links sl where sl.url like '%/quote/%' and not exists (select 1 from public.quotations q where q.token is not null and sl.url = 'https://erp.ofjauto.com/quote/' || q.token);
+delete from public.short_links sl where sl.url like '%/proforma/%' and not exists (select 1 from public.invoices i where i.token is not null and sl.url = 'https://erp.ofjauto.com/proforma/' || i.token);
+delete from public.short_links sl where sl.url like 'https://erp.ofjauto.com/invoice/%' and not exists (select 1 from public.invoices i where i.token is not null and sl.url = 'https://erp.ofjauto.com/invoice/' || i.token);
+delete from public.short_links sl where sl.url like '%/report/%' and not exists (select 1 from public.report_links r where sl.url = 'https://erp.ofjauto.com/report/' || r.token);
+delete from public.short_links sl where sl.url like '%/approve/%' and not exists (select 1 from public.approval_requests a where sl.url = 'https://erp.ofjauto.com/approve/' || a.token);
+delete from public.short_links sl where sl.url like '%/drive/%' and not exists (select 1 from public.recovery_trips t where t.token is not null and sl.url = 'https://erp.ofjauto.com/drive/' || t.token);
+delete from public.short_links sl where sl.url like '%/api/pdf/receipt/%' and not exists (select 1 from public.payments p where sl.url like '%/api/pdf/receipt/' || p.id || '%');

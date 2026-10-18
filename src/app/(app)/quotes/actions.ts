@@ -15,6 +15,8 @@ import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { aed, isUnchosen, marginToneOf, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { shortFor } from "@/lib/short-links";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -317,7 +319,7 @@ export async function urgentOnlyVersion(quotationId: string) {
   await makeVersion(quotationId, true);
 }
 
-export type SendQuoteState = { error?: string; ok?: boolean; token?: string; pendingOwner?: string[]; /** A free comeback: approved on sending, nothing goes to the customer. */ warranty?: boolean };
+export type SendQuoteState = { error?: string; ok?: boolean; token?: string; /** The short address for the message (erp.ofjauto.com/m/xxxx). */ short?: string; pendingOwner?: string[]; /** A free comeback: approved on sending, nothing goes to the customer. */ warranty?: boolean };
 
 /** "Send quotation": checks everything, asks the owner when needed, otherwise makes the link for the centre window. */
 export async function sendQuotation(quotationId: string, _prev: SendQuoteState, _fd?: FormData): Promise<SendQuoteState> {
@@ -368,7 +370,7 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
     return { ok: true, token, warranty: true };
   }
   refresh(q.job_id, q.id);
-  return { ok: true, token };
+  return { ok: true, token, short: await shortFor(`${PRODUCTION_SITE_URL}/quote/${token}`) };
 }
 
 /** Records that the link went to the customer; the quotation is now "sent" and the job waits for the customer. */
@@ -454,7 +456,7 @@ export async function resendQuotation(quotationId: string): Promise<SendQuoteSta
   await admin.from("quotations").update({ status: "sent", token, valid_until: new Date(Date.now() + (Number(q.validity_days) || 7) * 86400000).toISOString(), sent_at: new Date().toISOString(), sent_by: staff.id, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_resent", `${q.number} re-sent by ${staff.display_name}`);
   refresh(q.job_id, q.id);
-  return { ok: true, token };
+  return { ok: true, token, short: await shortFor(`${PRODUCTION_SITE_URL}/quote/${token}`) };
 }
 
 /** The checks before completing or sending: the findings not yet quoted and the markups to confirm are counted in. */

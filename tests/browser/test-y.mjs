@@ -215,7 +215,7 @@ if (want("D")) {
   await go(op, `${base}/jobs/${jobId}/gate-out`);
   await op.locator("[data-car-loaded]").click();
   const msg = await op.locator("[data-on-way-text]").inputValue();
-  check("D3: the customer message is the owner's wording with the blanks filled", /on its way to you on our recovery truck DXB A 11111/.test(msg) && /Driver: E2e Truck Driver, \+971500000400/.test(msg) && /\+971 4 330 3113/.test(msg), msg.slice(0, 160));
+  check("D3: the customer message is the owner's wording with the blanks filled", /is on its way to you/.test(msg) && /\*Recovery truck:\* DXB A 11111/.test(msg) && /\*Driver:\* E2e Truck Driver, \+971 50 000 0400/.test(msg) && /\+971 4 330 3113/.test(msg), msg.slice(0, 160));
   await op.locator("[data-on-way-send]").click();
   const loaded = await until(async () => (await sql("select loaded_at from public.recovery_trips where id = $1", [trip.id]))[0]?.loaded_at ? 1 : null, 30, 500);
   check("D3: the car is marked On the way with the time", !!loaded);
@@ -523,6 +523,78 @@ if (want("I")) {
   await browser.close();
   await sql("update public.settings set value = $1::jsonb where key = 'quote_margin_yellow_percent'", [JSON.stringify(orig?.y ?? 30)]);
   await sql("update public.settings set value = $1::jsonb where key = 'quote_margin_red_percent'", [JSON.stringify(orig?.r ?? 20)]);
+}
+
+/* ================= 18 Oct sections 1 and 2: copy buttons, tidy messages, short links ================= */
+if (want("J")) {
+  console.log("\n== 18-1/2 messages");
+  cleanupDb();
+  const { jobId, quotationId, token } = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  await sql("update public.part_requests set status = 'done' where job_id = $1", [jobId]);
+  await sql("update public.jobs set parts_pricing_done_at = now() where id = $1", [jobId]);
+  // A company customer with a saved person: the greeting prefers the person; the company keeps its cleaned name.
+  await sql("update public.customers set full_name = 'E2e Ahmed', company_name = 'E2e Luxe Rental L.l.c', customer_type = 'company' where id = (select customer_id from public.jobs where id = $1)", [jobId]);
+  const tpl = (await sql("select value from public.settings where key = 'whatsapp_quote_template'"))[0]?.value ?? "";
+  check("J: the stored quotation template is tidy (Dear [name], bold car)", /Dear \[name\],/.test(tpl) && /\*\[make model\]\*/.test(tpl), String(tpl).slice(0, 80));
+  // The real send, on a phone-width screen.
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 390, height: 844 } });
+  await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  await page.getByRole("button", { name: /^Quotation complete$/ }).click();
+  for (let i = 0; i < 6; i++) {
+    const found = await until(async () => {
+      if (await page.locator("[data-low-profit-send]").count()) return "[data-low-profit-send]";
+      if (await page.locator("[data-markup-continue]").count()) return "[data-markup-continue]";
+      if (await page.locator("[data-parts-leave]").count()) return "[data-parts-leave]";
+      if (await page.locator("[data-deposit-skip]").count()) return "[data-deposit-skip]";
+      if ((await sql("select completed_at from public.quotations where id = $1", [quotationId]))[0]?.completed_at) return "done";
+      return null;
+    }, 15, 400);
+    if (!found || found === "done") break;
+    await page.locator(found).click();
+    await sleep(400);
+  }
+  const completed = await until(async () => (await sql("select completed_at from public.quotations where id = $1", [quotationId]))[0]?.completed_at ? 1 : null, 20, 500);
+  check("J: the quotation completes", !!completed);
+  await page.getByRole("button", { name: /^Send quotation$/ }).first().click();
+  await until(async () => ((await page.locator("[role='dialog'] textarea").count()) ? 1 : null), 30, 400);
+  const msg = (await page.locator("[role='dialog'] textarea").inputValue().catch(() => "")) ?? "";
+  check("J: the message greets the saved person, not the company", /^Dear E2e Ahmed,/im.test(msg), msg.slice(0, 60));
+  check("J: the message carries the short link, never the long address", /erp\.ofjauto\.com\/m\/[A-Za-z0-9]{4,}/.test(msg) && !msg.includes("/quote/"), msg.slice(-80));
+  check("J: the message is the tidy template (bold car, signed OFJ)", /\*.+\*/.test(msg) && /OFJ Automotive\s*$/.test(msg), msg.slice(0, 120));
+  const quoteUrl = `https://erp.ofjauto.com/quote/${token}`;
+  const qCode = (await sql("select code from public.short_links where url = $1", [quoteUrl]))[0]?.code;
+  const r1 = qCode ? await fetch(`${base}/m/${qCode}`, { redirect: "manual" }) : null;
+  check("J: /m/<code> redirects to the full quotation link", !!r1 && [301, 302, 307, 308].includes(r1.status) && (r1.headers.get("location") ?? "") === quoteUrl, `${r1?.status} ${r1?.headers.get("location")}`);
+  await browser.close();
+  // The delivery: the driver's message in the agreed format, both links short, the copy buttons, the "on its way" window.
+  const driveTok = `e2e-drive-${Date.now()}`;
+  await sql("update public.jobs set status = 'in_delivery' where id = $1", [jobId]);
+  await sql(`insert into public.recovery_trips (job_id, kind, driver_name, driver_phone, truck_plate, location_url, location_details, scheduled_date, scheduled_slot, token)
+             values ($1, 'delivery', 'E2e Driver', '+971529562232', 'DXB A 11111', 'https://maps.app.goo.gl/e2eTest123', 'Dubai Hills', (now() at time zone 'Asia/Dubai' + interval '1 day')::date, 'morning', $2)`, [jobId, driveTok]);
+  const { browser: b2, page: p2 } = await browserFor("service_advisor", { viewport: { width: 1366, height: 1000 } });
+  await go(p2, `${base}/jobs/${jobId}/gate-out`);
+  await until(async () => ((await p2.locator("[data-delivery-panel]").count()) ? 1 : null), 30, 500);
+  const html = await p2.content();
+  check("J: the driver message leads *DELIVERY · <day> · MORNING*", /\*DELIVERY · [A-Z]{3} \d{1,2} [A-Z]{3} · MORNING\*/.test(html), (html.match(/\*DELIVERY[^\\"]{0,40}/) ?? [""])[0]);
+  check("J: the customer line cleans the company name (LLC)", /E2e Luxe Rental LLC/i.test(html));
+  check("J: the mobile is spaced +971 50 000 0003", /\+971 50 000 0003/.test(html));
+  check("J: the pin and the driver button are short links (/m/ and /d/)", /erp\.ofjauto\.com\/m\/[A-Za-z0-9]{4,}/.test(html) && /erp\.ofjauto\.com\/d\/[A-Za-z0-9]{4,}/.test(html));
+  const dCode = (await sql("select code from public.short_links where kind = 'drive' and url like $1", [`%/drive/${driveTok}`]))[0]?.code;
+  const r2 = dCode ? await fetch(`${base}/d/${dCode}`, { redirect: "manual" }) : null;
+  check("J: /d/<code> opens the driver's one-button page", !!r2 && [301, 302, 307, 308].includes(r2.status) && (r2.headers.get("location") ?? "").endsWith(`/drive/${driveTok}`), `${r2?.status} ${r2?.headers.get("location")}`);
+  check("J: a Copy button sits next to Send to driver", (await p2.locator("[data-delivery-panel] [data-copy-text]").count()) >= 1);
+  await p2.locator("[data-car-loaded]").click();
+  await until(async () => ((await p2.locator("[data-on-way-text]").count()) ? 1 : null), 20, 400);
+  const onWay = (await p2.locator("[data-on-way-text]").inputValue().catch(() => "")) ?? "";
+  check("J: the 'on its way' message greets the person, bolds the truck and spaces the driver's mobile", /^Dear E2e Ahmed,/m.test(onWay) && onWay.includes("*Recovery truck:*") && onWay.includes("+971 52 956 2232"), onWay.slice(0, 140));
+  check("J: the on-its-way window has its own Copy button", (await p2.locator("[data-on-way-dialog] [data-copy-text]").count()) === 1);
+  await b2.close();
+  // The owner edits the wording in Settings.
+  const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
+  await go(op, `${base}/settings`);
+  check("J: the 'on its way' wording is editable in Settings", (await op.locator("textarea[name='whatsapp_on_the_way_template']").count()) === 1);
+  await ob.close();
+  await sql("delete from public.short_links where url in ($1, $2) or url like $3 or url like '%e2eTest123%'", [quoteUrl, `https://erp.ofjauto.com/drive/${driveTok}`, `%/drive/e2e-drive-%`]);
 }
 
 cleanupDb();

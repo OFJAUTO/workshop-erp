@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CopyText } from "@/components/CopyText";
 import { Badge, Button, Card, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { ReasonChips } from "@/components/ReasonChips";
 import { requirePermission } from "@/lib/auth";
@@ -90,7 +91,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
   const chase = (r: Row) => {
     const text = `Hello, checking on our order ${r.lpo ?? ""}: ${r.qty} × ${r.name}${r.plate ? ` for ${r.plate}` : ""}. It was expected ${formatDate(r.expected)}. When will it arrive?`;
     return r.supplierPhone
-      ? <a href={`https://wa.me/${r.supplierPhone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center rounded-control border border-red-bar bg-white px-3 text-xs font-bold text-red" data-chase>Chase supplier</a>
+      ? <span className="inline-flex flex-wrap gap-1.5"><a href={`https://wa.me/${r.supplierPhone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center rounded-control border border-red-bar bg-white px-3 text-xs font-bold text-red" data-chase>Chase supplier</a><CopyText text={text} small /></span>
       : <span className="text-xs text-muted" data-chase-nophone>No phone on the supplier (add it under Suppliers)</span>;
   };
 

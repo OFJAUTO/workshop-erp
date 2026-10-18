@@ -33,13 +33,13 @@ function StatusLine({ tone, text, onAgain }: { tone: keyof typeof TONE_CLASS; te
 export type ReportLinkRow = { id: string; token: string; status: "created" | "sent" | "opened"; sent_at: string | null; opened_at: string | null; created_at: string };
 
 /** Inspection report card: "Send to customer" creates the link and opens the window; afterwards the status and "Send again". */
-export function ReportSendControl({ jobId, link, messageTemplate, siteUrl, phoneDigits, canSend }: { jobId: string; link: ReportLinkRow | null; messageTemplate: string; siteUrl: string; phoneDigits: string; canSend: boolean }) {
+export function ReportSendControl({ jobId, link, shortLink = null, messageTemplate, siteUrl, phoneDigits, canSend }: { jobId: string; link: ReportLinkRow | null; /** The short address for the message (erp.ofjauto.com/m/xxxx). */ shortLink?: string | null; messageTemplate: string; siteUrl: string; phoneDigits: string; canSend: boolean }) {
   const router = useRouter();
-  const [current, setCurrent] = useState<{ id: string; token: string } | null>(link ? { id: link.id, token: link.token } : null);
+  const [current, setCurrent] = useState<{ id: string; token: string; short?: string | null } | null>(link ? { id: link.id, token: link.token, short: shortLink } : null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const message = current ? messageTemplate.replaceAll("[link]", `${siteUrl}/report/${current.token}`) : null;
+  const message = current ? messageTemplate.replaceAll("[link]", current.short ?? `${siteUrl}/report/${current.token}`) : null;
 
   function create() {
     setError(null);
@@ -49,7 +49,7 @@ export function ReportSendControl({ jobId, link, messageTemplate, siteUrl, phone
         setError(res.error ?? "Could not create the link.");
         return;
       }
-      setCurrent({ id: res.id, token: res.token });
+      setCurrent({ id: res.id, token: res.token, short: res.short ?? null });
       setOpen(true);
       router.refresh();
     });
@@ -87,6 +87,7 @@ export function ApprovalSendControl({
   canSend,
   complete,
   latest,
+  latestShort = null,
   approvedAt,
   siteUrl,
   messageTemplate,
@@ -98,6 +99,8 @@ export function ApprovalSendControl({
   canSend: boolean;
   complete: boolean;
   latest: ApprovalRequestRow | null;
+  /** The short address for the existing approval link. */
+  latestShort?: string | null;
   approvedAt: string | null;
   siteUrl: string;
   /** The approval message with [name] and [link] still to fill. */
@@ -112,7 +115,7 @@ export function ApprovalSendControl({
   const [step, setStep] = useState<"who" | "send">("send");
   const [phone, setPhone] = useState(latest?.sent_to_phone ?? options[0]?.phone ?? "");
   const [name, setName] = useState(latest?.sent_to_name ?? customer?.name ?? "");
-  const [created, setCreated] = useState<{ id: string; link: string } | null>(latest && !latest.approved_at ? { id: latest.id, link: `${siteUrl}/approve/${latest.token}` } : null);
+  const [created, setCreated] = useState<{ id: string; link: string } | null>(latest && !latest.approved_at ? { id: latest.id, link: latestShort ?? `${siteUrl}/approve/${latest.token}` } : null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const approved = !!(approvedAt || latest?.approved_at);

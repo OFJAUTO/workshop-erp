@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card, SectionLabel, Textarea } from "@/components/ui";
+import { CopyText } from "@/components/CopyText";
 import { carLoaded, markDriverSent } from "@/app/(app)/jobs/delivery-actions";
 
 /**
@@ -49,6 +50,7 @@ export function DeliveryPanel({ jobId, trip, driverText, customerText, customerP
         >
           {trip.sentAt ? "Send to driver again" : "Send to driver"}
         </Button>
+        <CopyText text={driverText} />
         {!trip.loadedAt ? (
           <Button type="button" size="md" onClick={() => setLoadOpen(true)} data-car-loaded>
             Car loaded: send &quot;on its way&quot;
@@ -81,6 +83,7 @@ export function DeliveryPanel({ jobId, trip, driverText, customerText, customerP
               >
                 Open WhatsApp and mark on its way
               </Button>
+              <CopyText text={message} />
               <Button type="button" tone="ghost" size="md" onClick={() => setLoadOpen(false)}>Cancel</Button>
             </div>
           </div>

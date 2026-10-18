@@ -15,6 +15,7 @@ import { markInvoiceSent, markReadySent, prepareProformaSend } from "@/app/(app)
 export function ReadySendControl({
   jobId,
   token,
+  shortLink = null,
   siteUrl,
   messageTemplate,
   phoneDigits,
@@ -31,6 +32,8 @@ export function ReadySendControl({
 }: {
   jobId: string;
   token: string | null;
+  /** The short address for the message (erp.ofjauto.com/m/xxxx). */
+  shortLink?: string | null;
   siteUrl: string;
   messageTemplate: string;
   phoneDigits: string;
@@ -61,7 +64,7 @@ export function ReadySendControl({
   const [note, setNote] = useState<string | null>(null);
   const [pending, start] = useTransition();
   // Before payment the link says proforma, never invoice; the tax invoice has its own address.
-  const message = token ? messageTemplate.replaceAll("[link]", `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) : null;
+  const message = token ? messageTemplate.replaceAll("[link]", shortLink ?? `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) : null;
   if (!token) return <p className="text-xs text-muted">The message is ready once the proforma is prepared.</p>;
   const tax = kind === "tax_invoice";
   const title = tax ? "Your tax invoice" : "Your car is ready";

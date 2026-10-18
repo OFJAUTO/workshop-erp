@@ -2,6 +2,8 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { closeJob } from "./close-job";
 import { driverMessage, parseCoords } from "./recovery";
+import { shortFor } from "./short-links";
+import { PRODUCTION_SITE_URL } from "./site";
 import { notifyRoles, notifyStaff } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
@@ -101,10 +103,12 @@ export async function tripCar(trip: TripRow): Promise<{ plate: string; car: stri
   };
 }
 
-/** The driver's WhatsApp text with his one-button link. */
-export async function driverMessageFor(trip: TripRow, siteUrl: string): Promise<string> {
+/** The driver's WhatsApp text: the customer's pin and his one-button page as short links. */
+export async function driverMessageFor(trip: TripRow): Promise<string> {
   const car = await tripCar(trip);
-  return driverMessage({ plate: car.plate, car: car.car, kind: trip.kind, date: trip.scheduled_date, slot: trip.scheduled_slot, customerName: car.customerName, customerPhone: car.customerPhone, locationUrl: trip.location_url, locationDetails: trip.location_details }, `${siteUrl}/drive/${trip.token}`);
+  const drive = await shortFor(`${PRODUCTION_SITE_URL}/drive/${trip.token}`, "drive");
+  const map = trip.location_url ? await shortFor(trip.location_url, "map") : null;
+  return driverMessage({ plate: car.plate, car: car.car, kind: trip.kind, date: trip.scheduled_date, slot: trip.scheduled_slot, customerName: car.customerName, customerPhone: car.customerPhone, locationUrl: trip.location_url, locationDetails: trip.location_details }, { drive, map });
 }
 
 /**

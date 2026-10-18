@@ -1,6 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { shortFor } from "@/lib/short-links";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
@@ -15,7 +17,6 @@ import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { ROAD_TEST_DECISION_LABELS, type RoadTestDecision } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -378,9 +379,8 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
 
   await logEvent(supabase, jobId, staff.id, { event_type: "approval_created", note: `Approval link created for ${name || phone}` });
   refresh(jobId);
-  const site = await getSiteUrl();
-  // The link comes back to the button that was clicked; the centre window shows the message.
-  return { success: "Link created.", values: { ...values, link: `${site}/approve/${token}`, req: created.id } };
+  // The link comes back to the button that was clicked, short; the centre window shows the message.
+  return { success: "Link created.", values: { ...values, link: await shortFor(`${PRODUCTION_SITE_URL}/approve/${token}`), req: created.id } };
 }
 
 /** Records that the link was actually sent (Open WhatsApp or Copy link). */

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { CopyText } from "@/components/CopyText";
+import { greetingNameOf } from "@/lib/messages";
 import { BookingIcon } from "@/components/BookingIcons";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
@@ -192,6 +194,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                         <a href={whatsappLink(a, settings)} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white">
                           WhatsApp
                         </a>
+                        <CopyText text={whatsappText(a, settings)} />
                         <form action={markReminderSent.bind(null, a.id)}>
                           <Button type="submit" tone="secondary" size="md">
                             Mark sent
@@ -210,10 +213,9 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   );
 }
 
-function whatsappLink(a: AppointmentFull, settings: Settings) {
-  const digits = (a.customer?.phone ?? "").replace(/[^\d]/g, "");
-  const text = fillTemplate(reminderTemplateFor(a.kind, settings), {
-    name: a.customer?.full_name ?? "Customer",
+function whatsappText(a: AppointmentFull, settings: Settings) {
+  return fillTemplate(reminderTemplateFor(a.kind, settings), {
+    name: greetingNameOf(a.customer),
     date: formatShortDay(dubaiDateOf(a.starts_at)),
     time: dubaiTimeOf(a.starts_at),
     reason: a.reason,
@@ -221,7 +223,11 @@ function whatsappLink(a: AppointmentFull, settings: Settings) {
     address: a.collect_address ?? "",
     advisor: a.advisor?.display_name ?? "OFJ Automotive",
   });
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+
+function whatsappLink(a: AppointmentFull, settings: Settings) {
+  const digits = (a.customer?.phone ?? "").replace(/[^\d]/g, "");
+  return `https://wa.me/${digits}?text=${encodeURIComponent(whatsappText(a, settings))}`;
 }
 
 type Ctx = { grace: number; now: Date };

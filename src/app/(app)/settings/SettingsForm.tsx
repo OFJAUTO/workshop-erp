@@ -669,8 +669,11 @@ export function SettingsForm({
                 <Input name="payment_waiting_hours" defaultValue={v.payment_waiting_hours ?? "24"} inputMode="numeric" required />
               </Field>
             </div>
-            <Field label="WhatsApp follow-up message" hint="Placeholders: [name], [make model], [plate], [advisor].">
+            <Field label="WhatsApp follow-up message" hint="Placeholders: [name], [make model], [plate].">
               <Textarea name="whatsapp_followup_template" defaultValue={v.whatsapp_followup_template} rows={3} required />
+            </Field>
+            <Field label={'WhatsApp "on its way" (delivery by recovery)'} hint="Sent to the customer when the car is loaded on the recovery truck. Placeholders: [name], [car], [truck plate], [driver name], [driver mobile].">
+              <Textarea name="whatsapp_on_the_way_template" defaultValue={v.whatsapp_on_the_way_template} rows={6} required />
             </Field>
           </Card>
 

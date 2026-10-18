@@ -12,7 +12,9 @@ import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServi
 import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
-import { getSiteUrl } from "@/lib/site";
+import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
+import { shortFor } from "@/lib/short-links";
+import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { confirmEstimateUnchanged, decideQuoteApproval, decideRevision, declineQuotation, declineToGateOut, requestRevision, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
@@ -137,7 +139,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").
   const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
-    .replaceAll("[name]", customerName)
+    .replaceAll("[name]", greetingNameOf(customer))
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
@@ -249,6 +251,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         canSend={canSend}
         isOwner={isOwner}
         siteUrl={site}
+        shortLink={q.token ? await shortFor(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : null}
         messageTemplate={template}
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={!!q.estimate_id}

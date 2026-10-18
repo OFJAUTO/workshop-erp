@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { CopyText } from "@/components/CopyText";
+import { greetingNameOf } from "@/lib/messages";
 import { notFound } from "next/navigation";
 import { BookingIcon } from "@/components/BookingIcons";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -27,7 +29,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
   const date = dubaiDateOf(a.starts_at);
   const digits = (a.customer?.phone ?? "").replace(/[^\d]/g, "");
   const reminder = fillTemplate(reminderTemplateFor(a.kind, settings), {
-    name: a.customer?.full_name ?? "Customer",
+    name: greetingNameOf(a.customer),
     date: formatShortDay(date),
     time: dubaiTimeOf(a.starts_at),
     reason: a.reason,
@@ -121,6 +123,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
                 <a href={`https://wa.me/${digits}?text=${encodeURIComponent(reminder)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white">
                   Open WhatsApp
                 </a>
+                <CopyText text={reminder} />
                 {!a.reminder_sent_at ? (
                   <form action={markReminderSent.bind(null, a.id)}>
                     <Button type="submit" tone="secondary" size="md">

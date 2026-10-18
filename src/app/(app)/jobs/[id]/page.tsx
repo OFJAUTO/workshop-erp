@@ -36,7 +36,9 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
 import { loadDocAlerts } from "@/lib/doc-reminders-data";
-import { getSiteUrl } from "@/lib/site";
+import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
+import { shortFor } from "@/lib/short-links";
+import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
@@ -117,6 +119,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const isVip = customer?.is_vip ?? customerPublic?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? customerPublic?.vip_note ?? vip?.vip_note ?? null;
   const customerName = customer?.company_name ?? customer?.full_name ?? customerPublic?.company_name ?? customerPublic?.full_name ?? "Customer";
+  // Messages greet the person: the saved contact for a company, the company without its legal ending otherwise.
+  const greetName = greetingNameOf(customer ?? customerPublic);
 
   // The department's workshop manager(s), by name, for "Waiting on …".
   const deptManagers = (managers ?? []).filter((m) => jobConcernsSide(job.department, sideOfDepartment(m.department_id))).map((m) => m.display_name);
@@ -154,11 +158,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   void req;
   // The WhatsApp messages: car details filled here; the recipient's name and the link are filled in the centre window.
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name);
-  const approvalTemplate = fillCar(settings.whatsapp_approval_template);
-  const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", customerName);
+  const approvalTemplate = fillCar(settings.whatsapp_approval_template).replaceAll("[name]", greetName);
+  const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", greetName);
   // The messages are short: no bank details (those sit behind "Bank details" on the proforma page and in the PDF).
-  const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", customerName).replaceAll("[bank]", "");
-  const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? "")).replaceAll("[name]", customerName);
+  const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", greetName).replaceAll("[bank]", "");
+  const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? "")).replaceAll("[name]", greetName);
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
   const insp = inspection?.inspection ?? null;
@@ -440,7 +444,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={tile(["gate_in"], approvalState.tone)}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
-          <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: customer.company_name ?? customer.full_name, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
+          <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
         </Card>
         ) : null}
         {!loose ? (
@@ -457,7 +461,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               </LinkButton>
             ) : null}
           </div>
-          {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
+          {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} shortLink={reportLink?.token ? await shortFor(`${PRODUCTION_SITE_URL}/report/${reportLink.token}`) : null} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
         </Card>
         ) : null}
         {seesQuote ? (
@@ -568,7 +572,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <div className="mt-auto flex flex-col gap-2" data-money-action={money.action}>
             {money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && !staff.viewingAs && job.is_open ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full">Prepare the proforma</Button></form> : null}
             {(money.action === "send_proforma" || money.action === "send_tax_invoice") && money.live && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? (
-              <ReadySendControl jobId={id} size="lg" token={money.live.token} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />
+              <ReadySendControl jobId={id} size="lg" token={money.live.token} shortLink={money.live.token ? await shortFor(`${PRODUCTION_SITE_URL}/${money.live.kind === "tax_invoice" ? "invoice" : "proforma"}/${money.live.token}`) : null} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />
             ) : null}
             {money.action === "record_payment" && can(role, "recordPayments") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} size="lg" className="w-full">{money.actionLabel}</LinkButton> : null}
             {money.action === "gate_out" && can(role, "gateOut") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full">Gate out</LinkButton> : null}

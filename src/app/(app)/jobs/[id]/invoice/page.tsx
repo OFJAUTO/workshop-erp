@@ -12,7 +12,9 @@ import { ngeniusConfigured } from "@/lib/ngenius";
 import { currentPaymentLink, paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { getSiteUrl } from "@/lib/site";
+import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
+import { shortFor } from "@/lib/short-links";
+import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
@@ -64,11 +66,16 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const quoteToken = approvedQ?.token ?? null;
   const depositMessage = (amount: number, link: string) =>
     String(settings.whatsapp_deposit_receipt_template ?? "")
-      .replaceAll("[name]", card.customer?.full_name ?? "")
+      .replaceAll("[name]", greetingNameOf(card.customer))
       .replaceAll("[make model]", vehicleTitle(card.vehicle))
       .replaceAll("[plate]", formatPlate(card.vehicle))
       .replaceAll("[amount]", m(amount))
       .replaceAll("[link]", link);
+  // The proforma, tax invoice and deposit receipt links go out short, made before the page renders.
+  const proformaShort = proforma?.token ? await shortFor(`${PRODUCTION_SITE_URL}/proforma/${proforma.token}`) : null;
+  const taxShort = taxInvoice?.token ? await shortFor(`${PRODUCTION_SITE_URL}/invoice/${taxInvoice.token}`) : null;
+  const depositShorts = new Map<string, string>();
+  for (const p of depositRows) depositShorts.set(p.id, await shortFor(`${PRODUCTION_SITE_URL}/api/pdf/receipt/${p.id}${quoteToken ? `?q=${quoteToken}` : ""}`));
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
   const money = moneyState({
     jobStatus: job.status,
@@ -96,7 +103,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const canVerify = can(role, "verifyPayments") && acting;
   const phoneDigits = (customer?.phone ?? "").replace(/[^\d]/g, "");
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
-  const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name).replaceAll("[name]", customerName).replaceAll("[bank]", "");
+  const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name).replaceAll("[name]", greetingNameOf(customer)).replaceAll("[bank]", "");
   const readyTemplate = fillCar(settings.whatsapp_ready_template);
   const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? ""));
   const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
@@ -163,7 +170,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 {!live && money.action !== "prepare_proforma" && !taxInvoice ? <p className="text-sm text-muted">The proforma is prepared by itself when the car is Ready.</p> : null}
                 {proforma && canSend && unpaid ? (
                   <div className="flex flex-col gap-2">
-                    <ReadySendControl jobId={id} size={s === "current" ? "lg" : "md"} token={proforma.token} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} />
+                    <ReadySendControl jobId={id} size={s === "current" ? "lg" : "md"} token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} />
                     {proforma.sent_at && !payNowOn && ngeniusConfigured() ? <form action={addPayNow.bind(null, proforma.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-add-pay-now>Add Pay now and resend</Button></form> : null}
                   </div>
                 ) : null}
@@ -191,7 +198,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                           <span>AED {m(p.amount_aed)} by {METHOD_LABELS[p.method]}</span>
                           <span className="text-muted">{formatDateTime(p.received_at)}</span>
                           <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a>
-                          <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, `${site}/api/pdf/receipt/${p.id}${quoteToken ? `?q=${quoteToken}` : ""}`)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} />
+                          <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, depositShorts.get(p.id) ?? `${site}/api/pdf/receipt/${p.id}`)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} />
                         </div>
                       ))}
                       <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} />
@@ -261,7 +268,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 </div>
                 {!taxInvoice ? <p className="text-sm text-muted">Created by itself the moment {proforma?.number ?? "the proforma"} is paid in full{nextTax ? ` (it will be ${nextTax})` : ""}. A tax invoice can&apos;t be cancelled or deleted; corrections are by credit note, approved by the owner.</p> : null}
                 {taxInvoice && canSend ? (
-                  <ReadySendControl jobId={id} size={s === "current" ? "lg" : "md"} token={taxInvoice.token} kind="tax_invoice" siteUrl={site} messageTemplate={invoiceTemplate} phoneDigits={phoneDigits} sentAt={taxInvoice.sent_at} pdf={taxInvoice.token ? { href: `/api/pdf/invoice/${taxInvoice.token}`, fileName: `OFJ Tax invoice ${taxInvoice.number}.pdf` } : null} />
+                  <ReadySendControl jobId={id} size={s === "current" ? "lg" : "md"} token={taxInvoice.token} shortLink={taxShort} kind="tax_invoice" siteUrl={site} messageTemplate={invoiceTemplate} phoneDigits={phoneDigits} sentAt={taxInvoice.sent_at} pdf={taxInvoice.token ? { href: `/api/pdf/invoice/${taxInvoice.token}`, fileName: `OFJ Tax invoice ${taxInvoice.number}.pdf` } : null} />
                 ) : null}
                 {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber">Issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
                 {proforma && !taxInvoice && role === "owner" && acting ? (
