@@ -13,13 +13,14 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type JobRow } from "@/lib/types";
-import { dailyProfit } from "@/lib/profit";
+import { advisorDay, advisorMonthOf, dailyProfit } from "@/lib/profit";
 import { docHeadline, docNotSent } from "@/lib/doc-reminders";
 import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { AccountsDashboard } from "./AccountsDashboard";
 import { PartsDashboard } from "./PartsDashboard";
+import { AdvisorPanel } from "./AdvisorPanel";
 import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
 import { DepositsWaiting } from "./DepositsWaiting";
@@ -82,6 +83,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   // The order here matches the queries below: the invoices, then the running clocks (a swap once put invoices under "On the clock" as NaN:NaN).
   const [profit, { data: invoiced }, { data: clocked }] = await Promise.all([
     role === "owner" ? dailyProfit(settings) : Promise.resolve(null),
+
     createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", all.map((j) => j.id)),
     createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
   ]);
@@ -167,8 +169,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <WaitingPanel staff={staff} />
 
       {role === "owner" && profit ? (
-        <ProfitPanel live={role === "owner"} target={Number(settings.daily_profit_target_aed) || 0} data={profit} />
+        <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />
       ) : null}
+      {role === "service_advisor" ? <AdvisorPanel day={await advisorDay(settings)} month={await advisorMonthOf(settings, staff.id)} /> : null}
 
       {role === "owner" ? <DepositsWaiting /> : null}
 

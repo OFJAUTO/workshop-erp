@@ -239,3 +239,94 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
 }
 
 export type { PaymentRow };
+
+export type AdvisorDay = {
+  date: string;
+  /** Profit before VAT, after every job cost, of the quotations customers approved today. One team figure. */
+  todayProfit: number;
+  dailyTarget: number;
+  percent: number;
+  /** Approved so far this month (the whole team). */
+  monthApproved: number;
+  /** What must be approved per working day from now to land the month on target. */
+  perDayNeeded: number;
+  workingDaysLeft: number;
+};
+
+const ADVISOR_QUOTE_SELECT = "id, job_id, discount_percent, vat_percent, payment_by_card, rounded_total_aed, discount_kind, discount_value, discount_scope, commission_kind, commission_value, commission_status, materials_cost_aed, deposit_mode, deposit_value, responded_at, sent_by, status, number, version, job:jobs!quotations_job_id_fkey(id, department, gated_in_by)";
+
+/** The profit of each approved quotation, from its own lines and the department's cost rate. */
+async function approvedQuoteProfits(settings: Settings, fromIso: string): Promise<{ id: string; jobId: string | null; respondedAt: string; sentBy: string | null; profit: number; net: number }[]> {
+  const admin = createAdminClient();
+  const { data: qs } = await admin.from("quotations").select(ADVISOR_QUOTE_SELECT).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).gte("responded_at", fromIso);
+  const rows = ((qs ?? []) as unknown as (Record<string, unknown> & { job: { id: string; department: string | null } | null })[]);
+  if (!rows.length) return [];
+  const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", rows.map((r) => String(r.id))).eq("is_active", true);
+  return rows.map((r) => {
+    const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department) });
+    return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: totals.profit, net: totals.net };
+  });
+}
+
+/** Working days of the month on the Dubai clock: passed (today included) and the whole month. Sunday never counts. */
+export function workingDaysOf(settings: Settings, date: string): { passed: number; total: number; leftFromNow: number } {
+  const workingDays = new Set((settings.working_days ?? []) as string[]);
+  const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const isWorking = (d: string) => { const id = DAYS[new Date(`${d}T12:00:00Z`).getUTCDay()]; return id !== "sun" && (!workingDays.size || workingDays.has(id)); };
+  const monthStart = `${date.slice(0, 7)}-01`;
+  let passed = 0;
+  let total = 0;
+  for (let d = monthStart; d.slice(0, 7) === date.slice(0, 7); d = addDays(d, 1)) {
+    if (!isWorking(d)) continue;
+    total++;
+    if (d <= date) passed++;
+  }
+  const leftFromNow = total - passed + (isWorking(date) ? 1 : 0);
+  return { passed, total, leftFromNow: Math.max(1, leftFromNow) };
+}
+
+/**
+ * The advisors' day: the profit of the work customers approved (never sales value), one team figure, against the
+ * owner's daily target; and what must be approved per working day from now to land the month. No costs are exposed.
+ */
+export async function advisorDay(settings: Settings, date = dubaiDate()): Promise<AdvisorDay> {
+  const monthStart = `${date.slice(0, 7)}-01`;
+  const all = await approvedQuoteProfits(settings, dayStart(monthStart));
+  const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  const todayProfit = round2(all.filter((p) => dayOf(p.respondedAt) === date).reduce((a, p) => a + p.profit, 0));
+  const monthApproved = round2(all.reduce((a, p) => a + p.profit, 0));
+  const dailyTarget = Number(settings.daily_profit_target_aed) || 0;
+  const days = workingDaysOf(settings, date);
+  const monthlyTarget = dailyTarget * days.total;
+  const perDayNeeded = round2(Math.max(0, monthlyTarget - monthApproved) / days.leftFromNow);
+  return { date, todayProfit, dailyTarget, percent: dailyTarget > 0 ? Math.max(0, Math.round((todayProfit / dailyTarget) * 100)) : 0, monthApproved, perDayNeeded, workingDaysLeft: days.leftFromNow };
+}
+
+export type AdvisorMonth = { sent: number; approved: number; approvalPercent: number; profitApproved: number; avgMarginPercent: number; deliveredOnTime: number; deliveredWithDate: number };
+
+/** "My month": one advisor's own figures, shown only to him. Never a ranking, never a comparison. */
+export async function advisorMonthOf(settings: Settings, staffId: string, date = dubaiDate()): Promise<AdvisorMonth> {
+  const admin = createAdminClient();
+  const monthStart = dayStart(`${date.slice(0, 7)}-01`);
+  const [{ count: sent }, approvedAll, { data: outs }] = await Promise.all([
+    admin.from("quotations").select("id", { count: "exact", head: true }).eq("kind", "quotation").eq("is_active", true).eq("sent_by", staffId).gte("sent_at", monthStart),
+    approvedQuoteProfits(settings, monthStart),
+    admin.from("jobs").select("gated_out_at, promised_at").eq("gated_in_by", staffId).gte("gated_out_at", monthStart).not("gated_out_at", "is", null),
+  ]);
+  const mine = approvedAll.filter((p) => p.sentBy === staffId);
+  const profitApproved = round2(mine.reduce((a, p) => a + p.profit, 0));
+  const net = mine.reduce((a, p) => a + p.net, 0);
+  const withDate = ((outs ?? []) as { gated_out_at: string; promised_at: string | null }[]).filter((j) => !!j.promised_at);
+  const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  const onTime = withDate.filter((j) => dayOf(j.gated_out_at) <= String(j.promised_at).slice(0, 10)).length;
+  return {
+    sent: sent ?? 0,
+    approved: mine.length,
+    approvalPercent: sent ? Math.round((mine.length / sent) * 100) : 0,
+    profitApproved,
+    avgMarginPercent: net > 0 ? Math.round((profitApproved / net) * 100) : 0,
+    deliveredOnTime: onTime,
+    deliveredWithDate: withDate.length,
+  };
+}

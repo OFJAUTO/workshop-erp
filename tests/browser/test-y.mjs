@@ -450,5 +450,35 @@ if (want("Z")) {
   await browser.close();
 }
 
+/* ================= 18 Oct section 4: the advisors' daily profit figure ================= */
+if (want("H")) {
+  console.log("\n== 18-4 advisor figure");
+  cleanupDb();
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1400, height: 1100 } });
+  await go(page, `${base}/dashboard`);
+  const panel = page.locator("[data-advisor-panel]");
+  check("4: the advisor's dashboard leads with 'Today: AED X profit of AED 20,000' and a bar", (await panel.count()) === 1 && /^Today: AED [\d,]+ profit of AED [\d,]+$/.test(((await page.locator("[data-advisor-today]").textContent()) ?? "").trim()) && (await page.locator("[data-advisor-bar]").count()) === 1, (await page.locator("[data-advisor-today]").textContent().catch(() => "")) ?? "");
+  check("4: 'To hit <month>: AED Y profit a day from now'", /^To hit [A-Z][a-z]+: AED [\d,]+ profit a day from now$/.test(((await page.locator("[data-advisor-pace]").textContent()) ?? "").trim()), (await page.locator("[data-advisor-pace]").textContent().catch(() => "")) ?? "");
+  const body = (await page.textContent("body")) ?? "";
+  check("4: no fixed costs, break-even, owner projection or ranking for advisors", (await page.locator("[data-target-box]").count()) === 0 && !/break-even|fixed costs|continues like this/i.test(body) && !/rank/i.test(body));
+  await page.locator("[data-my-month] summary").click();
+  const my = (await page.locator("[data-my-month]").textContent()) ?? "";
+  check("4: 'My month' shows only the advisor's own six figures", /Quotes sent/.test(my) && /Quotes approved/.test(my) && /Profit approved/.test(my) && /Average margin/.test(my) && /Cars delivered on time/.test(my) && /only you see this/i.test(my));
+  const before = Number((((await page.locator("[data-advisor-today]").textContent()) ?? "").match(/Today: AED ([\d,]+)/)?.[1] ?? "0").replace(/,/g, ""));
+  await browser.close();
+  // A customer approval moves the team figure the moment it lands.
+  await api("/api/e2e/stage", { stage: "approved" });
+  const { browser: b2, page: p2 } = await browserFor("service_advisor", { viewport: { width: 1400, height: 1100 } });
+  await go(p2, `${base}/dashboard`);
+  const after = Number((((await p2.locator("[data-advisor-today]").textContent()) ?? "").match(/Today: AED ([\d,]+)/)?.[1] ?? "0").replace(/,/g, ""));
+  check("4: an approval today moves the team figure (profit of approved work, not sales value)", after > before, `${before} -> ${after}`);
+  // The owner's dashboard keeps his own box and never shows the advisor panel.
+  const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1400, height: 1100 } });
+  await go(op, `${base}/dashboard`);
+  check("4: the owner keeps the target box; the advisor panel is not his", (await op.locator("[data-target-box]").count()) === 1 && (await op.locator("[data-advisor-panel]").count()) === 0);
+  await ob.close();
+  await b2.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);
