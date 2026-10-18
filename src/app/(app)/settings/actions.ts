@@ -233,7 +233,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "company_name" && text.length < 2) return { error: "Enter the company name.", values };
     if (key === "company_trn" && text && !/^\d{15}$/.test(text)) return { error: "The company TRN is 15 digits.", values };
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
-    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && key !== "whatsapp_followup_template" && key !== "whatsapp_final_check_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
+    if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && key !== "whatsapp_followup_template" && key !== "whatsapp_final_check_template" && key !== "whatsapp_on_the_way_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "company_legal_name" && text.length < 2) return { error: "Enter the legal name.", values };
     if (key === "document_currency" && text !== "symbol" && text !== "aed") return { error: "Choose the currency shown on documents.", values };
     if (key === "labour_rate_bodyshop_aed" && text && !(Number(text) >= 0)) return { error: "The bodyshop labour rate must be a number, or empty.", values };
