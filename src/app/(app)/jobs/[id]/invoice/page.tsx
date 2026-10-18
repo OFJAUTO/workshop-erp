@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { signJobFiles } from "@/lib/work-data";
 import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
@@ -76,6 +77,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const taxShort = taxInvoice?.token ? await shortFor(`${PRODUCTION_SITE_URL}/invoice/${taxInvoice.token}`) : null;
   const depositShorts = new Map<string, string>();
   for (const p of depositRows) depositShorts.set(p.id, await shortFor(`${PRODUCTION_SITE_URL}/api/pdf/receipt/${p.id}${quoteToken ? `?q=${quoteToken}` : ""}`));
+  // The card slips and transfer proofs, signed for one hour.
+  const proofUrls = await signJobFiles([...payments, ...depositRows].map((p) => p.proof_path).filter((x): x is string => !!x));
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
   const money = moneyState({
     jobStatus: job.status,
@@ -137,6 +140,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {p.status === "recorded" && !p.verified_at && counter && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-confirm-counter>Confirmed</Button></form> : null}
         {p.status === "pending_owner" ? <Badge tone="amber">Waiting for the owner</Badge> : null}
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
+        {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
       </li>
     );
   };

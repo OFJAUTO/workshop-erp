@@ -18,6 +18,10 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = { cash: "Cash", car
 
 /** The five ways a customer pays, in the order the one-tap row shows them. */
 export const PAYMENT_METHODS = ["cash", "card", "link", "cheque", "transfer"] as const;
+
+/** The compulsory "how will the customer pay?" question before a proforma goes out: these four, this order. */
+export const EXPECTED_METHODS = ["card", "link", "transfer", "cash"] as const;
+export const EXPECTED_METHOD_LABELS: Record<string, string> = { card: "Card in the shop", link: "Payment link", transfer: "Bank transfer", cash: "Cash" };
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /** Who may record which method at the counter: accounts the bank side, advisors the counter, the owner anything. */

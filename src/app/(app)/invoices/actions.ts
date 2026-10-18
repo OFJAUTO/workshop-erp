@@ -100,6 +100,11 @@ export async function recordPayment(formData: FormData) {
   const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
   const method = String(formData.get("method") ?? "");
   if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) redirect(`${back}${sep}error=${encodeURIComponent(`${PAYMENT_METHOD_LABELS[method] ?? "This method"} is recorded by ${method === "cash" || method === "card" ? "the advisor at the counter" : "accounts"}, not by you.`)}`);
+  // A card or transfer payment carries its proof (the card slip, the transfer screenshot) or it is not recorded.
+  const proof = formData.get("proof");
+  const proofFile = proof instanceof File && proof.size > 0 ? proof : null;
+  if ((method === "card" || method === "transfer") && !proofFile) redirect(`${back}${sep}error=${encodeURIComponent(method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first.")}`);
+  if (proofFile && proofFile.size > 25 * 1024 * 1024) redirect(`${back}${sep}error=${encodeURIComponent("The proof photo is too large (over 25 MB).")}`);
   const r = await recordPaymentCore(actorOf(staff), {
     invoiceId,
     jobId: jobIdIn,
@@ -110,6 +115,13 @@ export async function recordPayment(formData: FormData) {
     notes: blankToNull(formData.get("notes")),
     clientKey: blankToNull(formData.get("client_key")),
   }, settings);
+  if (!r.error && r.paymentId && proofFile) {
+    const admin = createAdminClient();
+    const ext = proofFile.type.includes("png") ? "png" : proofFile.type.includes("webp") ? "webp" : proofFile.type.includes("pdf") ? "pdf" : "jpg";
+    const path = `payments/${r.paymentId}.${ext}`;
+    const { error: upErr } = await admin.storage.from("job-files").upload(path, Buffer.from(await proofFile.arrayBuffer()), { contentType: proofFile.type || "image/jpeg", upsert: true });
+    if (!upErr) await admin.from("payments").update({ proof_path: path, updated_by: staff.id }).eq("id", r.paymentId);
+  }
   const jobId = jobIdIn ?? (invoiceId ? (await loadInvoice(invoiceId))?.invoice.job_id ?? null : null);
   // A part payment: the Pay now order (if any) is remade for what is left.
   if (invoiceId && !r.error) {

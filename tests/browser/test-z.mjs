@@ -105,5 +105,78 @@ if (want("S1")) {
   await pb2.close();
 }
 
+/* ================= S2: the proforma asks how the customer will pay ================= */
+if (want("S2")) {
+  console.log("\n== S2 proforma payment method");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const pro = await until(async () => (await sql("select id, token from public.invoices where job_id = $1 and kind = 'proforma' and status = 'issued' limit 1", [jobId]))[0] ?? null, 20, 500);
+  check("S2: the Ready car has its proforma", !!pro?.id);
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1280, height: 1000 } });
+  await go(page, `${base}/jobs/${jobId}/invoice`);
+  await page.getByRole("button", { name: /^Send the proforma/ }).first().click();
+  await until(async () => ((await page.locator("[data-pay-how]").count()) ? 1 : null), 20, 400);
+  const labels = await page.locator("[data-expected]").allTextContents();
+  check("S2: exactly four choices - Card in the shop / Payment link / Bank transfer / Cash", (await page.locator("[data-expected]").count()) === 4 && /Card in the shop/.test(labels[0] ?? "") && /Payment link/.test(labels[1] ?? "") && /Bank transfer/.test(labels[2] ?? "") && /Cash/.test(labels[3] ?? "") && !labels.some((l) => /cheque/i.test(l)), labels.join(" | "));
+  check("S2: Continue is off until a method is chosen", await page.locator("[data-pay-continue]").isDisabled());
+  await page.locator("[data-expected='link']").click();
+  await until(async () => ((await page.locator("[data-link-fields]").count()) ? 1 : null), 10, 300);
+  check("S2: Payment link shows the paste box at once", (await page.locator("[data-link-url]").count()) === 1);
+  await shot(page, "s2-send");
+  await page.locator("[data-pay-continue]").click();
+  const err = await until(async () => { const t = (await page.locator("[data-pay-how]").textContent().catch(() => "")) ?? ""; return /Paste the payment link/.test(t) ? t : null; }, 15, 300);
+  check("S2: an empty link cannot send", !!err, (err ?? "").slice(0, 120));
+  await page.locator("[data-link-url]").fill("https://example.com/e2e-pay-test");
+  await page.locator("[data-pay-continue]").click();
+  await until(async () => { const r = (await sql("select expected_payment_method from public.invoices where id = $1", [pro.id]))[0]; return r?.expected_payment_method === "link" ? 1 : null; }, 30, 400);
+  check("S2: the choice is saved on the proforma", true);
+  const pl = await until(async () => (await sql("select url from public.payment_links where invoice_id = $1 and is_active and replaced_at is null order by added_at desc limit 1", [pro.id]))[0] ?? null, 20, 400);
+  check("S2: the pasted link is stored, never opened by us", (pl?.url ?? "").includes("example.com/e2e-pay-test"));
+  const msg = (await page.locator("[role='dialog'] textarea").inputValue().catch(() => "")) ?? "";
+  check("S2: the message tells the customer about Pay now", /Pay now/.test(msg), msg.slice(-120));
+  await page.keyboard.press("Escape");
+  // The customer's proforma shows the Pay now button.
+  const res = await fetch(`${base}/proforma/${pro.token}`);
+  const html = await res.text();
+  check("S2: the customer's proforma has the Pay now button", res.status === 200 && /Pay now ·/.test(html));
+  const { browser: cb, page: cp } = await browserFor("owner", { viewport: { width: 420, height: 900 } });
+  await go(cp, `${base}/proforma/${pro.token}`);
+  await shot(cp, "s2-proforma");
+  await cb.close();
+  // The advisor changes his mind later and re-sends with a different method.
+  await go(page, `${base}/jobs/${jobId}/invoice`);
+  await page.getByRole("button", { name: /^Send the proforma/ }).first().click();
+  await until(async () => ((await page.locator("[data-pay-how]").count()) ? 1 : null), 20, 400);
+  await page.locator("[data-expected='card']").click();
+  await page.locator("[data-pay-continue]").click();
+  const changed = await until(async () => ((await sql("select expected_payment_method from public.invoices where id = $1", [pro.id]))[0]?.expected_payment_method === "card" ? 1 : null), 30, 400);
+  check("S2: the method can be changed and re-sent", !!changed);
+  await page.keyboard.press("Escape");
+  // Card in the shop: recording needs the slip photo (the form unfolds once the proforma is sent).
+  await sql("update public.invoices set sent_at = now() where id = $1", [pro.id]);
+  await sql("update public.jobs set ready_sent_at = now() where id = $1", [jobId]);
+  await go(page, `${base}/jobs/${jobId}/invoice`);
+  const before = (await sql("select count(*)::int as n from public.payments where invoice_id = $1 and is_active", [pro.id]))[0]?.n ?? 0;
+  await page.locator("[data-method='card']").first().click();
+  await page.locator("[data-amount-partial]").first().click();
+  await page.locator("[data-amount-input]").first().fill("100");
+  check("S2: the card slip photo box is there and required", (await page.locator("[data-proof-input]").count()) >= 1 && (await page.locator("[data-proof-input]").first().getAttribute("required")) !== null);
+  await shot(page, "s2-payment-form");
+  await page.locator("[data-record-payment]").first().click();
+  await sleep(1500);
+  const after1 = (await sql("select count(*)::int as n from public.payments where invoice_id = $1 and is_active", [pro.id]))[0]?.n ?? 0;
+  check("S2: without the photo nothing is recorded", after1 === before, String(after1));
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.locator("[data-proof-input]").first().setInputFiles({ name: "slip.png", mimeType: "image/png", buffer: png });
+  await page.locator("[data-record-payment]").first().click();
+  const pay = await until(async () => { const r = (await sql("select id, proof_path from public.payments where invoice_id = $1 and is_active and method = 'card' order by created_at desc limit 1", [pro.id]))[0]; return r?.proof_path ? r : null; }, 30, 500);
+  check("S2: with the photo the payment records and keeps the slip", !!pay?.proof_path && String(pay.proof_path).startsWith("payments/"), JSON.stringify(pay));
+  await go(page, `${base}/jobs/${jobId}/invoice`);
+  check("S2: the card slip is one tap away next to the receipt", (await page.locator("[data-proof-link]").count()) >= 1);
+  await shot(page, "s2-payment-recorded");
+  await browser.close();
+  await sql("delete from public.payment_links where invoice_id = $1", [pro.id]);
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

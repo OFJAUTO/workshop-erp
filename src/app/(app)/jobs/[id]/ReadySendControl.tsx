@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { Button, Input } from "@/components/ui";
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "@/lib/money-steps";
+import { EXPECTED_METHODS, EXPECTED_METHOD_LABELS } from "@/lib/money-steps";
 import { markInvoiceSent, markReadySent, prepareProformaSend } from "@/app/(app)/invoices/actions";
 
 /**
@@ -59,12 +59,12 @@ export function ReadySendControl({
   const [expected, setExpected] = useState<string | null>(expectedMethod);
   const [payNow, setPayNow] = useState(startWithPayNow || payNowOn);
   const [linkUrl, setLinkUrl] = useState("");
-  const [paste, setPaste] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [pending, start] = useTransition();
   // Before payment the link says proforma, never invoice; the tax invoice has its own address.
-  const message = token ? messageTemplate.replaceAll("[link]", shortLink ?? `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) : null;
+  const payLine = kind === "proforma" && (payNowOn || payNow || linkUrl.trim()) ? "\n\nYou can pay by card online: open the link and tap *Pay now*." : "";
+  const message = token ? messageTemplate.replaceAll("[link]", shortLink ?? `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) + payLine : null;
   if (!token) return <p className="text-xs text-muted">The message is ready once the proforma is prepared.</p>;
   const tax = kind === "tax_invoice";
   const title = tax ? "Your tax invoice" : "Your car is ready";
@@ -82,9 +82,13 @@ export function ReadySendControl({
       setError("Choose how the customer will pay.");
       return;
     }
+    if (expected === "link" && !linkUrl.trim() && !payNow) {
+      setError(payNowAvailable ? "Paste the payment link, or turn on Pay now." : "Paste the payment link first.");
+      return;
+    }
     setError(null);
     start(async () => {
-      const r = await prepareProformaSend(jobId, { expected, payNow: payNow && !paste, linkUrl: paste && linkUrl.trim() ? linkUrl.trim() : null });
+      const r = await prepareProformaSend(jobId, { expected, payNow: expected === "link" && payNow && !linkUrl.trim(), linkUrl: expected === "link" && linkUrl.trim() ? linkUrl.trim() : null });
       if (r.error) {
         setError(r.error);
         return;
@@ -114,30 +118,29 @@ export function ReadySendControl({
             <div className="flex flex-col gap-4" data-pay-how>
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">How will the customer pay?</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {PAYMENT_METHODS.map((m) => (
+                <div className="grid grid-cols-2 gap-2">
+                  {EXPECTED_METHODS.map((m) => (
                     <button key={m} type="button" onClick={() => setExpected(m)} aria-pressed={expected === m} data-expected={m} className={`min-h-12 rounded-control border-2 px-2 text-sm font-bold flex flex-col items-center justify-center ${expected === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                      <span>{PAYMENT_METHOD_LABELS[m]}</span>
+                      <span>{EXPECTED_METHOD_LABELS[m]}</span>
                       {charges[m] ? <span className={`text-[11px] font-semibold ${expected === m ? "text-white/80" : "text-muted"}`}>{charges[m]}% bank charge</span> : null}
                     </button>
                   ))}
                 </div>
               </div>
-              {payNowAvailable && !paste ? (
-                <label className="flex items-center gap-3 min-h-12 rounded-control border border-line-strong bg-white px-4 cursor-pointer" data-pay-now-switch>
-                  <input type="checkbox" checked={payNow} onChange={(e) => setPayNow(e.target.checked)} className="h-5 w-5 accent-ink" />
-                  <span className="flex flex-col"><span className="text-sm font-bold">Pay now on the customer&apos;s page</span><span className="text-xs text-muted">Card payment through Network International; the payment records itself.</span></span>
-                </label>
+              {expected === "link" ? (
+                <div className="flex flex-col gap-2" data-link-fields>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-muted">Paste the payment link (shown as a Pay now button on the proforma)</span>
+                    <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://…" data-link-url />
+                  </label>
+                  {payNowAvailable && !linkUrl.trim() ? (
+                    <label className="flex items-center gap-3 min-h-12 rounded-control border border-line-strong bg-white px-4 cursor-pointer" data-pay-now-switch>
+                      <input type="checkbox" checked={payNow} onChange={(e) => setPayNow(e.target.checked)} className="h-5 w-5 accent-ink" />
+                      <span className="flex flex-col"><span className="text-sm font-bold">Create the link (Network International)</span><span className="text-xs text-muted">Pay now on the customer&apos;s page; the payment records itself.</span></span>
+                    </label>
+                  ) : null}
+                </div>
               ) : null}
-              {!paste ? (
-                <button type="button" onClick={() => setPaste(true)} className="self-start text-xs font-bold underline underline-offset-4 text-muted" data-paste-link>Paste a payment link instead</button>
-              ) : (
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-muted">Payment link (opens once for the customer)</span>
-                  <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://…" data-link-url />
-                  <button type="button" onClick={() => { setPaste(false); setLinkUrl(""); }} className="self-start text-xs font-bold underline underline-offset-4 text-muted">No link</button>
-                </label>
-              )}
               {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
               <Button type="button" size="lg" className="w-full" disabled={pending || !expected} onClick={continueToMessage} data-pay-continue>{pending ? "Saving…" : "Continue to the message"}</Button>
             </div>

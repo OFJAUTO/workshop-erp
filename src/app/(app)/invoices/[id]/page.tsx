@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { signJobFiles } from "@/lib/work-data";
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -49,6 +50,11 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const payable = isTax || (invoice.kind === "proforma" && !invoice.converted_to);
   const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
   const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
+
+  // The card slips and transfer proofs, signed for one hour.
+
+  const proofUrls = await signJobFiles(payments.map((p) => p.proof_path).filter((x): x is string => !!x));
+
 
   return (
     <>
@@ -102,6 +108,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
                       {p.bank_charge_aed && seesCost ? <span className="text-xs text-muted">charge {m(p.bank_charge_aed)}</span> : null}
                       {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
+                      {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs">
                       {p.status === "voided" ? <span className="text-red font-semibold">Voided by {nameOf.get(p.voided_by ?? "") ?? "the owner"} {formatDateTime(p.voided_at)}: {p.void_reason}</span> : null}

@@ -47,7 +47,7 @@ await section("1 send the proforma", async () => {
   check("1: step 2 carries no black button yet (the form stays folded until the proforma is sent)", (await page.locator('[data-step="payment"] [data-record-payment]:visible').count()) === 0 && (await page.locator("[data-record-block][data-folded]").count()) === 1);
   await page.locator('[data-ready-send="proforma"] button').first().click();
   await page.locator("[data-pay-how]").waitFor({ timeout: 10000 });
-  check("1: the window asks how the customer will pay", (await page.locator("[data-expected]").count()) === 5);
+  check("1: the window asks how the customer will pay (four choices)", (await page.locator("[data-expected]").count()) === 4);
   check("1: Continue is off until a method is chosen", await page.locator("[data-pay-continue]").isDisabled());
   await page.locator('[data-expected="transfer"]').click();
   check("1: Continue is on after choosing", !(await page.locator("[data-pay-continue]").isDisabled()));
@@ -118,6 +118,8 @@ await section("4 final confirmation and the tax invoice", async () => {
   check("4: accounts may record transfer, cheque and link", (await page.locator("[data-method]").count()) === 3 && (await page.locator('[data-method="transfer"]').count()) === 1);
   check("4: the expected method is pre-selected", (await page.locator('[data-method="transfer"]').getAttribute("aria-pressed")) === "true");
   await page.locator("[data-reference]").fill("12345");
+  // A transfer now needs its proof photo before it can be recorded.
+  await page.locator("[data-proof-input]").setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
   await page.locator("[data-record-payment]").click();
   await page.locator("[data-confirm-full]").waitFor({ timeout: 10000 });
   const text = plainText(await page.locator("[data-confirm-full]").innerHTML());
@@ -164,8 +166,8 @@ await section("6 pay now", async () => {
   await go(page, `${base}/jobs/${jobId}/invoice`);
   await page.locator('[data-ready-send="proforma"] button').first().click();
   await page.locator("[data-pay-how]").waitFor({ timeout: 10000 });
-  check("6: the Pay now switch is offered (gateway set up)", (await page.locator("[data-pay-now-switch] input").count()) === 1);
-  await page.locator('[data-expected="card"]').click();
+  await page.locator('[data-expected="link"]').click();
+  check("6: the Pay now switch is offered under Payment link (gateway set up)", (await page.locator("[data-pay-now-switch] input").count()) === 1);
   await page.locator("[data-pay-now-switch] input").check();
   await page.locator("[data-pay-continue]").click();
   await page.locator("textarea").first().waitFor({ timeout: 15000 });
@@ -207,7 +209,7 @@ await section("7 pay now follows the balance", async () => {
   await go(page, `${base}/jobs/${jobId}/invoice`);
   await page.locator('[data-ready-send="proforma"] button').first().click();
   await page.locator("[data-pay-how]").waitFor({ timeout: 10000 });
-  await page.locator('[data-expected="card"]').click();
+  await page.locator('[data-expected="link"]').click();
   await page.locator("[data-pay-now-switch] input").check();
   await page.locator("[data-pay-continue]").click();
   await page.locator("textarea").first().waitFor({ timeout: 15000 });

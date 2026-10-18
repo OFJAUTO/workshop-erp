@@ -104,6 +104,12 @@ export function PaymentForm({
         {method !== "cash" && method !== "cheque" ? (
           <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === "card" ? "Terminal slip number (optional)" : method === "transfer" ? "Transfer reference (optional)" : "Link reference (optional)"} className="max-w-72" data-reference />
         ) : null}
+        {method === "card" || method === "transfer" ? (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
+            <input type="file" name="proof" accept="image/*,.pdf" required className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input />
+          </label>
+        ) : null}
         <p className="text-xs text-muted">
           {charge > 0 ? `Bank charge ${charge}% on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (${money((value * charge) / 100)})` : ""}, internal, never shown to the customer.` : "No bank charge on this method."}
           {method === "cheque" ? " A cheque counts as unpaid until it is marked cleared." : ""}
