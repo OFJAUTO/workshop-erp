@@ -80,15 +80,18 @@ export function PageHeader({
   picture?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 pr-16 sm:pr-20">
-      <div className="flex items-center gap-4">
+    <div className="flex flex-wrap items-end gap-4">
+      <div className="flex min-w-0 items-center gap-4">
         {picture}
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-extrabold leading-tight">{title}</h1>
           {subtitle ? <p className="text-sm font-medium text-muted">{subtitle}</p> : null}
         </div>
       </div>
-      {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {actions}
+        <span id="header-bell-slot" className="inline-flex shrink-0 items-center" />
+      </div>
     </div>
   );
 }

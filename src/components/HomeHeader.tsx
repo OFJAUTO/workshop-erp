@@ -23,10 +23,11 @@ export function HomeHeader({ staff, gateIn = false, actions = null }: { staff: C
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-[-0.01em]" data-greeting>{greeting}, {first}</h1>
           <p className="text-[17px] font-bold text-muted" data-home-date>{date}</p>
         </div>
-        <div className="ml-auto flex items-center gap-3">
-          <div className="hidden md:block w-[24rem] xl:w-[28rem]"><TopSearch /></div>
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <div className="hidden md:block w-[20rem] xl:w-[26rem]"><TopSearch /></div>
           {gateIn ? <LinkButton href="/gate-in" size="lg">Gate in a car</LinkButton> : null}
           {actions}
+          <span id="header-bell-slot" className="inline-flex shrink-0 items-center" />
         </div>
       </div>
       <div className="md:hidden" data-search-row><TopSearch /></div>

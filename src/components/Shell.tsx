@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Logo } from "./Logo";
 import { Avatar } from "./ui";
 import { SidebarNav, type NavItem } from "./SidebarNav";
+import { BellDock } from "./BellDock";
 import { NotificationBell } from "./NotificationBell";
 import { ModeExit } from "./ModeExit";
 
@@ -71,11 +72,11 @@ export function Shell({
             <ModeExit dark />
           </div>
         ) : null}
-        {/* Bell at the top right of the page area, level with the page title; below the bar when viewing or acting as someone. */}
+        {/* The one bell: docked into the page header's slot (last on the right, normal flex flow), never floating. */}
         {user ? (
-          <div className={`absolute ${viewingAs || actingAs ? "top-[4.5rem]" : "top-5"} right-4 sm:right-6 lg:right-8 z-30`}>
+          <BellDock>
             <NotificationBell staffId={user.id} tone={sounds?.tone} ownerTone={sounds?.ownerTone} remindMinutes={sounds?.remindMinutes} />
-          </div>
+          </BellDock>
         ) : null}
         {viewingAs ? (
           // View only: every button, box and switch on the page is switched off, so nothing can be changed by accident.

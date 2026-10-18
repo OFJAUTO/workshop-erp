@@ -226,7 +226,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
           <path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
         {unread > 0 ? (
-          <span className="absolute -top-2 -right-2 min-w-6 h-6 rounded-full bg-red-bar text-white text-xs font-bold flex items-center justify-center px-1.5">{unread > 99 ? "99+" : unread}</span>
+          <span className="absolute top-0.5 right-0.5 min-w-5 h-5 rounded-full bg-red-bar text-white text-[10px] font-bold flex items-center justify-center px-1" data-bell-badge>{unread > 99 ? "99+" : unread}</span>
         ) : null}
       </button>
 
