@@ -29,11 +29,17 @@ const pdfText = async (buf) => {
 };
 /** Answers the markup and parts questions on "Quotation complete" so the deposit question (or completion) can come. */
 async function answerCompleteDialogs(page) {
-  for (let i = 0; i < 4; i++) {
-    await sleep(600);
-    if (await page.locator("[data-markup-continue]").count()) { await page.locator("[data-markup-continue]").click(); continue; }
-    if (await page.locator("[data-parts-leave]").count()) { await page.locator("[data-parts-leave]").click(); continue; }
-    break;
+  for (let i = 0; i < 6; i++) {
+    const found = await until(async () => {
+      if (await page.locator("[data-low-profit-send]").count()) return "low";
+      if (await page.locator("[data-markup-continue]").count()) return "markup";
+      if (await page.locator("[data-parts-leave]").count()) return "parts";
+      if (await page.locator("[data-deposit-ask]").count()) return "deposit";
+      return null;
+    }, 15, 400);
+    if (!found || found === "deposit") break;
+    await page.locator(found === "low" ? "[data-low-profit-send]" : found === "markup" ? "[data-markup-continue]" : "[data-parts-leave]").click();
+    await sleep(400);
   }
 }
 

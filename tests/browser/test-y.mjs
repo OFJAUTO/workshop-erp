@@ -480,5 +480,50 @@ if (want("H")) {
   await b2.close();
 }
 
+/* ================= 18 Oct section 5: low-profit colours and warning ================= */
+if (want("I")) {
+  console.log("\n== 18-5 low profit");
+  cleanupDb();
+  const { jobId, quotationId } = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  // The blockers out of the way: the open request closed and pricing done, as the deposit suite does.
+  await sql("update public.part_requests set status = 'done' where job_id = $1", [jobId]);
+  await sql("update public.jobs set parts_pricing_done_at = now() where id = $1", [jobId]);
+  const limits = async () => (await sql("select (select value from public.settings where key = 'quote_margin_yellow_percent') as y, (select value from public.settings where key = 'quote_margin_red_percent') as r"))[0];
+  const orig = await limits();
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1440, height: 1100 } });
+  await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("5: the bottom bar shows the profit margin in green at the default limits", /Profit \d+%/.test((await page.locator("[data-margin-chip]").textContent()) ?? "") && (await page.locator("[data-margin-chip]").getAttribute("data-margin-tone")) === "green", (await page.locator("[data-margin-chip]").textContent().catch(() => "")) ?? "");
+  // The owner raises the red line above this quote's margin: it turns red and completing asks "Are you sure?".
+  await sql("update public.settings set value = '95'::jsonb where key = 'quote_margin_red_percent'");
+  await sql("update public.settings set value = '97'::jsonb where key = 'quote_margin_yellow_percent'");
+  await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("5: below the red limit the margin shows red in the bar and the summary", (await page.locator("[data-margin-chip]").getAttribute("data-margin-tone")) === "red" && (await page.locator("[data-internal-box] dd[class*='text-red']").count()) >= 1);
+  const mark = (await sql("select now() as t"))[0]?.t;
+  await page.getByRole("button", { name: /^Quotation complete$/ }).click();
+  const ask = await until(async () => ((await page.locator("[data-low-profit-ask]").count()) ? 1 : null), 30, 400);
+  check("5: completing a red quote asks 'This is too low of a profit (AED x on AED y, z%)'", !!ask && /This is too low of a profit \(AED [\d,.]+ on AED [\d,.]+, [\d.]+%\)\. Are you sure you want to send\?/.test((await page.locator("[data-low-profit-ask]").textContent()) ?? ""), (await page.locator("[data-low-profit-ask]").textContent().catch(() => "")) ?? "");
+  await page.locator("[data-low-profit-fix]").click();
+  await sleep(800);
+  check("5: 'Go back and fix' closes the question without completing", (await page.locator("[data-low-profit-ask]").count()) === 0 && (await sql("select completed_at from public.quotations where id = $1", [quotationId]))[0]?.completed_at === null);
+  await page.getByRole("button", { name: /^Quotation complete$/ }).click();
+  await until(async () => ((await page.locator("[data-low-profit-ask]").count()) ? 1 : null), 30, 400);
+  await page.locator("[data-low-profit-send]").click();
+  const done = await until(async () => (await sql("select completed_at from public.quotations where id = $1", [quotationId]))[0]?.completed_at ? 1 : null, 30, 500);
+  check("5: 'Send anyway' completes and is written on the quotation", !!done && ((await sql("select count(*)::int as n from public.quotation_events where quotation_id = $1 and event_type = 'low_profit_sent'", [quotationId]))[0]?.n ?? 0) === 1);
+  const told = await until(async () => (await sql("select title from public.notifications where type = 'low_profit' and created_at > $1 limit 1", [mark]))[0] ?? null, 30, 500);
+  check("5: the owner is told 'Low-profit quote sent by [advisor]: [car], [margin]%'", /^Low-profit quote sent by .+: .+, [\d.]+%$/.test(told?.title ?? ""), told?.title);
+  // Yellow is a colour, never a question.
+  await sql("update public.settings set value = '5'::jsonb where key = 'quote_margin_red_percent'");
+  await sql("update public.quotations set completed_at = null, completed_by = null where id = $1", [quotationId]);
+  await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
+  check("5: between the limits the margin shows yellow", (await page.locator("[data-margin-chip]").getAttribute("data-margin-tone")) === "amber");
+  await page.getByRole("button", { name: /^Quotation complete$/ }).click();
+  const done2 = await until(async () => (await sql("select completed_at from public.quotations where id = $1", [quotationId]))[0]?.completed_at ? 1 : null, 30, 500);
+  check("5: a yellow quote completes without the question", !!done2 && (await page.locator("[data-low-profit-ask]").count()) === 0);
+  await browser.close();
+  await sql("update public.settings set value = $1::jsonb where key = 'quote_margin_yellow_percent'", [JSON.stringify(orig?.y ?? 30)]);
+  await sql("update public.settings set value = $1::jsonb where key = 'quote_margin_red_percent'", [JSON.stringify(orig?.r ?? 20)]);
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

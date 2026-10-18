@@ -288,6 +288,12 @@ export function SettingsForm({
               <Field label="Daily profit target (AED)">
                 <Input name="daily_profit_target_aed" defaultValue={v.daily_profit_target_aed} inputMode="numeric" required />
               </Field>
+              <Field label="Quote profit: yellow below (%)" hint="A quotation's profit shows yellow under this margin.">
+                <Input name="quote_margin_yellow_percent" defaultValue={v.quote_margin_yellow_percent} inputMode="numeric" required />
+              </Field>
+              <Field label="Quote profit: red below (%)" hint='Red under this margin; completing a red quote asks "Are you sure?" and you are told when it is sent anyway.'>
+                <Input name="quote_margin_red_percent" defaultValue={v.quote_margin_red_percent} inputMode="numeric" required />
+              </Field>
               <Field label="Monthly fixed costs (AED)" hint="The break-even line of the owner's target box: rent for both buildings, office and management staff, DEWA, insurance, software. Don't include technicians' pay here if it's already charged as labour cost on jobs.">
                 <Input name="monthly_fixed_costs_aed" defaultValue={v.monthly_fixed_costs_aed} inputMode="numeric" required />
               </Field>

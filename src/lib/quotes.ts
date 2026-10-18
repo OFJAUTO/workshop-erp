@@ -319,6 +319,15 @@ export type ServiceCategory = { id: string; name: string; position: number; is_a
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 export const round1 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 10) / 10;
+/** The quote's profit colour: red below the red margin (or a loss), yellow below the yellow one, green otherwise. */
+export function marginToneOf(profit: number, net: number, limits: { yellow: number; red: number }): "green" | "amber" | "red" {
+  if (profit < 0) return "red";
+  const margin = net > 0 ? (profit / net) * 100 : 0;
+  if (margin < limits.red) return "red";
+  if (margin < limits.yellow) return "amber";
+  return "green";
+}
+
 export const aed = (n: number | null | undefined) => `AED ${round2(n ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** "1.5 h", always one decimal. */
 /** "2.0 h", "10.25 h": one decimal, two when the figure needs them. */

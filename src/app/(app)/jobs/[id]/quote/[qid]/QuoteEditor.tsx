@@ -15,7 +15,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { marginToneOf, aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -130,6 +130,9 @@ export type EditorSettings = {
   reasons?: Record<string, string[]>;
   /** People we pay commission to (Settings), for the one-tap choices in the internal box. */
   commissionPeople?: string[];
+  /** The quote profit colours (Settings): yellow below, red below. */
+  marginYellow?: number;
+  marginRed?: number;
   /** The hours the technicians clocked on this job once the work is done; labour at cost switches to them. */
   clockedHours?: number | null;
   /** Bodyshop packages have no fixed price: the last price typed for each, shown as a small hint. */
@@ -297,6 +300,7 @@ export function QuoteEditor({
   const [discountOpen, setDiscountOpen] = useState(false);
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
+  const [lowAsk, setLowAsk] = useState<string | null>(null);
   const [depositAsk, setDepositAsk] = useState<string | null>(null);
   // The battery warranty picked on a battery line (12, 24, 36 months), kept here until the page refreshes.
   const [warranty, setWarrantyMap] = useState<Record<string, number>>({});
@@ -306,7 +310,7 @@ export function QuoteEditor({
   };
   const [reviseAsk, setReviseAsk] = useState(false);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
-  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean }>({});
+  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean }>({});
   const [partsAsk, setPartsAsk] = useState<{ message: string; missing: string[] } | null>(null);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
   const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
@@ -469,11 +473,13 @@ export function QuoteEditor({
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
   const completed = !!completedAt;
   /** Quotation complete, with the one-time markup reminder when every part is still at the minimum markup. */
-  const completeNow = (skipMarkup: boolean, skipParts = false, skipDeposit = false) => run(async () => {
+  const completeNow = (skipMarkup: boolean, skipParts = false, skipDeposit = false, lowProfitOk = false) => run(async () => {
     if (skipMarkup) skips.current.skipMarkup = true;
+    if (lowProfitOk) skips.current.lowProfitOk = true;
     if (skipParts) skips.current.skipParts = true;
     if (skipDeposit) skips.current.skipDeposit = true;
     const r = await completeQuotation(quotation.id, { ...skips.current });
+    if (r.ask === "low_profit") { setLowAsk(r.message ?? "This profit is very low. Are you sure you want to send?"); return { ok: true }; }
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
     if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
@@ -486,6 +492,7 @@ export function QuoteEditor({
     const a = await addMissingParts(quotation.id);
     if (a.error) return a;
     const r = await completeQuotation(quotation.id, { ...skips.current });
+    if (r.ask === "low_profit") { setLowAsk(r.message ?? "This profit is very low. Are you sure you want to send?"); return { ok: true }; }
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
     if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
@@ -892,7 +899,8 @@ export function QuoteEditor({
     );
   }
   const margin = totals.net > 0 ? (totals.profit / totals.net) * 100 : 0;
-  const marginTone = totals.profit < 0 ? "text-red" : margin >= (settings.goodMarginPercent ?? 25) ? "text-green" : "text-amber";
+  const tone3 = marginToneOf(totals.profit, totals.net, { yellow: settings.marginYellow ?? 30, red: settings.marginRed ?? 20 });
+  const marginTone = tone3 === "red" ? "text-red" : tone3 === "amber" ? "text-amber" : "text-green";
   const progressText = `${labourDone} of ${namedLabour.length} line${namedLabour.length === 1 ? "" : "s"} done${wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}`;
   const scrollToFirstBlocker = () => {
     setAttempted(true);
@@ -1374,6 +1382,18 @@ export function QuoteEditor({
         </div>
       ) : null}
       {reviseAskDialog}
+      {lowAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-low-profit-ask>
+          <div className="w-full max-w-md rounded-card border-2 border-red-bar bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold text-red">{lowAsk}</span>
+            <p className="text-sm text-muted">Sending anyway is written on the quotation and the owner is told.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => setLowAsk(null)} data-low-profit-fix>Go back and fix</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { setLowAsk(null); completeNow(false, false, false, true); }} data-low-profit-send>Send anyway</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {markupAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-markup-ask>
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
@@ -1413,6 +1433,7 @@ export function QuoteEditor({
         <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
             {!disabled ? <span className={`text-[11px] font-bold ${state === "offline" ? "text-amber" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
+            {showProfit ? <span className={`text-xs font-extrabold ${marginTone}`} data-margin-chip data-margin-tone={tone3}>Profit {margin.toFixed(0)}%</span> : null}
             {!sent ? <span className="text-xs font-semibold">{progressText}</span> : <span className="text-xs font-semibold">{quotation.status === "sent" ? "Sent, not yet opened" : quotation.status === "opened" ? "Opened by the customer" : quotation.status === "approved" ? "Approved" : quotation.status === "declined" ? "Declined" : quotation.status === "expired" ? "Expired" : quotation.status === "urgent_requested" ? "Urgent work asked for" : "Sent"}</span>}
             <span className="ml-auto flex flex-wrap items-center gap-2">
               {!sent && !completed && !disabled ? (

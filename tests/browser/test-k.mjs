@@ -104,7 +104,9 @@ await section("1 quote builder and revision", async () => {
   check("B13: 'Parts markup is still at the minimum 5%. Set it now?' appears once", !!asked, `${JSON.stringify(stateNow)} · ${(await page.locator("[data-blocker], .border-red-bar").allTextContents().catch(() => [])).join(" | ").slice(0, 200)} · ${String(await page.textContent("body")).match(/Not complete yet[^.]*|part requests still with Parts|not yet agreed[^.]*/)?.[0] ?? "no error text"}`);
   if (asked) {
     check("B13: the question offers Set markup and Continue anyway", (await page.locator("[data-markup-set]").count()) === 1 && (await page.locator("[data-markup-continue]").count()) === 1);
-    await page.locator("[data-markup-continue]").click();
+    if (await page.locator("[data-low-profit-send]").count()) await page.locator("[data-low-profit-send]").click();
+    await page.locator("[data-markup-continue]").click().catch(() => null);
+    if (await page.locator("[data-low-profit-send]").count()) await page.locator("[data-low-profit-send]").click();
     const logged = await until(async () => { const r = (await sql("select markup_skipped_at, completed_at from public.quotations where id = $1", [v1]))[0]; return r?.markup_skipped_at && r?.completed_at ? r : null; }, 40, 500);
     check("B13: Continue anyway is logged (who and when) and the quotation completes without approval", !!logged?.markup_skipped_at && !!logged?.completed_at, JSON.stringify(logged));
   }

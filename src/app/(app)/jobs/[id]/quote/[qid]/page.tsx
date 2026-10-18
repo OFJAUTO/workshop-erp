@@ -164,6 +164,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     workingTime: workingTimeOf(settings),
     reasons: { part_discount: reasonsFor(settings, "part_discount") },
     commissionPeople: ((settings.commission_people ?? []) as string[]).map(String),
+    marginYellow: Number(settings.quote_margin_yellow_percent) || 30,
+    marginRed: Number(settings.quote_margin_red_percent) || 20,
     clockedHours,
     lastPrices,
   };

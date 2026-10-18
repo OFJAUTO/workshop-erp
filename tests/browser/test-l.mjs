@@ -114,7 +114,10 @@ await section("1b missing-parts check", async () => {
   await until(async () => ((await page.locator("[data-labour-boxes]").count()) ? 1 : null), 30, 500);
   await page.locator("button", { hasText: /^Quotation complete$/ }).click();
   const markup = await until(async () => ((await page.locator("[data-markup-ask]").count()) ? 1 : null), 20, 500);
+  if (await page.locator("[data-low-profit-send]").count()) await page.locator("[data-low-profit-send]").click();
   if (markup) await page.locator("[data-markup-continue]").click();
+  await sleep(600);
+  if (await page.locator("[data-low-profit-send]").count()) await page.locator("[data-low-profit-send]").click();
   const asked = await until(async () => ((await page.locator("[data-parts-ask]").count()) ? 1 : null), 30, 500);
   check("1b: 'Quotation complete' says '1 priced part is missing from the quote' and names it", !!asked && /1 priced part is missing/.test((await page.locator("[data-parts-ask]").textContent().catch(() => "")) ?? "") && /E2E STOCK FILTER/i.test((await page.locator("[data-parts-ask]").textContent().catch(() => "")) ?? ""), (await page.locator("[data-parts-ask]").textContent().catch(() => "no ask")) ?? "");
   await shot(page, "13-missing-part-check");

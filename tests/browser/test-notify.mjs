@@ -205,7 +205,11 @@ try {
     if (await complete.count()) {
       await complete.click();
       // The markup reminder (every part still at the minimum markup): Continue anyway, as an advisor would when the price is right.
-      for (let i = 0; i < 12; i++) { if (await page.locator("[data-markup-ask]").count()) { await page.locator("[data-markup-continue]").click(); break; } await sleep(500); }
+      for (let i = 0; i < 12; i++) {
+        if (await page.locator("[data-low-profit-ask]").count()) { await page.locator("[data-low-profit-send]").click(); await sleep(600); continue; }
+        if (await page.locator("[data-markup-ask]").count()) { await page.locator("[data-markup-continue]").click(); break; }
+        await sleep(500);
+      }
       await sleep(3500);
     }
     await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);

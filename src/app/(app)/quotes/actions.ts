@@ -14,7 +14,7 @@ import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, isUnchosen, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, isUnchosen, marginToneOf, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { formatPlate } from "@/lib/types";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -468,7 +468,7 @@ async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQ
  * "Quotation complete": every check passes, the labour hours are remembered for the next quotation on
  * the same work, and descriptions typed by hand are counted so the owner can add them to the list.
  */
-export async function completeQuotation(quotationId: string, opts: { /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean; /** "Leave them off" on the missing-parts check: logged. */ skipParts?: boolean; /** "Send without a deposit" on the deposit reminder: logged. */ skipDeposit?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "markup" | "parts" | "deposit"; message?: string; missing?: string[] }> {
+export async function completeQuotation(quotationId: string, opts: { /** "Send anyway" on the low-profit warning: logged, the owner told. */ lowProfitOk?: boolean; /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean; /** "Leave them off" on the missing-parts check: logged. */ skipParts?: boolean; /** "Send without a deposit" on the deposit reminder: logged. */ skipDeposit?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "low_profit" | "markup" | "parts" | "deposit"; message?: string; missing?: string[] }> {
   const bundle = await loadQuotation(quotationId);
   if (!bundle) return { error: "Quotation not found." };
   const q = bundle.quotation;
@@ -481,6 +481,19 @@ export async function completeQuotation(quotationId: string, opts: { /** "Contin
   const blockers = await quoteBlockers(bundle, settings, checks);
   if (blockers.length) return { error: `Not complete yet: ${blockers.map((b) => b.label).join(" · ")}` };
   const active = bundle.lines.filter((l) => l.is_active);
+  // A red-margin quotation asks once: "This is too low of a profit (AED x on AED y, z%). Are you sure you want to send?".
+  // "Send anyway" is allowed; the log and the owner's message are written when the completion really happens (below),
+  // so answering the markup or deposit question afterwards never tells the owner twice.
+  let lowProfit: { marginPct: number; profit: number; net: number } | null = null;
+  if (q.kind === "quotation") {
+    const t = quoteTotals(bundle.lines, q, { technicianCostRate: Number((settings.technician_cost_rate_by_department as Record<string, number> | null)?.[bundle.job?.department ?? "mechanical"]) || Number(settings.technician_cost_rate_aed) || 0 });
+    const limits = { yellow: Number(settings.quote_margin_yellow_percent) || 30, red: Number(settings.quote_margin_red_percent) || 20 };
+    const marginPct = t.net > 0 ? (t.profit / t.net) * 100 : 0;
+    if (marginToneOf(t.profit, t.net, limits) === "red") {
+      if (!opts.lowProfitOk) return { ask: "low_profit", message: `This is too low of a profit (${aed(t.profit)} on ${aed(t.net)}, ${marginPct.toFixed(marginPct < 10 ? 1 : 0)}%). Are you sure you want to send?` };
+      lowProfit = { marginPct, profit: t.profit, net: t.net };
+    }
+  }
   // The parts markup never moved off the minimum: asked once (Set markup / Continue anyway); "Continue anyway" is logged for the owner's summary.
   const minMarkup = Number(settings.parts_min_markup_percent) || 5;
   const partLines = active.filter((l) => l.line_type === "part" && !isUnchosen(l) && !l.left_off);
@@ -537,6 +550,12 @@ export async function completeQuotation(quotationId: string, opts: { /** "Contin
     }
   }
   if (remembered) await admin.from("settings").update({ value: memory }).eq("key", "labour_hours_memory");
+  // "Send anyway" on the low-profit warning: written on the quotation, the owner told once.
+  if (lowProfit) {
+    const plate = bundle.vehicle ? formatPlate(bundle.vehicle) : bundle.job?.job_number ?? q.number;
+    await logQuoteEvent(q.id, q.job_id, staff.id, "low_profit_sent", `${q.number} v${q.version} completed at a ${lowProfit.marginPct.toFixed(1)}% margin (${aed(lowProfit.profit)} on ${aed(lowProfit.net)}) by ${staff.display_name}: Send anyway`);
+    if (staff.role_id !== "owner") await notifyRoles(["owner"], { type: "low_profit", title: `Low-profit quote sent by ${staff.display_name}: ${plate}, ${lowProfit.marginPct.toFixed(1)}%`, body: `${q.number}: ${aed(lowProfit.profit)} profit on ${aed(lowProfit.net)} before VAT. The limits are in Settings.`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+  }
   await admin.from("quotations").update({ completed_at: new Date().toISOString(), completed_by: staff.id, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name}`);
   refresh(q.job_id, q.id);
