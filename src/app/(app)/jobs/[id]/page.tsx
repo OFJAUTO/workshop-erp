@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from "@/lib/stage-style";
 import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
@@ -15,7 +16,7 @@ import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, forma
 import { hasLabourChargesLine, tasksFromInspection,inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate, type Stage } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { missingItems } from "@/lib/media-checklist";
 import { describeMileage } from "@/lib/mileage";
@@ -174,8 +175,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   ]);
   const partsStepList = partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) });
   const partsDots = <PartsSteps size="dots" steps={partsStepList} />;
-  // The Parts box on the stage track shows amber once some of its steps are done but not all.
-  const partsPartly = partsStepList.some((st) => st.state === "done") && !partsStepList.every((st) => st.state === "done");
   const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
   // The money side in five steps (one rule with the invoice page and the accounts screens).
   const [{ data: moneyInvRows }, { data: creditCust }] = laterStage
@@ -256,16 +255,38 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const approvalState = latestApproval?.approved_at || job.first_approval_at ? { text: `Approved${latestApproval?.approver_name ? ` by ${latestApproval.approver_name}` : ""}, ${formatDate(latestApproval?.approved_at ?? job.first_approval_at)}`, tone: "green" as const } : latestApproval?.opened_at ? { text: "Opened by the customer, not yet approved", tone: "amber" as const } : latestApproval?.sent_at ? { text: `Sent ${formatDate(latestApproval.sent_at)}, not yet opened`, tone: "amber" as const } : latestApproval ? { text: "Link created, not sent yet", tone: "neutral" as const } : { text: check.complete ? "Not sent yet" : "Gate-in photos and video pending", tone: "neutral" as const };
   // Every step tile: done (pale green with a tick), the current step (white, black outline), waiting on something (pale amber), not reached (grey).
   const STAGE_ORDER = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"];
-  const tile = (keys: string[], tone: "green" | "amber" | "red" | "neutral" = "neutral", started = true) => {
-    const idx = Math.max(...keys.map((k) => STAGE_ORDER.indexOf(k)));
-    const current = keys.includes(job.stage);
-    const done = !current && idx < stageIndex;
-    if (current) return `flex flex-col gap-2 bg-white ring-2 ring-ink ${tone === "red" ? "border-red-bar" : tone === "amber" ? "bg-amber-soft/40 border-amber-bar" : "border-ink"}`;
-    if (done) return "flex flex-col gap-2 tile-done bg-green-soft/50 border-green";
-    if (tone === "amber" && started) return "flex flex-col gap-2 bg-amber-soft/40 border-amber-bar";
-    if (tone === "red" && started) return "flex flex-col gap-2 border-red-bar";
-    return started ? "flex flex-col gap-2 border-line" : "flex flex-col gap-2 bg-canvas opacity-70";
+  // The boxes and the step bar share ONE source of truth (src/lib/stage-style.ts) and the same facts:
+  // done = the real thing happened (approved, report approved, quotation approved, every part received),
+  // never just "the stage moved on"; in progress = amber; not started = grey. Full-strength fills - the old
+  // tile used bg-green-soft/50, which reads as white (why the earlier fix looked like coloured text only).
+  const trackStages = (loose ? STAGE_ORDER.filter((s) => !LOOSE_SKIP_STAGES.includes(s as Stage)) : STAGE_ORDER) as Stage[];
+  const quoteApproved = latestQuote ? latestQuote.status === "approved" : null;
+  const stageDone = (s: string, i: number): boolean => {
+    if (!job.is_open) return true;
+    const positional = i < trackStages.indexOf(job.stage as Stage);
+    switch (s) {
+      case "inspection": return inspection ? inspection.inspection.status === "approved" : positional;
+      case "quote":
+      case "approval": return quoteApproved ?? positional;
+      case "parts": return partsStepList.find((x) => x.key === "received")?.state === "done";
+      case "qc": return qc ? qc.status === "passed" : positional;
+      case "wash": return wash ? true : positional;
+      case "ready": return money.chip.tone === "green";
+      default: return positional;
+    }
   };
+  const barStates = stageStates(trackStages, (s, i) => stageDone(s, i));
+  const approvalBox: StageBoxState = !job.is_open || job.first_approval_at ? "done" : "current";
+  const inspBox = barStates.inspection ?? "done";
+  const quoteBox = barStates.quote ?? "done";
+  const partsBox = barStates.parts ?? "done";
+  const workBox = barStates.work ?? "done";
+  const qcBox = barStates.qc ?? "done";
+  const washBox = barStates.wash ?? "done";
+  const moneyBox = barStates.ready ?? "done";
+  const tile = (state: StageBoxState) => `flex flex-col gap-2 ${STAGE_BOX_CARD[state]}`;
+  const boxTitle = (state: StageBoxState) => `text-xs font-bold uppercase tracking-[0.08em] ${STAGE_BOX_TITLE[state]}`;
+  const tick = (state: StageBoxState) => (state === "done" ? "✓ " : "");
   const mapHref = gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
   const overrides = events.filter((e) => e.event_type === "override");
   const pendingMove = moveRequests.find((m) => m.status === "pending");
@@ -357,7 +378,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {docAlerts.map((a) => <Badge key={a.key} tone={a.tone === "muted" ? "neutral" : a.tone}>{a.text}</Badge>)}
               </div>
             ) : null}
-            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} partly={job.stage === "parts" && partsPartly} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
+            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} states={barStates} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
@@ -445,15 +466,15 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {!loose ? (
-        <Card className={tile(["gate_in"], approvalState.tone)}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job card approval</span>
+        <Card className={tile(approvalBox)} data-stage-card="approval" data-state={approvalBox}>
+          <span className={boxTitle(approvalBox)}>{tick(approvalBox)}Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
           <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
         </Card>
         ) : null}
         {!loose ? (
-        <Card className={tile(["inspection", "quote"], inspectionState.tone)}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Inspection report</span>
+        <Card className={tile(inspBox)} data-stage-card="report" data-state={inspBox}>
+          <span className={boxTitle(inspBox)}>{tick(inspBox)}Inspection report</span>
           <span className="text-sm font-semibold">{inspectionState.text}</span>
           {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
           {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
@@ -469,8 +490,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
         {seesQuote ? (
-        <Card id="quotation" className={tile(["quote", "approval"], qState.tone)}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Quotation</span>
+        <Card id="quotation" className={tile(quoteBox)} data-stage-card="quotation" data-state={quoteBox}>
+          <span className={boxTitle(quoteBox)}>{tick(quoteBox)}Quotation</span>
           <span className="text-sm font-semibold">{qState.text}</span>
           {latestQuote ? (
             <span className="text-xs text-muted">
@@ -507,8 +528,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
         </Card>
         ) : null}
-        <Card className={tile(["parts"], "neutral", partItems.length > 0)}>
-          <span className="flex items-center gap-2"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Parts</span>{partsDots}</span>
+        <Card className={tile(partsBox)} data-stage-card="parts" data-state={partsBox}>
+          <span className="flex items-center gap-2"><span className={boxTitle(partsBox)}>{tick(partsBox)}Parts</span>{partsDots}</span>
           <span className="text-sm font-semibold">
             {partItems.length === 0 ? (quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
           </span>
@@ -537,8 +558,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           {partsState.late.length ? <span className="text-xs font-bold text-red">{partsState.late.length} part{partsState.late.length === 1 ? "" : "s"} late</span> : null}
           {partsState.needed.length ? <span className="text-xs text-muted">Handed over {partsState.confirmed.length} of {partsState.needed.length}</span> : null}
         </Card>
-        <Card className={tile(["work"], job.status === "in_work" && job.work_done_at ? "amber" : "neutral", !!work)}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Work</span>
+        <Card className={tile(workBox)} data-stage-card="work" data-state={workBox}>
+          <span className={boxTitle(workBox)}>{tick(workBox)}Work</span>
           <span className="text-sm font-semibold">{job.status === "in_work" && job.work_done_at ? `Job finished, waiting on ${managerLabel} to confirm` : work && job.plan_released_at ? `${work.lines.filter((l) => l.status === "done").length} of ${work.lines.length} jobs done` : work ? "Planned, not released" : "Not started"}</span>
           {work ? <span className="text-xs text-muted">{Math.floor(work.minutesTotal / 60)} h {work.minutesTotal % 60} min used of {work.hoursQuoted.toFixed(1)} h charged{plan?.technicians.length ? ` · ${plan.technicians.filter((t) => !t.left_at).map((t) => t.display_name).join(", ")}` : ""}{work.additional.some((a) => a.status === "pending") ? " · additional work waiting" : ""}</span> : null}
           {inspectionTasks.length ? <span className="text-xs text-muted" data-inspection-tasks-count>Labour charges: {inspectionTasks.length} task{inspectionTasks.length === 1 ? "" : "s"} from the inspection on the work order</span> : null}
@@ -549,22 +570,22 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </div>
           ) : null}
         </Card>
-        <Card className={tile(["qc"], qc?.status === "failed" ? "red" : "neutral", !!qc)}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">QC</span>
+        <Card className={tile(qcBox)} data-stage-card="qc" data-state={qcBox}>
+          <span className={boxTitle(qcBox)}>{tick(qcBox)}QC</span>
           <span className="text-sm font-semibold">{qc ? (qc.status === "open" ? `Round ${qc.round} in progress` : qc.status === "passed" ? `Passed, round ${qc.round}` : `Failed, round ${qc.round}`) : "Not started"}</span>
           {job.rework_count ? <span className="text-xs text-red font-bold">Rework {job.rework_count}×</span> : null}
           {(qc || job.status === "pending_qc") && (can(role, "doQc") || can(role, "viewWorkOrders")) ? <div className="mt-auto"><LinkButton href={`/qc/${id}`} tone={job.status === "pending_qc" && can(role, "doQc") ? "primary" : "secondary"} size="md">{job.status === "pending_qc" && can(role, "doQc") ? "Start QC" : "QC"}</LinkButton></div> : null}
         </Card>
         {!loose ? (
-        <Card className={tile(["wash"], job.status === "pending_wash" && !job.wash_sent_at ? "amber" : "neutral", !!wash || job.status === "pending_wash")}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Wash</span>
+        <Card className={tile(washBox)} data-stage-card="wash" data-state={washBox}>
+          <span className={boxTitle(washBox)}>{tick(washBox)}Wash</span>
           <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? (job.wash_sent_at ? `At the wash since ${formatDayTime(job.wash_sent_at)}` : "Ready for wash") : "Not started"}</span>
           {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><WashForms jobId={id} atWash={!!job.wash_sent_at} canAct={(role === "owner" || role === "service_advisor") && !staff.viewingAs} from="job" washState={job.wash_sent_at ? null : await washStateNow(id)} sendAction={sendToWash.bind(null, id)} doneAction={washDone.bind(null, id)} skipAction={skipWash.bind(null, id)} /></div> : null}
         </Card>
         ) : null}
         {can(role, "viewInvoices") ? (
-        <Card id="invoice" data-money-tile data-money-step={money.current} className={tile(["ready"], money.waitingHours ? "red" : money.chip.tone === "green" ? "green" : money.live ? "amber" : "neutral", !!money.live || job.status === "ready" || job.status === "pending_payment")}>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{money.live ? (money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma") : "Proforma"}</span>
+        <Card id="invoice" data-money-tile data-money-step={money.current} data-stage-card="money" data-state={moneyBox} className={tile(moneyBox)}>
+          <span className={boxTitle(moneyBox)}>{tick(moneyBox)}{money.live ? (money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma") : "Proforma"}</span>
           <span className="flex flex-wrap items-center gap-2">
             {money.live ? <span className="text-sm font-semibold">{money.live.number}</span> : null}
             <Badge tone={money.chip.tone === "ink" ? "ink" : money.chip.tone}>{money.chip.text}</Badge>

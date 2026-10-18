@@ -1,4 +1,5 @@
 import { STAGE_LABELS, STAGES, type Stage, type Timing } from "@/lib/jobs";
+import { STAGE_BOX_CLASS, STAGE_BOX_TITLE, type StageBoxState } from "@/lib/stage-style";
 
 const BAR: Record<Timing["tone"], string> = {
   green: "bg-green",
@@ -11,7 +12,7 @@ const BAR: Record<Timing["tone"], string> = {
  * The nine-step track from the dashboard design. Done steps are black, the current step takes the timing colour.
  * When a road test comes before the inspection, the Inspection step shows two halves: the road test, then the inspection.
  */
-export function StageTrack({ stage, timing, compact = false, skip, roadTest = null, partly = false }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null; /** The current step is part-way (some parts received, the road test done): the box shows amber. */ partly?: boolean }) {
+export function StageTrack({ stage, timing, compact = false, skip, roadTest = null, partly = false, states = null }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null; /** Kept for callers that still pass it; the states map is the source of truth now. */ partly?: boolean; /** The fact-driven state per stage (stageStates); without it the position decides. */ states?: Partial<Record<Stage, StageBoxState>> | null }) {
   const stages = skip?.length ? STAGES.filter((s) => !skip.includes(s)) : STAGES;
   const current = stages.indexOf(stage);
   if (compact) {
@@ -34,15 +35,10 @@ export function StageTrack({ stage, timing, compact = false, skip, roadTest = nu
         {stages.map((s, i) => {
           const done = i < current;
           const now = i === current;
-          const halfDone = now && ((s === "inspection" && roadTest === "done") || partly);
-          const state = done ? "done" : halfDone ? "partly" : now ? "current" : "later";
-          const cls =
-            state === "done" ? "border border-green bg-green-soft text-green"
-            : state === "partly" ? "border-2 border-amber-bar bg-amber-soft text-ink font-bold"
-            : state === "current" ? "border-2 border-ink bg-white text-ink font-bold"
-            : "border border-line bg-chip text-muted";
+          const state: StageBoxState = states?.[s] ?? (done ? "done" : now ? "current" : "later");
+          void partly; // in progress is always amber now; the shared classes carry the whole look
           return (
-            <div key={s} data-stage-box={s} data-state={state} className={`min-h-10 rounded-control px-1 py-1 flex items-center justify-center text-center text-[11px] font-semibold leading-tight ${cls}`} title={s === "inspection" && roadTest ? `Road test ${roadTest === "done" ? "done" : "waiting"} · inspection` : undefined}>
+            <div key={s} data-stage-box={s} data-state={state} className={`min-h-10 rounded-control px-1 py-1 flex items-center justify-center text-center text-[11px] leading-tight ${STAGE_BOX_CLASS[state]} ${STAGE_BOX_TITLE[state]} ${state === "current" ? "font-bold" : "font-semibold"}`} title={s === "inspection" && roadTest ? `Road test ${roadTest === "done" ? "done" : "waiting"} · inspection` : undefined}>
               <span>{state === "done" ? "✓ " : ""}{STAGE_LABELS[s]}</span>
             </div>
           );
