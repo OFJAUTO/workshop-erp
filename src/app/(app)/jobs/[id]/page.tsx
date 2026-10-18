@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
@@ -558,7 +559,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={tile(["wash"], job.status === "pending_wash" && !job.wash_sent_at ? "amber" : "neutral", !!wash || job.status === "pending_wash")}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Wash</span>
           <span className="text-sm font-semibold">{wash ? (wash.skipped ? `Skipped: ${wash.skip_reason}` : `Done ${formatDayTime(wash.done_at)}`) : job.status === "pending_wash" ? (job.wash_sent_at ? `At the wash since ${formatDayTime(job.wash_sent_at)}` : "Ready for wash") : "Not started"}</span>
-          {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><WashForms jobId={id} atWash={!!job.wash_sent_at} canAct={(role === "owner" || role === "service_advisor") && !staff.viewingAs} from="job" sendAction={sendToWash.bind(null, id)} doneAction={washDone.bind(null, id)} skipAction={skipWash.bind(null, id)} /></div> : null}
+          {job.status === "pending_wash" && can(role, "washCars") ? <div className="mt-auto"><WashForms jobId={id} atWash={!!job.wash_sent_at} canAct={(role === "owner" || role === "service_advisor") && !staff.viewingAs} from="job" washState={job.wash_sent_at ? null : await washStateNow(id)} sendAction={sendToWash.bind(null, id)} doneAction={washDone.bind(null, id)} skipAction={skipWash.bind(null, id)} /></div> : null}
         </Card>
         ) : null}
         {can(role, "viewInvoices") ? (

@@ -28,6 +28,9 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
   const atWash = rows.filter((j) => !!j.wash_sent_at);
   const done = (recent ?? []) as unknown as (WashRow & { job: { job_number: string } | null; person: { display_name: string } | null })[];
   const canAct = (role === "owner" || role === "service_advisor") && !staff.viewingAs;
+  // The live picture for the "Is the car wash free?" question, from the rows already loaded.
+  const toWashCar = (j: Row) => ({ id: j.id, plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number, title: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ") });
+  const stateFor = (id: string) => ({ inWash: atWash.map(toWashCar), waiting: waiting.filter((j) => j.id !== id).map(toWashCar) });
   const card = (j: Row) => (
     <Card key={j.id} className="flex flex-col md:flex-row md:items-center gap-3">
       <div className="flex-1 min-w-0 flex flex-col gap-1">
@@ -35,7 +38,7 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
         <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}{j.vehicle?.colour ? ` · ${j.vehicle.colour}` : ""} · {j.job_number}</span>
         <span className="text-xs text-muted">{j.wash_sent_at ? `At the wash since ${formatDateTime(j.wash_sent_at)}` : `QC passed ${formatDateTime(j.stage_entered_at)}`}</span>
       </div>
-      <WashForms jobId={j.id} atWash={!!j.wash_sent_at} canAct={canAct} sendAction={sendToWash.bind(null, j.id)} doneAction={washDone.bind(null, j.id)} skipAction={skipWash.bind(null, j.id)} />
+      <WashForms jobId={j.id} atWash={!!j.wash_sent_at} canAct={canAct} washState={j.wash_sent_at ? null : stateFor(j.id)} sendAction={sendToWash.bind(null, j.id)} doneAction={washDone.bind(null, j.id)} skipAction={skipWash.bind(null, j.id)} />
     </Card>
   );
   return (

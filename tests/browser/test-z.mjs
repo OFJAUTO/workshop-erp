@@ -288,5 +288,43 @@ if (want("S5")) {
   await browser.close();
 }
 
+/* ================= S6: "Is the car wash free?" before sending ================= */
+if (want("S6")) {
+  console.log("\n== S6 send to wash");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  await sql("update public.jobs set status = 'pending_wash', stage = 'wash', wash_sent_at = null where id = $1", [jobId]);
+  const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1360, height: 1000 } });
+  await go(page, `${base}/jobs/${jobId}`);
+  await page.locator("[data-send-wash]").click();
+  await until(async () => ((await page.locator("[data-wash-ask]").count()) ? 1 : null), 15, 300);
+  const askText = (await page.locator("[data-wash-ask]").textContent()) ?? "";
+  check("S6: the question asks 'Is the car wash free? Check with the wash team'", /Is the car wash free\?/.test(askText) && /Check with the wash team before sending/.test(askText));
+  check("S6: an empty wash says 'Wash is free' in green", (await page.locator("[data-wash-free]").count()) === 1 && /text-green/.test((await page.locator("[data-wash-free]").getAttribute("class")) ?? ""));
+  await page.getByRole("button", { name: "Cancel" }).click();
+  check("S6: Cancel sends nothing", (await sql("select wash_sent_at from public.jobs where id = $1", [jobId]))[0]?.wash_sent_at === null);
+  // Another car is in the wash: the pop-up lists it, with its plate and model.
+  await sql(`insert into public.jobs (id, job_number, vehicle_id, customer_id, status, stage, is_open, priority, gated_in_by, gated_in_at, wash_sent_at, created_by, updated_by)
+             select '22222222-0000-4000-8000-00000000e4bb', 'J-E2E98', vehicle_id, customer_id, 'pending_wash', 'wash', true, priority, gated_in_by, gated_in_at, now(), created_by, updated_by from public.jobs where id = $1`, [jobId]);
+  const busy = (await sql("select count(*)::int as n from public.jobs where id = '22222222-0000-4000-8000-00000000e4bb'"))[0]?.n ?? 0;
+  check("S6: the busy car is seeded", busy === 1);
+  await go(page, `${base}/jobs/${jobId}`);
+  await page.locator("[data-send-wash]").click();
+  await until(async () => ((await page.locator("[data-wash-ask]").count()) ? 1 : null), 15, 300);
+  const inNow = (await page.locator("[data-wash-in-now]").textContent().catch(() => "")) ?? "";
+  check("S6: it shows 'In the wash now: 1 car' with the plate and model", /In the wash now: 1 car/.test(inNow) && /Dubai S 30303/i.test(inNow) && /Porsche/i.test(inNow), inNow.slice(0, 120));
+  await shot(page, "s6-wash-popup");
+  await page.locator("[data-wash-yes]").click();
+  const sent = await until(async () => ((await sql("select wash_sent_at from public.jobs where id = $1", [jobId]))[0]?.wash_sent_at ? 1 : null), 30, 400);
+  check("S6: 'Yes, send to wash' sends the car", !!sent);
+  // "Skip the wash" keeps its one-tap flow, no pop-up.
+  await sql("update public.jobs set wash_sent_at = null where id = $1", [jobId]);
+  await go(page, `${base}/jobs/${jobId}`);
+  await page.getByRole("button", { name: "Skip the wash" }).click();
+  await sleep(500);
+  check("S6: Skip the wash has no pop-up, just the reason box", (await page.locator("[data-wash-ask]").count()) === 0 && (await page.locator("textarea[name='reason']").count()) >= 1);
+  await browser.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);
