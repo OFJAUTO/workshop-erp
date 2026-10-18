@@ -17,7 +17,8 @@ export function NewTripForm({ ourDriver, companies, action }: { ourDriver: Drive
   const [kind, setKind] = useState<"pickup" | "delivery">("pickup");
   const [companyChoice, setCompanyChoice] = useState<string>("");
   const [truckType, setTruckType] = useState<"flatbed" | "closed_box" | null>(null);
-  const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  // The Dubai day, read once when the form opens.
+  const [today] = useState(() => new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10));
   if (!side) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-trip-side>
