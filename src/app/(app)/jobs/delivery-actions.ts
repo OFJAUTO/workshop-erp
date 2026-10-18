@@ -67,14 +67,18 @@ export async function advisorMarkDelivered(jobId: string, formData: FormData) {
   redirect(`/jobs/${jobId}?message=${encodeURIComponent("Marked delivered. The job is closed; the driver's price goes on the Recovery page.")}`);
 }
 
-/** A new pick-up trip from the Recovery page (our truck or a company brings a car in). */
+/**
+ * A new pick-up or delivery from the Recovery page. Our truck: the saved driver fills in by himself and is
+ * never shown. External recovery: the truck type (Flatbed or Closed box) and the company, saved with its
+ * mobile for next time. Both get the same one-button link.
+ */
 export async function createPickupTrip(formData: FormData) {
   const staff = await requirePermission("gateOut");
-  const { createTrip } = await import("@/lib/delivery");
+  const { createTrip, loadDrivers } = await import("@/lib/delivery");
   const { isMapLink } = await import("@/lib/recovery");
   const back = "/recovery";
-  const driverName = blankToNull(formData.get("driver_name"));
-  if (!driverName) redirect(`${back}?error=${encodeURIComponent("Pick or type the driver.")}`);
+  const side = String(formData.get("side") ?? "ours");
+  const kind = String(formData.get("kind") ?? "pickup") === "delivery" ? "delivery" : "pickup";
   const url = blankToNull(formData.get("location_url"));
   if (url && !isMapLink(url)) redirect(`${back}?error=${encodeURIComponent("That is not a map link. Paste the pin the customer sent (Google Maps).")}`);
   const admin = createAdminClient();
@@ -85,17 +89,51 @@ export async function createPickupTrip(formData: FormData) {
     jobId = j?.id ?? null;
     if (!jobId) redirect(`${back}?error=${encodeURIComponent(`No job ${jobNumber} found. Leave the box empty for a pick-up before gate-in.`)}`);
   }
+  let company: string | null = null;
+  let recoveryKind: string | null = null;
+  let driverId: string | null = null;
+  let driverName: string | null = null;
+  let driverPhone: string | null = null;
+  let truckPlate: string | null = null;
+  if (side === "external") {
+    recoveryKind = ["flatbed", "closed_box"].includes(String(formData.get("truck_type"))) ? String(formData.get("truck_type")) : null;
+    if (!recoveryKind) redirect(`${back}?error=${encodeURIComponent("Pick the truck type: Flatbed or Closed box.")}`);
+    const choice = String(formData.get("company_choice") ?? "");
+    if (choice && choice !== "__new__") {
+      const { data: c } = await admin.from("recovery_companies").select("id, name, phone").eq("id", choice).maybeSingle();
+      if (!c) redirect(`${back}?error=${encodeURIComponent("Pick the company again.")}`);
+      company = c.name;
+      driverPhone = c.phone;
+    } else {
+      const name = blankToNull(formData.get("company_name"));
+      if (!name) redirect(`${back}?error=${encodeURIComponent("Type the company's name.")}`);
+      const phone = blankToNull(formData.get("company_phone"));
+      const { data: existing } = await admin.from("recovery_companies").select("id, phone").ilike("name", name).maybeSingle();
+      if (existing) await admin.from("recovery_companies").update({ phone: phone ?? existing.phone, is_active: true, updated_by: staff.id }).eq("id", existing.id);
+      else await admin.from("recovery_companies").insert({ name, phone, created_by: staff.id, updated_by: staff.id });
+      company = name;
+      driverPhone = phone;
+    }
+    driverName = company;
+  } else {
+    // Our truck: the saved driver only, pre-selected; his details never show on the form.
+    const drivers = (await loadDrivers()).filter((d) => !d.company);
+    const d = drivers.find((x) => x.is_default) ?? drivers[0];
+    if (!d) redirect(`${back}?error=${encodeURIComponent("No saved driver yet. The owner adds one under Settings > Recovery drivers.")}`);
+    driverId = d.id;
+    driverName = d.name;
+    driverPhone = d.phone;
+    truckPlate = d.truck_plate;
+  }
   const trip = await createTrip({
-    jobId, kind: "pickup",
-    company: blankToNull(formData.get("company")),
-    driverId: blankToNull(formData.get("driver_id")),
-    driverName, driverPhone: blankToNull(formData.get("driver_phone")), truckPlate: blankToNull(formData.get("truck_plate")),
+    jobId, kind, company, driverId, driverName, driverPhone, truckPlate,
     locationUrl: url, locationDetails: blankToNull(formData.get("location_details")),
     date: blankToNull(formData.get("date")), slot: blankToNull(formData.get("slot")), by: staff.id,
   });
   if (!trip) redirect(`${back}?error=${encodeURIComponent("The trip could not be saved.")}`);
+  if (recoveryKind) await admin.from("recovery_trips").update({ recovery_kind: recoveryKind, updated_by: staff.id }).eq("id", trip.id);
   revalidatePath("/recovery");
-  redirect(`${back}?message=${encodeURIComponent("Pick-up trip saved. Send the link to the driver from its row.")}&sent=${trip.id}`);
+  redirect(`${back}?message=${encodeURIComponent(`${kind === "pickup" ? "Pick-up" : "Delivery"} saved. Send the link from its row.`)}&sent=${trip.id}`);
 }
 
 /** The owner or accounts answer a claimed price: Approved, Queried (with a note to whoever runs the trips), or Paid. */
@@ -106,13 +144,16 @@ export async function decideTrip(tripId: string, formData: FormData) {
   const admin = createAdminClient();
   const { data: trip } = await admin.from("recovery_trips").select("id, job_id, status, price_aed, driver_name, company").eq("id", tripId).maybeSingle();
   if (!trip) redirect(`/recovery?error=${encodeURIComponent("Trip not found.")}`);
-  const next = decision === "approve" ? "approved" : decision === "query" ? "queried" : decision === "paid" ? "paid" : null;
-  if (!next) redirect(`/recovery?error=${encodeURIComponent("Choose Approve, Query or Paid.")}`);
+  // Paid is never per trip any more: the month is marked paid in one go, per driver or company.
+  const next = decision === "approve" ? "approved" : decision === "query" ? "queried" : null;
+  if (!next) redirect(`/recovery?error=${encodeURIComponent("Choose Approve or Query. Paying happens by the month.")}`);
+  const lockRow = await admin.from("recovery_trips").select("paid_month").eq("id", tripId).maybeSingle();
+  if (lockRow.data?.paid_month && staff.role_id !== "owner") redirect(`/recovery?error=${encodeURIComponent(`That month (${lockRow.data.paid_month}) is already paid and locked. Only the owner can change it.`)}`);
   if (next === "queried" && !note) redirect(`/recovery?error=${encodeURIComponent("Write the query note.")}`);
   await admin.from("recovery_trips").update({ status: next, decided_by: staff.id, decided_at: new Date().toISOString(), query_note: next === "queried" ? note : null, updated_by: staff.id }).eq("id", tripId);
   if (trip.job_id) await admin.from("job_events").insert({ job_id: trip.job_id, event_type: "delivery", note: `Recovery price AED ${Number(trip.price_aed ?? 0).toLocaleString("en-GB")} ${next === "queried" ? `queried by ${staff.display_name}: ${note}` : `${next} by ${staff.display_name}`}`, created_by: staff.id });
   revalidatePath("/recovery");
-  redirect(`/recovery?message=${encodeURIComponent(next === "queried" ? "Queried; the note is on the trip." : next === "paid" ? "Marked paid." : "Approved.")}`);
+  redirect(`/recovery?message=${encodeURIComponent(next === "queried" ? "Queried; the note is on the trip." : "Approved.")}`);
 }
 
 /** Accounts type a price on a trip that has none (the advisor marked it delivered). */
@@ -154,4 +195,43 @@ export async function removeRecoveryDriver(id: string) {
   await createAdminClient().from("recovery_drivers").update({ is_active: false, updated_by: staff.id }).eq("id", id);
   revalidatePath("/settings");
   redirect(`/settings?message=${encodeURIComponent("Driver removed from the list.")}#drivers`);
+}
+
+/** A trip with no road distance (no key, no pin): the kilometres typed by hand on the Recovery page. */
+export async function setTripKm(tripId: string, formData: FormData) {
+  const staff = await requirePermission("approveRelease");
+  const km = Number(String(formData.get("km") ?? "").replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(km) || km <= 0 || km > 2000) redirect(`/recovery?error=${encodeURIComponent("Enter the one-way kilometres.")}`);
+  const admin = createAdminClient();
+  await admin.from("recovery_trips").update({ road_km: Math.round(km * 10) / 10, km_source: "manual", updated_by: staff.id }).eq("id", tripId);
+  revalidatePath("/recovery");
+  redirect(`/recovery?message=${encodeURIComponent("Distance saved.")}`);
+}
+
+/**
+ * "Mark <month> paid" for one driver or company: only when every one of their trips that month is approved;
+ * the month then locks (changes need the owner). Written to recovery_payouts for the books.
+ */
+export async function markMonthPaid(formData: FormData) {
+  const staff = await requirePermission("approveRelease");
+  const who = String(formData.get("who") ?? "");
+  const month = String(formData.get("month") ?? "");
+  if (!who || !/^\d{4}-\d{2}$/.test(month)) redirect(`/recovery?error=${encodeURIComponent("Pick the month and the driver.")}`);
+  const admin = createAdminClient();
+  const { TRIP_SELECT } = await import("@/lib/delivery");
+  const { data: rows } = await admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).gte("created_at", `${month}-01`).order("created_at");
+  const whoOf = (t: { company: string | null; driver_name: string | null }) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
+  const trips = ((rows ?? []) as { id: string; company: string | null; driver_name: string | null; status: string; price_aed: number | string | null; delivered_at: string | null; created_at: string; paid_month: string | null }[])
+    .filter((t) => (t.delivered_at ?? t.created_at).startsWith(month) && whoOf(t) === who);
+  if (!trips.length) redirect(`/recovery?error=${encodeURIComponent("No trips for that month.")}`);
+  const open = trips.filter((t) => t.status !== "approved" && t.status !== "paid");
+  if (open.length) redirect(`/recovery?month=${month}&error=${encodeURIComponent(`${open.length} trip${open.length === 1 ? " is" : "s are"} not approved yet.`)}`);
+  const unpaid = trips.filter((t) => !t.paid_month);
+  const total = unpaid.reduce((a, t) => a + (Number(t.price_aed) || 0), 0);
+  if (!unpaid.length) redirect(`/recovery?month=${month}&message=${encodeURIComponent("Already marked paid.")}`);
+  const now = new Date().toISOString();
+  for (const t of unpaid) await admin.from("recovery_trips").update({ status: "paid", paid_month: month, updated_by: staff.id }).eq("id", t.id);
+  await admin.from("recovery_payouts").upsert({ who, month, total_aed: Math.round(total * 100) / 100, trip_count: unpaid.length, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" });
+  revalidatePath("/recovery");
+  redirect(`/recovery?month=${month}&message=${encodeURIComponent(`${who}: ${month} marked paid (AED ${total.toLocaleString("en-GB")}). The month is locked.`)}`);
 }

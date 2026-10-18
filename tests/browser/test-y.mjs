@@ -242,13 +242,11 @@ if (want("D")) {
   // The recovery log: distance, approve, paid.
   await go(op, `${base}/recovery`);
   const row = op.locator(`[data-trip='${trip.id}']`);
-  check("D5: one row with the pin, the photo, the distance and AED 150 claimed", (await row.count()) === 1 && (await row.locator("[data-trip-pin]").count()) === 1 && (await row.locator("[data-trip-photo]").count()) === 1 && /≈ 1[678](\.\d)? km/.test((await row.textContent()) ?? "") && /AED 150/.test((await row.textContent()) ?? ""), ((await row.textContent().catch(() => "")) ?? "").slice(0, 220));
+  check("D5: one row with the pin, the photo and AED 150 claimed; no route key here, so it asks for the km", (await row.count()) === 1 && (await row.locator("[data-trip-pin]").count()) === 1 && (await row.locator("[data-trip-photo]").count()) === 1 && /Distance not found/.test((await row.textContent()) ?? "") && /AED 150/.test((await row.textContent()) ?? ""), ((await row.textContent().catch(() => "")) ?? "").slice(0, 220));
   await row.locator("[data-trip-approve]").click();
   await op.waitForURL(/message=/, { timeout: 15000 }).catch(() => null);
-  await go(op, `${base}/recovery`);
-  await op.locator(`[data-trip='${trip.id}'] [data-trip-paid]`).click();
-  const paid = await until(async () => (await sql("select status from public.recovery_trips where id = $1", [trip.id]))[0]?.status === "paid" ? 1 : null, 30, 500);
-  check("D5: Claimed -> Approved -> Paid with one tap each", !!paid);
+  const approved = await until(async () => (await sql("select status from public.recovery_trips where id = $1", [trip.id]))[0]?.status === "approved" ? 1 : null, 30, 500);
+  check("D5: Claimed -> Approved with one tap; Paid now happens by the month, never per trip", !!approved && (await op.locator("[data-trip-paid]").count()) === 0);
   await ob.close();
 
   // The advisor's backup and the returning customer's pin. The same fixed job id cannot be stamped out twice
@@ -260,7 +258,8 @@ if (want("D")) {
   const { browser: ab, page: ap } = await browserFor("owner", { viewport: { width: 1500, height: 1200 } });
   await go(ap, `${base}/jobs/${second.jobId}/gate-out`);
   await ap.locator("input[name='leave_method'][value='recovery']").check({ force: true });
-  // No saved driver this round (the clean-up removed the E2e one): the new-driver boxes are typed, and he joins the list.
+  // A real saved driver may exist on the live data: pick "New driver" first when the chips are there.
+  if (await ap.locator("input[name='driver_choice'][value='new']").count()) await ap.locator("input[name='driver_choice'][value='new']").check({ force: true });
   await ap.locator("input[name='delivery_driver']").fill("E2e Backup Driver");
   await ap.locator("input[name='driver_phone']").fill("+971500000401");
   const prefilled = await ap.locator("[data-location-url]").inputValue();

@@ -156,3 +156,10 @@ delete from public.short_links sl where sl.url like '%/approve/%' and not exists
 delete from public.short_links sl where sl.url like '%/drive/%' and not exists (select 1 from public.recovery_trips t where t.token is not null and sl.url = 'https://erp.ofjauto.com/drive/' || t.token);
 delete from public.short_links sl where sl.url like '%/api/pdf/receipt/%' and not exists (select 1 from public.payments p where sl.url like '%/api/pdf/receipt/' || p.id || '%');
 delete from public.short_links where url like '%25.1812,55.2807%'; -- the D test's fixed pin
+
+-- Recovery rows made by the 18 October tests (no job attached, so they carry an E2e marker).
+set session_replication_role = replica;
+delete from public.recovery_payouts where who ilike 'e2e %';
+delete from public.recovery_trips where location_details ilike 'e2e %' or company ilike 'e2e %';
+delete from public.recovery_companies where name ilike 'e2e %';
+set session_replication_role = default;

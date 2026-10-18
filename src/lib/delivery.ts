@@ -2,13 +2,15 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { closeJob } from "./close-job";
 import { driverMessage, parseCoords } from "./recovery";
+import { expandMapLink, tripRoadKm, workshopPin } from "./route-distance";
+import { getSettings } from "./settings";
 import { shortFor } from "./short-links";
 import { PRODUCTION_SITE_URL } from "./site";
 import { notifyRoles, notifyStaff } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 
-export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by";
+export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by, road_km, km_source, recovery_kind, paid_month";
 
 export type TripRow = {
   id: string; job_id: string | null; kind: "delivery" | "pickup"; company: string | null; driver_id: string | null;
@@ -19,6 +21,7 @@ export type TripRow = {
   price_aed: number | null; price_at: string | null; status: "open" | "claimed" | "approved" | "queried" | "paid";
   decided_by: string | null; decided_at: string | null; query_note: string | null; marked_by: string | null;
   reminded_at: string | null; is_active: boolean; created_at: string; created_by: string | null;
+  road_km: number | null; km_source: "route" | "manual" | null; recovery_kind: string | null; paid_month: string | null;
 };
 
 export type DriverRow = { id: string; name: string; phone: string | null; truck_plate: string | null; company: string | null; is_default: boolean };
@@ -61,7 +64,8 @@ export async function rememberDriver(d: { name: string; phone: string | null; tr
 /** The trip row at gate-out (delivery) or from the Recovery page (pickup), with the driver's one-button token. */
 export async function createTrip(input: { jobId: string | null; kind: "delivery" | "pickup"; company: string | null; driverId: string | null; driverName: string | null; driverPhone: string | null; truckPlate: string | null; locationUrl: string | null; locationDetails: string | null; date: string | null; slot: string | null; by: string | null }): Promise<TripRow | null> {
   const admin = createAdminClient();
-  const coords = parseCoords(input.locationUrl);
+  // A long link carries its coordinates; a short one (maps.app.goo.gl) is expanded by its redirects.
+  const coords = parseCoords(input.locationUrl) ?? (await expandMapLink(input.locationUrl));
   // One live delivery trip per job: an older open one is retired first.
   if (input.jobId && input.kind === "delivery") await admin.from("recovery_trips").update({ is_active: false, updated_by: input.by }).eq("job_id", input.jobId).eq("kind", "delivery").is("delivered_at", null).eq("is_active", true);
   const { data } = await admin.from("recovery_trips").insert({
@@ -70,7 +74,20 @@ export async function createTrip(input: { jobId: string | null; kind: "delivery"
     location_url: input.locationUrl, location_details: input.locationDetails, lat: coords?.lat ?? null, lng: coords?.lng ?? null,
     scheduled_date: input.date, scheduled_slot: input.slot, token: newDriveToken(), created_by: input.by, updated_by: input.by,
   }).select(TRIP_SELECT).maybeSingle();
-  return (data as TripRow | null) ?? null;
+  const trip = (data as TripRow | null) ?? null;
+  // The real road distance (Google Routes), written on the trip; null means "enter the km by hand" on the Recovery page.
+  if (trip && coords) {
+    const settings = await getSettings();
+    const km = await tripRoadKm({ kind: trip.kind, lat: coords.lat, lng: coords.lng }, await workshopPin(settings));
+    if (km !== null) {
+      await admin.from("recovery_trips").update({ road_km: km, km_source: "route", lat: coords.lat, lng: coords.lng, updated_by: input.by }).eq("id", trip.id);
+      trip.road_km = km;
+      trip.km_source = "route";
+    } else if (trip.lat === null && coords) {
+      await admin.from("recovery_trips").update({ lat: coords.lat, lng: coords.lng, updated_by: input.by }).eq("id", trip.id);
+    }
+  }
+  return trip;
 }
 
 export async function tripByToken(token: string): Promise<TripRow | null> {

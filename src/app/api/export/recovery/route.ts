@@ -1,37 +1,89 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { TRIP_SELECT, type TripRow } from "@/lib/delivery";
-import { haversineKm, parseCoords } from "@/lib/recovery";
-import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { buildXlsx, xlsxResponse, type XlsxSheet } from "@/lib/xlsx";
 
 export const dynamic = "force-dynamic";
 
-/** The month's recovery trips as a CSV for accounts. */
+const COLUMNS = [
+  { header: "Date", key: "date", width: 12 },
+  { header: "Pick-up/Delivery", key: "kind", width: 16 },
+  { header: "Plate", key: "plate", width: 16 },
+  { header: "Job number", key: "job", width: 12 },
+  { header: "Driver/company", key: "who", width: 24 },
+  { header: "From", key: "from", width: 28 },
+  { header: "To", key: "to", width: 28 },
+  { header: "Road km", key: "km", width: 10, numFmt: "0.0" },
+  { header: "Price (AED)", key: "price", width: 12, numFmt: "#,##0.00" },
+  { header: "AED per km", key: "perKm", width: 11, numFmt: "0.0" },
+  { header: "Status", key: "status", width: 12 },
+];
+
+/** The month's recovery trips as a real Excel file; ?who=all gives one sheet per driver or company plus a summary. */
 export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff || !["owner", "accounts", "service_advisor"].includes(staff.role_id)) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const month = request.nextUrl.searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "Bad month." }, { status: 400 });
+  const who = request.nextUrl.searchParams.get("who");
   const admin = createAdminClient();
-  const settings = await getSettings();
-  const home = parseCoords(String(settings.workshop_location_pin ?? ""));
-  const { data: rows } = await admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).gte("created_at", `${month}-01`).lt("created_at", `${month}-31T23:59:59Z`).order("created_at");
+  const { data: rows } = await admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).gte("created_at", `${month}-01`).order("created_at");
   const trips = ((rows ?? []) as TripRow[]).filter((t) => (t.delivered_at ?? t.created_at).startsWith(month));
   const jobIds = Array.from(new Set(trips.map((t) => t.job_id).filter((x): x is string => !!x)));
   const { data: jobs } = jobIds.length ? await admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number)").in("id", jobIds) : { data: [] };
   const jobOf = new Map((jobs ?? []).map((j) => [j.id, { number: j.job_number as string, plate: j.vehicle ? formatPlate(j.vehicle as unknown as Parameters<typeof formatPlate>[0]) : "" }]));
-  const esc = (v: unknown) => `"${String(v ?? "").replaceAll('"', '""')}"`;
-  const lines = [["Date", "Kind", "Plate", "Job", "Driver or company", "Location", "Distance km", "Price AED", "Status"].join(",")];
-  for (const t of trips) {
+  const whoOf = (t: TripRow) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
+  const rowOf = (t: TripRow) => {
     const j = t.job_id ? jobOf.get(t.job_id) : null;
-    const km = home && t.lat !== null && t.lng !== null ? haversineKm(home, { lat: t.lat, lng: t.lng }) : "";
-    lines.push([
-      esc((t.delivered_at ?? t.created_at).slice(0, 10)), esc(t.kind), esc(j?.plate ?? ""), esc(j?.number ?? ""),
-      esc(t.company ?? `Our truck${t.driver_name ? ` · ${t.driver_name}` : ""}`), esc(t.location_details ?? t.location_url ?? ""),
-      esc(km), esc(t.price_aed ?? ""), esc(t.status),
-    ].join(","));
+    const km = t.road_km !== null ? Number(t.road_km) : null;
+    const price = t.price_aed === null ? null : Number(t.price_aed);
+    const place = t.location_details ?? t.location_url ?? "";
+    return {
+      date: new Date((t.delivered_at ?? t.created_at).slice(0, 10) + "T12:00:00Z"),
+      kind: t.kind === "pickup" ? "Pick-up" : "Delivery",
+      plate: j?.plate ?? "",
+      job: j?.number ?? "",
+      who: whoOf(t),
+      from: t.kind === "pickup" ? place : "OFJ Automotive",
+      to: t.kind === "pickup" ? "OFJ Automotive" : place,
+      km,
+      price,
+      perKm: km && price ? Math.round((price / km) * 10) / 10 : null,
+      status: t.status,
+    };
+  };
+  const totalsOf = (list: TripRow[]) => ({
+    date: `${list.length} trips`,
+    km: list.reduce((a, t) => a + (t.road_km !== null ? Number(t.road_km) : 0), 0),
+    who: "TOTAL TO PAY",
+    price: list.reduce((a, t) => a + (Number(t.price_aed) || 0), 0),
+  });
+  const sheets: XlsxSheet[] = [];
+  if (who === "all") {
+    const names = Array.from(new Set(trips.map(whoOf))).sort();
+    sheets.push({
+      name: "Summary",
+      columns: [
+        { header: "Driver/company", key: "who", width: 26 },
+        { header: "Trips", key: "trips", width: 8 },
+        { header: "Road km", key: "km", width: 10, numFmt: "0.0" },
+        { header: "Total (AED)", key: "total", width: 14, numFmt: "#,##0.00" },
+      ],
+      rows: names.map((n) => {
+        const list = trips.filter((t) => whoOf(t) === n);
+        return { who: n, trips: list.length, km: list.reduce((a, t) => a + (t.road_km !== null ? Number(t.road_km) : 0), 0), total: list.reduce((a, t) => a + (Number(t.price_aed) || 0), 0) };
+      }),
+      totals: { who: "TOTAL TO PAY", trips: trips.length, km: trips.reduce((a, t) => a + (t.road_km !== null ? Number(t.road_km) : 0), 0), total: trips.reduce((a, t) => a + (Number(t.price_aed) || 0), 0) },
+    });
+    for (const n of names) {
+      const list = trips.filter((t) => whoOf(t) === n);
+      sheets.push({ name: n.replace(/[\\/*?[\]:]/g, " ").slice(0, 31), columns: COLUMNS, rows: list.map(rowOf), totals: totalsOf(list) });
+    }
+  } else {
+    const list = who ? trips.filter((t) => whoOf(t) === who) : trips;
+    sheets.push({ name: `Recovery ${month}`, columns: COLUMNS, rows: list.map(rowOf), totals: totalsOf(list) });
   }
-  return new NextResponse(lines.join("\r\n"), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="recovery-${month}.csv"` } });
+  return xlsxResponse(await buildXlsx(sheets), `OFJ recovery ${month}${who === "all" ? " by driver" : ""}.xlsx`);
 }

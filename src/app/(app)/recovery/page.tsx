@@ -8,7 +8,8 @@ import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { createPickupTrip, decideTrip, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
+import { createPickupTrip, decideTrip, markMonthPaid, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
+import { NewTripForm } from "./NewTripForm";
 import { ReasonChips } from "@/components/ReasonChips";
 
 export const dynamic = "force-dynamic";
@@ -35,10 +36,16 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   const settings = await getSettings();
   const site = await getSiteUrl();
   const home = parseCoords(String(settings.workshop_location_pin ?? ""));
-  const [{ data: rows }, drivers] = await Promise.all([
+  const [{ data: rows }, drivers, { data: companyRows }, { data: payoutRows }] = await Promise.all([
     admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).order("created_at", { ascending: false }).limit(400),
     loadDrivers(),
+    admin.from("recovery_companies").select("id, name, phone").eq("is_active", true).order("name"),
+    admin.from("recovery_payouts").select("who, month, total_aed, paid_at").eq("month", monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7)),
   ]);
+  const companies = (companyRows ?? []) as { id: string; name: string; phone: string | null }[];
+  const ourDrivers = drivers.filter((d) => !d.company);
+  const ourDriver = ourDrivers.find((d) => d.is_default) ?? ourDrivers[0] ?? null;
+  const payoutOf = new Map(((payoutRows ?? []) as { who: string; total_aed: number | string; paid_at: string }[]).map((p) => [p.who, p]));
   const trips = (rows ?? []) as TripRow[];
   const jobIds = Array.from(new Set(trips.map((t) => t.job_id).filter((x): x is string => !!x)));
   const { data: jobs } = jobIds.length ? await admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number)").in("id", jobIds) : { data: [] };
@@ -47,7 +54,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   const { data: signed } = photoPaths.length ? await admin.storage.from("job-files").createSignedUrls(photoPaths, 3600) : { data: [] };
   const photoUrl = new Map((signed ?? []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]));
   const whoOf = (t: TripRow) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
-  const kmOf = (t: TripRow) => (home && t.lat !== null && t.lng !== null ? haversineKm(home, { lat: t.lat, lng: t.lng }) : null);
+  const kmOf = (t: TripRow) => (t.road_km !== null ? Number(t.road_km) : home && t.lat !== null && t.lng !== null ? haversineKm(home, { lat: t.lat, lng: t.lng }) : null);
   const history = trips.filter((t) => ["approved", "paid"].includes(t.status)).map((t) => ({ km: kmOf(t), price: t.price_aed === null ? null : Number(t.price_aed) }));
   const inMonth = trips.filter((t) => (t.delivered_at ?? t.created_at).startsWith(month));
   const whoList = Array.from(new Set(trips.map(whoOf))).sort();
@@ -68,7 +75,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
       {!home ? <p className="text-xs text-muted">Distances show once the workshop&apos;s own pin is in Settings (&quot;Workshop location pin&quot;).</p> : null}
 
       <Card className="flex flex-col gap-3" data-recovery-month>
-        <SectionLabel right={<a href={`/api/export/recovery?month=${month}`} className="underline underline-offset-4">Export for accounts (CSV)</a>}>By driver or company · {month}</SectionLabel>
+        <SectionLabel right={<span className="flex gap-3"><a href={`/api/export/recovery?month=${month}`} className="underline underline-offset-4" data-export-excel>Export to Excel</a><a href={`/api/export/recovery?month=${month}&who=all`} className="underline underline-offset-4" data-export-all>All drivers</a></span>}>By driver or company · {month}</SectionLabel>
         <form className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Month<Input type="month" name="month" defaultValue={month} className="w-40" /></label>
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver or company<Select name="who" defaultValue={whoParam ?? ""} className="min-w-48"><option value="">Everyone</option>{whoList.map((w) => <option key={w} value={w}>{w}</option>)}</Select></label>
@@ -76,11 +83,30 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
         </form>
         {monthTotals.size === 0 ? <p className="text-sm text-muted">No trips this month.</p> : (
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted"><th className="py-1 pr-3">Driver or company</th><th className="py-1 pr-3 text-right">Trips</th><th className="py-1 pr-3 text-right">Total</th><th className="py-1 text-right">Average</th></tr></thead>
+            <thead><tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted"><th className="py-1 pr-3">Driver or company</th><th className="py-1 pr-3 text-right">Trips</th><th className="py-1 pr-3 text-right">Total</th><th className="py-1 pr-3 text-right">Average</th><th className="py-1 text-right">Month&apos;s payment</th></tr></thead>
             <tbody className="divide-y divide-line">
-              {Array.from(monthTotals.entries()).sort((a, b) => b[1].total - a[1].total).map(([w, s]) => (
-                <tr key={w} data-recovery-who={w}><td className="py-1.5 pr-3 font-semibold">{w}</td><td className="py-1.5 pr-3 text-right">{s.trips}</td><td className="py-1.5 pr-3 text-right font-bold">{aedText(s.total)}</td><td className="py-1.5 text-right">{aedText(s.trips ? s.total / s.trips : 0)}</td></tr>
-              ))}
+              {Array.from(monthTotals.entries()).sort((a, b) => b[1].total - a[1].total).map(([w, s]) => {
+                const paid = payoutOf.get(w);
+                const whoTrips = inMonth.filter((t) => whoOf(t) === w);
+                const openCount = whoTrips.filter((t) => t.status !== "approved" && t.status !== "paid").length;
+                const monthName = new Date(`${month}-15T12:00:00Z`).toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
+                return (
+                  <tr key={w} data-recovery-who={w}>
+                    <td className="py-1.5 pr-3 font-semibold">{w}</td><td className="py-1.5 pr-3 text-right">{s.trips}</td><td className="py-1.5 pr-3 text-right font-bold">{aedText(s.total)}</td><td className="py-1.5 pr-3 text-right">{aedText(s.trips ? s.total / s.trips : 0)}</td>
+                    <td className="py-1.5 text-right">
+                      {paid ? <span className="inline-flex items-center rounded-control bg-green-soft px-2 py-1 text-xs font-bold text-green" data-month-paid-done>Paid ✓ {formatDate(paid.paid_at)}</span>
+                        : openCount ? <span className="text-xs font-semibold text-amber" data-month-open>{openCount} trip{openCount === 1 ? "" : "s"} not approved yet</span>
+                        : canDecide ? (
+                          <form action={markMonthPaid} className="inline">
+                            <input type="hidden" name="who" value={w} />
+                            <input type="hidden" name="month" value={month} />
+                            <Button type="submit" tone="secondary" size="md" data-month-pay>Mark {monthName} paid · {aedText(s.total)}</Button>
+                          </form>
+                        ) : <span className="text-xs text-muted">Ready to pay</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -103,7 +129,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                     {j ? <Link href={`/jobs/${t.job_id}`} className="font-semibold underline underline-offset-4">{j.plate} · {j.number}</Link> : <span className="text-muted">{t.location_details ?? "No job"}</span>}
                     <span className="text-muted">{whoOf(t)}</span>
                     {t.location_url ? <a href={t.location_url} target="_blank" rel="noreferrer" className="underline underline-offset-4" data-trip-pin>Open the pin</a> : null}
-                    {km !== null ? <span className="text-xs text-muted">≈ {km} km{price && km > 0 ? ` · AED ${(price / km).toFixed(0)}/km` : ""}</span> : null}
+                    {t.road_km !== null ? <span className="text-xs text-muted" data-trip-km>{Number(t.road_km)} km{price && Number(t.road_km) > 0 ? ` · AED ${(price / Number(t.road_km)).toFixed(0)}/km` : ""}</span> : null}
                     {t.photo_path && photoUrl.get(t.photo_path) ? <a href={photoUrl.get(t.photo_path) ?? "#"} target="_blank" rel="noreferrer" className="underline underline-offset-4" data-trip-photo>Photo</a> : null}
                     <span className="ml-auto inline-flex items-center gap-2">
                       {price !== null ? <span className="font-bold" data-trip-price>{aedText(price)}</span> : <span className="text-xs text-muted">no price yet</span>}
@@ -127,8 +153,14 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                           <form action={decideTrip.bind(null, t.id)} className="mt-2 flex flex-wrap items-end gap-2"><input type="hidden" name="decision" value="query" /><ReasonChips name="note" label="What looks wrong?" rows={1} options={["Price looks high for the distance", "Wrong trip", "Two trips claimed as one"]} required placeholder="Tap or type" /><Button type="submit" tone="secondary" size="md" data-trip-query>Send query</Button></form>
                         </details>
                       ) : null}
-                      <form action={decideTrip.bind(null, t.id)}><input type="hidden" name="decision" value="paid" /><Button type="submit" tone="secondary" size="md" data-trip-paid>Paid</Button></form>
                     </div>
+                  ) : null}
+                  {t.road_km === null && canDecide ? (
+                    <form action={setTripKm.bind(null, t.id)} className="flex flex-wrap items-center gap-2" data-enter-km>
+                      <span className="text-xs font-semibold text-amber">Distance not found – enter km</span>
+                      <Input name="km" inputMode="decimal" placeholder="One-way km" className="w-32 min-h-9" data-km-box />
+                      <Button type="submit" tone="secondary" size="md">Save</Button>
+                    </form>
                   ) : null}
                 </li>
               );
@@ -138,18 +170,8 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
       </Card>
 
       <Card className="flex flex-col gap-3" data-new-pickup>
-        <SectionLabel>New pick-up (a car coming in on a truck)</SectionLabel>
-        <form action={createPickupTrip} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver (saved)<Select name="driver_id" defaultValue=""><option value="">Type below instead</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}{d.company ? ` · ${d.company}` : " · Our truck"}</option>)}</Select></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver&apos;s name<Input name="driver_name" required /></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Driver&apos;s mobile<Input name="driver_phone" type="tel" inputMode="tel" /></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Company (empty = our truck)<Input name="company" /></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Job number (optional)<Input name="job_number" placeholder="J-00123" textCase="upper" /></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Pick-up pin (optional)<Input name="location_url" placeholder="Paste the map link" /></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Location details<Input name="location_details" placeholder="Villa 23, gate 2" textCase="sentence" /></label>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Date<Input type="date" name="date" /></label>
-          <div className="sm:col-span-2"><Button type="submit" size="md">Save the pick-up</Button></div>
-        </form>
+        <SectionLabel>New pick-up or delivery</SectionLabel>
+        <NewTripForm ourDriver={ourDriver ? { id: ourDriver.id, name: ourDriver.name } : null} companies={companies} action={createPickupTrip} />
         <p className="text-xs text-muted">The driver gets the same one-button link: photo on loading, then his price. This page replaces the WhatsApp group.</p>
       </Card>
     </>

@@ -326,5 +326,91 @@ if (want("S6")) {
   await browser.close();
 }
 
+/* ================= S7: recovery - the new form, road km, monthly payment, Excel ================= */
+if (want("S7")) {
+  console.log("\n== S7 recovery");
+  cleanupDb();
+  const PIN = "https://maps.google.com/?q=25.1812,55.2807";
+  const defaultDriver = (await sql("select name from public.recovery_drivers where is_active and company is null order by is_default desc, name limit 1"))[0]?.name ?? "";
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1360, height: 1050 } });
+  await go(page, `${base}/recovery`);
+  check("S7: the first choice is two big buttons, Our truck and External recovery", (await page.locator("[data-side-ours]").count()) === 1 && (await page.locator("[data-side-external]").count()) === 1 && new RegExp(defaultDriver).test((await page.locator("[data-side-ours]").textContent()) ?? ""));
+  await shot(page, "s7-form-choice");
+  // Our truck: no driver boxes at all, just the pin, details, date (today) and job number.
+  await page.locator("[data-side-ours]").click();
+  await until(async () => ((await page.locator("[data-new-trip]").count()) ? 1 : null), 10, 300);
+  check("S7: our truck shows no driver name, mobile, company or plate boxes", (await page.locator("[data-new-trip] input[name='driver_name'], [data-new-trip] input[name='driver_phone'], [data-new-trip] input[name='truck_plate'], [data-new-trip] input[name='company']").count()) === 0);
+  check("S7: the date is today", (await page.locator("[data-new-trip] input[name='date']").inputValue()) === new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10));
+  await page.locator("[data-pin-box]").fill(PIN);
+  await page.locator("input[name='location_details']").fill("E2e pin ours");
+  await shot(page, "s7-form-ours");
+  await page.locator("[data-save-trip]").click();
+  const t1 = await until(async () => (await sql("select id, driver_name, company, lat, road_km, km_source from public.recovery_trips where location_details ilike 'e2e pin ours' order by created_at desc limit 1"))[0] ?? null, 30, 400);
+  check("S7: the trip carries the saved driver by itself (our truck, no company)", !!t1 && t1.driver_name === defaultDriver && t1.company === null && Number(t1.lat) === 25.1812, JSON.stringify(t1));
+  // External recovery: Flatbed or Closed box, a new company saved with its mobile.
+  await go(page, `${base}/recovery`);
+  await page.locator("[data-side-external]").click();
+  await until(async () => ((await page.locator("[data-external-fields]").count()) ? 1 : null), 10, 300);
+  await page.locator("[data-trip-kind] button", { hasText: "Delivery" }).click();
+  await page.locator("[data-truck-type='flatbed']").click();
+  await page.locator("[data-company-choice]").selectOption("__new__");
+  await page.locator("[data-company-name]").fill("E2e Recovery Co");
+  await page.locator("[data-company-phone]").fill("+971500000777");
+  await page.locator("[data-pin-box]").fill(PIN);
+  await page.locator("input[name='location_details']").fill("E2e pin external");
+  await page.locator("[data-save-trip]").click();
+  const t2 = await until(async () => (await sql("select id, kind, company, recovery_kind, driver_phone from public.recovery_trips where location_details ilike 'e2e pin external' limit 1"))[0] ?? null, 30, 400);
+  check("S7: the external delivery carries the company, the type and its mobile", !!t2 && t2.kind === "delivery" && /e2e recovery co/i.test(t2.company ?? "") && t2.recovery_kind === "flatbed" && t2.driver_phone === "+971500000777", JSON.stringify(t2));
+  check("S7: the company is saved for next time", ((await sql("select count(*)::int as n from public.recovery_companies where name ilike 'e2e recovery co'"))[0]?.n ?? 0) === 1);
+  // No key in this dev run: "Distance not found - enter km"; the typed km stands, with no "≈" anywhere.
+  await go(page, `${base}/recovery`);
+  await until(async () => ((await page.locator("[data-enter-km]").count()) >= 1 ? 1 : null), 20, 400);
+  check("S7: a trip with no route asks for the km by hand, never a silent straight line", (await page.locator("[data-enter-km]").first().textContent() ?? "").includes("Distance not found"));
+  await page.locator(`[data-trip='${t2.id}'] [data-km-box]`).fill("12.5");
+  await page.locator(`[data-trip='${t2.id}'] [data-enter-km] button`).click();
+  const km = await until(async () => { const r = (await sql("select road_km, km_source from public.recovery_trips where id = $1", [t2.id]))[0]; return r?.road_km ? r : null; }, 30, 400);
+  check("S7: the typed km is saved as manual", Number(km?.road_km) === 12.5 && km?.km_source === "manual", JSON.stringify(km));
+  await go(page, `${base}/recovery`);
+  const kmText = (await page.locator(`[data-trip='${t2.id}'] [data-trip-km]`).textContent().catch(() => "")) ?? "";
+  check("S7: the log shows one-way road km with no ≈", /12\.5 km/.test(kmText) && !kmText.includes("≈"), kmText);
+  // Monthly payment: never per trip; "Mark <month> paid" only once everything is approved; then locked.
+  check("S7: the per-trip Paid button is gone", (await page.locator("[data-trip-paid]").count()) === 0);
+  const month = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 7);
+  await sql("update public.recovery_trips set price_aed = 240, delivered_at = now(), status = 'claimed' where id = $1", [t2.id]);
+  await go(page, `${base}/recovery?month=${month}&who=${encodeURIComponent(t2.company)}`);
+  const whoRow = page.locator(`[data-recovery-who='${t2.company}']`);
+  check("S7: a claimed trip blocks the month's payment ('1 trip not approved yet')", /1 trip not approved yet/.test((await whoRow.locator("[data-month-open]").textContent().catch(() => "")) ?? ""));
+  await page.locator(`[data-trip='${t2.id}'] [data-trip-approve]`).click();
+  await until(async () => ((await sql("select status from public.recovery_trips where id = $1", [t2.id]))[0]?.status === "approved" ? 1 : null), 30, 400);
+  await go(page, `${base}/recovery?month=${month}`);
+  const payBtn = whoRow.locator("[data-month-pay]");
+  check("S7: 'Mark <month> paid - AED 240' appears once every trip is approved", /paid · AED 240/.test((await payBtn.textContent().catch(() => "")) ?? ""), (await payBtn.textContent().catch(() => "")) ?? "");
+  await shot(page, "s7-monthly");
+  await payBtn.click();
+  const payout = await until(async () => (await sql("select total_aed, trip_count from public.recovery_payouts where who = $1 and month = $2", [t2.company, month]))[0] ?? null, 30, 400);
+  check("S7: the payout is written (who, month, total) and the trips lock", Number(payout?.total_aed) === 240 && payout?.trip_count === 1 && (await sql("select paid_month, status from public.recovery_trips where id = $1", [t2.id]))[0]?.status === "paid", JSON.stringify(payout));
+  await go(page, `${base}/recovery?month=${month}`);
+  check("S7: the month shows Paid ✓ and the button is gone", (await whoRow.locator("[data-month-paid-done]").count()) === 1 && (await whoRow.locator("[data-month-pay]").count()) === 0);
+  // The Excel export: a real .xlsx with the agreed columns and a bold TOTAL TO PAY row; "All drivers" gives one sheet each plus a summary.
+  const { cookieHeader } = await import("./pw-lib.mjs");
+  const cookies = await cookieHeader("owner");
+  const res = await fetch(`${base}/api/export/recovery?month=${month}`, { headers: { cookie: cookies } });
+  check("S7: the export is a real .xlsx", res.status === 200 && (res.headers.get("content-type") ?? "").includes("spreadsheetml"), res.headers.get("content-type") ?? "");
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await res.arrayBuffer()));
+  const ws = wb.worksheets[0];
+  const headers = (ws.getRow(1).values ?? []).slice(1);
+  check("S7: the columns match the agreed list", JSON.stringify(headers) === JSON.stringify(["Date", "Pick-up/Delivery", "Plate", "Job number", "Driver/company", "From", "To", "Road km", "Price (AED)", "AED per km", "Status"]), JSON.stringify(headers));
+  check("S7: the header row is bold and frozen", ws.getRow(1).font?.bold === true && ws.views?.[0]?.state === "frozen");
+  const last = ws.getRow(ws.rowCount);
+  check("S7: the bottom row carries TOTAL TO PAY in bold, amounts as numbers", last.font?.bold === true && JSON.stringify(last.values).includes("TOTAL TO PAY") && typeof last.getCell(9).value === "number", JSON.stringify(last.values).slice(0, 120));
+  const resAll = await fetch(`${base}/api/export/recovery?month=${month}&who=all`, { headers: { cookie: cookies } });
+  const wbAll = new ExcelJS.Workbook();
+  await wbAll.xlsx.load(Buffer.from(await resAll.arrayBuffer()));
+  check("S7: 'All drivers' has a summary sheet plus one sheet per driver or company", wbAll.worksheets[0]?.name === "Summary" && wbAll.worksheets.length >= 2, wbAll.worksheets.map((w) => w.name).join(" | "));
+  await browser.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);
