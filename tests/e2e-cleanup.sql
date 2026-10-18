@@ -163,3 +163,9 @@ delete from public.recovery_payouts where who ilike 'e2e %';
 delete from public.recovery_trips where location_details ilike 'e2e %' or company ilike 'e2e %';
 delete from public.recovery_companies where name ilike 'e2e %';
 set session_replication_role = default;
+
+-- Advisor-bonus rows made by tests (snapshots that mention E2E invoices, and overrides on test invoices).
+set session_replication_role = replica;
+delete from public.advisor_bonus_periods where rows::text ilike '%E2E%';
+delete from public.advisor_bonus_overrides where invoice_id::text like '22222222%';
+set session_replication_role = default;

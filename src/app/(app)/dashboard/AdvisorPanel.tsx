@@ -36,6 +36,7 @@ export function AdvisorPanel({ day, month }: { day: AdvisorDay; month: AdvisorMo
           <dt className="text-muted">Cars delivered on time</dt><dd className="text-right font-bold" data-my-ontime>{month.deliveredWithDate ? `${month.deliveredOnTime} of ${month.deliveredWithDate}` : "—"}</dd>
         </dl>
       </details>
+      <a href="/bonus" className="self-start text-xs font-bold underline underline-offset-4" data-bonus-link>Advisor bonus (only you see yours)</a>
     </Card>
   );
 }

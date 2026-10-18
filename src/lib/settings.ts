@@ -177,6 +177,8 @@ const DEFAULTS = {
   /** A quotation's profit colour: yellow below this margin, red below the red one; red asks "Are you sure?". */
   quote_margin_yellow_percent: 30,
   quote_margin_red_percent: 20,
+  /** The advisor bonus rate on a qualifying invoice's pure profit; the owner can override any invoice. */
+  advisor_bonus_percent: 5,
   /** The target box's break-even line. Not technicians' pay when it is already charged as labour cost on jobs. */
   monthly_fixed_costs_aed: 380000,
   /** Typed by accounts each month for the labour rate check: { "2026-10": { mechanical: 0, bodyshop: 0 } }. */

@@ -288,6 +288,9 @@ export function SettingsForm({
               <Field label="Daily profit target (AED)">
                 <Input name="daily_profit_target_aed" defaultValue={v.daily_profit_target_aed} inputMode="numeric" required />
               </Field>
+              <Field label="Advisor bonus (%)" hint="On a paid tax invoice's pure profit of AED 12,000 or more; you can override any invoice on the Bonus page.">
+                <Input name="advisor_bonus_percent" defaultValue={v.advisor_bonus_percent} inputMode="numeric" required />
+              </Field>
               <Field label="Quote profit: yellow below (%)" hint="A quotation's profit shows yellow under this margin.">
                 <Input name="quote_margin_yellow_percent" defaultValue={v.quote_margin_yellow_percent} inputMode="numeric" required />
               </Field>

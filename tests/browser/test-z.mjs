@@ -412,5 +412,77 @@ if (want("S7")) {
   await browser.close();
 }
 
+/* ================= S8: the advisor bonus ================= */
+if (want("S8")) {
+  console.log("\n== S8 advisor bonus");
+  cleanupDb();
+  const { jobId } = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const advisorId = (await sql("select gated_in_by from public.jobs where id = $1", [jobId]))[0]?.gated_in_by;
+  // A paid tax invoice with AED 20,000 pure profit (no costs on the job).
+  await sql(`insert into public.invoices (id, job_id, customer_id, kind, status, number, issued_at, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, created_by, updated_by)
+             select '22222222-0000-4000-8000-00000000e4cc', id, customer_id, 'tax_invoice', 'issued', 'INV-E2E01', now(), 20000, 0, 20000, 1000, 21000, gated_in_by, gated_in_by from public.jobs where id = $1`, [jobId]);
+  const invOk = (await sql("select count(*)::int as n from public.invoices where number = 'INV-E2E01'"))[0]?.n === 1;
+  check("S8: the test tax invoice is seeded", invOk);
+  await sql(`insert into public.payments (id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, status, created_by, updated_by)
+             select '22222222-0000-4000-8000-00000000e4cd', 'RCT-E2E01', job_id, id, customer_id, 'cash', 21000, now(), created_by, 'recorded', created_by, created_by from public.invoices where number = 'INV-E2E01'`);
+  const payOk = (await sql("select count(*)::int as n from public.payments where number = 'RCT-E2E01'"))[0]?.n === 1;
+  check("S8: the full payment is seeded", payOk);
+  const advisorName = (await sql("select display_name from public.staff where id = $1", [advisorId]))[0]?.display_name ?? "";
+  // The owner's view: the row, the rate, the bonus, the approve button.
+  const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1360, height: 1000 } });
+  await go(op, `${base}/bonus`);
+  await until(async () => ((await op.locator("[data-bonus-row='INV-E2E01']").count()) ? 1 : null), 20, 400);
+  const rowText = (await op.locator("[data-bonus-row='INV-E2E01']").textContent()) ?? "";
+  check("S8: the paid 20,000-profit invoice qualifies at the default 5% (AED 1,000)", /Profit AED 20,000/.test(rowText) && /5%/.test(rowText) && /AED 1,000/.test(rowText), rowText.slice(0, 140));
+  check("S8: it sits under the job's advisor", (await op.locator(`[data-bonus-advisor='${advisorName}'] [data-bonus-row='INV-E2E01']`).count()) === 1, advisorName);
+  await shot(op, "s8-owner");
+  // The owner overrides the rate with a reason.
+  const card = op.locator(`[data-bonus-advisor='${advisorName}']`);
+  await card.locator("[data-bonus-edit]").first().click();
+  await card.locator("[data-bonus-rate]").fill("7.5");
+  await card.locator("[data-bonus-reason]").fill("Hard job, well handled");
+  await card.getByRole("button", { name: "Save" }).click();
+  await op.waitForURL(/message=/, { timeout: 15000 }).catch(() => null);
+  await go(op, `${base}/bonus`);
+  const changed = (await op.locator("[data-bonus-row='INV-E2E01']").textContent()) ?? "";
+  check("S8: the owner's override (7.5%, with the reason) recalculates the bonus to AED 1,500", /7\.5%/.test(changed) && /AED 1,500/.test(changed) && /Hard job, well handled/.test(changed), changed.slice(0, 160));
+  // The advisor sees only his own rows and his total; no profit, no other advisors, no rates.
+  const { browser: ab, page: ap } = await browserForId(advisorId, { viewport: { width: 1360, height: 900 } });
+  await go(ap, `${base}/bonus`);
+  await until(async () => ((await ap.locator("[data-my-bonus]").count()) ? 1 : null), 20, 400);
+  const mine = (await ap.locator("[data-my-bonus]").textContent()) ?? "";
+  check("S8: the advisor sees his invoice and bonus, marked waiting for approval", /INV-E2E01/.test(mine) && /AED 1,500/.test(mine) && /Waiting for owner approval/.test((await ap.textContent("body")) ?? ""), mine.slice(0, 140));
+  check("S8: the advisor sees no profit figure and no rate", !/Profit/.test(mine) && !/7\.5%/.test(mine));
+  check("S8: the advisor cannot approve or change anything", (await ap.locator("[data-approve-bonuses]").count()) === 0 && (await ap.locator("[data-bonus-edit]").count()) === 0);
+  await shot(ap, "s8-advisor");
+  await ab.close();
+  // The owner approves the period; the Excel goes to the accountant.
+  await op.locator("[data-approve-bonuses]").click();
+  const period = await until(async () => (await sql("select period, total_aed, rows::text as snapshot from public.advisor_bonus_periods order by created_at desc limit 1"))[0] ?? null, 30, 400);
+  check("S8: approving freezes the period (real invoices included) with the test row inside", !!period && Number(period.total_aed) >= 1500 && String(period.snapshot).includes("INV-E2E01"), JSON.stringify({ period: period?.period, total: period?.total_aed }));
+  await go(op, `${base}/bonus`);
+  check("S8: the period shows Approved", /Approved/.test((await op.textContent("body")) ?? ""));
+  const { cookieHeader } = await import("./pw-lib.mjs");
+  const res = await fetch(`${base}/api/export/bonus?period=${period.period}`, { headers: { cookie: await cookieHeader("owner") } });
+  check("S8: the Excel for the accountant downloads (owner only)", res.status === 200 && (res.headers.get("content-type") ?? "").includes("spreadsheetml"));
+  const resAdvisor = await fetch(`${base}/api/export/bonus?period=${period.period}`, { headers: { cookie: await cookieHeader("service_advisor") } });
+  check("S8: an advisor cannot take the Excel", resAdvisor.status === 403);
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await res.arrayBuffer()));
+  const text = JSON.stringify(wb.worksheets[0].getSheetValues());
+  check("S8: one row per invoice with totals per advisor", text.includes("INV-E2E01") && text.includes(`${advisorName} TOTAL`) && text.includes("TOTAL TO PAY"), text.slice(0, 160));
+  // A credit note later: the approved bonus comes back off the NEXT period.
+  await sql(`insert into public.invoices (id, job_id, customer_id, kind, status, number, issued_at, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, credit_of, created_by, updated_by)
+             select '22222222-0000-4000-8000-00000000e4ce', job_id, customer_id, 'credit_note', 'issued', 'CRN-E2E01', ($1::date + interval '10 days'), 20000, 0, 20000, 1000, 21000, id, created_by, created_by from public.invoices where number = 'INV-E2E01'`, [period.period + "-25"]);
+  const nextKey = (await sql("select to_char(($1::date + interval '1 month'), 'YYYY-MM') as k", [period.period + "-01"]))[0]?.k;
+  await go(op, `${base}/bonus?period=${nextKey}`);
+  await until(async () => ((await op.locator("[data-bonus-row='INV-E2E01']").count()) ? 1 : null), 20, 400);
+  const claw = (await op.locator("[data-bonus-row='INV-E2E01']").textContent()) ?? "";
+  check("S8: the credit-noted bonus is deducted from the next period", /Credit note/.test(claw) && /-AED 1,500|AED -1,500/.test(claw.replace(/−/g, "-")), claw.slice(0, 160));
+  await op.close();
+  await ob.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);
