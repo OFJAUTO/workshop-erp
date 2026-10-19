@@ -94,5 +94,47 @@ const invoicePage = `${base}/jobs/${jobId}/invoice`;
   check("C: accounts export as advisor → 403", r4.status === 403, String(r4.status));
 }
 
+/* ---------- D. Recovery money: owner and accounts only (section 9, 19 October) ---------- */
+{
+  const { browser, page } = await browserFor("service_advisor");
+  await page.goto(`${base}/recovery`, { waitUntil: "load" });
+  await page.waitForTimeout(1200);
+  const body = (await page.textContent("body")) ?? "";
+  check("D: advisor sees no month totals box", (await page.locator("[data-recovery-month]").count()) === 0);
+  check("D: advisor sees no trip price", (await page.locator("[data-trip-price]").count()) === 0);
+  check("D: advisor sees no km cost", (await page.locator("[data-trip-km]").count()) === 0);
+  check("D: advisor sees no Approve / Query / Mark paid", (await page.locator("[data-trip-approve], [data-month-pay], [data-recalc-km]").count()) === 0 && !/Mark .* paid/.test(body));
+  check("D: advisor still sees the trips list", (await page.locator("[data-trip]").count()) > 0 || /No trips yet/.test(body));
+  check("D: advisor can still create a pick-up", (await page.locator("[data-new-pickup]").count()) === 1);
+  await browser.close();
+}
+{
+  const { browser, page } = await browserFor("accounts");
+  await page.goto(`${base}/recovery`, { waitUntil: "load" });
+  await page.waitForTimeout(1200);
+  check("D: accounts see the month totals and exports", (await page.locator("[data-recovery-month]").count()) === 1 && (await page.locator("[data-export-excel]").count()) === 1);
+  await browser.close();
+}
+/* The database itself: an advisor's own credentials read no trip, driver or payout rows (RLS). */
+{
+  const cookies = await loginCookies("service_advisor");
+  const parts = cookies.filter((c) => /^sb-.*-auth-token(\.\d+)?$/.test(c.name)).sort((a, b) => a.name.localeCompare(b.name));
+  let raw = parts.map((c) => decodeURIComponent(c.value)).join("");
+  if (raw.startsWith("base64-")) raw = Buffer.from(raw.slice(7), "base64url").toString("utf8");
+  const token = JSON.parse(raw).access_token;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const get = async (table) => {
+    const r = await fetch(`${url}/rest/v1/${table}?select=*&limit=5`, { headers: { apikey: anon, authorization: `Bearer ${token}` } });
+    return { status: r.status, rows: r.ok ? (await r.json()).length : -1 };
+  };
+  const trips = await get("recovery_trips");
+  check("D: REST recovery_trips as advisor → no rows", trips.rows === 0 || trips.status === 403, JSON.stringify(trips));
+  const payouts = await get("recovery_payouts");
+  check("D: REST recovery_payouts as advisor → no rows", payouts.rows === 0 || payouts.status === 403, JSON.stringify(payouts));
+  const drivers = await get("recovery_drivers");
+  check("D: REST recovery_drivers as advisor → no rows", drivers.rows === 0 || drivers.status === 403, JSON.stringify(drivers));
+}
+
 await cleanupDb();
 process.exit(summary() ? 1 : 0);

@@ -30,6 +30,8 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
     return <Notice tone="error">The recovery log is for the owner, the advisors and accounts.</Notice>;
   }
   const canDecide = (role === "owner" || role === "accounts") && !staff.viewingAs;
+  // Advisors see the trips list only: date, kind, car, who, the pin and the photo. Never a price, a km cost or a total.
+  const seesMoney = role === "owner" || role === "accounts";
   const { message, error, month: monthParam, who: whoParam, sent } = await searchParams;
   const month = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7);
   const admin = createAdminClient();
@@ -74,6 +76,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!home ? <p className="text-xs text-muted">Distances show once the workshop&apos;s own pin is in Settings (&quot;Workshop location pin&quot;).</p> : null}
 
+      {seesMoney ? (
       <Card className="flex flex-col gap-3" data-recovery-month>
         <SectionLabel right={<span className="flex gap-3"><a href={`/api/export/recovery?month=${month}`} className="underline underline-offset-4" data-export-excel>Export to Excel</a><a href={`/api/export/recovery?month=${month}&who=all`} className="underline underline-offset-4" data-export-all>All drivers</a></span>}>By driver or company · {month}</SectionLabel>
         <form className="flex flex-wrap items-end gap-2">
@@ -111,6 +114,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
           </table>
         )}
       </Card>
+      ) : null}
 
       <Card className="flex flex-col gap-3">
         <SectionLabel right={`${shown.length}`}>Trips</SectionLabel>
@@ -120,7 +124,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
               const j = t.job_id ? jobOf.get(t.job_id) : null;
               const km = kmOf(t);
               const price = t.price_aed === null ? null : Number(t.price_aed);
-              const usual = km !== null && t.status === "claimed" ? usualRange(km, history) : null;
+              const usual = seesMoney && km !== null && t.status === "claimed" ? usualRange(km, history) : null;
               return (
                 <li key={t.id} className="py-3 flex flex-col gap-1.5" data-trip={t.id} data-trip-status={t.status}>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -129,11 +133,11 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                     {j ? <Link href={`/jobs/${t.job_id}`} className="font-semibold underline underline-offset-4">{j.plate} · {j.number}</Link> : <span className="text-muted">{t.location_details ?? "No job"}</span>}
                     <span className="text-muted">{whoOf(t)}</span>
                     {t.location_url ? <a href={t.location_url} target="_blank" rel="noreferrer" className="underline underline-offset-4" data-trip-pin>Open the pin</a> : null}
-                    {t.road_km !== null ? <span className="text-xs text-muted" data-trip-km>{Number(t.road_km)} km{price && Number(t.road_km) > 0 ? ` · AED ${(price / Number(t.road_km)).toFixed(0)}/km` : ""}</span> : null}
+                    {seesMoney && t.road_km !== null ? <span className="text-xs text-muted" data-trip-km>{Number(t.road_km)} km{price && Number(t.road_km) > 0 ? ` · AED ${(price / Number(t.road_km)).toFixed(0)}/km` : ""}</span> : null}
                     {t.photo_path && photoUrl.get(t.photo_path) ? <a href={photoUrl.get(t.photo_path) ?? "#"} target="_blank" rel="noreferrer" className="underline underline-offset-4" data-trip-photo>Photo</a> : null}
                     <span className="ml-auto inline-flex items-center gap-2">
-                      {price !== null ? <span className="font-bold" data-trip-price>{aedText(price)}</span> : <span className="text-xs text-muted">no price yet</span>}
-                      <Badge tone={STATUS_TONES[t.status]}>{STATUS_LABELS[t.status]}</Badge>
+                      {seesMoney ? (price !== null ? <span className="font-bold" data-trip-price>{aedText(price)}</span> : <span className="text-xs text-muted">no price yet</span>) : t.company && price === null ? <span className="text-xs text-muted" data-price-with-accounts>Price: with accounts</span> : null}
+                      {seesMoney ? <Badge tone={STATUS_TONES[t.status]}>{STATUS_LABELS[t.status]}</Badge> : <Badge tone={t.delivered_at ? "green" : "amber"} data-plain-status>{t.delivered_at ? `Delivered ✓ ${new Date(t.delivered_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" })}` : t.loaded_at || t.sent_at ? "On the way" : "Booked"}</Badge>}
                     </span>
                   </div>
                   {!t.delivered_at ? <p className="text-xs text-muted">{scheduleWords(t.scheduled_date, t.scheduled_slot)}{t.sent_at ? ` · link sent to the driver ${formatDateTime(t.sent_at)}` : t.token ? ` · driver link: ${site}/drive/${t.token}` : ""}{sent === t.id && t.token ? "" : ""}</p> : null}
@@ -144,7 +148,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                     </form>
                   ) : null}
                   {usual ? <p className="text-xs font-semibold text-muted" data-trip-usual>Usual for this distance: AED {usual.low.toLocaleString("en-GB")}–{usual.high.toLocaleString("en-GB")} ({usual.n} trips)</p> : null}
-                  {t.status === "queried" && t.query_note ? <p className="text-xs font-semibold text-red">Query: {t.query_note}</p> : null}
+                  {seesMoney && t.status === "queried" && t.query_note ? <p className="text-xs font-semibold text-red">Query: {t.query_note}</p> : null}
                   {canDecide && price !== null && ["claimed", "queried", "approved"].includes(t.status) ? (
                     <div className="flex flex-wrap items-center gap-2">
                       {t.status !== "approved" ? <form action={decideTrip.bind(null, t.id)}><input type="hidden" name="decision" value="approve" /><Button type="submit" size="md" data-trip-approve>Approve</Button></form> : null}
