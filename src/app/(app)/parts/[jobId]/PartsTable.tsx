@@ -60,9 +60,11 @@ type Action = (formData: FormData) => void | Promise<void>;
  * never changes height whatever its state.
  */
 // Written out in full (no string building) so Tailwind sees every class. The one-line layout starts at 110rem (1760 px).
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(11rem,14rem)_6rem_4.25rem_3.25rem_5.25rem_14rem_12rem_2.5rem] min-[110rem]:grid-cols-[minmax(12rem,16rem)_6rem_17.5rem_12.5rem_4.25rem_3.25rem_5.25rem_14rem_12rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(11rem,14rem)_6rem_4.25rem_3.25rem_5.25rem_13rem_11rem_5rem_2.5rem] min-[110rem]:grid-cols-[minmax(12rem,16rem)_6rem_16rem_11.5rem_4.25rem_3.25rem_5.25rem_13rem_11rem_5rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
 const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
-const STATUS_LINE = "col-span-2 md:col-span-8 min-[110rem]:col-span-10 md:order-3";
+const STATUS_LINE = "col-span-2 md:col-span-9 min-[110rem]:col-span-11 md:order-3";
+/** Money for the cost bar and the line totals. */
+const aed = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ONE_LINE_ONLY = "hidden min-[110rem]:block";
 const EMPTY: RowValues = { part_number: "", part_type: "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
 const num = (s: string) => Number(String(s).replace(",", ".")) || 0;
@@ -75,7 +77,7 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" } }: { /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, showCost = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" } }: { /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** The cost bar and line totals: Parts, advisors and the owner only - never anything a customer sees. */ showCost?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
   const router = useRouter();
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
@@ -187,6 +189,27 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     return s;
   }
   const notFinished = summary.counts.not_finished;
+  // "Our cost": every line that still counts (declined, not needed and returned lines do not), qty × net each.
+  const countedRows = rows.filter((r) => { const s = stateOf(r); return s !== "removed" && s !== "not_available"; });
+  const rowCost = (r: TableRow) => num(r.values.qty || "1") * num(r.values.cost_aed);
+  const costTotal = countedRows.reduce((a, r) => a + rowCost(r), 0);
+  const costVat = Math.round(costTotal * 5) / 100;
+  const selectedCost = countedRows.filter((r) => selected.has(r.key)).reduce((a, r) => a + rowCost(r), 0);
+  const bySupplier = new Map<string, number>();
+  for (const r of countedRows) {
+    const c = rowCost(r);
+    if (!c) continue;
+    const s = r.values.supplier.trim() || "No supplier yet";
+    bySupplier.set(s, (bySupplier.get(s) ?? 0) + c);
+  }
+  const supplierPairs = [...bySupplier.entries()].sort((a, b) => b[1] - a[1]);
+  const costLine = showCost ? (
+    <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-0.5" data-cost-bar>
+      <span className="text-sm font-bold">Our cost: AED {aed(costTotal)} + VAT 5% AED {aed(costVat)} = <span data-cost-grand>AED {aed(costTotal + costVat)}</span></span>
+      {selectedCost ? <span className="text-sm font-semibold text-green" data-cost-selected>Selected: AED {aed(selectedCost)}</span> : null}
+      {supplierPairs.length > 1 ? <span className="text-xs text-muted" data-cost-suppliers>{supplierPairs.map(([s, v]) => `${s} AED ${aed(v)}`).join(" · ")}</span> : null}
+    </div>
+  ) : null;
 
   /** "Set for ticked": the chosen availability, supplier or type is saved on every ticked row, one save each. */
   async function applyBulk() {
@@ -330,7 +353,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           <span className="flex items-center gap-1.5">
             {canPrice && !pricingLocked ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
             Part
-          </span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net</span><span>Supplier</span><span>Availability</span><span />
+          </span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net each</span><span>Supplier</span><span>Availability</span><span className="text-right">Line total</span><span />
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
@@ -359,6 +382,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
       {showBar && onPricingDone && pricingLocked ? (
         <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+            {costLine}
             <span className="inline-flex min-h-10 items-center gap-2 rounded-control bg-green-soft px-3 text-sm font-bold text-green" data-pricing-locked>✓ Pricing done{pricingDoneAt ? ` · ${formatDateTime(pricingDoneAt)}` : ""}</span>
             <span className="text-xs text-muted" data-bar-text>{summary.text}</span>
             {onReopen ? <form action={onReopen} className="ml-auto"><button type="submit" className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-sm font-bold" data-pricing-edit>Edit</button></form> : null}
@@ -368,6 +392,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
       {showBar && onPricingDone && !pricingLocked ? (
         <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+            {costLine}
             {reopenedAt ? <span className="text-xs font-semibold text-amber" data-pricing-editing>Editing: the advisor sees the old prices until you press Send updated prices</span> : pricingDoneAt ? <span className="text-xs font-semibold text-green">✓ Sent to the advisor, {formatDateTime(pricingDoneAt)}</span> : null}
             {attempted && summary.open ? (
               <span className="text-sm font-semibold text-red" data-bar-text>
@@ -389,6 +414,11 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
               )}
             </div>
           </div>
+        </div>
+      ) : null}
+      {showCost && !(showBar && onPricingDone) ? (
+        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">{costLine}</div>
         </div>
       ) : null}
     </div>
@@ -675,6 +705,10 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
           {choice === "other" ? <Input value={v.days} onChange={(e) => change({ days: e.target.value })} onBlur={() => { if (daysComplete(latest.current.v.days)) setOtherMode(false); }} inputMode="numeric" placeholder="days" className={`h-9 min-h-9 w-14 shrink-0 px-1 text-xs text-center ${missingField("days") ? "border-red-bar" : ""}`} aria-label="Days until it arrives" /> : null}
         </span>
       )}
+      {/* Line total: qty × net each. A removed or not-available line shows a dash and counts nowhere. */}
+      <span className="hidden md:flex h-9 items-center justify-end text-sm font-semibold tabular-nums" data-line-total>
+        {state === "removed" || state === "not_available" ? "—" : aed(num(v.qty || "1") * num(v.cost_aed))}
+      </span>
       {/* The three-dot menu: narrow, always visible, opens upwards near the bottom */}
       <div className="relative h-9 flex items-center justify-end">
         {canPrice ? (
