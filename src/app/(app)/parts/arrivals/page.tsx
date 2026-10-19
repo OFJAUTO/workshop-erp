@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CopyText } from "@/components/CopyText";
 import { Badge, Button, Card, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { ReasonChips } from "@/components/ReasonChips";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
@@ -123,6 +124,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="Parts arrivals" subtitle="What is coming, day by day: supplier, car and LPO. Overdue parts sit on top; one tap moves a date and tells the advisor." />
+      <LiveRefresh tables={["purchase_orders", "part_items"]} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <form className="flex flex-wrap items-end gap-2">

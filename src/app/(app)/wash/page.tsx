@@ -43,7 +43,7 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
   );
   return (
     <>
-      <LiveRefresh tables={["jobs", "washes"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "washes"]} />
       <PageHeader title="Car wash" subtitle={`${waiting.length} waiting to be sent · ${atWash.length} at the wash`} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

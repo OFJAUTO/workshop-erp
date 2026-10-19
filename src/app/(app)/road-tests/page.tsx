@@ -83,7 +83,7 @@ export default async function RoadTestsPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <LiveRefresh tables={["inspections", "road_tests", "jobs"]} pollMs={60000} />
+      <LiveRefresh tables={["inspections", "road_tests", "jobs"]} />
       <PageHeader title="Road tests" subtitle="Cars the workshop manager wants road tested. The technician's inspection opens once you submit the road test." />
       {message ? <Notice tone="success">{message}</Notice> : null}
       <WaitingPanel staff={staff} />

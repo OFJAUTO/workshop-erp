@@ -92,7 +92,7 @@ export default async function MySectionPage({ searchParams }: { searchParams: Pr
   };
   return (
     <>
-      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments"]} />
       <PageHeader
         title={`${SECTION_LABELS[section]} · my cars`}
         subtitle={`${now.length} with you now · ${coming.length} coming`}

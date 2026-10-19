@@ -36,7 +36,8 @@
     "test:y": "node --env-file=.env.local tests/browser/test-y.mjs",
     "test:layout": "node --env-file=.env.local tests/browser/layout-check.mjs",
     "test:perms": "node --env-file=.env.local tests/browser/test-perms.mjs",
-    "test:preview": "node --env-file=.env.local tests/browser/test-preview.mjs"
+    "test:preview": "node --env-file=.env.local tests/browser/test-preview.mjs",
+    "test:live": "node --env-file=.env.local tests/browser/test-live.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

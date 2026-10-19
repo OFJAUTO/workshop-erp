@@ -69,7 +69,7 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
   const deposits = await depositsNotInvoiced();
   return (
     <>
-      <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders"]} pollMs={60000} />
+      <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders"]} />
       <HomeHeader staff={staff} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} />

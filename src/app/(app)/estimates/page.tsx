@@ -42,7 +42,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <LiveRefresh tables={["quotations"]} pollMs={60000} />
+      <LiveRefresh tables={["quotations"]} />
       <PageHeader title="Estimates" subtitle="Before the car arrives. The customer accepts on a branded page; at gate-in the estimate becomes the quotation." actions={<LinkButton href="/estimates/new" size="lg">New estimate</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {rows.length === 0 ? <Empty title="No estimates yet" /> : null}

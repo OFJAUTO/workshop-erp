@@ -15,7 +15,7 @@ export default async function BodyshopPage({ searchParams }: { searchParams: Pro
   const board = await loadBoard();
   return (
     <>
-      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_signoffs"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_signoffs"]} />
       <PageHeader
         title="Bodyshop"
         subtitle={`${board.cars.length} car${board.cars.length === 1 ? "" : "s"} in the bodyshop · ${board.goingOut.length} going out today or tomorrow`}

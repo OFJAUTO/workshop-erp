@@ -113,7 +113,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
 
   return (
     <>
-      <LiveRefresh tables={["purchase_orders"]} pollMs={60000} />
+      <LiveRefresh tables={["purchase_orders"]} />
       <PageHeader title="LPOs" subtitle="Raised from the Parts desk or the stock page, approved by the owner or the head accountant, sent to the supplier, received line by line." actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

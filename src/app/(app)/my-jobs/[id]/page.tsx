@@ -210,7 +210,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "inspections", "road_tests", "work_sessions", "job_technicians", "part_items"]} jobId={id} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "inspections", "road_tests", "work_sessions", "job_technicians", "part_items"]} jobId={id} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={

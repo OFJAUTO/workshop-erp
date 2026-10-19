@@ -203,7 +203,7 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
         ) : (
           <div className="flex flex-col gap-3">
             {visible.map((j) => (
-              <Link key={j.id} href={`/jobs/${j.id}`} className="block">
+              <Link key={j.id} href={`/jobs/${j.id}`} className="block" data-flash-id={j.id}>
                 <Card className="flex flex-col md:flex-row md:items-center gap-5 hover:border-ink">
                   <CarPicture url={j.pictureUrl} alt={j.plate} className="w-full md:w-56" />
                   <div className="flex-1 min-w-0 flex flex-col gap-1">

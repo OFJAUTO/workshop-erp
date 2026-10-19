@@ -84,7 +84,7 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
   return (
     <>
       {submitted ? <SubmittedOverlay jobNumber={submittedJob?.job_number ?? ""} /> : null}
-      <LiveRefresh tables={["jobs", "inspections", "road_tests", "job_technicians", "part_items"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "inspections", "road_tests", "job_technicians", "part_items"]} />
       <HomeHeader
         staff={staff}
         actions={

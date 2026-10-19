@@ -138,7 +138,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
 
   return (
     <>
-      <LiveRefresh tables={["part_requests", "part_items", "purchase_orders"]} jobId={jobId} pollMs={60000} />
+      <LiveRefresh tables={["part_requests", "part_items", "purchase_orders"]} jobId={jobId} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Parts · ${v ? formatPlate(v) : job.job_number}`}

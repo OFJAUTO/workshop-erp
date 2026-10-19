@@ -25,7 +25,7 @@ export default async function QcListPage({ searchParams }: { searchParams: Promi
   const done = (checks ?? []) as unknown as (QcCheckRow & { job: { job_number: string; vehicle: Row["vehicle"] } | null })[];
   return (
     <>
-      <LiveRefresh tables={["jobs", "qc_checks"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "qc_checks"]} />
       <PageHeader title="Cars for QC" subtitle={`${rows.length} waiting. Each item Pass or Fail; a Fail sends the car back to Work.`} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

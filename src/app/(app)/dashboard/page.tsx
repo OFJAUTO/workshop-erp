@@ -174,7 +174,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "gate_ins"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "gate_ins", "invoices"]} showUpdated />
       <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
       <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? moneyWaiting : []} />

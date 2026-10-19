@@ -22,7 +22,7 @@ export default async function WorkshopListPage() {
   const approvedJobs = new Set((approved ?? []).map((a) => a.job_id));
   return (
     <>
-      <LiveRefresh tables={["jobs", "inspections"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "inspections"]} />
       <PageHeader title="Workshop list" subtitle={`${rows.length} car${rows.length === 1 ? "" : "s"} in the workshop`} />
       {rows.length === 0 ? (
         <Empty title="No cars in the workshop" />

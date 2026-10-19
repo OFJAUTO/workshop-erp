@@ -144,7 +144,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const electrical = await electricalTasks();
   return (
     <>
-      <LiveRefresh tables={["jobs", "gate_ins", "approval_requests"]} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "gate_ins", "approval_requests"]} />
       <PageHeader title="To assign" subtitle={side ? `${side === "mechanical" ? "Mechanical" : "Bodyshop"} cars waiting for a technician` : "All cars waiting for a technician"} />
       {message ? <p className="rounded-control bg-green-soft px-4 py-3 text-sm font-semibold text-green">{message}</p> : null}
       {error ? <p className="rounded-control bg-red-soft px-4 py-3 text-sm font-semibold text-red">{error}</p> : null}

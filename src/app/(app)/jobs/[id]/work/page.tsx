@@ -76,7 +76,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
 
   return (
     <>
-      <LiveRefresh tables={["work_lines", "work_sessions", "additional_work", "jobs", "job_technicians", "work_pauses"]} jobId={id} pollMs={60000} />
+      <LiveRefresh tables={["work_lines", "work_sessions", "additional_work", "jobs", "job_technicians", "work_pauses"]} jobId={id} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Work order · ${formatPlate(vehicle)}`}

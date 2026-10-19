@@ -63,7 +63,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <LiveRefresh tables={["invoices", "payments", "jobs"]} pollMs={60000} />
+      <LiveRefresh tables={["invoices", "payments", "jobs"]} />
       <PageHeader
         title="Invoices and payments"
         subtitle={`${counts[""]} car${counts[""] === 1 ? "" : "s"}${ranged ? ` · invoices from ${from || "the start"} to ${to || "today"}` : ""}`}

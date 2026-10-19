@@ -93,7 +93,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} pollMs={60000} />
+      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`${v ? formatPlate(v) : job.job_number} · ${carName}`}

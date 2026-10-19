@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { loadDrivers, TRIP_SELECT, type TripRow } from "@/lib/delivery";
@@ -72,6 +73,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="Recovery" subtitle="Every pick-up and delivery: the pin, the driver's photo and his price. Claimed, then Approved or Queried, then Paid." />
+      <LiveRefresh tables={["recovery_trips"]} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!home ? <p className="text-xs text-muted">Distances show once the workshop&apos;s own pin is in Settings (&quot;Workshop location pin&quot;).</p> : null}
