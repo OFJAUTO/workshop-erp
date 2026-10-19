@@ -25,7 +25,7 @@ export type NextStepInput = {
   /** The quotation's plain-word state, when the job is at or past the quote. */
   quote?: QuoteState | null;
   /** Later stages: parts, work, QC, wash, invoice, delivery. */
-  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; invoiceKind?: "proforma" | "tax_invoice" | "credit_note" | null; invoiceSent?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null; planningOn?: "parts" | "workshop" | "advisor" | null; workFinishedAt?: string | null; washSentAt?: string | null; technicianNames?: string[] } | null;
+  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; invoiceKind?: "proforma" | "tax_invoice" | "credit_note" | null; invoiceSent?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null; planningOn?: "parts" | "workshop" | "advisor" | null; workFinishedAt?: string | null; washSentAt?: string | null; technicianNames?: string[]; /** The live parts picture (partsLiveOf): with it, the parts step is said from the rows, never a stored flag. */ parts?: { hasParts: boolean; toOrder: number; missing: number; late: number; readyDate: string | null; pendingLpo: boolean } | null } | null;
 };
 
 export type NextStep = {
@@ -99,9 +99,19 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
   const x = j.extra ?? {};
   if (j.status === "approved" || j.status === "waiting_parts") {
     const since = j.stage_entered_at;
-    const on = x.planningOn ?? "parts";
-    if (on === "workshop") return { done: { label: "Parts ordered", by: null }, next: `${j.managerLabel} picks the start day and the technicians, then releases the car to the workshop.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Plan the work", href: `/jobs/${jobId}#planning` }, since, line: `Planning, waiting on ${j.managerLabel} to release the car` };
+    const p = x.parts ?? null;
+    const release: NextStep = { done: { label: p?.hasParts ? "Every part is here" : "Quotation approved by the customer", by: null }, next: `${j.managerLabel} picks the start day and the technicians, then releases the work.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Release work", href: `/jobs/${jobId}#planning` }, since, line: `Planning, waiting on ${j.managerLabel} to release the work` };
+    const on = x.planningOn ?? (p ? (p.pendingLpo || p.toOrder > 0 || p.missing > 0 ? "parts" : "workshop") : "parts");
+    if (on === "workshop") return release;
     if (on === "advisor") return { done: { label: "Released to the workshop", by: null }, next: `${advisor} confirms the finish date and tells the customer.`, waitingOn: advisor, actorRole: "service_advisor", action: { label: "Confirm the date", href: `/jobs/${jobId}#planning` }, since, line: `Waiting on ${advisor} to confirm the finish date` };
+    // Waiting on Parts: with the live picture, say exactly where the parts stand.
+    if (p) {
+      if (p.pendingLpo) return { done: { label: "LPO sent for approval", by: null }, next: "The owner or accounts approve the LPO with one tap; Parts then order from each supplier.", waitingOn: "the owner or accounts", actorRole: "owner", action: { label: "Open the LPO", href: `/parts/${jobId}#lpo` }, since, line: "LPO waiting for approval" };
+      if (p.toOrder > 0) return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts send the LPO for approval; after the one-tap approval they order from each supplier.", waitingOn: "Parts", actorRole: "parts", action: { label: "Send LPO for approval", href: `/parts/${jobId}#lpo` }, since, line: "Planning, waiting on Parts" };
+      if (p.missing > 0 && p.late > 0) return { done: { label: "Parts ordered", by: null }, next: `${p.late} part${p.late === 1 ? " is" : "s are"} late. Parts chase the supplier.`, waitingOn: "the supplier", actorRole: "parts", action: { label: "LPOs", href: "/parts/orders" }, since, line: `Waiting for parts, ${p.late} late` };
+      if (p.missing > 0) return { done: { label: "Parts ordered", by: null }, next: `Waiting for the supplier${p.readyDate ? `: all parts here by ${p.readyDate}` : ""}. Parts receive them at the desk as they arrive.`, waitingOn: "the supplier", actorRole: "parts", action: { label: "Receive parts", href: `/parts/${jobId}#received` }, since, line: `Waiting for parts${p.readyDate ? `, here by ${p.readyDate}` : ""}` };
+      return release; // nothing missing: from stock or already received, the manager releases the work
+    }
     if (x.partsState === "ordered" && x.partsLate) return { done: { label: "Parts ordered", by: null }, next: `${x.partsLate} part${x.partsLate === 1 ? " is" : "s are"} late. Parts chase the supplier.`, waitingOn: "the supplier", actorRole: "parts", action: { label: "LPOs", href: "/parts/orders" }, since, line: `Waiting for parts, ${x.partsLate} late` };
     return { done: { label: "Quotation approved by the customer", by: null }, next: "Parts send the LPO for approval; after the one-tap approval they order from each supplier.", waitingOn: "Parts", actorRole: "parts", action: { label: "Send LPO for approval", href: `/parts/${jobId}#lpo` }, since, line: "Planning, waiting on Parts" };
   }

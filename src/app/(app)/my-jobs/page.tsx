@@ -1,4 +1,3 @@
-import { pendingHandoversFor } from "@/lib/handover";
 import { HomeHeader } from "@/components/HomeHeader";
 import Link from "next/link";
 import { CarPicture } from "@/components/CarPicture";
@@ -52,7 +51,6 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
     admin.from("job_technicians").select("job_id").eq("staff_id", staff.id).eq("is_active", true).is("left_at", null),
   ]);
   const carIds = (onCar ?? []).map((t) => t.job_id);
-  const pendingHandovers = await pendingHandoversFor(staff.id);
   const { data } = await supabase
     .from("jobs")
     .select(
@@ -101,9 +99,6 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
       <p className="text-sm font-semibold text-muted">{rows.length} car{rows.length === 1 ? "" : "s"} for you</p>
       {message ? <Notice tone="success">{message}</Notice> : null}
       <WaitingPanel staff={staff} />
-      {pendingHandovers.map((h) => (
-        <Link key={h.id} href={`/my-jobs/${h.job_id}#handover`} className="block rounded-card border-2 border-ink bg-white px-4 py-3 text-[15px] font-semibold">{h.giverName} is handing you {h.items.length} part{h.items.length === 1 ? "" : "s"} for {h.plate}: tap to enter your PIN.</Link>
-      ))}
       {rows.length === 0 ? (
         <Empty title="No cars for you right now" />
       ) : (

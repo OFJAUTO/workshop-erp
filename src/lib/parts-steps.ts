@@ -54,10 +54,10 @@ export function partsSteps(i: PartsStepsInput): PartsStep[] {
     ? ["No parts on this car", null, null, null, null]
     : [
         pricingDone ? "Priced" : "Price every part, then Pricing done",
-        approvalDone ? (needLpo ? "LPO approved" : "From our stock, no LPO") : i.mainLpoStatus === "pending_approval" ? "Waiting for the owner or accounts" : approved.length ? "Send the LPO for approval" : "Waiting for the customer's approval",
+        approvalDone ? (needLpo ? "LPO approved" : "From stock, no LPO needed") : i.mainLpoStatus === "pending_approval" ? "Waiting for the owner or accounts" : approved.length ? "Send the LPO for approval" : "Waiting for the customer's approval",
         needLpo ? `${orderedCount} of ${nonStock.length} ordered` : approved.length ? "Our stock, nothing to order" : null,
         approved.length ? `${receivedCount} of ${approved.length} received` : null,
-        approved.length ? `${handedCount} of ${approved.length} handed over` : null,
+        approved.length ? `Handover ${handedCount} of ${approved.length}` : null,
       ];
   // A done step stays green whatever happens around it; the current step is the FIRST unfinished one.
   const firstUndone = done.findIndex((d) => !d);

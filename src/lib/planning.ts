@@ -1,7 +1,7 @@
 import "server-only";
 import { dubaiDate } from "./jobs";
 import { loadJobLpos } from "./lpo";
-import { PART_FULL_SELECT, toPartFull, type PartFull } from "./parts-data";
+import { PART_FULL_SELECT, partsLiveOf, partsPlanned, planningOnOf, toPartFull, type PartFull } from "./parts-data";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import type { JobRow } from "./types";
@@ -69,17 +69,19 @@ export async function loadPlanning(job: JobRow, settings: Settings): Promise<Pla
   ]);
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull);
   const unplanned = parts.filter((p) => !p.availability || (p.availability === "to_order" && !p.delivery_date && p.order_status !== "received"));
-  const missing = parts.filter((p) => p.order_status !== "received" && p.availability !== "in_stock");
   const today = dubaiDate();
-  const dates = missing.map((p) => p.expected_date ?? p.delivery_date).filter((d): d is string => !!d);
-  const partsReadyDate = missing.length === 0 ? today : dates.length ? dates.sort().at(-1)! : null;
-  const partsDelayed = !!job.plan_parts_done_at && !!job.plan_parts_ready_date && !!partsReadyDate && partsReadyDate > job.plan_parts_ready_date;
+  // The one live calculation (partsLiveOf): no stored flag decides what the Planning card says.
+  const liveBase = partsLiveOf(parts, today);
+  const here = (p: typeof parts[number]) => p.availability === "in_stock" || p.order_status === "received" || p.received_qty + 0.005 >= (Number(p.confirmed_quantity ?? p.quantity) || 1);
+  const missing = parts.filter((p) => !here(p));
+  const partsReadyDate = liveBase.readyDate;
+  // Delayed means exactly: at least one part is not at the desk AND its due date has passed.
+  const partsDelayed = liveBase.late > 0;
   const quotedHours = (lineRows ?? []).reduce((a, l) => a + (Number(l.hours_quoted) || 0), 0);
   const hoursEstimate = quotedHours || Number(insp?.estimated_hours_manager ?? insp?.estimated_hours ?? 0) || 0;
   const start = job.plan_start_date ?? today;
   const suggestedFinish = hoursEstimate > 0 ? suggestFinishDate(start, hoursEstimate, wt) : null;
   const active = ["approved", "waiting_parts"].includes(job.status) || (!!job.plan_released_at && !job.plan_date_confirmed_at && job.is_open);
-  const waitingOn: CircleKey | null = !active ? null : !job.plan_parts_done_at || partsDelayed ? "parts" : !job.plan_released_at ? "workshop" : !job.plan_date_confirmed_at ? "advisor" : null;
 
   // The three faces: the Parts person who planned (or the Parts role), the department manager, the advisor.
   const [{ data: partsPeople }, { data: managers }, { data: advisor }] = await Promise.all([
@@ -96,10 +98,19 @@ export async function loadPlanning(job: JobRow, settings: Settings): Promise<Pla
   // The Parts step: the LPO sent for approval, approved and ordered from each supplier; then "All parts here by".
   const lpos = active || !job.plan_parts_done_at ? await loadJobLpos(job.id) : null;
   const pendingMain = lpos?.main && lpos.main.status === "pending_approval" ? lpos.main : null;
+  const live = { ...liveBase, pendingLpo: !!pendingMain };
+  const partsSorted = !missing.length || partsPlanned(live);
+  const waitingOn: CircleKey | null = !active ? null : planningOnOf(job, live);
   const toOrderLpos = (lpos?.suppliers ?? []).filter((s) => s.po.status === "approved");
-  const partsLine = job.plan_parts_done_at && !pendingMain && !toOrderLpos.length && !lpos?.toOrder.length ? (partsDelayed ? `Delayed: now all here by ${partsReadyDate}` : missing.length ? `All parts here by ${job.plan_parts_ready_date ?? partsReadyDate}` : parts.length ? "Every part is here" : "No parts needed") : pendingMain ? `${pendingMain.number} waiting for approval` : toOrderLpos.length ? `${toOrderLpos.length} supplier LPO${toOrderLpos.length === 1 ? "" : "s"} to order` : lpos?.toOrder.length ? `${lpos.toOrder.length} part${lpos.toOrder.length === 1 ? "" : "s"} to order: send the LPO for approval` : parts.length ? "Every part is here" : "No parts needed";
+  const partsLine = !missing.length
+    ? parts.length ? "Every part is here" : "No parts needed"
+    : pendingMain ? `${pendingMain.number} waiting for approval`
+    : toOrderLpos.length ? `${toOrderLpos.length} supplier LPO${toOrderLpos.length === 1 ? "" : "s"} to order`
+    : lpos?.toOrder.length ? `${lpos.toOrder.length} part${lpos.toOrder.length === 1 ? "" : "s"} to order: send the LPO for approval`
+    : partsDelayed ? `Delayed: ${live.late} part${live.late === 1 ? "" : "s"} overdue${partsReadyDate ? `, now all here by ${partsReadyDate}` : ""}`
+    : partsReadyDate ? `All parts here by ${partsReadyDate}` : "Waiting for delivery dates";
   const circles: PlanningCircle[] = [
-    { key: "parts", n: 1, title: "Parts", state: job.plan_parts_done_at && !partsDelayed ? "green" : active ? "amber" : "grey", since: job.plan_parts_done_at ? null : job.stage_entered_at, person: person(people[0]), line: partsLine },
+    { key: "parts", n: 1, title: "Parts", state: partsSorted ? "green" : active ? "amber" : "grey", since: partsSorted ? null : job.stage_entered_at, person: person(people[0]), line: partsLine },
     { key: "workshop", n: 2, title: "Workshop", state: job.plan_released_at ? "green" : waitingOn === "workshop" ? "amber" : "grey", since: job.plan_parts_done_at, person: person(people[1]), line: job.plan_released_at ? `Released: start ${job.plan_start_date}` : waitingOn === "workshop" ? "Pick the start day and the technicians" : "After Parts" },
     { key: "advisor", n: 3, title: "Advisor", state: job.plan_date_confirmed_at ? "green" : waitingOn === "advisor" ? "amber" : "grey", since: job.plan_released_at, person: person(people[2]), line: job.plan_date_confirmed_at ? `Promised ${job.promised_at}` : waitingOn === "advisor" ? `Confirm the finish date (suggested ${suggestedFinish ?? "…"}) and tell the customer` : "After the workshop" },
   ];

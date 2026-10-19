@@ -3,6 +3,7 @@ import type { CurrentStaff } from "./auth";
 import { jobConcernsSide, sideOfDepartment, type InspectionStatus } from "./inspection";
 import { formatWait, workingMinutesSince, workingTimeOf, type JobStatus } from "./jobs";
 import { nextStepOf } from "./next-step";
+import { loadPartsLiveMap, planningOnOf } from "./parts-data";
 import { loadQuoteSummaries } from "./quote-data";
 import { quoteState } from "./quotes";
 import type { RoadTestRow } from "./road-test";
@@ -42,10 +43,12 @@ type Row = {
   road_test: Pick<RoadTestRow, "status" | "decision">[] | null;
   gate_in: { is_complete: boolean } | null;
   inspection: { status: InspectionStatus; technician_id: string | null; submitted_at: string | null; approved_at: string | null }[] | null;
+  plan_released_at: string | null;
+  plan_date_confirmed_at: string | null;
 };
 
 const SELECT =
-  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
+  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_date_confirmed_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
 
 /**
  * "Waiting on you": every open car whose next step is this person's move, oldest wait first. The owner sees
@@ -60,6 +63,8 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
   ]);
   const all = (data ?? []) as unknown as Row[];
   const summaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
+  // The live parts picture of every job at the parts step: no stored flag decides whose move it is.
+  const partsLiveMap = await loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id));
   // The live proforma or tax invoice of the cars at the money steps, so the next step never says "proforma to prepare" on a paid car.
   const moneyIds = all.filter((j) => ["ready", "pending_payment", "in_delivery"].includes(j.status)).map((j) => j.id);
   const { data: invRows } = moneyIds.length ? await admin.from("invoices").select("job_id, kind, sent_at, converted_to").in("job_id", moneyIds).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("kind", ["proforma", "tax_invoice"]) : { data: [] as { job_id: string; kind: string; sent_at: string | null }[] };
@@ -89,7 +94,10 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       gateInComplete: !!j.gate_in?.is_complete,
       loose: j.job_kind === "loose",
       quote: summaries.has(j.id) ? quoteState(summaries.get(j.id)!, !!insp && insp.status === "approved") : null,
-      extra: invoiceOf.has(j.id) ? { invoiced: true, invoiceKind: invoiceOf.get(j.id)!.kind, readySent: invoiceOf.get(j.id)!.kind === "proforma" && !!invoiceOf.get(j.id)!.sent_at, invoiceSent: invoiceOf.get(j.id)!.kind === "tax_invoice" && !!invoiceOf.get(j.id)!.sent_at } : undefined,
+      extra: {
+        ...(invoiceOf.has(j.id) ? { invoiced: true, invoiceKind: invoiceOf.get(j.id)!.kind, readySent: invoiceOf.get(j.id)!.kind === "proforma" && !!invoiceOf.get(j.id)!.sent_at, invoiceSent: invoiceOf.get(j.id)!.kind === "tax_invoice" && !!invoiceOf.get(j.id)!.sent_at } : {}),
+        ...(partsLiveMap.has(j.id) ? { parts: partsLiveMap.get(j.id)!, planningOn: planningOnOf(j, partsLiveMap.get(j.id)!) } : {}),
+      },
     });
     if (!step.actorRole || step.actorRole === "customer") continue;
     const mine =

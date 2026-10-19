@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatMinutes, type InspectionStatus } from "@/lib/inspection";
 import { nextStepOf } from "@/lib/next-step";
+import { loadPartsLiveMap, planningOnOf } from "@/lib/parts-data";
 import { inspectionOverTarget, inspectionWorkingMinutes } from "@/lib/inspection-data";
 import { STATUS_LABELS, clockOf, formatPromised, hoursInStage, jobTiming, urgencyRank, workingTimeOf, type JobStatus, type Priority, type Stage } from "@/lib/jobs";
 import { type RoadTestRow } from "@/lib/road-test";
@@ -68,7 +69,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, invoice_sent_at, parts_pricing_done_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
+      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, invoice_sent_at, parts_pricing_done_at, plan_released_at, plan_date_confirmed_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true);
   const all = (data ?? []) as unknown as Row[];
@@ -76,6 +77,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   const customerIds = Array.from(new Set(all.map((j) => j.customer_id)));
   const quoteSummaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
+  const partsLiveMap = await loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id));
   const [{ data: names }, pictures] = await Promise.all([
     all.length ? supabase.from("customer_public").select("id, full_name, company_name, is_vip").in("id", customerIds) : Promise.resolve({ data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] }),
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
@@ -122,8 +124,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       gateInComplete: !!j.gate_in?.is_complete,
       loose: j.job_kind === "loose",
       quote: quoteSummaries.has(j.id) ? quoteState(quoteSummaries.get(j.id)!, !!insp && insp.status === "approved") : null,
-      // The money facts, so a paid car never reads "proforma to prepare".
-      extra: { invoiced: invoicedJobs.has(j.id), invoiceKind: invoicedJobs.get(j.id)?.kind ?? null, readySent: !!j.ready_sent_at, invoiceSent: !!j.invoice_sent_at },
+      // The money facts, so a paid car never reads "proforma to prepare"; the live parts picture for the parts step.
+      extra: { invoiced: invoicedJobs.has(j.id), invoiceKind: invoicedJobs.get(j.id)?.kind ?? null, readySent: !!j.ready_sent_at, invoiceSent: !!j.invoice_sent_at, ...(partsLiveMap.has(j.id) ? { parts: partsLiveMap.get(j.id)!, planningOn: planningOnOf(j, partsLiveMap.get(j.id)!) } : {}) },
     });
     return {
       statusLine: step.line || STATUS_LABELS[j.status as JobStatus],

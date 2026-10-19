@@ -166,10 +166,103 @@ export function newLabelCode() {
   return "P" + randomBytes(5).toString("hex").toUpperCase().slice(0, 9);
 }
 
+/**
+ * THE one live calculation of where a job's parts stand, computed from the part rows alone - no stored
+ * stage flag that can go stale. The job card's NEXT STEP, the Planning card, the delay note, Remind,
+ * the parts desk dots, the dashboard cards, the technician screen and the parts page all read this.
+ */
+export type PartsLive = {
+  hasParts: boolean;
+  /** Needed, not here, and not on any LPO yet. */
+  toOrder: number;
+  /** Needed parts not yet received at the desk. */
+  missing: number;
+  /** Missing parts whose due date has passed: the only time a delay note shows. */
+  late: number;
+  /** The latest due date among the missing parts. */
+  readyDate: string | null;
+  /** Missing parts with no due date at all (still to plan). */
+  missingNoDate: number;
+  needed: number;
+  receivedCount: number;
+  /** Parts the technician confirmed with his PIN - the only thing Handover counts. */
+  handed: number;
+  allReceived: boolean;
+  allHanded: boolean;
+  fromStockOnly: boolean;
+  /** The job's main LPO is waiting for the one-tap approval. */
+  pendingLpo: boolean;
+};
+
+const dubaiToday = () => new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+
+/** The pure rule: the live parts picture from the rows and today's date. */
+export function partsLiveOf(parts: PartFull[], today: string, pendingLpo = false): PartsLive {
+  const approved = parts.filter((p) => p.is_active !== false && (p.order_status !== "none" || p.issue_status !== "none"));
+  const needed = approved.filter((p) => p.return_status !== "returned" && !(p.not_needed_at && p.disposition !== "fit_approved") && p.exchange_status !== "needed" && p.exchange_status !== "ordered");
+  const here = (p: PartFull) => p.availability === "in_stock" || p.order_status === "received" || p.received_qty + 0.005 >= (Number(p.confirmed_quantity ?? p.quantity) || 1);
+  const missingRows = needed.filter((p) => !here(p));
+  const dueOf = (p: PartFull) => (p.expected_date ?? p.delivery_date ?? null)?.slice(0, 10) ?? null;
+  const lateRows = missingRows.filter((p) => { const d = dueOf(p); return !!d && d < today; });
+  const dues = missingRows.map(dueOf).filter((d): d is string => !!d);
+  const handed = needed.filter((p) => p.issue_status === "confirmed").length;
+  return {
+    hasParts: needed.length > 0,
+    toOrder: missingRows.filter((p) => !p.po_id && !["ordered", "partly_received"].includes(p.order_status ?? "")).length,
+    missing: missingRows.length,
+    late: lateRows.length,
+    readyDate: dues.length ? dues.sort().at(-1)! : null,
+    missingNoDate: missingRows.length - dues.length,
+    needed: needed.length,
+    receivedCount: needed.length - missingRows.length,
+    handed,
+    allReceived: needed.length > 0 && missingRows.length === 0,
+    allHanded: needed.length > 0 && handed === needed.length,
+    fromStockOnly: needed.length > 0 && needed.every((p) => p.availability === "in_stock"),
+    pendingLpo,
+  };
+}
+
+/** Parts are sorted when nothing is left to order or approve and nothing missing is late or undated. */
+export const partsPlanned = (live: PartsLive) => !live.pendingLpo && live.toOrder === 0 && live.late === 0 && live.missingNoDate === 0;
+
+/** Whose move the Planning card waits on, live: Parts until the parts are sorted, then the manager, then the advisor. */
+export function planningOnOf(job: { plan_released_at: string | null; plan_date_confirmed_at: string | null }, live: PartsLive): "parts" | "workshop" | "advisor" | null {
+  if (!partsPlanned(live)) return "parts";
+  if (!job.plan_released_at) return "workshop";
+  if (!job.plan_date_confirmed_at) return "advisor";
+  return null;
+}
+
+/** The live picture for many jobs in two queries (the dashboard, the waiting list). */
+export async function loadPartsLiveMap(jobIds: string[]): Promise<Map<string, PartsLive>> {
+  const out = new Map<string, PartsLive>();
+  if (!jobIds.length) return out;
+  const admin = createAdminClient();
+  const [{ data: partRows }, { data: pendingMains }] = await Promise.all([
+    admin.from("part_items").select(PART_FULL_SELECT).in("job_id", jobIds).eq("is_active", true),
+    admin.from("purchase_orders").select("job_id").in("job_id", jobIds).eq("kind", "main").eq("status", "pending_approval"),
+  ]);
+  const pending = new Set((pendingMains ?? []).map((r) => r.job_id as string));
+  const byJob = new Map<string, PartFull[]>();
+  for (const r of (partRows ?? []) as unknown as Record<string, unknown>[]) {
+    const p = toPartFull(r);
+    const list = byJob.get(p.job_id) ?? [];
+    list.push(p);
+    byJob.set(p.job_id, list);
+  }
+  const today = dubaiToday();
+  for (const id of jobIds) out.set(id, partsLiveOf(byJob.get(id) ?? [], today, pending.has(id)));
+  return out;
+}
+
 /** The approved parts on a job and where they stand, for the stage card, the work gate and the Parts desk. */
 export async function jobPartsState(jobId: string) {
   const admin = createAdminClient();
-  const { data } = await admin.from("part_items").select(PART_FULL_SELECT).eq("job_id", jobId).eq("is_active", true);
+  const [{ data }, { data: pendingMain }] = await Promise.all([
+    admin.from("part_items").select(PART_FULL_SELECT).eq("job_id", jobId).eq("is_active", true),
+    admin.from("purchase_orders").select("id").eq("job_id", jobId).eq("kind", "main").eq("status", "pending_approval").limit(1),
+  ]);
   const parts = ((data ?? []) as unknown as Record<string, unknown>[]).map(toPartFull);
   const approved = parts.filter((p) => p.order_status !== "none" || p.issue_status !== "none");
   const toOrder = approved.filter((p) => p.order_status === "to_order");
@@ -179,7 +272,8 @@ export async function jobPartsState(jobId: string) {
   const needed = approved.filter((p) => p.return_status !== "returned" && !(p.not_needed_at && p.disposition !== "fit_approved") && p.exchange_status !== "needed" && p.exchange_status !== "ordered");
   const issued = needed.filter((p) => p.issue_status !== "none");
   const confirmed = needed.filter((p) => p.issue_status === "confirmed");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dubaiToday();
+  const live = partsLiveOf(parts, today, (pendingMain ?? []).length > 0);
   const late = ordered.filter((p) => p.expected_date && p.expected_date < today);
-  return { parts, approved, toOrder, ordered, received, needed, issued, confirmed, late, allIssued: needed.length > 0 && needed.every((p) => p.issue_status === "confirmed"), noneNeeded: needed.length === 0 };
+  return { parts, approved, toOrder, ordered, received, needed, issued, confirmed, late, live, allIssued: needed.length > 0 && needed.every((p) => p.issue_status === "confirmed"), noneNeeded: needed.length === 0 };
 }
