@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { closeJob } from "@/lib/close-job";
-import { activeDeliveryTrip, tripCar } from "@/lib/delivery";
+import { activeDeliveryTrip, tripCar, recalcTripKm } from "@/lib/delivery";
 import { blankToNull } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -198,6 +198,14 @@ export async function removeRecoveryDriver(id: string) {
 }
 
 /** A trip with no road distance (no key, no pin): the kilometres typed by hand on the Recovery page. */
+/** Owner or accounts: work the road distance out again (after the pin or the key was fixed). */
+export async function recalcDistance(tripId: string) {
+  const staff = await requirePermission("approveRelease");
+  const r = await recalcTripKm(tripId, staff.id);
+  revalidatePath("/recovery");
+  redirect(r.km !== null ? `/recovery?message=${encodeURIComponent(`Distance found: ${r.km} km by road.`)}` : `/recovery?error=${encodeURIComponent(r.error ?? "Distance not found.")}`);
+}
+
 export async function setTripKm(tripId: string, formData: FormData) {
   const staff = await requirePermission("approveRelease");
   const km = Number(String(formData.get("km") ?? "").replace(/[^\d.]/g, ""));

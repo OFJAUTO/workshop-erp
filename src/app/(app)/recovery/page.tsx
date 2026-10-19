@@ -8,7 +8,7 @@ import { getSettings } from "@/lib/settings";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { createPickupTrip, decideTrip, markMonthPaid, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
+import { createPickupTrip, decideTrip, markMonthPaid, recalcDistance, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
 import { NewTripForm } from "./NewTripForm";
 import { ReasonChips } from "@/components/ReasonChips";
 
@@ -156,11 +156,16 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                     </div>
                   ) : null}
                   {t.road_km === null && canDecide ? (
-                    <form action={setTripKm.bind(null, t.id)} className="flex flex-wrap items-center gap-2" data-enter-km>
-                      <span className="text-xs font-semibold text-amber">Distance not found – enter km</span>
-                      <Input name="km" inputMode="decimal" placeholder="One-way km" className="w-32 min-h-9" data-km-box />
-                      <Button type="submit" tone="secondary" size="md">Save</Button>
-                    </form>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <form action={setTripKm.bind(null, t.id)} className="flex flex-wrap items-center gap-2" data-enter-km>
+                        <span className="text-xs font-semibold text-amber" data-km-why>Distance not found{t.km_error ? ` – ${t.km_error}` : ""} – enter km</span>
+                        <Input name="km" inputMode="decimal" placeholder="One-way km" className="w-32 min-h-9" data-km-box />
+                        <Button type="submit" tone="secondary" size="md">Save</Button>
+                      </form>
+                      <form action={recalcDistance.bind(null, t.id)}><Button type="submit" tone="ghost" size="md" data-recalc-km>Recalculate distance</Button></form>
+                    </div>
+                  ) : t.road_km !== null && canDecide ? (
+                    <form action={recalcDistance.bind(null, t.id)} className="self-start"><Button type="submit" tone="ghost" size="md" data-recalc-km>Recalculate distance</Button></form>
                   ) : null}
                 </li>
               );

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { recalcTripKm } from "@/lib/delivery";
 import { notifyLowStock } from "@/lib/stock";
 import { bodyshopHourly } from "@/lib/bodyshop";
 import { GATE_IN_BUCKET } from "@/lib/media";
@@ -369,6 +370,19 @@ export async function GET(request: NextRequest) {
       await notifyManagers((job.department as string | null) ?? null, { type: "handover", title, body, jobId, href: `/jobs/${jobId}/work` });
       await admin.from("part_items").update({ ready_reminder_at: new Date().toISOString() }).in("id", g.ids);
     }
+  }
+
+  // 22. Trips still without a road distance: worked out again every hour on the server (where the
+  // GOOGLE_MAPS_API_KEY lives), and the reason stored on the trip when Google still cannot say.
+  {
+    const { data: noKm } = await admin.from("recovery_trips").select("id").eq("is_active", true).is("road_km", null).order("created_at", { ascending: false }).limit(20);
+    let found = 0;
+    for (const t of noKm ?? []) {
+      const r = await recalcTripKm(t.id as string, null);
+      if (r.km !== null) found++;
+    }
+    report.kmRecalc = (noKm ?? []).length;
+    report.kmFound = found;
   }
 
   // 20. A car still "On the way" three hours after loading (or leaving): the advisor is reminded once; he can press

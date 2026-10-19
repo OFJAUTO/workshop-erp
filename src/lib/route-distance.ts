@@ -51,10 +51,12 @@ export async function expandMapLink(url: string | null | undefined): Promise<Lat
   return null;
 }
 
-/** One-way road kilometres from A to B (Google Routes API); null when the key is missing or the route fails. */
-export async function roadKm(from: LatLng, to: LatLng): Promise<number | null> {
+export type RoadResult = { km: number | null; error: string | null };
+
+/** One-way road kilometres from A to B (Google Routes API), with the reason when it fails - never the key. */
+export async function roadKmDetail(from: LatLng, to: LatLng): Promise<RoadResult> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
-  if (!key) return null;
+  if (!key) return { km: null, error: "GOOGLE_MAPS_API_KEY is not set on the server" };
   try {
     const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
       method: "POST",
@@ -66,13 +68,27 @@ export async function roadKm(from: LatLng, to: LatLng): Promise<number | null> {
       }),
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      let reason = `Google answered ${res.status}`;
+      try {
+        const j = JSON.parse(body) as { error?: { message?: string; status?: string } };
+        if (j?.error?.status) reason += ` ${j.error.status}`;
+        if (j?.error?.message) reason += `: ${String(j.error.message).slice(0, 240)}`;
+      } catch { /* the status alone */ }
+      return { km: null, error: reason };
+    }
     const j = (await res.json().catch(() => null)) as { routes?: { distanceMeters?: number }[] } | null;
     const m = j?.routes?.[0]?.distanceMeters;
-    return typeof m === "number" && m > 0 ? Math.round(m / 100) / 10 : null;
-  } catch {
-    return null;
+    return typeof m === "number" && m > 0 ? { km: Math.round(m / 100) / 10, error: null } : { km: null, error: "Google found no driving route between the two points" };
+  } catch (e) {
+    return { km: null, error: `Could not reach Google: ${String(e).slice(0, 160)}` };
   }
+}
+
+/** One-way road kilometres; null when the lookup fails (the detail version says why). */
+export async function roadKm(from: LatLng, to: LatLng): Promise<number | null> {
+  return (await roadKmDetail(from, to)).km;
 }
 
 /** The workshop's own pin from Settings, expanded if it is a short link. */
@@ -82,10 +98,15 @@ export async function workshopPin(settings: { workshop_location_pin?: unknown })
 
 /**
  * A trip's one-way road distance: pick-up = customer pin → OFJ; delivery = OFJ → customer pin.
- * Null when the pin or the key is missing: the Recovery page then asks for the kilometres by hand.
+ * The error says why when it fails; the Recovery page then asks for the kilometres by hand.
  */
-export async function tripRoadKm(trip: { kind: string; lat: number | null; lng: number | null }, home: LatLng | null): Promise<number | null> {
-  if (!home || trip.lat === null || trip.lng === null) return null;
+export async function tripRoadKmDetail(trip: { kind: string; lat: number | null; lng: number | null }, home: LatLng | null): Promise<RoadResult> {
+  if (trip.lat === null || trip.lng === null) return { km: null, error: "The customer pin has no coordinates" };
+  if (!home) return { km: null, error: "The workshop's own pin is not set in Settings" };
   const pin = { lat: trip.lat, lng: trip.lng };
-  return trip.kind === "pickup" ? roadKm(pin, home) : roadKm(home, pin);
+  return trip.kind === "pickup" ? roadKmDetail(pin, home) : roadKmDetail(home, pin);
+}
+
+export async function tripRoadKm(trip: { kind: string; lat: number | null; lng: number | null }, home: LatLng | null): Promise<number | null> {
+  return (await tripRoadKmDetail(trip, home)).km;
 }
