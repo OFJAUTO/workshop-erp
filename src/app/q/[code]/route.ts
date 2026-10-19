@@ -1,9 +1,7 @@
-import { NextResponse } from "next/server";
-import { urlOfCode } from "@/lib/short-links";
+import { shortLinkResponse } from "@/lib/short-preview";
 
-/** A short quotation link (erp.ofjauto.com/q/xxxx): straight to the customer's quotation. */
+/** A short link from a WhatsApp message: HTTP 200 with the og preview tags, then on to the stored address. */
 export async function GET(req: Request, ctx: { params: Promise<{ code: string }> }) {
   const { code } = await ctx.params;
-  const url = await urlOfCode(code);
-  return NextResponse.redirect(url ?? new URL("/", req.url), 302);
+  return shortLinkResponse(code, "q", req.url);
 }
