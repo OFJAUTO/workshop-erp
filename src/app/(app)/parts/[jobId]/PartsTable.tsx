@@ -341,6 +341,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         {bulkError ? <span className="text-sm font-semibold text-red">{bulkError}</span> : null}
         <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
         <Button type="button" tone="secondary" size="md" onClick={() => setListOpen(true)}>Copy list for supplier</Button>
+        {showCost ? <a href={`/api/pdf/parts-check/${jobId}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-print-pdf>Print / PDF</a> : null}
         {canPrice && !pricingLocked ? <a href={`/parts/${jobId}/import`} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-import-prices>Import prices</a> : null}
         {canPrice && !pricingLocked && lastImport && !importGone ? (
           <button type="button" onClick={() => void undoLastImport()} disabled={bulkBusy} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" title={`${lastImport.count} line${lastImport.count === 1 ? "" : "s"} imported ${formatDateTime(lastImport.at)}`} data-undo-import>
