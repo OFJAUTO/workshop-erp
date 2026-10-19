@@ -101,5 +101,24 @@ export function ServiceSticker({ w, h, logoUrl, d }: { w: number; h: number; log
 
 /** The one style tag every sticker print page needs: the page is the sticker, no browser margins. */
 export function stickerPageCss(w: number, h: number) {
-  return `@page { size: ${w}mm ${h}mm; margin: 0; } html, body { margin: 0; padding: 0; background: #fff; } .bar { font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; padding: 10px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 14px; } .bar a, .bar button { color: #fff; } .print-one { font: 700 12px Arial, Helvetica, sans-serif; margin: 6px 8px; padding: 5px 10px; border: 1px solid #111; background: #fff; border-radius: 6px; cursor: pointer; } @media print { .bar, .print-one { display: none; } body.printing-one .one:not(.print-this) { display: none; } }`;
+  return `@page { size: ${w}mm ${h}mm; margin: 0; } html, body { margin: 0; padding: 0; background: #fff; }
+.bar { font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; padding: 10px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.bar a { color: #fff; }
+.bar button { font: 700 13px Arial, Helvetica, sans-serif; min-height: 40px; padding: 6px 14px; border: 0; border-radius: 8px; background: #fff; color: #111; cursor: pointer; }
+.bar button:disabled { opacity: .5; cursor: default; }
+.bar .print-btn { background: #0f7b4f; color: #fff; }
+.sheet { font-family: Arial, Helvetica, sans-serif; display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; padding: 12px; background: #f3f4f6; min-height: 100vh; align-content: start; }
+.one { display: flex; align-items: center; gap: 12px; background: #fff; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px; }
+.one.off { opacity: .4; }
+.one .art { flex-shrink: 0; }
+.pick { margin-left: auto; display: flex; align-items: center; gap: 10px; min-height: 48px; min-width: 48px; border: 0; background: none; text-align: right; cursor: pointer; font: 600 12px Arial, Helvetica, sans-serif; color: #111; }
+.pick .meta { max-width: 150px; overflow: hidden; }
+.tick { width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px; border: 2px solid #9ca3af; background: #fff; color: transparent; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; }
+.tick-on { background: #0f7b4f; border-color: #0f7b4f; color: #fff; }
+@media print {
+  .bar, .pick { display: none !important; }
+  .sheet { display: block; padding: 0; background: none; min-height: 0; }
+  .one { display: block; border: 0; border-radius: 0; padding: 0; break-after: page; }
+  .one.off { display: none; }
+}`;
 }

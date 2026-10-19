@@ -7,8 +7,7 @@ import { qrDataUrl } from "@/lib/pdf/qr";
 import { getSettings } from "@/lib/settings";
 import { ensureQrLink, qrUrl, stickerLogoDataUrl, stickerSettings } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PrintNow } from "./PrintNow";
-import { PrintOne } from "./PrintOne";
+import { StickerSheet } from "./StickerSheet";
 
 export const dynamic = "force-dynamic";
 
@@ -56,18 +55,21 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
   return (
     <div>
       <style>{stickerPageCss(ss.partW, ss.partH)}</style>
-      <div className="bar">
-        <span>{labels.length} sticker{labels.length === 1 ? "" : "s"} · {ss.partW} × {ss.partH} mm · {test === "1" ? "test print" : jobNumber}</span>
-        <PrintNow auto={auto === "1" && labels.length > 0} label={`Print all (${labels.length}) · ${ss.printerPart}`} />
-        <a href={backHref} style={{ marginLeft: "auto" }}>Back</a>
-      </div>
-      {labels.length === 0 ? <p style={{ background: "#fff", padding: 12, fontFamily: "Arial, sans-serif" }}>No received parts to print yet. Stickers appear once a delivery is recorded.</p> : null}
-      {labels.map((l) => (
-        <div className="one" key={l.key} data-sticker-one>
-          <PrintOne />
-          <PartSticker w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr: l.qr, jobNumber, name: l.name, index: l.index, count: l.count, date: l.date }} />
-        </div>
-      ))}
+      {labels.length === 0 ? (
+        <div className="bar"><span>No received parts to print yet. Stickers appear once a delivery is recorded.</span><a href={backHref} style={{ marginLeft: "auto" }}>Back</a></div>
+      ) : (
+        <StickerSheet
+          items={labels.map((l) => ({ key: l.key, name: l.name, qty: l.count > 1 ? `${l.index} of ${l.count}` : "× 1" }))}
+          printer={ss.printerPart}
+          info={`${labels.length} sticker${labels.length === 1 ? "" : "s"} · ${ss.partW} × ${ss.partH} mm · ${test === "1" ? "test print" : jobNumber}`}
+          auto={auto === "1"}
+          extra={<a href={backHref} style={{ marginLeft: "auto" }}>Back</a>}
+        >
+          {labels.map((l) => (
+            <PartSticker key={l.key} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr: l.qr, jobNumber, name: l.name, index: l.index, count: l.count, date: l.date }} />
+          ))}
+        </StickerSheet>
+      )}
     </div>
   );
 }

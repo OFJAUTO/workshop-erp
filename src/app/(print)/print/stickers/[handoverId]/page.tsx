@@ -8,8 +8,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { qrUrl, stickerSettings, warrantyMonthsFor, stickerLogoDataUrl } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PrintNow } from "../../../parts/labels/[jobId]/PrintNow";
-import { PrintOne } from "../../../parts/labels/[jobId]/PrintOne";
+import { StickerSheet } from "../../../parts/labels/[jobId]/StickerSheet";
 
 export const dynamic = "force-dynamic";
 
@@ -40,10 +39,12 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   if (first) await admin.from("part_handovers").update({ stickers_printed_at: new Date().toISOString(), updated_by: staff.id }).eq("id", handoverId);
   else if (reprint !== "0") await admin.from("job_events").insert({ job_id: h.job_id, event_type: "sticker_reprint", note: `Stickers of the handover printed again by ${staff.display_name}`, created_by: staff.id });
   const stickers: React.ReactNode[] = [];
+  const sheetItems: { key: string; name: string; qty: string }[] = [];
   for (const [partId, s] of plan) {
     const item = h.items.find((i) => i.id === partId);
     const qr = await qrDataUrl(qrUrl(s.code), 300);
     for (let n = 0; n < s.count; n++) {
+      sheetItems.push({ key: `${partId}-${n}`, name: item?.description ?? (s.kind === "battery" ? "Battery" : "Part"), qty: s.count > 1 ? `${n + 1} of ${s.count}` : "× 1" });
       if (s.kind === "battery") {
         const months = warrantyMonthsFor(ss, s.brand, partMonths.get(partId) ?? null);
         const until = new Date(h.confirmed_at ?? h.created_at);
@@ -60,13 +61,18 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   return (
     <div>
       <style>{stickerPageCss(w, hh)}</style>
-      <div className="bar">
-        <span>{stickers.length} sticker{stickers.length === 1 ? "" : "s"} · {h.job?.job_number ?? ""}{first ? "" : " · printed again"}</span>
-        <PrintNow label={`Print on ${battery ? ss.printerLarge : ss.printerPart}`} />
-        <a href={`/api/pdf/stickers/${handoverId}`}>Download PDF</a>
-        <a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a>
-      </div>
-      {stickers.length === 0 ? <p style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>No stickers were asked for on this handover.</p> : stickers.map((s, i) => <div className="one" key={i} data-sticker-one><PrintOne />{s}</div>)}
+      {stickers.length === 0 ? (
+        <div className="bar"><span>No stickers were asked for on this handover.</span><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a></div>
+      ) : (
+        <StickerSheet
+          items={sheetItems}
+          printer={battery ? ss.printerLarge : ss.printerPart}
+          info={`${stickers.length} sticker${stickers.length === 1 ? "" : "s"} · ${h.job?.job_number ?? ""}${first ? "" : " · printed again"}`}
+          extra={<><a href={`/api/pdf/stickers/${handoverId}`}>Download PDF</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a></>}
+        >
+          {stickers}
+        </StickerSheet>
+      )}
     </div>
   );
 }
