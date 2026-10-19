@@ -113,7 +113,7 @@ export const PERMISSIONS = {
   viewInvoices: ["owner", "accounts", "service_advisor"],
   issueInvoices: ["owner", "accounts"],
   manageSuppliers: ["owner", "parts", "accounts"],
-  recordPayments: ["owner", "accounts", "service_advisor"],
+  recordPayments: ["owner", "accounts"],
   verifyPayments: ["owner", "accounts"],
   approveCreditNotes: ["owner"],
   viewProfitList: ["owner", "accounts"],

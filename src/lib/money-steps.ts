@@ -24,11 +24,9 @@ export const EXPECTED_METHODS = ["card", "link", "transfer", "cash"] as const;
 export const EXPECTED_METHOD_LABELS: Record<string, string> = { card: "Card in the shop", link: "Payment link", transfer: "Bank transfer", cash: "Cash" };
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-/** Who may record which method at the counter: accounts the bank side, advisors the counter, the owner anything. */
+/** Who may record payments: ACCOUNTS and the OWNER only. Advisors never record, edit or delete a payment. */
 export function methodsFor(role: string): PaymentMethod[] {
-  if (role === "owner") return [...PAYMENT_METHODS];
-  if (role === "accounts") return ["transfer", "cheque", "link"];
-  if (role === "service_advisor") return ["cash", "card"];
+  if (role === "owner" || role === "accounts") return [...PAYMENT_METHODS];
   return [];
 }
 

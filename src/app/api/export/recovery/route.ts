@@ -24,7 +24,7 @@ const COLUMNS = [
 /** The month's recovery trips as a real Excel file; ?who=all gives one sheet per driver or company plus a summary. */
 export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
-  if (!staff || !["owner", "accounts", "service_advisor"].includes(staff.role_id)) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
+  if (!staff || !["owner", "accounts"].includes(staff.role_id)) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const month = request.nextUrl.searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "Bad month." }, { status: 400 });
   const who = request.nextUrl.searchParams.get("who");

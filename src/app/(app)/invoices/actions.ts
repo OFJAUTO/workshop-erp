@@ -99,7 +99,7 @@ export async function recordPayment(formData: FormData) {
   const sep = back.includes("?") ? "&" : "?";
   const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
   const method = String(formData.get("method") ?? "");
-  if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) redirect(`${back}${sep}error=${encodeURIComponent(`${PAYMENT_METHOD_LABELS[method] ?? "This method"} is recorded by ${method === "cash" || method === "card" ? "the advisor at the counter" : "accounts"}, not by you.`)}`);
+  if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) redirect(`${back}${sep}error=${encodeURIComponent("Not allowed: payments are recorded by accounts or the owner only.")}`);
   // A card or transfer payment carries its proof (the card slip, the transfer screenshot) or it is not recorded.
   const proof = formData.get("proof");
   const proofFile = proof instanceof File && proof.size > 0 ? proof : null;

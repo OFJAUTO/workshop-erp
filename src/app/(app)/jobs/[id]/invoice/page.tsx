@@ -192,7 +192,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     </div>
                   </details>
                 ) : null}
-                {!live && canRecord ? (
+                {!live && (canRecord || depositRows.length > 0) ? (
                   <details className="text-sm">
                     <summary className="cursor-pointer min-h-11 flex items-center font-bold">Deposit before the proforma{depositTotal ? ` · AED ${m(depositTotal)} received` : ""}</summary>
                     <div className="mt-2 flex flex-col gap-2">
@@ -205,7 +205,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                           <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, depositShorts.get(p.id) ?? `${site}/api/pdf/receipt/${p.id}`)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} />
                         </div>
                       ))}
-                      <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} />
+                      {canRecord ? <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /> : <p className="text-xs text-muted">Deposits are recorded by accounts.</p>}
                     </div>
                   </details>
                 ) : null}
@@ -246,6 +246,11 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     <p className="text-sm font-semibold mb-2">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p>
                     <PaymentForm invoiceId={live.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live.number} isProforma={live.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
                   </div>
+                ) : null}
+                {live && unpaid && !canRecord ? (
+                  <p className="border-t border-line pt-3 text-sm text-muted" data-waiting-accounts>
+                    {proforma?.sent_at ? `Proforma sent ${formatDayTime(proforma.sent_at)} · ` : ""}{proforma?.expected_payment_method ? `Expected: ${PAYMENT_METHOD_LABELS[proforma.expected_payment_method] ?? proforma.expected_payment_method} · ` : ""}Waiting for accounts to record the payment.
+                  </p>
                 ) : null}
                 {live && unpaid && acting && s === "current" && !proforma?.customer_says_paid_at && (role === "service_advisor" || role === "owner") ? (
                   <form action={customerSaysPaid.bind(null, live.id)} className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
