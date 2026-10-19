@@ -68,11 +68,20 @@ if (want("S1")) {
   await until(async () => ((await tp.locator("[data-parts-for-car]").count()) ? 1 : null), 30, 400);
   check("S1: the note is a small amber line, not a red banner", new RegExp(`${nParts} parts? not received yet`).test((await tp.locator("[data-parts-note]").textContent().catch(() => "")) ?? ""));
   check("S1: nothing blocks starting work (no red border on the parts card)", !/border-red/.test((await tp.locator("[data-parts-for-car]").getAttribute("class")) ?? ""));
-  check("S1: a tick box per line, all ticked to start", (await tp.locator("[data-part-take]").count()) === nParts && new RegExp(`I've received these \\(${nParts}\\)`).test((await tp.locator("[data-receive-parts]").textContent()) ?? ""));
+  check("S1: a tick box per line, every row starts UNTICKED grey", (await tp.locator("[data-part-take][data-ticked='0']").count()) === nParts && new RegExp("I've received these \\(0\\)").test((await tp.locator("[data-receive-parts]").textContent()) ?? ""));
+  check("S1: the button is off with nothing ticked", await tp.locator("[data-receive-parts]").isDisabled());
+  await shot(tp, "s1-tech-before");
+  // Tick everything (Select all when there are several rows, the row itself otherwise).
   if (nParts > 1) {
     check("S1: Select all is there", (await tp.locator("[data-select-all-parts]").count()) === 1);
+    await tp.locator("[data-select-all-parts]").click();
+  } else {
+    await tp.locator("[data-part-take] button").first().click();
   }
-  await shot(tp, "s1-tech-before");
+  await until(async () => ((await tp.locator("[data-part-take][data-ticked='1']").count()) === nParts ? 1 : null), 20, 300);
+  const tickedBg = await tp.locator("[data-part-take][data-ticked='1'] > button").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+  check("S1: a ticked row is light green (computed colour)", tickedBg === "rgb(232, 245, 236)", tickedBg);
+  await shot(tp, "s1-tech-ticked");
   // Wrong PIN first: refused in words.
   await tp.locator("[data-receive-pin]").fill("9999");
   await tp.locator("[data-receive-parts]").click();

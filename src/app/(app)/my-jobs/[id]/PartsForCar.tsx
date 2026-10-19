@@ -10,13 +10,15 @@ type Action = (formData: FormData) => void | Promise<void>;
 type Receive = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
 
 /**
- * "Parts for this car" on the technician's own tablet: a tick box per part that is at the desk, Select all,
- * "I've received these (N)" and his own PIN. Received lines turn light green with his name and the time.
- * Nothing here ever blocks starting work; receiving is needed only before "Job finished".
+ * "Parts for this car" on the technician's own tablet. Every row starts UNTICKED (light grey): the
+ * technician looks at each part and ticks what he is really taking - a ticked row turns light green.
+ * "I've received these (N)" goes active only with at least one tick and his 4-digit PIN. Confirmed
+ * parts keep the green, say who received them and when, can never be unticked, and sit collapsed
+ * at the bottom under "Received (N)". Nothing here ever blocks starting work.
  */
 export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: { jobId: string; parts: PanelPart[]; canAct: boolean; receive: Receive; exchangeAction: Action }) {
   const router = useRouter();
-  const [unticked, setUnticked] = useState<Set<string>>(new Set());
+  const [tickedIds, setTickedIds] = useState<Set<string>>(new Set());
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [report, setReport] = useState(false);
@@ -25,9 +27,10 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
   const takeable = parts.filter((p) => p.state === "ready" || p.state === "here");
   const coming = parts.filter((p) => p.state === "coming");
   const notReceived = takeable.length + coming.length;
-  const ticked = takeable.filter((p) => !unticked.has(p.id));
+  const allReceived = parts.length > 0 && received.length === parts.length;
+  const ticked = takeable.filter((p) => tickedIds.has(p.id));
   if (!parts.length) return null;
-  const toggle = (id: string) => setUnticked((u) => { const n = new Set(u); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggle = (id: string) => setTickedIds((u) => { const n = new Set(u); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const submit = () => start(async () => {
     setMsg(null);
     const fd = new FormData();
@@ -37,7 +40,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
     if (r.error) setMsg({ tone: "error", text: r.error });
     else {
       setMsg({ tone: "success", text: r.message ?? "Received." });
-      setUnticked(new Set());
+      setTickedIds(new Set());
       setPin("");
       router.refresh();
     }
@@ -45,23 +48,16 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
   return (
     <Card className="flex flex-col gap-3" data-parts-for-car>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <SectionLabel right={`${received.length} of ${parts.length} received`}>Parts for this car</SectionLabel>
-        {notReceived ? <span className="text-xs font-bold text-amber" data-parts-note>{notReceived} part{notReceived === 1 ? "" : "s"} not received yet</span> : null}
+        <SectionLabel right={allReceived ? undefined : `${received.length} of ${parts.length} received`}>Parts for this car</SectionLabel>
+        {allReceived ? <span className="text-sm font-bold text-green" data-all-received>All {parts.length} received ✓</span> : notReceived ? <span className="text-xs font-bold text-amber" data-parts-note>{notReceived} part{notReceived === 1 ? "" : "s"} not received yet</span> : null}
       </div>
       <ul className="flex flex-col gap-1 text-sm">
-        {received.map((p) => (
-          <li key={p.id} className="flex items-center gap-2 rounded-control bg-green-soft px-2 py-2" data-part-received={p.id}>
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
-            <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
-            <span className="ml-auto text-xs font-semibold text-green">Received{p.receivedBy ? ` · ${p.receivedBy}` : ""}{p.receivedAt ? ` · ${p.receivedAt}` : ""}</span>
-          </li>
-        ))}
         {takeable.map((p) => {
-          const on = canAct && !unticked.has(p.id);
+          const on = canAct && tickedIds.has(p.id);
           return (
-            <li key={p.id} data-part-take={p.id}>
-              <button type="button" disabled={!canAct} onClick={() => toggle(p.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
-                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+            <li key={p.id} data-part-take={p.id} data-ticked={on ? "1" : "0"}>
+              <button type="button" disabled={!canAct} onClick={() => toggle(p.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control border px-2 text-left ${on ? "border-[#7FC195] bg-[#E8F5EC]" : "border-transparent bg-chip"}`}>
+                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-green bg-green text-white" : "border-line-strong bg-white text-transparent"}`}>✓</span>
                 <span className="flex-1 font-semibold">{p.description}</span>
                 <span>× {p.quantity}</span>
                 <span className="text-xs font-semibold text-muted">{p.state === "ready" ? "Ready at the desk" : "At the parts desk"}</span>
@@ -80,8 +76,8 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
       {canAct && takeable.length ? (
         <div className="flex flex-col gap-2 border-t border-line pt-3">
           {takeable.length > 1 ? (
-            <button type="button" onClick={() => setUnticked(unticked.size ? new Set() : new Set(takeable.map((p) => p.id)))} className="self-start min-h-9 px-2 text-xs font-bold underline underline-offset-4" data-select-all-parts>
-              {unticked.size ? "Select all" : "Unselect all"}
+            <button type="button" onClick={() => setTickedIds(ticked.length === takeable.length ? new Set() : new Set(takeable.map((p) => p.id)))} className="self-start min-h-9 px-2 text-xs font-bold underline underline-offset-4" data-select-all-parts>
+              {ticked.length === takeable.length ? "Unselect all" : "Select all"}
             </button>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">
@@ -92,6 +88,20 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
           </div>
           {msg ? <span className={`text-sm font-semibold ${msg.tone === "error" ? "text-red" : "text-green"}`} role="alert">{msg.text}</span> : null}
         </div>
+      ) : null}
+      {received.length ? (
+        <details className="border-t border-line pt-2" data-received-fold {...(takeable.length === 0 && coming.length === 0 ? { open: true } : {})}>
+          <summary className="cursor-pointer min-h-10 flex items-center text-sm font-bold">Received ({received.length})</summary>
+          <ul className="mt-1 flex flex-col gap-1 text-sm">
+            {received.map((p) => (
+              <li key={p.id} className="flex items-center gap-2 rounded-control border border-[#7FC195] bg-[#E8F5EC] px-2 py-2" data-part-received={p.id}>
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
+                <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
+                <span className="ml-auto text-xs font-semibold text-green">Received ✓{p.receivedBy ? ` ${p.receivedBy}` : ""}{p.receivedAt ? ` · ${p.receivedAt}` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
       {canAct && received.length ? (
         !report ? (
