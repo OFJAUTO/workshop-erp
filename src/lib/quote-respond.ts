@@ -1,4 +1,5 @@
 import { replaceProformaAfterRevision } from "./invoice-flow";
+import { createTrip, loadDrivers } from "./delivery";
 import { dropParts } from "@/lib/drop-parts";
 import "server-only";
 import { finishPartsPlanning } from "./lpo";
@@ -87,6 +88,22 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   if (!q.job_id) return { status };
   const { data: job } = await admin.from("jobs").select("id, job_number, status, department, assigned_to").eq("id", q.job_id).maybeSingle();
   if (!job) return { status };
+
+  // A package with "Complimentary pick-up & drop-off" approved: both recovery trips are made at once
+  // (our truck, the saved driver). The advisor fills the pin and date; the customer sees "Complimentary",
+  // and the truck's cost still counts against this job's profit.
+  if (answer.approve && lines.some((l) => (l.package_items as { pickup_dropoff?: boolean } | null)?.pickup_dropoff)) {
+    const { data: existing } = await admin.from("recovery_trips").select("id").eq("job_id", job.id).eq("is_active", true).limit(1);
+    if (!(existing ?? []).length) {
+      const drivers = await loadDrivers();
+      const ours = drivers.filter((d) => !d.company);
+      const driver = ours.find((d) => d.is_default) ?? ours[0] ?? null;
+      for (const kind of ["pickup", "delivery"] as const) {
+        await createTrip({ jobId: job.id, kind, company: null, driverId: driver?.id ?? null, driverName: driver?.name ?? null, driverPhone: driver?.phone ?? null, truckPlate: driver?.truck_plate ?? null, locationUrl: null, locationDetails: "Complimentary (package)", date: null, slot: null, by: answer.by ?? null });
+      }
+      await admin.from("job_events").insert({ job_id: job.id, event_type: "recovery", note: "Complimentary pick-up and drop-off trips created with the package approval; the advisor fills the pin and date", created_by: answer.by ?? null });
+    }
+  }
 
   // A bodyshop quotation answered before the car arrives: nothing moves in the workshop. Approved: the advisor books the
   // arrival and the handover (and a deposit if wanted); declined: the advisor hears, no inspection fee.
