@@ -660,9 +660,21 @@ export function estimatedDaysAfterApproval(lines: QuoteLine[], parts: PartItem[]
 }
 
 /** Why the owner must approve before sending: a discount above the advisor's limit, a part discount, or a total above the optional threshold. */
-export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, lines: QuoteLine[], totals: { total: number }, settings: { discountLimit: number; approvalAbove: number }): string[] {
+/**
+ * Why a quotation needs the owner before it can go out. The advisor's discount limit (Settings, default
+ * 10%) is measured as a share of the LABOUR the discount applies to, and the round-off given at sending
+ * counts toward it; within the limit the advisor sends it himself, above it the quotation waits as
+ * pending_owner ("Waiting for the owner: discount 18% of labour (limit 10%)"). The owner is never limited.
+ */
+export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, lines: QuoteLine[], totals: { total: number; discountBase: number; discount: number; rounding: number }, settings: { discountLimit: number; approvalAbove: number }): string[] {
+  void q;
   const out: string[] = [];
-  if ((q.discount_percent ?? 0) > settings.discountLimit) out.push(`Discount on the total of ${q.discount_percent}% is above the ${settings.discountLimit}% limit`);
+  const roundOff = Math.max(0, -(totals.rounding ?? 0));
+  const givenAway = round2((totals.discount ?? 0) + roundOff);
+  const pct = totals.discountBase > 0 && givenAway > 0 ? (givenAway / totals.discountBase) * 100 : 0;
+  if (settings.discountLimit > 0 && pct > settings.discountLimit + 0.049) {
+    out.push(`discount ${pct.toFixed(pct >= 10 ? 0 : 1)}% of labour (limit ${settings.discountLimit}%)${roundOff > 0 ? `, the round-off of ${aed(roundOff)} counted` : ""}`);
+  }
   for (const l of lines) {
     if (!l.is_active) continue;
     if (hasCostFloor(l) && (l.discount_percent ?? 0) > 0) out.push(`${l.title}: part discount of ${l.discount_percent}%${l.discount_reason ? ` (${l.discount_reason})` : ""}`);

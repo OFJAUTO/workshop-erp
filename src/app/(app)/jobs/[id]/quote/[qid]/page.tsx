@@ -210,7 +210,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for owner approval ({q.owner_approval_reason}).</Notice></div> : null}
+      {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
       {q.owner_approved_at && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
       {bundle.versions.length > 1 ? (
         <p className="text-xs text-muted">

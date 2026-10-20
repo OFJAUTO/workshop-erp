@@ -252,7 +252,7 @@ export function SettingsForm({
           <Card className="flex flex-col gap-4">
             <SectionLabel>Pricing</SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Advisor discount limit (%)" hint="Used from Phase 4.">
+              <Field label="Advisor discount limit (% of labour)" hint="An advisor can discount labour up to this share himself; the round-off counts too. Above it the quotation waits for you. Parts are never discounted by advisors; you are never limited.">
                 <Input name="discount_limit_percent" defaultValue={v.discount_limit_percent} inputMode="numeric" required />
               </Field>
               <Field label="Minimum parts markup (%)" hint="A quote cannot go out below this. No upper limit.">
