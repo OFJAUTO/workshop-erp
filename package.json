@@ -46,6 +46,7 @@
     "test:commission": "node --env-file=.env.local tests/browser/test-commission.mjs",
     "test:advance": "node --env-file=.env.local tests/browser/test-advance.mjs",
     "test:invoice2": "node --env-file=.env.local tests/browser/test-invoice2.mjs",
+    "test:depositpanel": "node --env-file=.env.local tests/browser/test-deposit-panel.mjs",
     "test:waiting": "node --env-file=.env.local tests/browser/test-waiting.mjs"
   },
   "dependencies": {

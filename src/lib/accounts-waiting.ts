@@ -36,25 +36,34 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       actionLabel: "Confirm & bank",
       href: p.job_id ? `/jobs/${p.job_id}/invoice` : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices",
       always: true,
+      urgency: "red",
+      since: p.received_at,
+      hint: "Cash was taken: tick it once the money is counted and banked.",
+      inline: { kind: "confirm_payment", paymentId: p.id },
     });
   }
 
-  // 2. Deposits asked for and not yet received.
+  // 2. Deposits asked for and not yet received: one line per job, the Record deposit panel right there.
   for (const d of await depositsWaiting()) {
     out.push({
       jobId: d.jobId,
       plate: d.plate,
-      car: d.customer,
-      what: `Deposit not received yet (${d.quotation}, approved ${d.hours} h ago)`,
+      car: [d.carTitle, d.customer].filter(Boolean).join(" · ") || null,
+      what: `Deposit to record (${d.quotation})`,
       amount: aed(round2(d.required - d.received)),
-      actionLabel: "Open the job",
+      actionLabel: "Record the deposit",
       href: `/jobs/${d.jobId}/invoice`,
       always: true,
+      replaces: true,
+      urgency: "red",
+      since: d.approvedAt,
+      hint: `The customer approved ${d.quotation} ${d.hours} h ago with a deposit of ${aed(d.required)}; ${aed(d.received)} received so far.`,
+      inline: { kind: "record_deposit", deposit: { jobId: d.jobId, plate: d.plate, car: d.carTitle, customer: d.customer, quote: d.quotation, requested: d.required, received: d.received, outstanding: round2(Math.max(0, d.required - d.received)) } },
     });
   }
 
   // 3. LPOs waiting for the one-tap approval.
-  const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_name, total_cost_aed, kind").eq("status", "pending_approval").eq("is_active", true);
+  const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_name, total_cost_aed, kind, created_at").eq("status", "pending_approval").eq("is_active", true);
   for (const po of lpos ?? []) {
     out.push({
       jobId: `lpo:${po.id}`,
@@ -65,13 +74,16 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       actionLabel: "Approve",
       href: `/parts/orders/${po.id}`,
       always: true,
+      urgency: "amber",
+      since: po.created_at as string,
+      hint: "One tap approves it on the LPO page; Parts then order from each supplier.",
     });
   }
 
   // 4. Supplier invoices: still to follow, or prices to check against the LPO.
-  const { data: toFollow } = await admin.from("purchase_orders").select("id, number, supplier_name").eq("supplier_invoice_status", "to_follow").eq("is_active", true).neq("status", "cancelled");
+  const { data: toFollow } = await admin.from("purchase_orders").select("id, number, supplier_name, received_at, created_at").eq("supplier_invoice_status", "to_follow").eq("is_active", true).neq("status", "cancelled");
   for (const po of toFollow ?? []) {
-    out.push({ jobId: `inv:${po.id}`, plate: po.number as string, car: po.supplier_name as string, what: "Supplier invoice to follow: chase it and enter the number and date", amount: null, actionLabel: "Open the LPO", href: `/parts/orders/${po.id}`, always: true });
+    out.push({ jobId: `inv:${po.id}`, plate: po.number as string, car: po.supplier_name as string, what: "Supplier invoice missing", amount: null, actionLabel: "Open the LPO", href: `/parts/orders/${po.id}`, always: true, urgency: "amber", since: (po.received_at ?? po.created_at) as string, hint: "Chase the supplier and enter the invoice number and date; the LPO cannot be paid without them." });
   }
   const { data: mismatch } = await admin.from("purchase_order_lines").select("po_id, po:purchase_orders(number, supplier_name, is_active)").eq("invoice_check", "mismatch");
   const seenPo = new Set<string>();
@@ -79,13 +91,13 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     const po = l.po as unknown as { number: string; supplier_name: string; is_active: boolean } | null;
     if (!po?.is_active || seenPo.has(l.po_id as string)) continue;
     seenPo.add(l.po_id as string);
-    out.push({ jobId: `chk:${l.po_id}`, plate: po.number, car: po.supplier_name, what: "Supplier invoice price differs from the LPO: accept or dispute", amount: null, actionLabel: "Check", href: `/parts/orders/${l.po_id}`, always: true });
+    out.push({ jobId: `chk:${l.po_id}`, plate: po.number, car: po.supplier_name, what: "Invoice price differs from the LPO", amount: null, actionLabel: "Check", href: `/parts/orders/${l.po_id}`, always: true, urgency: "amber", hint: "Accept the new price or dispute it, line by line, on the LPO page." });
   }
 
   // 5. Recovery: claimed trips to approve, and a month ready to pay.
   const { data: claimed } = await admin.from("recovery_trips").select("id").eq("status", "claimed").eq("is_active", true);
   if (claimed?.length) {
-    out.push({ jobId: "recovery:claimed", plate: "Recovery", car: null, what: `${claimed.length} trip${claimed.length === 1 ? "" : "s"} claimed by the drivers: approve or query`, amount: null, actionLabel: "Open Recovery", href: "/recovery", always: true });
+    out.push({ jobId: "recovery:claimed", plate: "Recovery", car: null, what: `${claimed.length} trip${claimed.length === 1 ? "" : "s"} claimed by the drivers`, amount: null, actionLabel: "Open Recovery", href: "/recovery", always: true, urgency: "grey", hint: "Approve or query each claimed trip; the month is paid once every trip is settled." });
   }
   const month = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 7);
   const { data: monthTrips } = await admin.from("recovery_trips").select("id, company, driver_name, price_aed, status, delivered_at, created_at").eq("is_active", true);
@@ -103,7 +115,7 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     const paidSet = new Set((paid ?? []).map((p) => p.who as string));
     for (const [who, g] of byWho) {
       if (g.open || paidSet.has(who) || !(g.total > 0)) continue;
-      out.push({ jobId: `payout:${who}`, plate: who, car: null, what: `Every trip approved: the month is ready to pay`, amount: aed(g.total), actionLabel: "Mark paid", href: "/recovery", always: true });
+      out.push({ jobId: `payout:${who}`, plate: who, car: null, what: `Recovery month ready to pay`, amount: aed(g.total), actionLabel: "Mark paid", href: "/recovery", always: true, urgency: "grey", hint: "Every trip is approved: pay the month and it locks." });
     }
   }
   return out;

@@ -53,6 +53,8 @@ export type DepositWaiting = {
   received: number;
   approvedAt: string | null;
   hours: number;
+  phone: string | null;
+  carTitle: string | null;
   reminded: boolean;
   advisorIds: string[];
 };
@@ -65,12 +67,12 @@ export async function depositsWaiting(): Promise<DepositWaiting[]> {
   if (!rows.length) return [];
   const jobIds = Array.from(new Set(rows.map((q) => q.job_id as string)));
   const [{ data: jobs }, { data: pays }] = await Promise.all([
-    admin.from("jobs").select(`id, job_number, is_open, gated_in_by, customer:customers(full_name, company_name), vehicle:vehicles(${PLATE_SELECT})`).in("id", jobIds),
+    admin.from("jobs").select(`id, job_number, is_open, gated_in_by, customer:customers(full_name, company_name, phone), vehicle:vehicles(${PLATE_SELECT}, model_year, make:vehicle_makes(name), model:vehicle_models(name))`).in("id", jobIds),
     admin.from("payments").select(PAYMENT_SELECT).in("job_id", jobIds).eq("is_active", true),
   ]);
   const payments = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared"));
   const out: DepositWaiting[] = [];
-  for (const j of (jobs ?? []) as unknown as { id: string; job_number: string; is_open: boolean; gated_in_by: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: PlateRow | null }[]) {
+  for (const j of (jobs ?? []) as unknown as { id: string; job_number: string; is_open: boolean; gated_in_by: string | null; customer: { full_name: string; company_name: string | null; phone: string | null } | null; vehicle: (PlateRow & { model_year?: number | null; make?: { name: string } | null; model?: { name: string } | null }) | null }[]) {
     if (!j.is_open) continue;
     const mine = rows.filter((q) => q.job_id === j.id);
     const required = round2(mine.reduce((a, q) => a + (Number(q.deposit_aed) || 0), 0));
@@ -85,6 +87,8 @@ export async function depositsWaiting(): Promise<DepositWaiting[]> {
       jobNumber: j.job_number,
       plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number,
       customer: j.customer?.company_name ?? j.customer?.full_name ?? "Customer",
+      phone: j.customer?.phone ?? null,
+      carTitle: [j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.model_year].filter(Boolean).join(" ") || null,
       required,
       received,
       approvedAt,

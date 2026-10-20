@@ -20,7 +20,7 @@ const panel = (await page.locator("[data-waiting-panel]").textContent().catch(()
 check("not 'Nothing waiting'", (await page.locator("[data-waiting-empty]").count()) === 0);
 check("the cash deposit is under Waiting on you", /Cash deposit RCT-E2E1 to confirm and bank/.test(panel), panel.slice(0, 120));
 check("with the amount", /13,550\.00/.test(panel));
-check("the requested deposit shows too", /Deposit not received yet/.test(panel));
+check("the requested deposit shows too", /Deposit to record/.test(panel));
 
 // Open the list for the screenshot.
 const summaryEl = page.locator("[data-waiting-summary]");

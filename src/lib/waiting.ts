@@ -12,6 +12,21 @@ import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 
+export type Urgency = "red" | "amber" | "grey";
+
+/**
+ * How hard a task is knocking (1.2, 21 October 2026): red = money to record, a tax invoice to issue or a
+ * customer waiting with the car Ready; amber = today's operational work (approvals, pricing, assigning);
+ * grey comes only from the when-you-can extras (recovery, month-end). An amber task older than a day turns
+ * red where it is shown.
+ */
+export function urgencyOf(i: { actorRole: string | null; status: string; line: string }): Urgency {
+  if (i.actorRole === "accounts") return "red";
+  if (/deposit/i.test(i.line) && /record|waiting for the deposit/i.test(i.line)) return "red";
+  if (["ready", "pending_payment", "in_delivery"].includes(i.status)) return "red";
+  return "amber";
+}
+
 export type WaitingItem = {
   jobId: string;
   jobNumber: string;
@@ -24,6 +39,7 @@ export type WaitingItem = {
   since: string;
   wait: string;
   role: string;
+  urgency: Urgency;
 };
 
 type Row = {
@@ -129,6 +145,7 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       since: step.since,
       wait: formatWait(workingMinutesSince(step.since, wt, now), wt),
       role: step.actorRole,
+      urgency: urgencyOf({ actorRole: step.actorRole, status: j.status, line: step.line }),
     });
   }
   out.sort((a, b) => a.since.localeCompare(b.since));
