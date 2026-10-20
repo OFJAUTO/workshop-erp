@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { recalcTripKm } from "@/lib/delivery";
 import { aftercareHourly } from "@/lib/aftercare";
+import { depositState } from "@/lib/deposits";
 import { notifyLowStock } from "@/lib/stock";
 import { bodyshopHourly } from "@/lib/bodyshop";
 import { GATE_IN_BUCKET } from "@/lib/media";
@@ -391,6 +392,29 @@ export async function GET(request: NextRequest) {
     const a = await aftercareHourly();
     report.aftercareReminded = a.reminded;
     report.aftercareOverdue = a.overdue;
+  }
+
+  // 25. A RED task older than 30 minutes rings one bell (1.2, 21 October 2026): cash taken and still
+  // not confirmed and banked, and a deposit the customer approved that is still not recorded.
+  {
+    let rang = 0;
+    const cut = new Date(Date.now() - 30 * 60000).toISOString();
+    const { data: cashOld } = await admin.from("payments").select("id, number, amount_aed, job_id").eq("is_active", true).eq("status", "recorded").is("verified_at", null).eq("method", "cash").is("bank_reminder_at", null).lt("received_at", cut);
+    for (const p of cashOld ?? []) {
+      await notifyRoles(["accounts"], { type: "task_overdue", title: `Still to bank · ${p.number}`, body: `Cash of AED ${Number(p.amount_aed).toLocaleString("en-GB")} was taken over 30 minutes ago and is not confirmed and banked yet.`, jobId: (p.job_id as string | null) ?? null, href: "/dashboard" });
+      await admin.from("payments").update({ bank_reminder_at: new Date().toISOString() }).eq("id", p.id);
+      rang++;
+    }
+    const { data: depOld } = await admin.from("quotations").select("id, number, deposit_aed, job_id, responded_at").eq("kind", "quotation").eq("status", "approved").eq("is_active", true).gt("deposit_aed", 0).is("deposit_accounts_reminded_at", null).lt("responded_at", cut);
+    for (const q of depOld ?? []) {
+      if (!q.job_id) continue;
+      const st = await depositState(q.job_id as string);
+      if (!st.short) { await admin.from("quotations").update({ deposit_accounts_reminded_at: new Date().toISOString() }).eq("id", q.id); continue; }
+      await notifyRoles(["accounts"], { type: "task_overdue", title: `Deposit still to record · ${q.number}`, body: `AED ${Math.max(0, st.required - st.received).toLocaleString("en-GB")} asked over 30 minutes ago and not recorded yet. It sits on your Waiting on you.`, jobId: q.job_id as string, href: "/dashboard" });
+      await admin.from("quotations").update({ deposit_accounts_reminded_at: new Date().toISOString() }).eq("id", q.id);
+      rang++;
+    }
+    report.redTaskBells = rang;
   }
 
   // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the

@@ -19,6 +19,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "sticker_prompt", label: "A sticker or label to print (labels at receipt, battery warranty, oil service)", locked: true },
   { type: "supplier_invoice_mismatch", label: "A supplier invoice price differs from the LPO (accounts)", locked: true },
   { type: "supplier_invoice_missing", label: "A supplier invoice is still missing (Parts, daily)", locked: true },
+  { type: "task_overdue", label: "A red task waited over 30 minutes (one bell)", locked: true },
   { type: "quote_revised_by_parts", label: "Parts changed: revised quotation to send" },
   { type: "job_declined_out", label: "Declined job going out" },
   { type: "approval_opened", label: "Customer opened the approval link", locked: true },

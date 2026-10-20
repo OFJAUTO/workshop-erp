@@ -32,8 +32,9 @@ export type WaitingItem = {
   jobNumber: string;
   plate: string;
   car: string;
-  /** What to do, in plain words. */
+  /** What to do, short (the step line); the full sentence sits in hint for the tooltip. */
   what: string;
+  hint: string;
   actionLabel: string;
   href: string;
   since: string;
@@ -139,7 +140,8 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       jobNumber: j.job_number,
       plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number,
       car: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "),
-      what: step.next,
+      what: step.line,
+      hint: step.next,
       actionLabel: step.action?.label ?? "Open",
       href: step.action?.href ?? (role === "technician" ? `/my-jobs/${j.id}` : `/jobs/${j.id}`),
       since: step.since,

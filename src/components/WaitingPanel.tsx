@@ -28,7 +28,7 @@ export type ExtraWaiting = {
   inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData };
 };
 
-type RowItem = WaitingItem & { amount?: string | null; urgency: Urgency; inline?: ExtraWaiting["inline"]; hint?: string };
+type RowItem = WaitingItem & { amount?: string | null; urgency: Urgency; inline?: ExtraWaiting["inline"] };
 
 const URGENCY_BAR: Record<Urgency, string> = { red: "border-l-red-bar", amber: "border-l-amber-bar", grey: "border-l-line-strong" };
 const URGENCY_WORD: Record<Urgency, string> = { red: "Urgent", amber: "Today", grey: "When you can" };
@@ -80,7 +80,7 @@ export async function WaitingPanel({ staff, extra = [] }: { staff: CurrentStaff;
       .map((e) => {
         const u = escalate(e.urgency ?? "amber", e.since);
         const wait = e.since ? formatWait(workingMinutesSince(e.since, wt, now), wt) : "";
-        return { jobId: e.jobId, plate: e.plate, car: e.car, what: e.what, amount: e.amount, role: staff.role_id, since: e.since ?? "", wait, href: e.href, actionLabel: e.actionLabel, urgency: u, inline: e.inline, hint: e.hint } as RowItem;
+        return { jobId: e.jobId, plate: e.plate, car: e.car, what: e.what, amount: e.amount, role: staff.role_id, since: e.since ?? "", wait, href: e.href, actionLabel: e.actionLabel, urgency: u, inline: e.inline, hint: e.hint ?? e.what } as RowItem;
       }),
   ].sort((a, b) => (ORDER[a.urgency] - ORDER[b.urgency]) || String(a.since).localeCompare(String(b.since)));
   if (all.length === 0) {
