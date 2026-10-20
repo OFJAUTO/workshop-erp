@@ -51,6 +51,7 @@
     "test:commissions": "node --env-file=.env.local tests/browser/test-commissions-page.mjs",
     "test:partsdesk": "node --env-file=.env.local tests/browser/test-partsdesk.mjs",
     "test:supinv": "node --env-file=.env.local tests/browser/test-supplierinvoice.mjs",
+    "test:sim": "node --env-file=.env.local tests/browser/sim-e2e.mjs",
     "test:lpoflow": "node --env-file=.env.local tests/browser/test-lpoflow.mjs",
     "test:partnames": "node --env-file=.env.local tests/browser/test-partnames.mjs",
     "test:paypage": "node --env-file=.env.local tests/browser/test-paypage.mjs",

@@ -65,10 +65,12 @@ type Row = {
   plan_released_at: string | null;
   plan_date_confirmed_at: string | null;
   deposit_requested_at: string | null;
+  work_done_at: string | null;
+  wash_sent_at: string | null;
 };
 
 const SELECT =
-  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_date_confirmed_at, deposit_requested_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
+  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_date_confirmed_at, deposit_requested_at, work_done_at, wash_sent_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
 
 /**
  * "Waiting on you": every open car whose next step is this person's move, oldest wait first. The owner sees
@@ -117,6 +119,10 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       loose: j.job_kind === "loose",
       quote: summaries.has(j.id) ? quoteState(summaries.get(j.id)!, !!insp && insp.status === "approved") : null,
       extra: {
+        // Without these two stamps a finished job still read "In work, waiting on the technician" here,
+        // so the manager's "confirm the work" task never reached his Waiting list (found by sim path a).
+        workFinishedAt: j.work_done_at,
+        washSentAt: j.wash_sent_at,
         ...(invoiceOf.has(j.id) ? { invoiced: true, invoiceKind: invoiceOf.get(j.id)!.kind, readySent: invoiceOf.get(j.id)!.kind === "proforma" && !!invoiceOf.get(j.id)!.sent_at, invoiceSent: invoiceOf.get(j.id)!.kind === "tax_invoice" && !!invoiceOf.get(j.id)!.sent_at } : {}),
         ...(partsLiveMap.has(j.id) ? { parts: partsLiveMap.get(j.id)!, planningOn: planningOnOf(j, partsLiveMap.get(j.id)!) } : {}),
         ...(depositOf.has(j.id) ? { deposit: { required: depositOf.get(j.id)!.required, received: depositOf.get(j.id)!.received, short: true, requestedAt: j.deposit_requested_at } } : {}),
