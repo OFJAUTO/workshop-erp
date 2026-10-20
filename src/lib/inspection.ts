@@ -461,6 +461,8 @@ export function isPadItem(label: string) {
   return /brake pad/i.test(label) && !/sensor|wear/i.test(label);
 }
 export const PAD_MM_CHIPS = ["2", "3", "4", "5", "6", "8", "10"];
+/** One-tap labour hours on a Bad or Average item (internal; never on the customer's report). */
+export const LABOUR_HOUR_CHIPS = ["0.3", "0.5", "1", "1.5", "2", "3", "4"];
 export function padMeasureKey(label: string): "pad_front" | "pad_rear" {
   return /rear/i.test(label) ? "pad_rear" : "pad_front";
 }
@@ -616,7 +618,7 @@ export function limitProblems(m: Record<string, string>, limits: InspectionLimit
   return out;
 }
 /** The form's state for one checklist item, from a stored row. */
-export function toItemState(i: { item_key: string; item_label: string; section_key: string; style?: string | null; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; parts_rows?: unknown }) {
+export function toItemState(i: { item_key: string; item_label: string; section_key: string; style?: string | null; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; labour_hours?: number | string | null; parts_rows?: unknown }) {
   const s = (v: number | string | null | undefined) => (v === null || v === undefined ? "" : String(v));
   return {
     key: i.item_key,
@@ -637,6 +639,7 @@ export function toItemState(i: { item_key: string; item_label: string; section_k
     fluid_spec: i.fluid_spec ?? "",
     disc_condition: i.disc_condition ?? "",
     disc_action: i.disc_action ?? "",
+    labour_hours: s(i.labour_hours),
     disc_thickness: s(i.disc_thickness),
     disc_minimum: s(i.disc_minimum),
     parts_rows: cleanPartsRows(i.parts_rows),

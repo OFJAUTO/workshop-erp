@@ -324,6 +324,8 @@ export function QuoteEditor({
   const [skippedPositions, setSkippedPositions] = useState<Set<string>>(() => new Set());
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // "Merge with another labour line": the picked line's hours join the target, the line itself goes.
+  const [mergeFor, setMergeFor] = useState<string | null>(null);
   const [draft, setDraft] = useState<null | "choose" | "saving">(null);
   /** Where the cursor goes after the next render: a new line's name box, or a filled line's hours or price box. */
   const [focusTarget, setFocusTarget] = useState<null | { id: string; field: "name" | "amount" }>(null);
@@ -714,6 +716,7 @@ export function QuoteEditor({
                   <MenuItem label={l.details ? "Change the note for the customer" : "Add a note for the customer"} onClick={() => { setMenuFor(null); openOnly(l.id, `note-${l.id}`); }} />
                   {svc?.position_ask || positions.length ? <MenuItem label="Change position" onClick={() => { setMenuFor(null); setSkippedPositions((s) => { const n = new Set(s); n.delete(l.id); return n; }); openOnly(l.id, `pos-${l.id}`); }} /> : null}
                   {l.line_type === "labour" ? <MenuItem label={isOwner ? "Change rate" : "Raise rate"} onClick={() => { setMenuFor(null); openOnly(l.id, `rate-${l.id}`); }} /> : null}
+                  {l.line_type === "labour" && lines.some((o) => o.id !== l.id && o.line_type === "labour" && !o.left_off) ? <MenuItem label="Merge into another labour line…" onClick={() => { setMenuFor(null); setMergeFor(l.id); }} /> : null}
                   {isOwner || settings.advisorDiscount ? <MenuItem label={isOwner ? "Owner discount" : "Discount"} onClick={() => { setMenuFor(null); openOnly(l.id, `disc-${l.id}`); }} /> : null}
                   <MenuItem label="Remove" red onClick={() => { setMenuFor(null); removeLine(l.id); }} />
                 </FloatingMenu>
@@ -1359,6 +1362,23 @@ export function QuoteEditor({
           </div>
         </div>
       ) : null}
+      {mergeFor ? (
+        <MergeDialog
+          lines={lines}
+          fromId={mergeFor}
+          onClose={() => setMergeFor(null)}
+          onPick={(targetId) => {
+            const from = lines.find((x) => x.id === mergeFor);
+            const t = lines.find((x) => x.id === targetId);
+            if (!from || !t) return;
+            const hours = Math.round(((Number(t.hours) || 0) + (Number(from.hours) || 0)) * 100) / 100;
+            const title = `${t.title || "Labour"} + ${from.title || "labour"}`.slice(0, 180);
+            patch(t.id, { hours, title }, true);
+            removeLine(from.id);
+            setMergeFor(null);
+          }}
+        />
+      ) : null}
       {partsAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-parts-ask>
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
@@ -1471,6 +1491,29 @@ export function QuoteEditor({
  * The name box of a line: type freely with matching items from that kind's list suggested underneath,
  * or tap the small arrow at the end to open that kind's picker. Enter takes the top match or moves on.
  */
+/** "Merge into another labour line": pick the target; the hours join it and this line goes. */
+function MergeDialog({ lines, fromId, onClose, onPick }: { lines: QuoteLine[]; fromId: string; onClose: () => void; onPick: (targetId: string) => void }) {
+  const from = lines.find((x) => x.id === fromId);
+  const targets = lines.filter((x) => x.id !== fromId && x.line_type === "labour" && !x.left_off);
+  if (!from) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-merge-ask onClick={onClose}>
+      <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+        <span className="text-lg font-extrabold">Merge “{from.title || "this line"}” into…</span>
+        <p className="text-sm text-muted">Its {from.hours ?? 0} h join the line you pick and this line disappears. Adjust the hours after, so the customer is never charged twice for the same dismantling.</p>
+        <div className="flex flex-col gap-2">
+          {targets.map((t) => (
+            <button key={t.id} type="button" className="min-h-12 rounded-control border border-line-strong bg-white px-3 text-left text-sm font-bold" data-merge-target onClick={() => onPick(t.id)}>
+              {t.title || "(no name)"} · {t.hours ?? 0} h
+            </button>
+          ))}
+        </div>
+        <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
 function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, onArrow, onNext }: { id: string; value: string; kind: "labour" | "service"; items: Suggestion[]; disabled: boolean; blocked: boolean; onType: (text: string) => void; onPick: (s: Suggestion) => void; onArrow: () => void; onNext: () => void }) {
   const [focus, setFocus] = useState(false);
   const q = value.trim().toLowerCase();

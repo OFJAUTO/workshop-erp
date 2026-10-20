@@ -136,6 +136,7 @@ export async function startQuotation(jobId: string) {
     }
   }
   // Jobs the report marked Required (wheel alignment, wheel balancing...): the matching fixed-price service joins the quotation at once.
+  const serviceCovered = new Set<string>();
   if (bundle && !job!.estimate_id) {
     const required = bundle.items.filter((i) => i.style === "job" && i.status === "bad");
     if (required.length) {
@@ -145,7 +146,20 @@ export async function startQuotation(jobId: string) {
       for (const it of required) {
         const svc = svcs.find((s) => (s.suggest_for ?? []).includes(it.item_key) && (s.line_kind ? s.line_kind === "service" : s.price_aed !== null));
         if (!svc) continue;
+        serviceCovered.add(it.item_key);
         await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: pos++, line_type: "package", title: svc.name, service_id: svc.id, unit_price: svc.price_aed === null ? null : Number(svc.price_aed), price_per: svc.price_per ?? "job", quantity: 1, source_type: "item", source_key: it.item_key, outside_work: !!svc.outside_work, created_by: staff!.id, updated_by: staff!.id });
+      }
+    }
+  }
+  // Every Bad or Average item with labour hours arrives as its own labour line, hours pre-filled (20 October 2026).
+  if (bundle && !job!.estimate_id) {
+    const withHours = bundle.items.filter((i) => (i.status === "bad" || i.status === "average") && Number(i.labour_hours) > 0 && !serviceCovered.has(i.item_key));
+    if (withHours.length) {
+      const { count } = await admin.from("quotation_lines").select("id", { count: "exact", head: true }).eq("quotation_id", created!.id);
+      let hpos = (count ?? 0) + 1;
+      const rate = labourRateFor(settings, job!.department ?? null, makeName);
+      for (const it of withHours) {
+        await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: hpos++, line_type: "labour", title: it.item_label, hours: Number(it.labour_hours), labour_rate: rate, quantity: 1, urgency: it.status === "bad" ? "urgent" : null, source_type: "item", source_key: it.item_key, created_by: staff!.id, updated_by: staff!.id });
       }
     }
   }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
-import { PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
+import { LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
 import { PartPicker } from "@/components/PartPicker";
 import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
@@ -74,6 +74,7 @@ export type ItemState = {
   disc_action: string;
   disc_thickness: string;
   disc_minimum: string;
+  labour_hours: string;
   parts_rows: PartsRow[];
 };
 export type FindingState = { requestId: string; text: string; found: string; needs: string; status: ItemStatus | null };
@@ -710,6 +711,18 @@ export function InspectionForm({
                       <Input value={it.fluid_grade} onChange={(e) => patchItem(it.key, { fluid_grade: e.target.value }, false)} disabled={locked} placeholder="Or type the grade" className="max-w-56" />
                     </div>
                   ) : null}
+                  {(it.status === "average" || it.status === "bad") || Number(it.labour_hours) > 0 ? (
+                    <div className="flex flex-col gap-1.5" data-labour-hours={it.key}>
+                      <span className="text-xs font-semibold text-muted">Labour hours (internal, never shown to the customer)</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {LABOUR_HOUR_CHIPS.map((c) => (
+                          <button key={c} type="button" disabled={locked} aria-pressed={it.labour_hours === c} onClick={() => patchItem(it.key, { labour_hours: it.labour_hours === c ? "" : c })} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${it.labour_hours === c ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-hour-chip={c}>{c}</button>
+                        ))}
+                        <Input value={it.labour_hours} onChange={(e) => patchItem(it.key, { labour_hours: e.target.value }, false)} inputMode="decimal" disabled={locked} aria-label={`${it.label} labour hours`} style={{ width: "5rem" }} data-labour-box />
+                        <span className="text-xs text-muted">h</span>
+                      </div>
+                    </div>
+                  ) : null}
                   {needsDetail || partsList.some((e) => e.item_key === it.key) ? (
                     <div className="flex flex-col gap-1.5">
                       <span className="text-xs font-semibold text-muted">Parts</span>
@@ -1003,6 +1016,18 @@ export function InspectionForm({
             ))}
           </div>
         ) : null}
+        {(() => {
+          const withHours = items.filter((i) => Number(i.labour_hours) > 0);
+          if (!withHours.length) return null;
+          const total = Math.round(withHours.reduce((a, i) => a + (Number(i.labour_hours) || 0), 0) * 100) / 100;
+          return (
+            <div className="flex flex-col gap-1 rounded-control bg-chip p-3" data-labour-total>
+              <span className="text-sm font-extrabold">Total labour: {total} h</span>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">{withHours.map((i) => <span key={i.key}>{i.label}: {i.labour_hours} h</span>)}</div>
+              {!locked && estimate !== String(total) ? <button type="button" onClick={() => { setEstimate(String(total)); debounced("estimate", () => ({ inspection: { estimated_hours: String(total) } })); }} className="self-start min-h-9 px-2 text-xs font-bold underline underline-offset-4" data-use-total>Use {total} h as the estimate</button> : null}
+            </div>
+          );
+        })()}
         <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-3 items-end">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Estimated hours for this job (total{submitAction ? ", required" : ""})</span>
