@@ -468,8 +468,11 @@ export async function POST(request: NextRequest) {
     const h = body.header;
     const patch: Record<string, unknown> = { ...stamp };
     if (h.discount_percent !== undefined) {
-      if (!isOwner) return NextResponse.json({ error: "Only the owner gives a discount." }, { status: 403 });
-      patch.discount_percent = Math.min(100, Math.max(0, n(h.discount_percent) ?? 0));
+      // The labour discount is the advisor's (within the Settings limit, checked at send); only the
+      // LEGACY whole-total percent stays owner-only. Clearing it to 0 rides along with any discount save.
+      const legacy = Math.min(100, Math.max(0, n(h.discount_percent) ?? 0));
+      if (!isOwner && legacy > 0) return NextResponse.json({ error: "Only the owner uses the old whole-total discount. Use Discount (labour) instead." }, { status: 403 });
+      patch.discount_percent = legacy;
     }
     // The labour discount: a percentage or a fixed amount of our own labour lines; nothing on parts or outside services.
     if (h.discount_kind !== undefined || h.discount_value !== undefined) {

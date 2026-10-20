@@ -42,6 +42,7 @@
     "test:oldparts": "node --env-file=.env.local tests/browser/test-oldparts.mjs",
     "test:fixed": "node --env-file=.env.local tests/browser/test-fixed.mjs",
     "test:instant": "node --env-file=.env.local tests/browser/test-instant.mjs",
+    "test:discount2": "node --env-file=.env.local tests/browser/test-discount2.mjs",
     "test:discount": "node --env-file=.env.local tests/browser/test-discount.mjs",
     "test:commission": "node --env-file=.env.local tests/browser/test-commission.mjs",
     "test:advance": "node --env-file=.env.local tests/browser/test-advance.mjs",

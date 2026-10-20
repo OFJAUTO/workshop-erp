@@ -1132,6 +1132,26 @@ export function QuoteEditor({
               <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green" : ""}>
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
               </Button>
+              {(() => {
+                // The discount against the advisor's limit, live (1.6): green inside it, amber above (the
+                // owner approves at send); the round-off at sending counts toward the same limit.
+                const given = totals.discount + Math.max(0, -(totals.rounding ?? 0));
+                const limit = settings.discountLimit ?? 0;
+                if (!(given > 0) || !(totals.discountBase > 0)) return null;
+                const pct = (given / totals.discountBase) * 100;
+                const pctText = pct.toFixed(pct >= 10 ? 0 : 1);
+                const over = limit > 0 && pct > limit + 0.049;
+                const pendingOwner = quotation.status === "pending_owner";
+                return (
+                  <span className={`inline-flex items-center text-xs font-semibold ${over ? "text-amber-bar" : "text-green"}`} data-discount-status data-discount-over={over ? "" : undefined}>
+                    {isOwner
+                      ? `${aed(given)} = ${pctText}% of labour · owner (no limit)`
+                      : over
+                        ? `${pctText}% · limit ${limit}% · ${pendingOwner ? "Waiting for owner approval" : "the owner approves before it can be sent"}`
+                        : `${aed(given)} = ${pctText}% of labour · within your limit (${limit}%)`}
+                  </span>
+                );
+              })()}
             </div>
           ) : null}
           {totals.labourHours > 0 || totals.labourEstimateHours > 0 ? (
