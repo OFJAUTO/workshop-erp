@@ -4,10 +4,10 @@ import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff } from "@/lib/auth";
 import { ocrEnabled, ocrTable } from "@/lib/import-ocr";
-import { readPdfRows, renderPdfPages } from "@/lib/pdf-read";
+import { readPdfPositionedLines, readPdfRows, renderPdfPages } from "@/lib/pdf-read";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type RowValues, type SupplierOption } from "@/lib/parts-rows";
-import { parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult, importAvailabilityNote } from "@/lib/price-import";
+import { parseDealerBlocks, parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult, importAvailabilityNote } from "@/lib/price-import";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -66,6 +66,17 @@ export async function parseImportUpload(jobId: string, formData: FormData): Prom
         return { error: `${file.name} could not be opened as a PDF.` };
       }
       if (!read.scanned) {
+        // A dealer block layout (name and part number stacked, List/Discount/Net rows) reads by position first.
+        const dealer = parseDealerBlocks(await readPdfPositionedLines(buf));
+        if (dealer && dealer.lines.length) {
+          if (dealer.customerId) {
+            const memory = ((await getSettings()).import_supplier_memory ?? {}) as Record<string, string>;
+            if (memory[dealer.customerId]) dealer.supplierHint = memory[dealer.customerId];
+          }
+          results.push({ ...dealer, vin: dealer.vin ?? read.vin });
+          names.push(`${file.name} (${read.pageCount} page${read.pageCount === 1 ? "" : "s"})`);
+          continue;
+        }
         // The cells as the PDF laid them out; the plain lines when the cells did not line up.
         const byCells = withSaved(read.pages.flat(), mappings);
         const r = byCells.lines.length ? byCells : withSaved(parsePaste(read.text, null), mappings);
@@ -156,7 +167,7 @@ export type ApplyResult = { error?: string; applied?: number; failed?: { name: s
  * or a note ("Back order", "Supplier to confirm") that never touches the price. Everything the import added or
  * changed is written down under one import, so "Undo last import" can take exactly that back.
  */
-export async function applyImport(jobId: string, payload: { supplierId: string | null; defaultType: string | null; source: string; format?: string | null; lines: ApplyLine[]; mapping?: { headings: string[]; mapping: ColumnMapping } | null }): Promise<ApplyResult> {
+export async function applyImport(jobId: string, payload: { supplierId: string | null; defaultType: string | null; source: string; format?: string | null; customerId?: string | null; lines: ApplyLine[]; mapping?: { headings: string[]; mapping: ColumnMapping } | null }): Promise<ApplyResult> {
   const staff = await partsStaff();
   if (!staff) return { error: "Not allowed." };
   const admin = createAdminClient();
@@ -170,6 +181,13 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
     supplier = { id: s.id as string, name: s.name as string, discount: Number(s.default_discount_percent) || 0, byType: (s.discount_by_type as Record<string, number> | null) ?? {} };
     // A mapping Parts set by hand is remembered for this supplier.
     if (payload.mapping && Object.keys(payload.mapping.mapping).length) await saveImportMapping(supplier.id, payload.mapping.headings, payload.mapping.mapping);
+    // The dealer's customer id remembers which supplier this is, so the next file pre-fills it.
+    if (payload.customerId) {
+      const memory = ((settings.import_supplier_memory ?? {}) as Record<string, string>);
+      if (memory[payload.customerId] !== supplier.name) {
+        await admin.from("settings").upsert({ key: "import_supplier_memory", value: { ...memory, [payload.customerId]: supplier.name }, updated_by: staff.id }, { onConflict: "key" });
+      }
+    }
   }
   const { data: imp } = await admin.from("price_imports").insert({ job_id: jobId, supplier_id: supplier?.id ?? null, source: payload.source.slice(0, 200), format: payload.format ?? null, line_count: payload.lines.length, created_by: staff.id, updated_by: staff.id }).select("id").single();
   const importId = (imp?.id as string | undefined) ?? null;

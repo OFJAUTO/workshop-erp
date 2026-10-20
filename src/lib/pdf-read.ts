@@ -6,6 +6,8 @@ import "server-only";
  * the same baseline (one text block per column, as most PDF generators write tables) are joined into one row.
  * A scanned PDF (a picture, no text) is detected so it can go through the screenshot reader page by page.
  */
+import type { PosLine } from "./price-import";
+
 export type PdfRead = {
   /** Rows of cells per page. */
   pages: string[][][];
@@ -115,4 +117,18 @@ export async function renderPdfPage(buffer: Buffer | Uint8Array, index: number, 
   const doc = mupdf.Document.openDocument(buffer, "application/pdf");
   if (index < 0 || index >= doc.countPages()) return null;
   return doc.loadPage(index).toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false, true).asPNG();
+}
+
+/** Every text line with its position, page by page: the dealer-block parser works off the geometry. */
+export async function readPdfPositionedLines(buffer: Buffer | Uint8Array): Promise<PosLine[][]> {
+  const mupdf = await lib();
+  const doc = mupdf.Document.openDocument(Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer), "application/pdf");
+  const pages: PosLine[][] = [];
+  for (let p = 0; p < doc.countPages(); p++) {
+    const data = JSON.parse(doc.loadPage(p).toStructuredText("preserve-whitespace").asJSON()) as { blocks?: { lines?: { bbox: { x: number; y: number }; text: string }[] }[] };
+    const lines: PosLine[] = [];
+    for (const block of data.blocks ?? []) for (const line of block.lines ?? []) lines.push({ x: line.bbox.x, y: line.bbox.y, text: line.text });
+    pages.push(lines);
+  }
+  return pages;
 }

@@ -6,7 +6,8 @@ const MODEL = process.env.ANTHROPIC_OCR_MODEL || "claude-sonnet-5-5";
 const PROMPT = `This is a screenshot of a car parts supplier's price list or quotation. Read the table exactly as printed.
 Reply with JSON only, no words around it, in this shape:
 {"headings": ["...", "..."], "rows": [["cell", "cell", ...], ...], "totals": [{"label": "Gross Amount", "value": "11,853.00"}]}
-Rules: one entry per column heading, in order; one row per part line with one cell per heading, every cell the exact text you see (keep commas and spaces in numbers and part numbers); a cell you cannot read with confidence is "" (empty), never a guess; totals, VAT and grand totals go under "totals" with their label, never as rows; nothing that is not in the picture.`;
+Rules: one entry per column heading, in order; one row per part line with one cell per heading, every cell the exact text you see (keep commas and spaces in numbers and part numbers); a cell you cannot read with confidence is "" (empty), never a guess; totals, VAT and grand totals go under "totals" with their label, never as rows; nothing that is not in the picture.
+Dealer block layouts: some quotations print each part as a BLOCK - the part name on one line (sometimes wrapped with a hyphen: join it into one name), the part number on its own line under the name, and "List price", "Discount (x %)", "Net price" as three stacked rows beside it, with the quantity and the line sum at the edge. Flatten every such block into ONE row with the headings ["Part number","Description","Qty","List price","Discount %","Net price","Line total"]: the part number exactly as printed (keep its spaces), the joined name, the quantity, the list price value, the discount percent from the label, the NET PRICE value (never the list price) and the line sum.`;
 
 /** The screenshot reader is on when the key exists in the environment; the key never reaches the browser. */
 export const ocrEnabled = () => !!process.env.ANTHROPIC_API_KEY;

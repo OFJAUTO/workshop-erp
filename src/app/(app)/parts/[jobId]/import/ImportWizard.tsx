@@ -184,7 +184,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
     });
     setBusy("Applying…");
     start(async () => {
-      const res = await applyImport(jobId, { supplierId: supplierId || null, defaultType, source: source?.label ?? "import", format: result.format, mapping: result.format === "mapped" ? { headings: result.headings, mapping: result.mapping } : null, lines: payload });
+      const res = await applyImport(jobId, { supplierId: supplierId || null, defaultType, source: source?.label ?? "import", format: result.format, customerId: result.customerId ?? null, mapping: result.format === "mapped" ? { headings: result.headings, mapping: result.mapping } : null, lines: payload });
       setBusy(null);
       if (res.error) {
         setError(res.error);
@@ -350,6 +350,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                   <div key={l.key} data-import-line={l.key} data-decided={d.confirmed ? "confirmed" : skipped ? "skipped" : "open"} data-duplicate={dup ? "true" : undefined} className={`grid grid-cols-1 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7rem] gap-2 items-center rounded-control border px-2 py-1.5 ${dup ? "border-red-bar bg-red-soft" : d.confirmed ? "border-green bg-green-soft" : skipped ? "border-line bg-canvas opacity-70" : totalsBad ? "border-red-bar bg-white" : "border-line bg-white"}`}>
                     <div className="flex flex-col min-w-0 text-sm">
                       <span className="font-bold truncate">{l.description ?? <span className="text-muted">No description</span>}</span>
+                      {l.flag ? <span className="text-xs font-semibold text-amber" data-line-flag>{l.flag}</span> : null}
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
                         {dup ? <span className="font-semibold text-red">Same match as another line: change one</span> : null}
                         {l.partNumber ? <span className="font-mono font-semibold text-ink">{l.partNumber}</span> : <span className="text-amber">No part number</span>}

@@ -6,6 +6,8 @@ import { DEFAULT_CHECKLIST, type ChecklistSection } from "./inspection";
 export type Branch = { name: string; address: string };
 
 const DEFAULTS = {
+  /** Dealer customer id -> supplier name, learned when a dealer PDF import is applied. */
+  import_supplier_memory: {} as Record<string, string>,
   company_name: "OFJ Automotive",
   company_legal_name: "O F J AUTOMOTIVE WORKS L.L.C",
   company_legal_name_ar: "او اف جي اوتوموتيف وركس ش.ذ.م.م",

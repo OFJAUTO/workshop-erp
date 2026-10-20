@@ -7,7 +7,7 @@
 
 export type ImportField = "partNumber" | "description" | "qty" | "list" | "net" | "total" | "availability" | "vin" | "ignore";
 export type ColumnMapping = Partial<Record<ImportField, number>>;
-export type ImportFormat = "b2bconnect" | "landrover" | "generic" | "mapped" | "unknown";
+export type ImportFormat = "b2bconnect" | "landrover" | "dealer" | "generic" | "mapped" | "unknown";
 
 /**
  * The supplier's words on availability. "same_day": the supplier has it ("in stock", "available"), so it is ordered
@@ -30,6 +30,8 @@ export type ImportLine = {
   availability: ImportAvailability | null;
   vin: string | null;
   raw: string[];
+  /** An amber note on the line (the sum does not divide back to the net each). */
+  flag?: string | null;
 };
 
 export type ImportTotals = {
@@ -55,6 +57,8 @@ export type ImportResult = {
   /** The VIN in the file, when there is one, to compare with the car. */
   vin: string | null;
   warnings: string[];
+  /** The dealer's customer id in the header ("P0000412"): the chosen supplier is remembered against it. */
+  customerId?: string | null;
 };
 
 // Headings recognised for each field, matched as whole words, case-insensitive, "*" and punctuation ignored.
@@ -521,3 +525,90 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   vin: "VIN",
   ignore: "Ignore",
 };
+
+/* ------------------------------------------------------------------------------------------------
+   Dealer block PDFs (the Mercedes Deira layout and friends): each part is a BLOCK - the name
+   (sometimes wrapped with a hyphen) and the part number stacked in one column, "List price /
+   Discount (x %) / Net price" as three label rows beside it, the quantity and the line sum on the
+   block's first row. Parsed from the PDF's own line positions (src/lib/pdf-read.ts hands them in),
+   so the part number never lands inside the name and the net each is really the net each.
+   ------------------------------------------------------------------------------------------------ */
+
+export type PosLine = { x: number; y: number; text: string };
+
+/** "A 177 200 04 00 28" and friends: an optional letter prefix and at least four groups of digits. */
+const DEALER_PART_RE = /^[A-Z]{0,3}[\s-]?(?:\d{2,4}[\s-]){3,6}\d{2,4}$/;
+const VIN_IN_TEXT = /\b[A-HJ-NPR-Z0-9]{17}\b/;
+
+export function parseDealerBlocks(pages: PosLine[][]): ImportResult | null {
+  const all = pages.flat();
+  const netLabels = all.filter((l) => /^net price$/i.test(l.text.trim()));
+  if (!netLabels.length) return null;
+  const labelX = netLabels.map((l) => l.x).sort((a, b) => a - b)[Math.floor(netLabels.length / 2)];
+  const lines: ImportLine[] = [];
+  const found: { label: string; value: number }[] = [];
+  const warnings: string[] = [];
+  let vin: string | null = null;
+  let customerId: string | null = null;
+  let supplierHint: string | null = null;
+  const money = (t: string | undefined | null) => { const v = parseNumber(String(t ?? "").replace(/AED/i, "").replace(/−/g, "-").trim()); return v === null ? null : Math.abs(v); };
+  for (const page of pages) {
+    const sorted = page.map((l) => ({ ...l, text: l.text.trim() })).filter((l) => l.text).sort((a, b) => a.y - b.y || a.x - b.x);
+    // The header: the VIN, the branch line and the customer id.
+    for (const l of sorted) {
+      if (!vin) { const m = l.text.match(VIN_IN_TEXT); if (m && !DEALER_PART_RE.test(l.text)) vin = m[0].toUpperCase(); }
+      const cid = /customer id:?\s*([A-Z0-9-]{3,20})/i.exec(l.text);
+      if (cid) customerId = cid[1];
+      if (!supplierHint && /branch/i.test(l.text)) supplierHint = l.text.replace(/\s*-\s*$/, "").trim();
+    }
+    // Item anchors: the position numbers in the leftmost column; the totals block bounds the last item.
+    const ints = sorted.filter((l) => /^\d{1,3}$/.test(l.text) && l.x < labelX - 100);
+    if (!ints.length) continue;
+    const leftX = Math.min(...ints.map((l) => l.x));
+    const anchors = ints.filter((l) => Math.abs(l.x - leftX) <= 10);
+    const totalsY = Math.min(...sorted.filter((l) => /^(sum of list prices|total net price)$/i.test(l.text)).map((l) => l.y), Infinity);
+    for (let i = 0; i < anchors.length; i++) {
+      const a = anchors[i];
+      if (a.y >= totalsY) continue;
+      const endY = Math.min(anchors[i + 1]?.y ?? Infinity, totalsY);
+      const block = sorted.filter((l) => l.y >= a.y - 8 && l.y < endY - 8 && l !== a);
+      // The name column sits between the position and the price labels; the part number is its own line.
+      let name = "";
+      let partNumber: string | null = null;
+      for (const l of block.filter((b) => b.x > leftX + 12 && b.x < labelX - 35).sort((p, q) => p.y - q.y)) {
+        if (/^\d{1,3}$/.test(l.text)) continue; // the DG column
+        if (!partNumber && DEALER_PART_RE.test(l.text)) { partNumber = l.text; continue; }
+        if (partNumber) continue; // small print under the part number
+        name = name.endsWith("-") ? name.slice(0, -1) + l.text : name ? `${name} ${l.text}` : l.text;
+      }
+      // The three price rows: each value on the same line as its label, left of the quantity column.
+      const rowOf = (re: RegExp) => {
+        const label = block.find((b) => Math.abs(b.x - labelX) <= 12 && re.test(b.text));
+        if (!label) return { v: null as number | null, label: null as string | null };
+        const val = block.filter((b) => Math.abs(b.y - label.y) <= 4 && b.x > labelX + 30 && b.x < labelX + 140).sort((p, q) => p.x - q.x).at(-1);
+        return { v: money(val?.text), label: label.text };
+      };
+      const list = rowOf(/^list price$/i).v;
+      const disc = rowOf(/^discount/i);
+      const net = rowOf(/^net price$/i).v;
+      const discount = disc.label ? Number(/\((\d+(?:\.\d+)?)\s*%\)/.exec(disc.label)?.[1]) || null : null;
+      // The block's first row: the quantity and the line sum.
+      const base = block.filter((b) => Math.abs(b.y - a.y) <= 5 && b.x > labelX + 140);
+      const qty = parseQty(base.find((b) => /^\d{1,4}$/.test(b.text))?.text ?? null);
+      const total = money(base.filter((b) => /\d/.test(b.text) && !/^\d{1,4}$/.test(b.text)).sort((p, q) => p.x - q.x).at(-1)?.text);
+      if (!name && !partNumber) continue;
+      const line: ImportLine = { key: `d${lines.length + 1}`, partNumber, description: name || null, qty, list, net, discount: discount ?? (list && net ? Math.round((1 - net / list) * 1000) / 10 : null), total, availability: null, vin: null, raw: [a.text, name, partNumber ?? "", String(qty ?? ""), String(list ?? ""), String(net ?? "")], flag: null };
+      if (net !== null && qty && total !== null && Math.abs(net * qty - total) > 0.02) line.flag = `The line sum ${total.toFixed(2)} ÷ ${qty} does not give the net each ${net.toFixed(2)} - check this line`;
+      lines.push(line);
+    }
+    // The totals under the last item ("Total net price" is the one the lines must add up to).
+    for (const lab of sorted.filter((l) => l.y >= totalsY - 2 && /^(sum of list prices|discount|total net price|vat\s*\(?\d+(?:\.\d+)?\s*%\)?|total)$/i.test(l.text))) {
+      const val = sorted.filter((l) => Math.abs(l.y - lab.y) <= 4 && l.x > lab.x + 40).sort((p, q) => p.x - q.x).at(-1);
+      const v = money(val?.text);
+      if (v === null) continue;
+      found.push({ label: lab.text.replace(/[()]/g, "").replace(/\s+/g, " ").replace(/^total net price$/i, "Total before VAT").trim(), value: v });
+    }
+  }
+  if (!lines.length) return null;
+  return { format: "dealer", supplierHint, customerId, headings: ["Pos", "Part", "Part number", "Qty", "List", "Net each"], rows: lines.map((l) => l.raw), mapping: {}, lines, totals: checkTotals(lines, found), vin, warnings };
+}
