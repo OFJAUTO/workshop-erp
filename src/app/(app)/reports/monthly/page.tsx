@@ -5,6 +5,9 @@ import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { VERDICT_LABELS } from "@/lib/job-summary";
 import { monthlySummary } from "@/lib/owner-report";
+import { bodyshopLabourBySection } from "@/lib/bodyshop";
+import { SECTION_LABELS } from "@/lib/bodyshop-kinds";
+import { jobFilmCost } from "@/lib/film";
 import { getSettings } from "@/lib/settings";
 import { markCommissionPaid } from "../commission-actions";
 import { ReportTabs, aedText, monthParam, verdictTone } from "../ReportTabs";
@@ -67,6 +70,35 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
           </div>
         ) : null}
       </Card>
+      {s.bodyshop.cars.length ? await (async () => {
+        const rows = await Promise.all(s.bodyshop.cars.map(async (c) => ({ c, sections: await bodyshopLabourBySection(c.jobId, settings), film: await jobFilmCost(c.jobId) })));
+        const totals = new Map<string, number>();
+        for (const r of rows) for (const sec of r.sections) totals.set(sec.section, (totals.get(sec.section) ?? 0) + sec.hours);
+        return (
+          <Card className="flex flex-col gap-2" data-bodyshop-costing>
+            <SectionLabel>Bodyshop: hours per section and materials per car</SectionLabel>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              {[...totals.entries()].sort((a, b) => b[1] - a[1]).map(([sec, h]) => <span key={sec} className="font-semibold">{(SECTION_LABELS as Record<string, string>)[sec] ?? sec}: {Math.round(h * 10) / 10} h</span>)}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Car</th><th className="py-1 pr-3 text-right">Film (m)</th><th className="py-1 pr-3 text-right">Film + tint</th><th className="py-1">Hours per section</th></tr></thead>
+                <tbody>
+                  {rows.map(({ c, sections, film }) => (
+                    <tr key={c.jobId} className="border-t border-line">
+                      <td className="py-1.5 pr-3">{c.plate}</td>
+                      <td className="py-1.5 pr-3 text-right">{film.metres || "–"}</td>
+                      <td className="py-1.5 pr-3 text-right whitespace-nowrap">{aedText(film.film + film.tint)}</td>
+                      <td className="py-1.5 text-xs text-muted">{sections.map((x) => `${(SECTION_LABELS as Record<string, string>)[x.section] ?? x.section} ${x.hours} h (${x.people})`).join(" · ") || "–"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted">Which cars to price higher: the models that eat sections and film.</p>
+          </Card>
+        );
+      })() : null}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="flex flex-col gap-2">
           <SectionLabel>Verdicts</SectionLabel>

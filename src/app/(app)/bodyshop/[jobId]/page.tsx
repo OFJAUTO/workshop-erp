@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Avatar, Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
-import { bodyshopLabourCost, loadBodyshopJob, type StageRow } from "@/lib/bodyshop";
+import { loadBodyshopJob, type StageRow } from "@/lib/bodyshop";
 import { BODYSHOP_KIND_LABELS, SECTION_LABELS, SECTIONS, STAGE_DEFS, sectionOfDepartment, signoffKeyOf, type BodyshopKind, type StageSection } from "@/lib/bodyshop-kinds";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
@@ -21,6 +21,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { JOB_FILE_SELECT, signJobFiles } from "@/lib/work-data";
 import { addStageAction, afterPhotoAction, assignAction, bookArrivalAction, clockAction, moveStageAction, notReadyAction, refitTickAction, removeStageAction, removedItemAction, reopenStageAction, requestDepositAction, setStageDueAction, signOffAction, stageDoneAction, startWorkAction, updatePhotoAction, updateSentAction } from "../actions";
+import { consumablesShare, jobFilmCost, rollsWithUse } from "@/lib/film";
+import { bodyshopLabourBySection } from "@/lib/bodyshop";
+import { filmUsageAction, tintUsageAction } from "../rolls/actions";
 import { RemovedItemForm } from "./RemovedItemForm";
 import { SignoffPanel } from "./SignoffPanel";
 import { UpdatesPanel, type UpdateState } from "./UpdatesPanel";
@@ -57,12 +60,11 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const myKey = signoffKeyOf(role, staff.department_id);
   // A server page: today is read once.
   const today = dubaiDate();
-  const [{ data: quoteRows }, approved, { data: depositRows }, { data: photoRows }, labour] = await Promise.all([
+  const [{ data: quoteRows }, approved, { data: depositRows }, { data: photoRows }] = await Promise.all([
     admin.from("quotations").select("id, number, status, total_aed, sent_at, responded_at").eq("job_id", jobId).eq("is_active", true).eq("kind", "quotation").order("created_at", { ascending: false }),
     approvedQuotations(jobId),
     admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "proforma").eq("is_active", true).not("deposit_for_quotation_id", "is", null).order("issued_at", { ascending: false }),
     admin.from("job_files").select(JOB_FILE_SELECT).eq("job_id", jobId).in("kind", ["bodyshop_photo", "work_photo", "wash_photo", "gate_out_photo"]).order("taken_at"),
-    seesMoney ? bodyshopLabourCost(jobId, settings) : Promise.resolve({ minutes: 0, cost: 0 }),
   ]);
   const quotes = (quoteRows ?? []) as { id: string; number: string; status: string; total_aed: number | string | null; sent_at: string | null; responded_at: string | null }[];
   const latestQuote = quotes[0] ?? null;
@@ -283,13 +285,76 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         </Card>
       ) : null}
 
-      {isOwner && approvedQuote ? (
-        <Card className="flex flex-col gap-2" data-profit-card>
-          <SectionLabel>Profit of this car (owner only)</SectionLabel>
-          <p className="text-xs text-muted">Price less materials, clocked labour, commission and the bank charge. Materials and commission are typed in the internal box of the quotation.</p>
-          <p className="text-sm">Quotation total {aed(approvedQuote.total_aed)} · labour clocked {hm(labour.minutes)} = {aed(labour.cost)}. <Link href={`/jobs/${jobId}/quote/${approvedQuote.id}`} className="font-semibold underline underline-offset-4">Open the internal box</Link></p>
-        </Card>
-      ) : null}
+      {canLead && job.status !== "booked" ? await (async () => {
+        const [openRolls, used] = await Promise.all([rollsWithUse(), admin.from("film_usage").select("id, metres, cost_aed, roll:film_rolls(kind, name)").eq("job_id", jobId).eq("is_active", true)]);
+        const filmRolls = openRolls.filter((r) => r.kind === "film" && !r.finished_at);
+        const tintRolls = openRolls.filter((r) => r.kind === "tint" && !r.finished_at);
+        const rows = (used.data ?? []) as unknown as { id: string; metres: number | null; cost_aed: number; roll: { kind: string; name: string } | null }[];
+        return (
+          <Card id="materials" className="flex flex-col gap-3" data-materials-card>
+            <SectionLabel right={<Link href="/bodyshop/rolls" className="underline underline-offset-4">Rolls</Link>}>Film and tint on this car</SectionLabel>
+            {rows.length ? (
+              <ul className="flex flex-col gap-1 text-sm">
+                {rows.map((u) => <li key={u.id} className="flex flex-wrap items-center gap-2"><span className="font-semibold">{u.roll?.kind === "tint" ? "Tint roll" : "Film"} · {u.roll?.name}</span>{u.metres !== null ? <span className="text-muted">{u.metres} m</span> : <span className="text-muted">one car&apos;s share</span>}{isOwner ? <span className="ml-auto text-xs text-muted">{aed(Number(u.cost_aed))}</span> : null}</li>)}
+              </ul>
+            ) : <p className="text-sm text-muted">Nothing entered yet. The PPF team leader enters the metres at the end of his stage.</p>}
+            <form action={filmUsageAction.bind(null, jobId)} className="flex flex-wrap items-end gap-2" data-film-usage>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Film roll
+                <Select name="roll_id" defaultValue={filmRolls[0]?.id ?? ""} className="min-w-44">{filmRolls.length ? filmRolls.map((r) => <option key={r.id} value={r.id}>{r.name}{r.metresLeft !== null ? ` · ${r.metresLeft} m left` : ""}</option>) : <option value="">No open film roll: open one under Rolls</option>}</Select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Metres used
+                <Input name="metres" inputMode="decimal" placeholder="6.5" required style={{ width: "6rem" }} data-metres-box />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Plotter photo (optional)
+                <input type="file" name="photo" accept="image/*" className="text-xs" />
+              </label>
+              <Button type="submit" size="md" data-save-metres>Save the metres</Button>
+            </form>
+            {tintRolls.length ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-muted">Tint used (one tap):</span>
+                {tintRolls.map((r) => <form key={r.id} action={tintUsageAction.bind(null, jobId, r.id)}><Button type="submit" tone="secondary" size="md" data-tint-roll>{r.name}</Button></form>)}
+              </div>
+            ) : null}
+          </Card>
+        );
+      })() : null}
+      {isOwner && approvedQuote ? await (async () => {
+        const [{ data: q }, film, share, sections, { data: tripRows }] = await Promise.all([
+          admin.from("quotations").select("subtotal_aed, total_aed, materials_cost_aed, vat_percent").eq("id", approvedQuote.id).maybeSingle(),
+          jobFilmCost(jobId),
+          consumablesShare(settings),
+          bodyshopLabourBySection(jobId, settings),
+          admin.from("recovery_trips").select("price_aed").eq("job_id", jobId).eq("is_active", true),
+        ]);
+        const income = Number(q?.subtotal_aed) || Math.round(((Number(q?.total_aed) || 0) / (1 + (Number(q?.vat_percent) || 5) / 100)) * 100) / 100;
+        const otherMaterials = Number(q?.materials_cost_aed) || 0;
+        const recovery = (tripRows ?? []).reduce((a, t) => a + (Number(t.price_aed) || 0), 0);
+        const labourCost = sections.reduce((a, s) => a + s.cost, 0);
+        const real = Math.round((income - film.film - film.tint - otherMaterials - share - labourCost - recovery) * 100) / 100;
+        const row = (label: string, v: number, minus = true) => (
+          <div className="flex items-center justify-between text-sm"><span className="text-muted">{label}</span><span className="font-semibold">{minus && v ? "−" : ""}{aed(v)}</span></div>
+        );
+        return (
+          <Card className="flex flex-col gap-2" data-real-profit>
+            <SectionLabel>Real profit of this car (owner only)</SectionLabel>
+            {row("Package price (before VAT)", income, false)}
+            {row(`Film${film.metres ? ` (${film.metres} m)` : ""}`, film.film)}
+            {row("Tint", film.tint)}
+            {row("Other materials (internal box)", otherMaterials)}
+            {row("Consumables share", share)}
+            {row("Labour (clocked)", Math.round(labourCost * 100) / 100)}
+            {row("Recovery", recovery)}
+            <div className="flex items-center justify-between border-t border-ink pt-2 text-base font-extrabold"><span>REAL PROFIT</span><span className={real < 0 ? "text-red" : "text-green"} data-real-profit-figure>{aed(real)}</span></div>
+            {sections.length ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted" data-section-hours>
+                {sections.map((s) => <span key={s.section}>{(SECTION_LABELS as Record<string, string>)[s.section] ?? s.section}: {s.people} {s.people === 1 ? "person" : "people"} · {s.hours} h</span>)}
+              </div>
+            ) : null}
+            <p className="text-xs text-muted"><Link href={`/jobs/${jobId}/quote/${approvedQuote.id}`} className="underline underline-offset-4">Open the internal box</Link> for materials and commission.</p>
+          </Card>
+        );
+      })() : null}
     </>
   );
 }

@@ -8,6 +8,20 @@ export type Branch = { name: string; address: string };
 const DEFAULTS = {
   /** Bodyshop packages the owner builds (Settings > Bodyshop packages): one customer price, the list included. */
   bodyshop_packages: [] as unknown[],
+  /** Film types: roll price and roll length give the cost per metre. Prices excl. VAT. */
+  film_types: [
+    { key: "ppf_gloss", name: "PPF Gloss", roll_price: 1429, roll_m: 15 },
+    { key: "ppf_matte", name: "PPF Matte", roll_price: 1524, roll_m: 15 },
+  ] as { key: string; name: string; roll_price: number | string; roll_m: number | string }[],
+  tint_roll_price_aed: 1200,
+  /** The film gap allowed when a roll is finished before the owner is told, in percent of the roll. */
+  bodyshop_waste_percent: 10,
+  /** Alcohol, blades, cutting software… shared over the bodyshop cars finished each month. */
+  bodyshop_consumables_monthly_aed: 1500,
+  /** The bodyshop labour cost rate per hour; blank uses the workshop rate. */
+  bodyshop_cost_rate_aed: "" as string | number,
+  /** Real cost history per package (rolling average), for the advisor's low-price warning. */
+  package_cost_history: {} as Record<string, { n: number; avg_cost: number }>,
   /** Dealer customer id -> supplier name, learned when a dealer PDF import is applied. */
   import_supplier_memory: {} as Record<string, string>,
   company_name: "OFJ Automotive",

@@ -529,13 +529,14 @@ export async function bodyshopLabourCost(jobId: string, settings: Settings): Pro
   const admin = createAdminClient();
   const { data } = await admin.from("bodyshop_clockings").select("staff_id, started_at, ended_at, minutes, staff:staff!bodyshop_clockings_staff_id_fkey(department_id)").eq("job_id", jobId).eq("is_active", true);
   const byDept = (settings.technician_cost_rate_by_department ?? {}) as Record<string, number>;
-  const base = Number(settings.technician_cost_rate_aed) || 0;
+  const bodyshopRate = Number(settings.bodyshop_cost_rate_aed) || 0;
+  const base = bodyshopRate || Number(settings.technician_cost_rate_aed) || 0;
   let minutes = 0;
   let cost = 0;
   for (const c of data ?? []) {
     const m = clockedMinutes([c]);
     const dept = (c.staff as unknown as { department_id: string | null } | null)?.department_id ?? "";
-    const rate = Number(byDept[dept] ?? byDept.bodyshop ?? base) || base;
+    const rate = bodyshopRate || Number(byDept[dept] ?? byDept.bodyshop ?? base) || base;
     minutes += m;
     cost += (m / 60) * rate;
   }
@@ -793,4 +794,20 @@ export async function bodyshopMonth(settings: Settings, fromIso: string, toIso: 
   const price = cars.reduce((a, c) => a + c.price, 0);
   const materials = cars.reduce((a, c) => a + c.materials, 0);
   return { inProgress, late, avgDays: days.length ? Math.round((days.reduce((a, b) => a + b, 0) / days.length) * 10) / 10 : null, profit: round2(cars.reduce((a, c) => a + c.profit, 0)), materialsPercent: price > 0 ? Math.round((materials / price) * 1000) / 10 : null, cars };
+}
+
+/** Clocked labour per SECTION on one job: "PPF: 4 people · 96 h · AED x" for the owner's summary. */
+export async function bodyshopLabourBySection(jobId: string, settings: Settings): Promise<{ section: string; people: number; hours: number; cost: number }[]> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("bodyshop_clockings").select("staff_id, started_at, ended_at, minutes, stage:bodyshop_stages(section)").eq("job_id", jobId).eq("is_active", true);
+  const rate = (Number(settings.bodyshop_cost_rate_aed) || 0) || Number(settings.technician_cost_rate_aed) || 0;
+  const by = new Map<string, { people: Set<string>; minutes: number }>();
+  for (const c of data ?? []) {
+    const section = ((c.stage as unknown as { section: string | null } | null)?.section ?? "other") || "other";
+    const g = by.get(section) ?? { people: new Set<string>(), minutes: 0 };
+    g.people.add(c.staff_id as string);
+    g.minutes += clockedMinutes([c]);
+    by.set(section, g);
+  }
+  return [...by.entries()].map(([section, g]) => ({ section, people: g.people.size, hours: Math.round((g.minutes / 60) * 10) / 10, cost: round2((g.minutes / 60) * rate) })).sort((a, b) => b.hours - a.hours);
 }

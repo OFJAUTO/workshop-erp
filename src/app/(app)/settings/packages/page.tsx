@@ -1,4 +1,6 @@
-import { LinkButton, Notice, PageHeader } from "@/components/ui";
+import { Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { filmTypesOf } from "@/lib/film";
+import { saveBodyshopCosting } from "@/app/(app)/bodyshop/rolls/actions";
 import { requirePermission } from "@/lib/auth";
 import { packagesOf } from "@/lib/packages";
 import { getSettings } from "@/lib/settings";
@@ -22,6 +24,30 @@ export default async function PackagesSettingsPage({ searchParams }: { searchPar
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <PackagesEditor initial={packagesOf(settings)} action={savePackages} />
+
+      <Card className="flex flex-col gap-3" data-costing-card>
+        <SectionLabel>Bodyshop costing (internal: what the materials really cost)</SectionLabel>
+        <form action={saveBodyshopCosting} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold text-muted">Film types: roll price (AED, excl. VAT) and roll length (m) give the cost per metre</span>
+            {[...filmTypesOf(settings), { key: "", name: "", roll_price: 0, roll_m: 0, costPerM: 0 }].map((t, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <Input name="film_name" defaultValue={t.name} placeholder="Coloured PPF Red" className="min-w-44" />
+                <Input name="film_price" defaultValue={t.roll_price || ""} inputMode="decimal" placeholder="Roll price" style={{ width: "8rem" }} />
+                <Input name="film_m" defaultValue={t.roll_m || ""} inputMode="decimal" placeholder="Metres" style={{ width: "6rem" }} />
+                {t.costPerM ? <span className="text-xs text-muted">AED {t.costPerM}/m</span> : null}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Tint roll price (AED)<Input name="tint_roll_price" defaultValue={String(settings.tint_roll_price_aed ?? 1200)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Film waste allowance (%)<Input name="waste_percent" defaultValue={String(settings.bodyshop_waste_percent ?? 10)} inputMode="numeric" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Consumables per month (AED)<Input name="consumables" defaultValue={String(settings.bodyshop_consumables_monthly_aed ?? 1500)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Bodyshop labour rate (AED/h, blank = workshop rate)<Input name="bodyshop_rate" defaultValue={String(settings.bodyshop_cost_rate_aed ?? "")} inputMode="decimal" /></label>
+          </div>
+          <div><Button type="submit" size="md" data-save-costing>Save the costing</Button></div>
+        </form>
+      </Card>
     </>
   );
 }

@@ -138,6 +138,8 @@ export type EditorSettings = {
   clockedHours?: number | null;
   /** Bodyshop packages have no fixed price: the last price typed for each, shown as a small hint. */
   lastPrices?: Record<string, number>;
+  /** Average REAL cost per package key from past closed jobs (owner data; advisors see only the colour). */
+  packageCost?: Record<string, number>;
   /** The usual battery warranty (Settings), shown as the ticked choice until the advisor picks another. */
   batteryWarrantyMonths?: number;
 };
@@ -1476,6 +1478,19 @@ export function QuoteEditor({
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
             {!disabled ? <span className={`text-[11px] font-bold ${state === "offline" ? "text-amber" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
             {showProfit ? <span className={`text-xs font-extrabold ${marginTone}`} data-margin-chip data-margin-tone={tone3}>Profit {margin.toFixed(0)}%</span> : null}
+            {(() => {
+              const hist = settings.packageCost ?? {};
+              let worst: "red" | "amber" | null = null;
+              for (const l of lines) {
+                if (!l.package_key || l.left_off || !(l.unit_price && l.unit_price > 0)) continue;
+                const avg = hist[l.package_key];
+                if (!avg) continue;
+                if (l.unit_price < avg) worst = "red";
+                else if (l.unit_price < avg * 1.15 && worst !== "red") worst = "amber";
+              }
+              if (!worst) return null;
+              return <span className={`text-xs font-extrabold ${worst === "red" ? "text-red" : "text-amber"}`} data-package-warn={worst}>{worst === "red" ? "Package price below what this package usually costs us" : "Package price looks low against past jobs"}</span>;
+            })()}
             {!sent ? <span className="text-xs font-semibold">{progressText}</span> : <span className="text-xs font-semibold">{quotation.status === "sent" ? "Sent, not yet opened" : quotation.status === "opened" ? "Opened by the customer" : quotation.status === "approved" ? "Approved" : quotation.status === "declined" ? "Declined" : quotation.status === "expired" ? "Expired" : quotation.status === "urgent_requested" ? "Urgent work asked for" : "Sent"}</span>}
             <span className="ml-auto flex flex-wrap items-center gap-2">
               {!sent && !completed && !disabled ? (
