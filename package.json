@@ -47,6 +47,7 @@
     "test:commission": "node --env-file=.env.local tests/browser/test-commission.mjs",
     "test:advance": "node --env-file=.env.local tests/browser/test-advance.mjs",
     "test:invoice2": "node --env-file=.env.local tests/browser/test-invoice2.mjs",
+    "test:profitpage": "node --env-file=.env.local tests/browser/test-profitpage.mjs",
     "test:commissions": "node --env-file=.env.local tests/browser/test-commissions-page.mjs",
     "test:partnames": "node --env-file=.env.local tests/browser/test-partnames.mjs",
     "test:paypage": "node --env-file=.env.local tests/browser/test-paypage.mjs",

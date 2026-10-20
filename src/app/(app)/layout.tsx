@@ -72,7 +72,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/invoices", label: "Invoices and payments", show: can(role, "viewInvoices") },
     { href: "/recovery", label: "Recovery", show: role === "owner" || role === "service_advisor" || role === "accounts" },
     { href: "/commissions", label: "Commissions", show: role === "owner" || role === "accounts" },
-    { href: "/profit", label: "Profit", show: can(role, "viewProfitList") },
+    { href: "/profit", label: "Profit", show: role === "owner" },
     { href: "/reports/monthly", label: "Reports", show: role === "owner" },
     { href: "/reports/labour-rate", label: "Labour rate check", show: role === "accounts" },
     { href: "/attendance", label: "Attendance", show: can(role, "viewAttendance") },
