@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
+import { PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
 import { PartPicker } from "@/components/PartPicker";
 import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
@@ -201,7 +202,7 @@ function Dot({ ok, attempted }: { ok: boolean; attempted: boolean }) {
   return <span className={`inline-block h-3 w-3 rounded-full ${attempted ? "bg-red-bar" : "bg-line-strong"}`} aria-label="incomplete" />;
 }
 
-const AUTO_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
+const AUTO_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6 };
 
 /**
  * The technician's report: the scan step (when the gate is on), findings per customer request, the
@@ -444,6 +445,15 @@ export function InspectionForm({
     if (part) addEntryIfMissing(it.key, part);
     patchItem(it.key, { [field]: next[field], remarks });
   }
+  /** Brake pads: the mm sets Good / Average / Bad by itself (thresholds from Settings); the technician can still change it. */
+  function setPadMm(it: ItemState, value: string, immediate = false) {
+    setMeasurement(padMeasureKey(it.label), value, immediate);
+    const status = padStatusForMm(value, limits);
+    const auto = padWords(value, status);
+    const remarks = !it.remarks.trim() || PAD_AUTO_REMARK_RE.test(it.remarks.trim()) ? auto : it.remarks;
+    patchItem(it.key, { remarks, ...(status ? { status } : {}) });
+  }
+
   /** Brake discs: the condition and the action set AVERAGE or BAD by themselves; below minimum locks the action to replace. */
   function setDisc(it: ItemState, field: "disc_condition" | "disc_action", value: string) {
     const next = { ...it, [field]: value };
@@ -620,6 +630,8 @@ export function InspectionForm({
               const remarkShown = remarkRequired || remarkOpen.has(it.key) || (!structured && !!it.remarks) || (isJob && it.status === "bad");
               const sug = suggestions[it.key] ?? {};
               const disc = isDiscItem(it.label);
+              const pads = !disc && isPadItem(it.label) && /front|rear/i.test(it.label);
+              const padKey = pads ? padMeasureKey(it.label) : null;
               const fluid = isFluidItem(it.label);
               const leak = isLeakItem(it.label);
               return (
@@ -643,6 +655,20 @@ export function InspectionForm({
                         <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Measured (mm, optional)</span><Input value={it.disc_thickness} onChange={(e) => patchItem(it.key, { disc_thickness: e.target.value }, false)} inputMode="decimal" disabled={locked} /></label>
                         <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Minimum (mm, optional)</span><Input value={it.disc_minimum} onChange={(e) => patchItem(it.key, { disc_minimum: e.target.value }, false)} inputMode="decimal" disabled={locked} /></label>
                       </div>
+                      <InspectionMedia inspectionId={inspectionId} files={filesFor({ itemKey: `item.${it.key}` })} where={{ itemKey: `item.${it.key}` }} disabled={locked} iconOnly label="Photo of the discs" onAdded={addFile({ itemKey: `item.${it.key}` })} onRemoved={removeFile} />
+                    </div>
+                  ) : null}
+                  {pads && padKey ? (
+                    <div className="flex flex-col gap-2 rounded-control bg-chip p-2" data-pads-panel={padKey}>
+                      <span className="text-xs font-semibold text-muted">Thickness (mm) · at or under {limits.pads_bad_max} = Bad · under {limits.pads_good_min} = Average · from {limits.pads_good_min} = Good</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {PAD_MM_CHIPS.map((c) => (
+                          <button key={c} type="button" disabled={locked} aria-pressed={(measurements[padKey] ?? "") === c} onClick={() => setPadMm(it, c, true)} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${(measurements[padKey] ?? "") === c ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-pad-chip={c}>{c}</button>
+                        ))}
+                        <Input value={measurements[padKey] ?? ""} onChange={(e) => setPadMm(it, e.target.value)} inputMode="decimal" disabled={locked} aria-label={`${it.label} thickness in mm`} style={{ width: "5rem" }} className={outOfRange(padKey) ? "border-red-bar" : ""} data-pad-mm={padKey} />
+                        <span className="text-xs text-muted">mm</span>
+                      </div>
+                      <InspectionMedia inspectionId={inspectionId} files={filesFor({ itemKey: `measure.${padKey}` })} where={{ itemKey: `measure.${padKey}` }} disabled={locked} iconOnly label="Photo of the pads" onAdded={addFile({ itemKey: `measure.${padKey}` })} onRemoved={removeFile} />
                     </div>
                   ) : null}
                   {structured && !remarkOpen.has(it.key) ? (
@@ -828,7 +854,7 @@ export function InspectionForm({
           <SectionLabel>Numbers (all required)</SectionLabel>
           <Dot ok={numbersOk} attempted={attempted} />
         </div>
-        {["Brake pads", "Battery test", "Air conditioning"].map((g) => (
+        {["Brake pads", "Battery test", "Air conditioning"].filter((g) => !(g === "Brake pads" && items.some((i) => isPadItem(i.label) && /front|rear/i.test(i.label)))).map((g) => (
           <div key={g} className="flex flex-col gap-2" id={g === "Battery test" ? "item-measure-battery" : undefined}>
             <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{g}</span>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

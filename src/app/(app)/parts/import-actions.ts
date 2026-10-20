@@ -185,7 +185,7 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
     if (payload.customerId) {
       const memory = ((settings.import_supplier_memory ?? {}) as Record<string, string>);
       if (memory[payload.customerId] !== supplier.name) {
-        await admin.from("settings").upsert({ key: "import_supplier_memory", value: { ...memory, [payload.customerId]: supplier.name }, updated_by: staff.id }, { onConflict: "key" });
+        await admin.from("settings").upsert({ key: "import_supplier_memory", label: "Import supplier memory", value: { ...memory, [payload.customerId]: supplier.name }, updated_by: staff.id }, { onConflict: "key" });
       }
     }
   }

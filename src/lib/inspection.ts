@@ -431,8 +431,8 @@ export const PARTS_UNITS = ["pc", "set", "pair", "litre", "kg", "m"] as const;
 /** One line of "Parts needed": the part, how many, the unit. The quantity follows the part to the price request and the quotation. */
 export type PartsRow = { part: string; qty: number; unit: string };
 
-export type InspectionLimits = { tread_max: number; pads_max: number; battery_max: number; vent_min: number; vent_max: number; fluid_max: number; tyre_years: number };
-export const DEFAULT_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
+export type InspectionLimits = { tread_max: number; pads_max: number; battery_max: number; vent_min: number; vent_max: number; fluid_max: number; tyre_years: number; pads_bad_max: number; pads_good_min: number };
+export const DEFAULT_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6 };
 /** The limits from Settings on top of the defaults. */
 export function inspectionLimitsOf(settings: { inspection_limits?: unknown }): InspectionLimits {
   const raw = (settings.inspection_limits ?? {}) as Partial<Record<keyof InspectionLimits, number | string>>;
@@ -455,6 +455,34 @@ export function isFluidItem(label: string) {
 export function isDiscItem(label: string) {
   return /brake disc/i.test(label);
 }
+
+/* Brake pads (20 October 2026): front and rear each their own item, the thickness in mm beside it. */
+export function isPadItem(label: string) {
+  return /brake pad/i.test(label) && !/sensor|wear/i.test(label);
+}
+export const PAD_MM_CHIPS = ["2", "3", "4", "5", "6", "8", "10"];
+export function padMeasureKey(label: string): "pad_front" | "pad_rear" {
+  return /rear/i.test(label) ? "pad_rear" : "pad_front";
+}
+/** The mm sets the rating: at or under pads_bad_max = Bad, under pads_good_min = Average, else Good. */
+export function padStatusForMm(mm: string | number | null | undefined, limits: InspectionLimits): ItemStatus | null {
+  const t = String(mm ?? "").trim();
+  if (!t) return null;
+  const n = Number(t.replace(",", "."));
+  if (!Number.isFinite(n)) return null;
+  if (n <= limits.pads_bad_max) return "bad";
+  if (n < limits.pads_good_min) return "average";
+  return "good";
+}
+/** "3 mm – Replace now" / "6 mm – Good": the words beside the measurement, for the remark and the report. */
+export function padWords(mm: string | null | undefined, status: ItemStatus | null): string {
+  const v = String(mm ?? "").trim();
+  if (!v) return "";
+  const words = status === "bad" ? "Replace now" : status === "average" ? "Getting low, replace soon" : status === "good" ? "Good" : "";
+  return `${v} mm${words ? ` – ${words}` : ""}`;
+}
+/** A pads remark the system wrote (replaceable); a technician's own words are kept. */
+export const PAD_AUTO_REMARK_RE = /^\d+(?:[.,]\d+)?\s*mm(\s*–.*)?$/;
 /** Litres for everything except A/C gas, which is weighed in grams. */
 export function fluidUnitFor(label: string, current: string | null | undefined) {
   if (current) return current;

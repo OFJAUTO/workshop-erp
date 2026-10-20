@@ -54,6 +54,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   if (batteryReplace) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.battery")));
   for (const p of [...TYRE_POSITIONS, { key: "spare", label: "Spare" }]) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === `tyre.${p.key}`)));
   wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.vent")));
+  wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.pad_front" || x.item_key === "measure.pad_rear")));
   const buffers = new Map<string, Buffer>();
   await Promise.all(
     Array.from(new Set(wanted.map((w) => w.storage_path))).map(async (p) => {
@@ -203,6 +204,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
                 {x.unit ? ` ${x.unit}` : ""}
               </Text>
               {x.key === "vent_temp" && photoBuffers(bundle.media.filter((y) => y.item_key === "measure.vent")).length ? <View style={{ width: "100%" }}><Photos photos={photoBuffers(bundle.media.filter((y) => y.item_key === "measure.vent"))} /></View> : null}
+              {(x.key === "pad_front" || x.key === "pad_rear") && photoBuffers(bundle.media.filter((y) => y.item_key === `measure.${x.key}`)).length ? <View style={{ width: "100%" }}><Photos photos={photoBuffers(bundle.media.filter((y) => y.item_key === `measure.${x.key}`))} /></View> : null}
             </View>
           ))}
         </View>
