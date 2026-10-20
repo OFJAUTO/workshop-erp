@@ -165,8 +165,8 @@ export async function syncPartLine(jobId: string, partId: string, by: string | n
   ]);
   if (!pRaw) return { quotationId: qid, created: target.created, change: null };
   const p = toPart(pRaw as Record<string, unknown>);
-  // The name only: part numbers never reach a customer document (they live on the part item for the LPO and the supplier list).
-  const title = p.description;
+  // The customer name when the advisor set one, else the supplier name; part numbers never reach a customer document.
+  const title = (p.customer_name ?? "").trim() || p.description;
   const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
   const shared = { title, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, positions: p.positions ?? null, updated_by: by };
   let change: "added" | "changed" | "removed" | null = null;

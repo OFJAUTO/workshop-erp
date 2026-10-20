@@ -237,6 +237,8 @@ export type PartItem = {
   id: string;
   job_id: string;
   part_request_id: string | null;
+  /** The name on customer documents; empty falls back to the supplier name (description). */
+  customer_name?: string | null;
   /** Battery lines: the warranty months the advisor picked (12, 24, 36); null means the Settings default. */
   warranty_months?: number | null;
   part_number: string | null;

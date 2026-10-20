@@ -18,7 +18,7 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { marginToneOf, aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
-import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setPartWarranty } from "@/app/(app)/quotes/actions";
+import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
 import { CommissionLine } from "./CommissionLine";
 
@@ -330,6 +330,27 @@ export function QuoteEditor({
   const pickWarranty = (partId: string, months: number) => {
     setWarrantyMap((p) => ({ ...p, [partId]: months }));
     run(() => setPartWarranty(partId, months));
+  };
+  // "Rename for the customer" on a part line: the supplier name and the part number never change.
+  const [renamePart, setRenamePart] = useState<{ lineId: string; partId: string; value: string } | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const saveCustomerName = () => {
+    if (!renamePart) return;
+    const { lineId, partId, value } = renamePart;
+    setRenameError(null);
+    start(async () => {
+      const fd = new FormData();
+      fd.set("name", value);
+      const r = await setCustomerPartName(partId, fd);
+      if (r.error) {
+        setRenameError(r.error);
+        return;
+      }
+      setLines((prev) => prev.map((x) => (x.id === lineId ? { ...x, title: r.title ?? x.title } : x)));
+      setDirty((d) => new Set(d).add(lineId));
+      setRenamePart(null);
+      refresh();
+    });
   };
   const [reviseAsk, setReviseAsk] = useState(false);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
@@ -1168,7 +1189,19 @@ export function QuoteEditor({
                           {failChip(l.id)}
                           <div className="flex items-start gap-1.5">
                             {l.option_group ? <input type="radio" name={`opt-${l.option_group}`} checked={!optionOff} onChange={() => choose(l.option_group!, l.id)} disabled={disabled || leftOff} className="h-4 w-4 shrink-0 accent-ink" aria-label="Use this option" /> : null}
-                            <span className="min-w-0 break-words font-semibold uppercase">{l.title}</span>
+                            {renamePart?.lineId === l.id ? (
+                              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" data-rename-part-box>
+                                <Input value={renamePart.value} onChange={(e) => setRenamePart({ ...renamePart, value: e.target.value })} className="min-h-9 flex-1 min-w-40 text-xs" textCase="title" aria-label="Customer name for this part" data-rename-part-input />
+                                <Button type="button" size="md" disabled={pending} onClick={saveCustomerName} data-rename-part-save>Save</Button>
+                                <Button type="button" tone="ghost" size="md" onClick={() => { setRenamePart(null); setRenameError(null); }}>Cancel</Button>
+                                {renameError ? <span className="w-full text-[11px] font-semibold text-red" data-rename-part-error>{renameError}</span> : null}
+                              </span>
+                            ) : (
+                              <>
+                                <span className="min-w-0 break-words font-semibold uppercase">{l.title}</span>
+                                {!disabled && l.part_item_id ? <button type="button" onClick={() => { setRenameError(null); setRenamePart({ lineId: l.id, partId: l.part_item_id!, value: l.title }); }} aria-label="Rename for the customer" title="Rename for the customer (the supplier name and part number never change)" className="min-h-7 min-w-7 shrink-0 rounded-control border border-line text-xs font-bold text-muted hover:border-ink" data-rename-part={l.id}>✎</button> : null}
+                              </>
+                            )}
                             {l.positions?.length ? <span className="text-xs text-muted shrink-0">{l.positions.join(", ")}</span> : null}
                             {partTypeText(l) ? <Badge tone="outline">{partTypeText(l)}</Badge> : null}
                           </div>

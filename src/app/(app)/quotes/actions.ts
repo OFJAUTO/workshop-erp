@@ -835,3 +835,32 @@ export async function decideCommission(quotationId: string, formData: FormData):
   refresh(q.job_id, q.id);
   return { ok: true };
 }
+
+/**
+ * The customer name of a part (1.5, 21 October 2026): the advisor or the owner rename what the
+ * customer reads on the quotation, proforma and invoice; the supplier name (and the part number)
+ * never change, so LPOs, the parts pages and the stickers stay as Parts wrote them. Locked the
+ * moment a quotation carrying the part is approved.
+ */
+export async function setCustomerPartName(partId: string, formData: FormData): Promise<{ error?: string; ok?: boolean; title?: string }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Viewing only." };
+  const role = staff.role_id as RoleId;
+  if (!(role === "owner" || role === "service_advisor")) return { error: "The advisor or the owner rename a part for the customer." };
+  const name = String(formData.get("name") ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const admin = createAdminClient();
+  const { data: part } = await admin.from("part_items").select("id, job_id, description, customer_name").eq("id", partId).maybeSingle();
+  if (!part) return { error: "Part not found." };
+  const { data: approvedLines } = await admin.from("quotation_lines").select("id, quotation:quotations!inner(status)").eq("part_item_id", partId).eq("is_active", true).eq("quotation.status", "approved").limit(1);
+  if ((approvedLines ?? []).length) return { error: "The customer approved this part: its name is locked. Revise the quotation to change it." };
+  const value = name || null;
+  await admin.from("part_items").update({ customer_name: value, updated_by: staff.id }).eq("id", partId);
+  const title = value ?? String(part.description ?? "");
+  const { data: lines } = await admin.from("quotation_lines").select("id, quotation:quotations!inner(status, job_id)").eq("part_item_id", partId).eq("is_active", true).in("quotation.status", ["draft", "pending_owner", "sent", "opened", "urgent_requested"]);
+  for (const l of (lines ?? []) as { id: string }[]) await admin.from("quotation_lines").update({ title, updated_by: staff.id }).eq("id", l.id);
+  if (part.job_id) {
+    await admin.from("job_events").insert({ job_id: part.job_id, event_type: "part_renamed", note: `${String(part.description ?? "").toUpperCase()} shows to the customer as ${title.toUpperCase()} (${staff.display_name})`, created_by: staff.id });
+    refresh(part.job_id as string);
+  }
+  return { ok: true, title };
+}

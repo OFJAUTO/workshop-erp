@@ -152,6 +152,41 @@ export function compactPartNumber(s: string | null | undefined): string {
 }
 
 /** Which of our fields each heading is, by its words. Unknown headings are left out (ignored). */
+/**
+ * "SCREW PLUG N000000 008789" → "SCREW PLUG" (1.5, 21 October 2026): a part number never belongs in
+ * the name. With the row's part number, any trailing tokens whose compacted form matches it are cut
+ * (spaced numbers like "A 167 330 68 00" included). Without one, a trailing run of number-shaped
+ * tokens goes (5+ characters, 4+ digits, mostly digits) — so "ENGINE OIL 0W20" and "BOLT M8X40"
+ * keep their size codes, while "SEALING RING N007603 014106" loses the number.
+ */
+export function stripNumberFromName(name: string | null, partNumber: string | null): string | null {
+  if (!name) return name;
+  let n = name.replace(/\s+/g, " ").trim();
+  const compact = compactPartNumber(partNumber);
+  if (compact) {
+    const tokens = n.split(" ");
+    for (let take = Math.min(6, tokens.length - 1); take >= 1; take--) {
+      if (tokens.slice(-take).some((t) => /^[([{]/.test(t))) continue; // a bracketed year or size is the name, never a glued-on number
+      const c = compactPartNumber(tokens.slice(-take).join(" "));
+      if (c.length >= 5 && (c === compact || compact.endsWith(c))) {
+        n = tokens.slice(0, -take).join(" ").trim();
+        break;
+      }
+    }
+  }
+  const tokens = n.split(" ");
+  let cut = tokens.length;
+  while (cut > 1) {
+    const t = tokens[cut - 1];
+    if (/^[([{]/.test(t)) break; // a bracketed year or size is the name, never a glued-on number
+    const digits = (t.match(/\d/g) ?? []).length;
+    if (t.length >= 5 && digits >= 4 && digits >= Math.ceil(t.length * 0.6)) cut--;
+    else break;
+  }
+  if (cut < tokens.length && tokens.slice(0, cut).join(" ").replace(/[^A-Za-z]/g, "").length >= 3) n = tokens.slice(0, cut).join(" ").trim();
+  return n || name.replace(/\s+/g, " ").trim();
+}
+
 export function mapHeadings(headings: string[]): ColumnMapping {
   const mapping: ColumnMapping = {};
   const taken = new Set<ImportField>();
@@ -225,7 +260,7 @@ export function linesFromRows(rows: string[][], mapping: ColumnMapping, keyPrefi
     lines.push({
       key: `${keyPrefix}${idx}`,
       partNumber,
-      description: description ? description.replace(/\s+/g, " ") : null,
+      description: description ? stripNumberFromName(description, partNumber) : null,
       qty,
       list,
       net,
@@ -597,7 +632,7 @@ export function parseDealerBlocks(pages: PosLine[][]): ImportResult | null {
       const qty = parseQty(base.find((b) => /^\d{1,4}$/.test(b.text))?.text ?? null);
       const total = money(base.filter((b) => /\d/.test(b.text) && !/^\d{1,4}$/.test(b.text)).sort((p, q) => p.x - q.x).at(-1)?.text);
       if (!name && !partNumber) continue;
-      const line: ImportLine = { key: `d${lines.length + 1}`, partNumber, description: name || null, qty, list, net, discount: discount ?? (list && net ? Math.round((1 - net / list) * 1000) / 10 : null), total, availability: null, vin: null, raw: [a.text, name, partNumber ?? "", String(qty ?? ""), String(list ?? ""), String(net ?? "")], flag: null };
+      const line: ImportLine = { key: `d${lines.length + 1}`, partNumber, description: stripNumberFromName(name, partNumber) || null, qty, list, net, discount: discount ?? (list && net ? Math.round((1 - net / list) * 1000) / 10 : null), total, availability: null, vin: null, raw: [a.text, name, partNumber ?? "", String(qty ?? ""), String(list ?? ""), String(net ?? "")], flag: null };
       if (net !== null && qty && total !== null && Math.abs(net * qty - total) > 0.02) line.flag = `The line sum ${total.toFixed(2)} ÷ ${qty} does not give the net each ${net.toFixed(2)} - check this line`;
       lines.push(line);
     }
