@@ -58,7 +58,7 @@ await p2.page.goto(`${base}/parts`, { waitUntil: "load" });
 await p2.page.waitForTimeout(1500);
 const deskText = ((await p2.page.textContent("body")) ?? "").replace(/\s+/g, " ");
 check("the desk never says 'PO waiting for approval' after approval", !/PO waiting for approval/.test(deskText));
-check("the desk says ORDER NOW (approved) instead", /ORDER NOW \(approved\)/.test(deskText));
+check("the desk's ORDER NOW section carries the LPO card", (await p2.page.locator(`[data-order-now="${child.number}"]`).count()) === 1);
 
 /* Mark ordered: Deliveries expected + the advisor's job card line. */
 await p2.page.goto(`${base}/parts/orders/${child.id}`, { waitUntil: "load" });

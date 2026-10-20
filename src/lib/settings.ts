@@ -237,6 +237,9 @@ const DEFAULTS = {
   quote_validity_days: 7,
   quote_owner_approval_above_aed: 0,
   parts_pricing_target_hours: 4,
+  /** The ORDER NOW clock on an approved LPO: amber past the first figure, red (and the owner told once) past the second. Working minutes. */
+  order_now_amber_minutes: 30,
+  order_now_red_minutes: 60,
   quote_send_target_hours: 4,
   estimate_followup_days: 2,
   whatsapp_quote_template: "Dear [name],\n\nYour quotation for the *[make model]* ([plate]) is ready:\n[link]\n\nAny questions, just reply here.\n\nOFJ Automotive",

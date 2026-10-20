@@ -391,6 +391,12 @@ export function SettingsForm({
               <Field label="Parts pricing target (hours)" hint="Working hours for Parts to price a request before it turns amber, red at double.">
                 <Input name="parts_pricing_target_hours" defaultValue={v.parts_pricing_target_hours} inputMode="numeric" required />
               </Field>
+              <Field label="Order-now amber (minutes)" hint="An approved LPO not yet ordered turns amber after this.">
+                <Input name="order_now_amber_minutes" defaultValue={v.order_now_amber_minutes} inputMode="numeric" required />
+              </Field>
+              <Field label="Order-now red (minutes)" hint="Past this it turns red and the owner is told once.">
+                <Input name="order_now_red_minutes" defaultValue={v.order_now_red_minutes} inputMode="numeric" required />
+              </Field>
               <Field label="Quote sent after pricing (hours)" hint="Working hours for the advisor to send once the parts are priced.">
                 <Input name="quote_send_target_hours" defaultValue={v.quote_send_target_hours} inputMode="numeric" required />
               </Field>

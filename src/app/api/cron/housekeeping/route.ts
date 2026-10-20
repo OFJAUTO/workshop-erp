@@ -417,6 +417,23 @@ export async function GET(request: NextRequest) {
     report.redTaskBells = rang;
   }
 
+  // 26. The ORDER NOW clock (2.4, 21 October 2026): an approved LPO still not ordered past the red
+  // line tells the owner once.
+  {
+    let rang = 0;
+    const redMin = Number(settings.order_now_red_minutes) || 60;
+    const wt26 = workingTimeOf(settings);
+    const { data: lateOrders } = await admin.from("purchase_orders").select("id, number, supplier_name, approved_at, job_id, total_cost_aed").eq("is_active", true).eq("status", "approved").in("kind", ["supplier", "stock"]).is("order_overdue_notified_at", null).not("approved_at", "is", null);
+    for (const po of lateOrders ?? []) {
+      const mins = workingMinutesSince(po.approved_at as string, wt26);
+      if (mins < redMin) continue;
+      await notifyRoles(["owner"], { type: "task_overdue", title: `ORDER NOW overdue · ${po.number} · ${po.supplier_name}`, body: `Approved ${Math.round(mins)} working minutes ago (AED ${Number(po.total_cost_aed).toLocaleString("en-GB")}) and still not ordered. Parts have it red on their list.`, jobId: (po.job_id as string | null) ?? null, href: `/parts/orders/${po.id}` });
+      await admin.from("purchase_orders").update({ order_overdue_notified_at: new Date().toISOString() }).eq("id", po.id);
+      rang++;
+    }
+    report.orderNowOverdue = rang;
+  }
+
   // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the
   // number and the date are entered. Accounts see the same LPOs on their Waiting list all along.
   {
