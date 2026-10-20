@@ -136,8 +136,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {p.reference ? <span className="text-xs text-muted">{p.reference}</span> : null}
         <span className="text-xs text-muted">by {by?.display_name ?? "Network International"}</span>
         <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
-        {p.status === "recorded" && !p.verified_at && counter ? <Badge tone="amber">Recorded by advisor, to confirm</Badge> : null}
-        {p.status === "recorded" && !p.verified_at && counter && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-confirm-counter>Confirmed</Button></form> : null}
+        {p.status === "recorded" && !p.verified_at && (counter || p.method === "cash") ? <Badge tone="amber">{p.method === "cash" ? "Cash: to confirm & bank" : "Recorded by advisor, to confirm"}</Badge> : null}
+        {p.status === "recorded" && !p.verified_at && (counter || p.method === "cash") && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-confirm-counter>Confirmed &amp; banked</Button></form> : null}
         {p.status === "pending_owner" ? <Badge tone="amber">Waiting for the owner</Badge> : null}
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
         {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
@@ -202,6 +202,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                           <span>AED {m(p.amount_aed)} by {METHOD_LABELS[p.method]}</span>
                           <span className="text-muted">{formatDateTime(p.received_at)}</span>
                           <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a>
+                          {p.status === "recorded" && !p.verified_at && p.method === "cash" ? <Badge tone="amber">To confirm &amp; bank</Badge> : null}
+                          {p.status === "recorded" && !p.verified_at && p.method === "cash" && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-confirm-deposit>Confirmed &amp; banked</Button></form> : null}
                           <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, depositShorts.get(p.id) ?? `${site}/api/pdf/receipt/${p.id}`)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} />
                         </div>
                       ))}

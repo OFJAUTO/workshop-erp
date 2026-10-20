@@ -3,7 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { loadWaitingOnYou, type WaitingItem } from "@/lib/waiting";
 import { Card, LinkButton } from "./ui";
 
-export type ExtraWaiting = { jobId: string; plate: string; car: string | null; what: string; amount: string | null; actionLabel: string; href: string };
+export type ExtraWaiting = { jobId: string; plate: string; car: string | null; what: string; amount: string | null; actionLabel: string; href: string; /** Show even when the base list already has this job (accounts money items). */ always?: boolean };
 
 function Row({ i, owner }: { i: WaitingItem & { amount?: string | null }; owner: boolean }) {
   return (
@@ -29,7 +29,7 @@ export async function WaitingPanel({ staff, extra = [] }: { staff: CurrentStaff;
   const have = new Set(items.map((i) => i.jobId));
   const all: (WaitingItem & { amount?: string | null })[] = [
     ...items,
-    ...extra.filter((e) => !have.has(e.jobId)).map((e) => ({ jobId: e.jobId, plate: e.plate, car: e.car, what: e.what, amount: e.amount, role: staff.role_id, wait: "", href: e.href, actionLabel: e.actionLabel }) as WaitingItem & { amount?: string | null }),
+    ...extra.filter((e) => e.always || !have.has(e.jobId)).map((e) => ({ jobId: e.jobId, plate: e.plate, car: e.car, what: e.what, amount: e.amount, role: staff.role_id, wait: "", href: e.href, actionLabel: e.actionLabel }) as WaitingItem & { amount?: string | null }),
   ];
   if (all.length === 0) {
     return (

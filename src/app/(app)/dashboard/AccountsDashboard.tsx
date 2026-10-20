@@ -2,6 +2,7 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { HomeHeader } from "@/components/HomeHeader";
 import { MoneyRow } from "@/components/MoneyRow";
 import { WaitingPanel } from "@/components/WaitingPanel";
+import { accountsWaitingExtra } from "@/lib/accounts-waiting";
 import {Badge, Button, Card, LinkButton, SectionLabel} from "@/components/ui";
 import type { CurrentStaff } from "@/lib/auth";
 import { formatDayTime } from "@/lib/format";
@@ -72,7 +73,7 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
       <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders"]} />
       <HomeHeader staff={staff} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
       <MoneyTilesRow t={tiles} />
-      <WaitingPanel staff={staff} />
+      <WaitingPanel staff={staff} extra={await accountsWaitingExtra()} />
       <CounterPaymentsCard canConfirm={!staff.viewingAs} returnTo="/dashboard" />
       {deposits.length ? (
         <section className="flex flex-col gap-3" data-deposits-not-invoiced>
