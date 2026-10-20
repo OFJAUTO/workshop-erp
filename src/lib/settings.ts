@@ -147,6 +147,9 @@ const DEFAULTS = {
     { key: "closed_box", label: "Closed box", cost: 400, price: 400 },
   ] as { key: string; label: string; cost: number; price: number }[],
   recovery_companies: [] as string[],
+  /** The pay-page domains a pasted payment link may use (one per line in Settings); empty keeps the N-Genius defaults. */
+  payment_gateway_domains: ["paypage.ngenius-payments.com", "paypage.sandbox.ngenius-payments.com"] as string[],
+  workshop_hours_text: "Monday to Saturday, 8:00–17:00",
   /** Tyre models per brand for the tyre details window; learned from what Parts type. */
   tyre_models: {} as Record<string, string[]>,
   manager_note_groups: {} as Record<string, string[]>,
@@ -229,7 +232,7 @@ const DEFAULTS = {
   deposit_percent: 50,
   /** What the customer gets for a deposit: "receipt" (the usual) or "tax_invoice" (a tax invoice for the advance as well). */
   deposit_document: "receipt" as "receipt" | "tax_invoice",
-  whatsapp_deposit_request_template: "Dear [name],\n\nTo order the parts for your *[make model]* ([plate]), we kindly ask for an advance payment of *AED [amount]* against quotation [quotation].\n\nYou can pay by card, transfer or cash at the workshop.\n\nOFJ Automotive",
+  whatsapp_deposit_request_template: "Dear [name],\n\nTo order the parts for your *[make model]* ([plate]), an advance payment of *AED [amount]* is required.\n\nPay here:\n[link]\n\nOFJ Automotive",
   whatsapp_deposit_receipt_template: "Dear [name],\n\nThank you for your deposit of *AED [amount]* for the *[make model]* ([plate]).\n\nYour receipt is here:\n[link]\n\nOFJ Automotive",
   quote_validity_days: 7,
   quote_owner_approval_above_aed: 0,

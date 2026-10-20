@@ -11,6 +11,7 @@ import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPayment, type Actor } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
+import { validateGatewayUrl } from "@/lib/pay-page";
 import { convertProformaIfPaid, ensureProforma } from "@/lib/invoice-flow";
 import { currentPaymentLink, ensureAutoPayLink, paymentLinksOf, replacePaymentLink } from "@/lib/payment-links";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, methodsFor } from "@/lib/money-steps";
@@ -205,7 +206,10 @@ export async function setPaymentLink(invoiceId: string, formData: FormData) {
   const role = staff.role_id as RoleId;
   if (!can(role, "issueInvoices")) redirect(`/invoices/${invoiceId}`);
   const url = blankToNull(formData.get("payment_link_url"));
-  if (url && !/^https:\/\/\S+$/.test(url)) redirect(`/invoices/${invoiceId}?error=${encodeURIComponent("Paste the full https:// link.")}`);
+  if (url) {
+    const v = validateGatewayUrl(url, await getSettings());
+    if (!v.ok) redirect(`/invoices/${invoiceId}?error=${encodeURIComponent(v.error)}`);
+  }
   // The address is stored as text and never requested by the system: it works once, for the customer.
   const res = await replacePaymentLink(invoiceId, url, staff);
   if (res.error) redirect(`/invoices/${invoiceId}?error=${encodeURIComponent(res.error)}`);
@@ -297,7 +301,8 @@ export async function prepareProformaSend(jobId: string, opts: { expected: strin
   let payNowError: string | undefined;
   let payNowOn = false;
   if (opts.linkUrl) {
-    if (!/^https:\/\/\S+$/.test(opts.linkUrl)) return { error: "Paste the full https:// payment link." };
+    const v = validateGatewayUrl(opts.linkUrl, await getSettings());
+    if (!v.ok) return { error: v.error };
     const r = await replacePaymentLink(pro.id, opts.linkUrl, { id: staff.id, display_name: staff.display_name });
     if (r.error) return { error: r.error };
     payNowOn = true;

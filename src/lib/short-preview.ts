@@ -20,6 +20,7 @@ function titleFor(prefix: string, url: string): string {
   if (url.includes("/approve/") || url.includes("/u/")) return "OFJ Automotive – Your job card";
   if (url.includes("/report/")) return "OFJ Automotive – Your inspection report";
   if (url.includes("/progress/")) return "OFJ Automotive – Your car's progress";
+  if (url.includes("/p/")) return "OFJ Automotive – Payment";
   if (url.includes("/handover/")) return "OFJ Automotive – Your handover";
   return "OFJ Automotive";
 }

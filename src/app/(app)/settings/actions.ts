@@ -320,6 +320,8 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   }
   // Recovery companies may be an empty list: the ones typed at gate-out are added on their own.
   updates.push({ key: "recovery_companies", value: Array.from(new Set(String(formData.get("recovery_companies") ?? "").split(/\r?\n/).map((l) => l.trim().slice(0, 60)).filter(Boolean))).slice(0, 60) });
+  updates.push({ key: "payment_gateway_domains", value: Array.from(new Set(String(formData.get("payment_gateway_domains") ?? "").split(/\r?\n/).map((l) => l.trim().toLowerCase().slice(0, 80)).filter(Boolean))).slice(0, 20) });
+  updates.push({ key: "workshop_hours_text", value: String(formData.get("workshop_hours_text") ?? "").trim().slice(0, 120) || "Monday to Saturday, 8:00–17:00" });
   // Tyre models, one line per brand: "Pirelli: P Zero, Cinturato".
   {
     const models: Record<string, string[]> = {};

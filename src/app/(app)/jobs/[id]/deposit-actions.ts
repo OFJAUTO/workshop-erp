@@ -4,7 +4,36 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import { depositState } from "@/lib/deposits";
 import { notifyRoles } from "@/lib/notifications";
+import { ensurePaymentRequest, validateGatewayUrl } from "@/lib/pay-page";
+import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+/**
+ * Makes (or updates) the job's /p/ payment page for the deposit and hands back OUR short link - the
+ * only link that ever goes in the message (1.4). A pasted gateway link is validated against the
+ * allowed pay-page domains and stored ON the page; the same /p/ link keeps working when it changes.
+ */
+export async function prepareDepositRequest(jobId: string, gatewayUrl?: string | null): Promise<{ error?: string; shortLink?: string; host?: string | null }> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "Viewing only." };
+  if (!(staff.role_id === "owner" || staff.role_id === "service_advisor" || staff.role_id === "accounts")) return { error: "The advisor sends the deposit request." };
+  const dep = await depositState(jobId);
+  if (!(dep.required > 0)) return { error: "No deposit is asked for on this job." };
+  let host: string | null = null;
+  let url: string | null | undefined = undefined;
+  if (gatewayUrl !== undefined && gatewayUrl !== null) {
+    const clean = String(gatewayUrl).trim();
+    if (clean === "") url = null;
+    else {
+      const v = validateGatewayUrl(clean, await getSettings());
+      if (!v.ok) return { error: v.error };
+      url = clean;
+      host = v.host;
+    }
+  }
+  const { shortLink } = await ensurePaymentRequest({ jobId, kind: "deposit", amount: Math.max(0, dep.required - dep.received), quotationId: dep.quotationId, purpose: `Advance payment to order the parts (${dep.quotationNumbers.join(", ")})`, ...(url !== undefined ? { gatewayUrl: url } : {}), by: staff.id });
+  return { shortLink, host };
+}
 
 /**
  * The advisor pressed Send on the deposit request (WhatsApp or copy): stamped on the job, so the step

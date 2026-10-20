@@ -663,9 +663,17 @@ export function SettingsForm({
             <Field label="WhatsApp tax invoice message" hint="Sent with the tax invoice link once the proforma is paid. Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_invoice_template" defaultValue={v.whatsapp_invoice_template} rows={3} required />
             </Field>
-            <Field label="WhatsApp: deposit request" hint="The advisor sends it when a deposit is asked for. [name], [make model], [plate], [amount], [quotation]; a pasted payment link is added underneath.">
+            <Field label="WhatsApp: deposit request" hint="The advisor sends it when a deposit is asked for. [name], [make model], [plate], [amount], [link] — the link is always our own payment page (erp.ofjauto.com/p/…), never the gateway's address.">
               <Textarea name="whatsapp_deposit_request_template" defaultValue={v.whatsapp_deposit_request_template} rows={3} required />
             </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Allowed payment-link domains" hint="One per line. A pasted Pay-now link must be https on one of these pay-page domains, or it is refused. Empty keeps the Network International defaults.">
+                <Textarea name="payment_gateway_domains" defaultValue={Array.isArray(v.payment_gateway_domains) ? (v.payment_gateway_domains as string[]).join("\n") : String(v.payment_gateway_domains ?? "")} rows={3} data-gateway-domains />
+              </Field>
+              <Field label="Workshop hours (payment page)" hint='Shown under "Pay at the workshop".'>
+                <Input name="workshop_hours_text" defaultValue={v.workshop_hours_text} required />
+              </Field>
+            </div>
             <Field label="WhatsApp: deposit receipt" hint="[name], [make model], [plate], [amount], [link].">
               <Textarea name="whatsapp_deposit_receipt_template" defaultValue={v.whatsapp_deposit_receipt_template} rows={3} required />
             </Field>
