@@ -379,6 +379,9 @@ export async function POST(request: NextRequest) {
       }
       if (type === "other" && !row.title) row.title = "";
     }
+    // The editor draws the line before the save answers and sends its id: the row is born with it, so the screen and the server agree.
+    const wantId = typeof (a as { id?: unknown }).id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((a as { id: string }).id) ? (a as { id: string }).id : null;
+    if (wantId) row.id = wantId;
     const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", q.id).eq("is_active", true).neq("line_type", "fee").order("position", { ascending: false }).limit(1).maybeSingle();
     row.position = (Number(last?.position) || 0) + 1;
     const { data: created, error } = await admin.from("quotation_lines").insert(row).select("id").single();

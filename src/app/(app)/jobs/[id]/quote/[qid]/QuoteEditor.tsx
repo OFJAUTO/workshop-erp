@@ -16,7 +16,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { marginToneOf, aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { marginToneOf, aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -31,6 +31,8 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
   const busy = useRef(false);
   const [state, setState] = useState<"saved" | "saving" | "offline">("saved");
   const [error, setError] = useState<string | null>(null);
+  /** Ops the server refused: kept with their message, retried per line with one tap, never dropped. */
+  const [failed, setFailed] = useState<(Op & { failMessage?: string })[]>([]);
   const persist = useCallback(() => {
     try {
       if (queue.current.length) localStorage.setItem(key, JSON.stringify(queue.current));
@@ -57,6 +59,7 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
           queue.current.shift();
           persist();
           setError(data.error ?? "Could not save.");
+          setFailed((fl) => [...fl, { ...op, failMessage: data.error ?? "Could not save." }]);
           changed = true;
           continue;
         }
@@ -101,7 +104,18 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
       window.removeEventListener("online", online);
     };
   }, [key, flush]);
-  return { save, state, error };
+  const retryFailed = useCallback(
+    (op: Op) => {
+      setFailed((fl) => fl.filter((x) => x !== op));
+      const { failMessage: _m, ...clean } = op as Op & { failMessage?: string };
+      void _m;
+      queue.current.push(clean);
+      persist();
+      void flush();
+    },
+    [flush, persist],
+  );
+  return { save, state, error, failed, retryFailed };
 }
 
 export type EditorSettings = {
@@ -349,7 +363,20 @@ export function QuoteEditor({
     refreshWhenIdle(() => router.refresh());
   }, [router]);
   const onConfirm = useCallback((op: Op, message: string) => setConfirming({ op, message }), [setConfirming]);
-  const { save, state, error } = useQuoteAutosave(quotation.id, refresh, onConfirm);
+  const { save, state, error, failed, retryFailed } = useQuoteAutosave(quotation.id, refresh, onConfirm);
+  /** New lines drawn on screen before the server answers: kept through refreshes until the server row arrives. */
+  const pendingNew = useRef<Set<string>>(new Set());
+  const failedOf = (lineId: string) => failed.filter((o) => ((o.patchLine as { id?: string } | undefined)?.id === lineId) || ((o.addLine as { id?: string } | undefined)?.id === lineId) || ((o.removeLine as { id?: string } | undefined)?.id === lineId));
+  const failChip = (lineId: string) => {
+    const ops = failedOf(lineId);
+    if (!ops.length) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2 px-2 py-0.5 text-[11px] font-semibold text-red" data-line-not-saved={lineId}>
+        <span>Not saved{(ops[0] as { failMessage?: string }).failMessage ? ` – ${(ops[0] as { failMessage?: string }).failMessage}` : ""}</span>
+        <button type="button" onClick={() => ops.forEach((o) => retryFailed(o))} className="min-h-7 rounded-control border border-red-bar px-2 font-bold" data-line-retry={lineId}>Retry</button>
+      </div>
+    );
+  };
   const lockedName = lockedBy ?? lockLive;
   const disabled = readOnly || !!lockedName;
   const depositOn = !!header.deposit_mode && header.deposit_mode !== "none";
@@ -368,12 +395,17 @@ export function QuoteEditor({
     if (fresh.length && draft) setDraft(null);
     setLines((cur) => {
       const known = new Map(cur.map((l) => [l.id, l]));
-      return initialLines.map((l) => {
+      const serverIds = new Set(initialLines.map((l) => l.id));
+      const out = initialLines.map((l) => {
         const k = known.get(l.id);
         if (!k || l.fee_kind) return l;
+        if (pendingNew.current.has(l.id)) return dirty.has(l.id) ? { ...l, ...k } : l;
         if (dirty.has(l.id)) return { ...l, ...k };
         return { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, left_off: l.left_off, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title };
       });
+      for (const l of cur) if (!serverIds.has(l.id) && pendingNew.current.has(l.id)) out.push(l);
+      for (const id of Array.from(pendingNew.current)) if (serverIds.has(id)) pendingNew.current.delete(id);
+      return out;
     });
   }
   // A refused save while a new line was being added: the placeholder row goes.
@@ -432,7 +464,45 @@ export function QuoteEditor({
     if (immediate) save(op());
     else debounced(`line-${id}-${Object.keys(fields).join(",")}`, op);
   };
-  const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null }) => save({ addLine: fields });
+  const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null }) => {
+    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null;
+    if (!id) {
+      save({ addLine: fields });
+      return;
+    }
+    // The line appears the moment the button is tapped; the save carries the same id, so the server's
+    // row (service price and hours filled in) slides underneath it on the next refresh.
+    const svc = fields.service_id ? services.find((x) => x.id === fields.service_id) ?? null : null;
+    const type = (fields.line_type as LineType | undefined) ?? (svc ? (svc.price_aed !== null || svc.bodyshop_kind ? "package" : "labour") : "labour");
+    const maxPos = Math.max(0, ...lines.filter((l) => l.line_type !== "fee").map((l) => Number(l.position) || 0));
+    const optimistic: QuoteLine = {
+      id, quotation_id: quotation.id, position: maxPos + 1, line_type: type,
+      title: (fields.title ?? svc?.name ?? "").toString(), details: fields.details ?? svc?.description ?? null,
+      package_key: fields.package_key ?? null, package_items: fields.package_items ?? null,
+      group_label: fields.group_label ?? null, source_type: fields.source_type ?? "manual", source_key: fields.source_key ?? null,
+      quantity: fields.quantity ?? (type === "package" ? Math.max(1, Math.round(Number(svc?.usual_quantity) || 1)) : 1),
+      unit_cost: fields.unit_cost ?? null, markup_percent: fields.markup_percent ?? null,
+      unit_price: fields.unit_price ?? (svc && svc.price_aed !== null ? Number(svc.price_aed) : null),
+      hours: fields.hours ?? (svc && svc.default_hours !== null ? Number(svc.default_hours) : null),
+      labour_rate: fields.labour_rate ?? settings.labourRate ?? null,
+      discount_percent: 0, discount_reason: null, line_total: 0, part_item_id: null, package_id: null,
+      service_id: fields.service_id ?? null, price_per: fields.price_per ?? (type === "package" ? (svc?.price_per ?? "job") : null),
+      visible_to_customer: fields.visible_to_customer ?? true, urgency: fields.urgency ?? null,
+      advisor_added: false, customer_approved: null, is_active: true, part_type: null, brand: null,
+      option_group: null, chosen: true, fee_kind: null,
+      recovery_trips: fields.recovery_trips ?? (type === "recovery" ? 1 : null), recovery_provider: null,
+      dangerous: fields.dangerous ?? false, parent_line_id: fields.parent_line_id ?? null,
+      recovery_provider_kind: type === "recovery" ? "ours" : null, markup_confirmed: false,
+      positions: fields.positions ?? null, left_off: false, outside_work: fields.outside_work ?? false,
+      recovery_type: fields.recovery_type ?? null, recovery_paid_by: type === "recovery" ? "customer" : null,
+      recovery_mention_free: false, hours_estimate: null, revised_from_line_id: null,
+      film_colour: null, film_code: null, tint_percent: null,
+    };
+    pendingNew.current.add(id);
+    setLines((prev) => [...prev, optimistic]);
+    setFocusTarget({ id, field: optimistic.title ? "amount" : "name" });
+    save({ addLine: { id, ...fields } });
+  };
   /** Removing a job with parts under it asks once ("Also remove its parts?", default Yes); on its own, the parts stay on the quotation. */
   const removeLine = (id: string) => {
     const kids = lines.filter((l) => l.is_active && l.parent_line_id === id && blockOf(l) === "parts" && !l.left_off);
@@ -574,15 +644,13 @@ export function QuoteEditor({
       else if (first.c) applyCustom(ctx.replace, first.c);
       rest = others;
     }
-    if (rest.length) setFocusNewest("amount");
     for (const r of rest) {
       if (r.s) addLine({ service_id: r.s.id, ...source });
       else if (r.c) addLine({ line_type: ctx.kind === "service" ? "package" : "labour", title: r.c, ...source });
     }
   };
   const chooseKind = (kind: "labour" | "service") => {
-    setDraft("saving");
-    setFocusNewest("name");
+    setDraft(null);
     addLine({ line_type: kind === "labour" ? "labour" : "package", title: "" });
   };
   const switchKind = (l: QuoteLine) => {
@@ -633,6 +701,7 @@ export function QuoteEditor({
     const amountBox = (extra: string) => `w-16 text-right min-h-10 px-1 ${extra}`;
     return (
       <div key={l.id} id={`item-line-${l.id}`} className="flex flex-col">
+        {failChip(l.id)}
         <div className="flex flex-wrap items-center gap-2 py-1.5 px-2 text-sm">
           <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${done ? "bg-green text-white" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
@@ -783,6 +852,7 @@ export function QuoteEditor({
     const setFree = (on: boolean) => patch(l.id, { recovery_mention_free: on, visible_to_customer: on, unit_price: 0 }, true);
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-2 rounded-control border border-line px-3 py-2 ${paidBy === "us" ? "bg-chip" : "bg-white"}`}>
+        {failChip(l.id)}
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className="font-bold self-center">Recovery</span>
@@ -832,6 +902,7 @@ export function QuoteEditor({
     const needPrice = blocked && !hidden && !costed && !(l.unit_price && l.unit_price > 0);
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-1.5 rounded-control border border-line px-3 py-2 ${hidden ? "bg-chip" : "bg-white"}`}>
+        {failChip(l.id)}
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <label className={`${boxLabel} flex-1 min-w-48`}>Charge<Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is it for?" aria-label="Charge" className={`min-h-9 font-semibold ${blocked && !l.title.trim() ? "border-red-bar" : ""}`} textCase="sentence" /></label>
@@ -1084,6 +1155,7 @@ export function QuoteEditor({
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{idx + 1}</td>
                         <td className="py-2 pr-2 align-top min-w-0">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
+                          {failChip(l.id)}
                           <div className="flex items-start gap-1.5">
                             {l.option_group ? <input type="radio" name={`opt-${l.option_group}`} checked={!optionOff} onChange={() => choose(l.option_group!, l.id)} disabled={disabled || leftOff} className="h-4 w-4 shrink-0 accent-ink" aria-label="Use this option" /> : null}
                             <span className="min-w-0 break-words font-semibold uppercase">{l.title}</span>

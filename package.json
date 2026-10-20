@@ -39,6 +39,7 @@
     "test:preview": "node --env-file=.env.local tests/browser/test-preview.mjs",
     "test:live": "node --env-file=.env.local tests/browser/test-live.mjs",
     "test:import": "node --env-file=.env.local tests/browser/test-import.mjs",
+    "test:instant": "node --env-file=.env.local tests/browser/test-instant.mjs",
     "test:discount": "node --env-file=.env.local tests/browser/test-discount.mjs",
     "test:commission": "node --env-file=.env.local tests/browser/test-commission.mjs",
     "test:advance": "node --env-file=.env.local tests/browser/test-advance.mjs",
