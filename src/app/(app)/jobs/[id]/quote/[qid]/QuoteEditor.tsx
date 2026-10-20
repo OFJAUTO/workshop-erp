@@ -659,7 +659,7 @@ export function QuoteEditor({
               </span>
             ) : null}
           </div>
-          <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-2">
+          <span className="w-full inline-flex flex-wrap items-center justify-end gap-2 pl-12">
           {l.line_type === "labour" ? (
             /* Three separate things, each labelled: the hours quoted to the customer, our internal estimate (Est. h, profit
                viewers only), and the hourly rate in AED/h. The estimate label never sits on the rate box. */
@@ -1071,9 +1071,9 @@ export function QuoteEditor({
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{idx + 1}</td>
                         <td className="py-2 pr-2 align-top min-w-0">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
-                          <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                          <div className="flex items-start gap-1.5">
                             {l.option_group ? <input type="radio" name={`opt-${l.option_group}`} checked={!optionOff} onChange={() => choose(l.option_group!, l.id)} disabled={disabled || leftOff} className="h-4 w-4 shrink-0 accent-ink" aria-label="Use this option" /> : null}
-                            <span className="font-semibold truncate uppercase" title={l.title}>{l.title}</span>
+                            <span className="min-w-0 break-words font-semibold uppercase">{l.title}</span>
                             {l.positions?.length ? <span className="text-xs text-muted shrink-0">{l.positions.join(", ")}</span> : null}
                             {partTypeText(l) ? <Badge tone="outline">{partTypeText(l)}</Badge> : null}
                           </div>
@@ -1521,10 +1521,17 @@ function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, on
   return (
     <div className="relative min-w-0">
       <div className={`flex items-center rounded-control border bg-white focus-within:border-ink ${blocked ? "border-red-bar" : "border-line-strong"}`}>
-        <input
+        {/* A one-row box that grows as the name gets long: the full name always shows, never "…". */}
+        <textarea
           id={id}
           value={value}
-          onChange={(e) => onType(e.target.value)}
+          rows={1}
+          ref={(el) => {
+            if (!el) return;
+            el.style.height = "0px";
+            el.style.height = `${Math.max(40, el.scrollHeight)}px`;
+          }}
+          onChange={(e) => onType(e.target.value.replace(/\n/g, " "))}
           onFocus={() => setFocus(true)}
           onBlur={() => setTimeout(() => setFocus(false), 150)}
           onKeyDown={(e) => {
@@ -1539,7 +1546,7 @@ function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, on
           spellCheck
           lang="en"
           autoComplete="off"
-          className="min-h-10 min-w-0 flex-1 uppercase bg-transparent px-2.5 text-sm font-semibold outline-none disabled:text-muted"
+          className="min-h-10 min-w-0 flex-1 resize-none overflow-hidden uppercase bg-transparent px-2.5 py-2 text-sm font-semibold outline-none disabled:text-muted"
         />
         {!disabled ? <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onArrow} aria-label={kind === "labour" ? "Open the labour jobs list" : "Open the services list"} className="min-h-10 min-w-10 border-l border-line text-sm font-bold hover:bg-canvas">▾</button> : null}
       </div>
