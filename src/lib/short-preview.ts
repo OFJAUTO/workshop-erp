@@ -10,7 +10,7 @@ import { urlOfCode } from "./short-links";
  */
 
 const DESCRIPTION = "O F J Automotive Works L.L.C · Al Quoz, Dubai";
-const IMAGE = `${PRODUCTION_SITE_URL}/og/ofj-square.png`;
+const IMAGE = `${PRODUCTION_SITE_URL}/og/ofj-square-600.png`;
 
 function titleFor(prefix: string, url: string): string {
   if (prefix === "q") return "OFJ Automotive – Your quotation";
@@ -30,6 +30,7 @@ const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
 export async function shortLinkResponse(code: string, prefix: "q" | "i" | "r" | "m" | "d", reqUrl: string): Promise<Response> {
   const url = await urlOfCode(code);
   if (!url) return Response.redirect(new URL("/", reqUrl), 302);
+  const canonical = `${PRODUCTION_SITE_URL}/${prefix}/${code}`;
   // A target on someone else's site (a Google Maps pin): pass straight through, never dress it as ours.
   if (!url.startsWith(PRODUCTION_SITE_URL) && !/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(url)) return Response.redirect(url, 302);
   const title = titleFor(prefix, url);
@@ -42,9 +43,11 @@ export async function shortLinkResponse(code: string, prefix: "q" | "i" | "r" | 
 <title>${escapeHtml(title)}</title>
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(DESCRIPTION)}">
+<meta property="og:url" content="${canonical}">
 <meta property="og:image" content="${IMAGE}">
-<meta property="og:image:width" content="300">
-<meta property="og:image:height" content="300">
+<meta property="og:image:secure_url" content="${IMAGE}">
+<meta property="og:image:width" content="600">
+<meta property="og:image:height" content="600">
 <meta property="og:image:type" content="image/png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="OFJ Automotive">

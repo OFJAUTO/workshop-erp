@@ -5,3 +5,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
   const { code } = await ctx.params;
   return shortLinkResponse(code, "q", req.url);
 }
+
+export { GET as HEAD };

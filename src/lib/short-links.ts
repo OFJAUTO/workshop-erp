@@ -12,7 +12,7 @@ import { createAdminClient } from "./supabase/admin";
  * repeated after the insert would otherwise come back empty from the cache); the insert returns its own row.
  */
 
-const SHORT_HOST = PRODUCTION_SITE_URL.replace(/^https?:\/\//, "");
+// The FULL address with https:// - WhatsApp only builds a preview reliably for a complete link.
 const ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/l/i/I
 
 function newCode(len: number): string {
@@ -36,14 +36,14 @@ export async function shortFor(url: string, kind: "map" | "page" | "drive" = "pa
   const admin = createAdminClient();
   const prefix = prefixFor(url, kind);
   const { data: existing } = await admin.from("short_links").select("code").eq("url", url).limit(1).abortSignal(new AbortController().signal).maybeSingle();
-  if (existing?.code) return `${SHORT_HOST}/${prefix}/${existing.code}`;
+  if (existing?.code) return `${PRODUCTION_SITE_URL}/${prefix}/${existing.code}`;
   for (let len = 4; len <= 8; len++) {
     // The insert hands the row straight back; a clash on the code tries a longer one.
     const { data: made } = await admin.from("short_links").insert({ code: newCode(len), url, kind }).select("code").maybeSingle();
-    if (made?.code) return `${SHORT_HOST}/${prefix}/${made.code}`;
+    if (made?.code) return `${PRODUCTION_SITE_URL}/${prefix}/${made.code}`;
     // A clash on the url means another request just made it: that row wins.
     const { data: race } = await admin.from("short_links").select("code").eq("url", url).limit(1).abortSignal(new AbortController().signal).maybeSingle();
-    if (race?.code) return `${SHORT_HOST}/${prefix}/${race.code}`;
+    if (race?.code) return `${PRODUCTION_SITE_URL}/${prefix}/${race.code}`;
   }
   return url; // Never in practice: the long address still works.
 }
