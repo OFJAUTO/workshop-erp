@@ -345,7 +345,8 @@ export async function POST(request: NextRequest) {
       const { data: svc } = await admin.from("services").select(SERVICE_SELECT).eq("id", String(a.service_id)).maybeSingle();
       if (!svc) return NextResponse.json({ error: "Service not found." }, { status: 404 });
       // A bodyshop package has no fixed price: a service line whose price the advisor types every time.
-      type = svc.price_aed !== null || svc.bodyshop_kind ? "package" : "labour";
+      // A service set as fixed price in Settings is a fixed line even when the price is typed each time (line_kind), never hours x rate.
+      type = (svc.line_kind ? svc.line_kind === "service" : svc.price_aed !== null) || svc.bodyshop_kind ? "package" : "labour";
       Object.assign(row, { quantity: type === "package" ? Math.max(1, Math.round(Number(svc.usual_quantity) || 1)) : 1, price_per: type === "package" ? (svc.price_per ?? "job") : null, line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
       // A job added for a finding keeps that finding, so its parts land under it.
       if (a.source_type && a.source_key && ["item", "tyre", "request"].includes(a.source_type)) Object.assign(row, { source_type: a.source_type, source_key: String(a.source_key).slice(0, 120) });

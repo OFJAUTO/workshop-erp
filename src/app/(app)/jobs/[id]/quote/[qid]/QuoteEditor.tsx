@@ -473,7 +473,7 @@ export function QuoteEditor({
     // The line appears the moment the button is tapped; the save carries the same id, so the server's
     // row (service price and hours filled in) slides underneath it on the next refresh.
     const svc = fields.service_id ? services.find((x) => x.id === fields.service_id) ?? null : null;
-    const type = (fields.line_type as LineType | undefined) ?? (svc ? (svc.price_aed !== null || svc.bodyshop_kind ? "package" : "labour") : "labour");
+    const type = (fields.line_type as LineType | undefined) ?? (svc ? ((svc.line_kind ? svc.line_kind === "service" : svc.price_aed !== null) || svc.bodyshop_kind ? "package" : "labour") : "labour");
     const maxPos = Math.max(0, ...lines.filter((l) => l.line_type !== "fee").map((l) => Number(l.position) || 0));
     const optimistic: QuoteLine = {
       id, quotation_id: quotation.id, position: maxPos + 1, line_type: type,
@@ -653,9 +653,19 @@ export function QuoteEditor({
     setDraft(null);
     addLine({ line_type: kind === "labour" ? "labour" : "package", title: "" });
   };
+  /** Labour (hours × rate) ↔ Fixed price (qty × price), on any line: the customer's figure is carried across, and a fixed line counts no hours anywhere. */
   const switchKind = (l: QuoteLine) => {
-    if (l.line_type === "labour") patch(l.id, { line_type: "package", hours: null, unit_price: null, price_per: "job", quantity: 1, service_id: null }, true);
-    else patch(l.id, { line_type: "labour", unit_price: null, price_per: null, quantity: 1, service_id: null }, true);
+    const rate = l.labour_rate ?? settings.labourRate ?? 0;
+    if (l.line_type === "labour") {
+      const total = round2((l.hours ?? 0) * rate * (1 - (l.discount_percent ?? 0) / 100)) || null;
+      patch(l.id, { line_type: "package", hours: null, hours_estimate: null, unit_price: total, price_per: "job", quantity: 1, service_id: null }, true);
+    } else {
+      // Never below the standard rate for the car (the server would refuse the whole change).
+      const backRate = Math.max(rate, settings.labourRate ?? 0) || null;
+      const total = lineTotal(l);
+      const hours = backRate && total > 0 ? round2(total / backRate) : null;
+      patch(l.id, { line_type: "labour", unit_price: null, price_per: null, quantity: 1, hours, labour_rate: backRate, service_id: null }, true);
+    }
   };
   /** One job on several positions is one row: the quantity follows for per-unit services, the hours for hourly ones with default hours. */
   const setPositions = (l: QuoteLine, positions: string[]) => {
@@ -788,7 +798,7 @@ export function QuoteEditor({
               </button>
               {menu ? (
                 <FloatingMenu anchor={menuAnchor} onClose={() => setMenuFor(null)} width={240} label="More for this line" data-line-menu="">
-                  {!l.title.trim() ? <MenuItem label={isService ? "Switch to Labour" : "Switch to Service"} onClick={() => { setMenuFor(null); switchKind(l); }} /> : null}
+                  <MenuItem label={isService ? "Make it Labour (hours × rate)" : "Make it Fixed price (qty × price)"} onClick={() => { setMenuFor(null); switchKind(l); }} />
                   {isQuotation && !l.dangerous ? <MenuItem label={l.urgency === "urgent" ? "Not urgent" : "Mark as urgent"} onClick={() => { setMenuFor(null); patch(l.id, { urgency: l.urgency === "urgent" ? null : "urgent" }, true); }} /> : null}
                   {l.dangerous && isOwner ? <MenuItem label="Switch the safety warning off" onClick={() => { setMenuFor(null); patch(l.id, { dangerous: false, urgency: "urgent" }, true); }} /> : null}
                   <MenuItem label={l.details ? "Change the note for the customer" : "Add a note for the customer"} onClick={() => { setMenuFor(null); openOnly(l.id, `note-${l.id}`); }} />
