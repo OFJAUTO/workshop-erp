@@ -2,6 +2,7 @@ import Link from "next/link";
 import { HomeHeader } from "@/components/HomeHeader";
 import {Card, Empty, SectionLabel} from "@/components/ui";
 import { WaitingPanel } from "@/components/WaitingPanel";
+import { partsWaitingExtra } from "@/lib/parts-waiting";
 import { PartsSteps } from "@/components/PartsSteps";
 import type { CurrentStaff } from "@/lib/auth";
 import { partsSteps, stepPartOf, type PartsStepKey } from "@/lib/parts-steps";
@@ -55,7 +56,7 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
   return (
     <>
       <HomeHeader staff={staff} />
-      <WaitingPanel staff={staff} />
+      <WaitingPanel staff={staff} extra={await partsWaitingExtra()} />
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-3" data-parts-tiles>
         {tiles.map((t) => (
           <Link key={t.key} href={t.href} className={`flex min-h-20 flex-col justify-center rounded-card border px-4 py-3 ${t.count ? "border-ink bg-white" : "border-line bg-white"}`} data-parts-tile={t.key}>

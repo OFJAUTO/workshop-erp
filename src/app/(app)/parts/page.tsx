@@ -42,6 +42,9 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
   const noHomeCount = (await partsWithNoHome()).length;
+  // The live LPO status per part: a part at "to order" with an APPROVED LPO is ORDER NOW, never "waiting for approval".
+  const { data: poRows } = await admin.from("purchase_orders").select("id, status").eq("is_active", true);
+  const poState = new Map(((poRows ?? []) as { id: string; status: string }[]).map((r) => [r.id, r.status]));
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
   const today = todayIso();
   const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)]));
@@ -208,7 +211,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                   const late = !!p.expected_date && p.expected_date < today && p.order_status !== "to_order";
                   return (
                     <li key={p.id} className="py-1.5 flex flex-wrap items-center gap-2">
-                      <Badge tone={late ? "red" : p.order_status === "to_order" ? "amber" : "neutral"}>{p.order_status === "to_order" ? "PO waiting for approval" : late ? "Late" : p.order_status === "partly_received" ? "Partly received" : "Ordered"}</Badge>
+                      <Badge tone={late ? "red" : p.order_status === "to_order" ? (poState.get(p.po_id ?? "") === "approved" ? "red" : "amber") : "neutral"}>{p.order_status === "to_order" ? (poState.get(p.po_id ?? "") === "approved" ? "ORDER NOW (approved)" : poState.get(p.po_id ?? "") === "pending_approval" ? "LPO waiting for approval" : "To order") : late ? "Late" : p.order_status === "partly_received" ? "Partly received" : "Ordered"}</Badge>
                       <span className="font-semibold">{p.description}</span>
                       {p.expected_date ? <span className="text-muted">expected {p.expected_date}</span> : null}
                     </li>

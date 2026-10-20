@@ -21,6 +21,7 @@ export type Urgency = "red" | "amber" | "grey";
  * red where it is shown.
  */
 export function urgencyOf(i: { actorRole: string | null; status: string; line: string }): Urgency {
+  if (/order now/i.test(i.line)) return "red";
   if (i.actorRole === "accounts") return "red";
   if (/deposit/i.test(i.line) && /record|waiting for the deposit/i.test(i.line)) return "red";
   if (["ready", "pending_payment", "in_delivery"].includes(i.status)) return "red";

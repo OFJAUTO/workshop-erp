@@ -110,9 +110,9 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     await admin.from("purchase_orders").update({ status: "cancelled", notes: [po.notes, note ? `Refused: ${note}` : "Refused"].filter(Boolean).join("\n"), updated_by: staff.id }).eq("id", poId);
     await admin.from("part_items").update({ po_id: null, po_line_id: null, updated_by: staff.id }).eq("po_id", poId);
     if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_refused", note: `${po.number} refused by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
-    if (po.created_by) await notifyStaff([po.created_by], { type: "po_decided", title: `${po.number} refused`, body: note ?? "", jobId: po.job_id, href: back });
+    await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} refused by ${staff.display_name}`, body: `${note ? `Reason: ${note}. ` : ""}The parts are back under To order: fix the list and send a new LPO for approval.`, jobId: po.job_id, href: po.job_id ? `/parts/${po.job_id}#lpo` : "/parts" });
     refresh(po.job_id, poId);
-    redirect(`${back}?message=${encodeURIComponent("LPO refused.")}`);
+    redirect(`${back}?message=${encodeURIComponent(`${po.number} refused \u2713 \u2014 Parts have been told${note ? " with your reason" : ""}; the parts are back under To order for a new LPO.`)}`);
   }
   const deposit = po.job_id ? await depositState(po.job_id) : null;
   let override: { by: string; reason: string } | null = null;
@@ -129,9 +129,11 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     // The main LPO is split into one LPO per supplier (LPO-00012-1, -2, -3); Parts send each and press Ordered.
     const { created } = await splitMainLpo(poId, staff);
     for (const c of created) revalidatePath(`/parts/orders/${c.id}`);
-    await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} approved · ${created.length} supplier LPO${created.length === 1 ? "" : "s"}`, body: `${job?.job_number ?? ""} · ${created.map((c) => `${c.number} ${c.supplier}`).join(", ")}. Copy or PDF to each supplier, then press Ordered.`, jobId: po.job_id, href: `/parts/${po.job_id}#lpo` });
+    await notifyRoles(["parts"], { type: "po_decided", title: `ORDER NOW \u00b7 ${job?.job_number ?? po.number} \u00b7 ${created.map((c) => c.supplier).join(", ")}`, body: `${po.number} approved by ${staff.display_name}: ${created.map((c) => `${c.number} (${c.supplier})`).join(", ")}. Send each one (Copy, PDF or Email) and press Ordered.`, jobId: po.job_id, href: `/parts/${po.job_id}#lpos` });
     refresh(po.job_id, poId);
-    redirect(`${back}?message=${encodeURIComponent(`Approved. ${created.map((c) => `${c.number} (${c.supplier})`).join(", ")} ready for Parts to send and mark ordered.`)}`);
+    const supplierWords = created.map((c) => c.supplier).join(", ");
+    const { count: lineCount } = await admin.from("purchase_order_lines").select("id", { count: "exact", head: true }).eq("po_id", poId).eq("is_active", true);
+    redirect(`${back}?message=${encodeURIComponent(`${po.number} approved \u2713 \u2014 Parts have been asked to order from ${supplierWords} (${lineCount} part${lineCount === 1 ? "" : "s"}, AED ${po.total_cost_aed.toLocaleString("en-GB")}).`)}`);
   }
   await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} approved: send it to ${po.supplier_name}`, body: `${job?.job_number ?? ""} · approved by ${staff.display_name}`, jobId: po.job_id, href: back });
   if (po.fixed_asset) await notifyRoles(["accounts"], { type: "fixed_asset", title: `Fixed asset approved: ${po.number}, AED ${po.total_cost_aed.toLocaleString("en-GB")}`, body: `Tools and equipment from ${po.supplier_name}, approved by ${staff.display_name}. Record it in the asset register once it is received.`, href: back });

@@ -605,6 +605,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               ].filter(Boolean).join(" · ")}
             </span>
           ) : null}
+          {partsState.live.orderNow > 0 ? <span className="text-xs font-bold text-red" data-order-now-line>ORDER NOW: {partsState.live.orderNow} approved part{partsState.live.orderNow === 1 ? "" : "s"} not yet sent to the supplier.</span> : null}
+          {partsState.live.orderNow === 0 && partsState.live.missing > 0 ? (() => {
+            const suppliers = Array.from(new Set(partItems.filter((p) => p.order_status === "ordered" || p.order_status === "partly_received").map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
+            return suppliers.length ? <span className="text-xs font-semibold" data-ordered-line>Parts ordered from {suppliers.join(", ")}{partsState.live.readyDate ? ` – arriving ${formatDate(partsState.live.readyDate)}` : ""}.</span> : null;
+          })() : null}
           <div className="mt-auto flex flex-wrap gap-2">
             {(can(role, "priceParts") || seesPrices) && (partItems.length || quoteSummary.openRequests || role === "owner") ? <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton> : can(role, "priceParts") || seesPrices ? (
               <span className="flex flex-col gap-1">

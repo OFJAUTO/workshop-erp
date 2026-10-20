@@ -197,12 +197,14 @@ export type PartsLive = {
   fromStockOnly: boolean;
   /** The job's main LPO is waiting for the one-tap approval. */
   pendingLpo: boolean;
+  /** Parts whose supplier LPO is APPROVED but not yet ordered: the red ORDER NOW state. */
+  orderNow: number;
 };
 
 const dubaiToday = () => new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
 
 /** The pure rule: the live parts picture from the rows and today's date. */
-export function partsLiveOf(parts: PartFull[], today: string, pendingLpo = false): PartsLive {
+export function partsLiveOf(parts: PartFull[], today: string, pendingLpo = false, poStatus?: Map<string, string>): PartsLive {
   const approved = parts.filter((p) => p.is_active !== false && (p.order_status !== "none" || p.issue_status !== "none"));
   const needed = approved.filter((p) => p.return_status !== "returned" && !(p.not_needed_at && p.disposition !== "fit_approved") && p.exchange_status !== "needed" && p.exchange_status !== "ordered");
   const here = (p: PartFull) => p.availability === "in_stock" || p.order_status === "received" || p.received_qty + 0.005 >= (Number(p.confirmed_quantity ?? p.quantity) || 1);
@@ -214,6 +216,7 @@ export function partsLiveOf(parts: PartFull[], today: string, pendingLpo = false
   return {
     hasParts: needed.length > 0,
     toOrder: missingRows.filter((p) => !p.po_id && !["ordered", "partly_received"].includes(p.order_status ?? "")).length,
+    orderNow: missingRows.filter((p) => !!p.po_id && poStatus?.get(p.po_id) === "approved").length,
     missing: missingRows.length,
     late: lateRows.length,
     readyDate: dues.length ? dues.sort().at(-1)! : null,
@@ -244,11 +247,13 @@ export async function loadPartsLiveMap(jobIds: string[]): Promise<Map<string, Pa
   const out = new Map<string, PartsLive>();
   if (!jobIds.length) return out;
   const admin = createAdminClient();
-  const [{ data: partRows }, { data: pendingMains }] = await Promise.all([
+  const [{ data: partRows }, { data: pendingMains }, { data: poRows }] = await Promise.all([
     admin.from("part_items").select(PART_FULL_SELECT).in("job_id", jobIds).eq("is_active", true),
     admin.from("purchase_orders").select("job_id").in("job_id", jobIds).eq("kind", "main").eq("status", "pending_approval"),
+    admin.from("purchase_orders").select("id, status").in("job_id", jobIds).eq("is_active", true),
   ]);
   const pending = new Set((pendingMains ?? []).map((r) => r.job_id as string));
+  const poStatus = new Map(((poRows ?? []) as { id: string; status: string }[]).map((r) => [r.id, r.status]));
   const byJob = new Map<string, PartFull[]>();
   for (const r of (partRows ?? []) as unknown as Record<string, unknown>[]) {
     const p = toPartFull(r);
@@ -257,16 +262,17 @@ export async function loadPartsLiveMap(jobIds: string[]): Promise<Map<string, Pa
     byJob.set(p.job_id, list);
   }
   const today = dubaiToday();
-  for (const id of jobIds) out.set(id, partsLiveOf(byJob.get(id) ?? [], today, pending.has(id)));
+  for (const id of jobIds) out.set(id, partsLiveOf(byJob.get(id) ?? [], today, pending.has(id), poStatus));
   return out;
 }
 
 /** The approved parts on a job and where they stand, for the stage card, the work gate and the Parts desk. */
 export async function jobPartsState(jobId: string) {
   const admin = createAdminClient();
-  const [{ data }, { data: pendingMain }] = await Promise.all([
+  const [{ data }, { data: pendingMain }, { data: jobPos }] = await Promise.all([
     admin.from("part_items").select(PART_FULL_SELECT).eq("job_id", jobId).eq("is_active", true),
     admin.from("purchase_orders").select("id").eq("job_id", jobId).eq("kind", "main").eq("status", "pending_approval").limit(1),
+    admin.from("purchase_orders").select("id, status").eq("job_id", jobId).eq("is_active", true),
   ]);
   const parts = ((data ?? []) as unknown as Record<string, unknown>[]).map(toPartFull);
   const approved = parts.filter((p) => p.order_status !== "none" || p.issue_status !== "none");
@@ -278,7 +284,7 @@ export async function jobPartsState(jobId: string) {
   const issued = needed.filter((p) => p.issue_status !== "none");
   const confirmed = needed.filter((p) => p.issue_status === "confirmed");
   const today = dubaiToday();
-  const live = partsLiveOf(parts, today, (pendingMain ?? []).length > 0);
+  const live = partsLiveOf(parts, today, (pendingMain ?? []).length > 0, new Map(((jobPos ?? []) as { id: string; status: string }[]).map((r) => [r.id, r.status])));
   const late = ordered.filter((p) => p.expected_date && p.expected_date < today);
   return { parts, approved, toOrder, ordered, received, needed, issued, confirmed, late, live, allIssued: needed.length > 0 && needed.every((p) => p.issue_status === "confirmed"), noneNeeded: needed.length === 0 };
 }
