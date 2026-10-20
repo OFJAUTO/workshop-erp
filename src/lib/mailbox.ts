@@ -2,6 +2,7 @@ import "server-only";
 import { attachmentsOf, getAttachment, getMessage, headerOf, listMessages, scansMailbox, textBodyOf, type GmailMessage } from "./gmail";
 import { mailboxConnection, oauthConfigured } from "./google-mailbox";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
+import { autelLinksIn, carHintOf, fetchAutelReport, isAutelSender, reportIdOf } from "./autel";
 import { readPdfRows } from "./pdf-read";
 import { SCANS_BUCKET, attachPrescan, scanKindFor } from "./scans";
 import { createAdminClient } from "./supabase/admin";
@@ -23,16 +24,31 @@ const isImage = (a: MailAttachmentIn) => /^image\/(jpeg|png|webp)/i.test(a.conte
  * received for <plate>". No match: the file waits in Unmatched scans, where the car is picked with one tap. An
  * email with nothing attached is kept for the owner to read.
  */
-export async function processMail(mail: MailIn): Promise<MailResult> {
+export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boolean } = {}): Promise<MailResult> {
   const admin = createAdminClient();
   const subject = (mail.subject ?? "").slice(0, 300);
-  const files = mail.attachments.filter((a) => (isPdf(a) || isImage(a)) && a.bytes.length > 0 && a.bytes.length <= 35 * 1024 * 1024);
+  let files = mail.attachments.filter((a) => (isPdf(a) || isImage(a)) && a.bytes.length > 0 && a.bytes.length <= 35 * 1024 * 1024);
+  // Autel sends a LINK instead of an attachment: fetch the report at once (their links expire).
+  // Only autel.com / auteltech.com are ever followed, time-limited and size-capped (src/lib/autel.ts).
+  let sourceUrl: string | null = null;
+  if (!files.length && isAutelSender(mail.from)) {
+    for (const link of autelLinksIn(`${subject}\n${mail.text ?? ""}`)) {
+      const got = await fetchAutelReport(link);
+      if ("bytes" in got) {
+        files = [{ name: got.fileName, contentType: got.contentType, bytes: got.bytes }];
+        sourceUrl = link;
+        break;
+      }
+    }
+  }
+  const reportId = reportIdOf(`${subject}\n${(mail.text ?? "").slice(0, 2000)}`);
+  const carHint = carHintOf(subject);
   if (!files.length) {
-    await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: (mail.text ?? "").slice(0, 20000) || null, gmail_message_id: mail.messageId });
+    if (opts.keepEmailOnNoFiles !== false) await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: (mail.text ?? "").slice(0, 20000) || null, gmail_message_id: mail.messageId });
     return { stored: 0, matched: false, jobNumber: null, kept: true, vin: null };
   }
-  // The VIN: the subject, the body, then the words inside the first PDF that carries one.
-  let vin = (subject.match(VIN_RE)?.[0] ?? (mail.text ?? "").match(VIN_RE)?.[0] ?? "").toUpperCase() || null;
+  // The VIN: the subject, the body, the file names (Autel puts it in the file name), then inside the PDF.
+  let vin = (subject.match(VIN_RE)?.[0] ?? (mail.text ?? "").match(VIN_RE)?.[0] ?? files.map((f) => f.name).join(" ").match(VIN_RE)?.[0] ?? "").toUpperCase() || null;
   if (!vin) {
     for (const f of files.filter(isPdf)) {
       try {
@@ -54,15 +70,16 @@ export async function processMail(mail: MailIn): Promise<MailResult> {
   for (const f of files) {
     const safeName = f.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "scan";
     const path = `${job ? job.id : "unmatched"}/${Date.now()}-${stored}-${safeName}`;
-    const contentType = isPdf(f) ? "application/pdf" : f.contentType.toLowerCase().startsWith("image/") ? f.contentType.toLowerCase() : "image/jpeg";
+    const contentType = isPdf(f) ? "application/pdf" : f.contentType.toLowerCase() === "text/html" ? "text/html" : f.contentType.toLowerCase().startsWith("image/") ? f.contentType.toLowerCase() : "image/jpeg";
     const { error: upError } = await admin.storage.from(SCANS_BUCKET).upload(path, f.bytes, { contentType, upsert: false });
     if (upError) continue;
     const kind = job ? scanKindFor(job.status) : null;
-    await admin.from("inbound_scans").insert({ from_email: mail.from, subject, vin, storage_path: path, content_type: contentType, file_name: f.name, job_id: job?.id ?? null, kind, status: job ? "matched" : "unmatched", gmail_message_id: mail.messageId });
+    await admin.from("inbound_scans").insert({ from_email: mail.from, subject, vin, storage_path: path, content_type: contentType, file_name: f.name, job_id: job?.id ?? null, kind, status: job ? "matched" : "unmatched", gmail_message_id: mail.messageId, source_url: sourceUrl, report_id: reportId, car_hint: carHint });
     stored++;
     if (job && kind === "pre" && isPdf(f)) await attachPrescan(job.id, f.bytes, f.name);
   }
   if (!stored) {
+    if (opts.keepEmailOnNoFiles === false) return { stored: 0, matched: false, jobNumber: null, kept: false, vin };
     await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: `${(mail.text ?? "").slice(0, 19000)}\n\n(${files.length} attachment${files.length === 1 ? "" : "s"} could not be kept)`, gmail_message_id: mail.messageId });
     return { stored: 0, matched: false, jobNumber: null, kept: true, vin };
   }

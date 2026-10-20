@@ -6,8 +6,23 @@ import { requirePermission } from "@/lib/auth";
 import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { SCANS_BUCKET, attachPrescan, scanKindFor } from "@/lib/scans";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { checkScansMailbox } from "@/lib/mailbox";
+import { checkScansMailbox, processMail } from "@/lib/mailbox";
+import { requireStaff } from "@/lib/auth";
 import { disconnectMailbox } from "@/lib/google-mailbox";
+
+/** The owner re-runs an email through the scan pipeline: an Autel link that landed under Other emails. */
+export async function reprocessEmail(emailId: string) {
+  const staff = await requireStaff();
+  if (staff.role_id !== "owner" || staff.viewingAs) redirect(`/scans?error=${encodeURIComponent("Only the owner can do this.")}`);
+  const admin = createAdminClient();
+  const { data: m } = await admin.from("inbound_emails").select("id, from_email, subject, text_body, gmail_message_id").eq("id", emailId).maybeSingle();
+  if (!m) redirect(`/scans?error=${encodeURIComponent("Email not found.")}`);
+  const r = await processMail({ messageId: m!.gmail_message_id, from: m!.from_email, subject: m!.subject ?? "", text: m!.text_body ?? "", attachments: [] }, { keepEmailOnNoFiles: false });
+  if (!r.stored) redirect(`/scans?error=${encodeURIComponent("No report could be fetched from this email. Only Autel links are followed, and theirs expire after a while.")}`);
+  await admin.from("inbound_emails").update({ is_active: false }).eq("id", emailId);
+  revalidatePath("/scans");
+  redirect(`/scans?message=${encodeURIComponent(r.matched ? `Report fetched from the Autel link and matched to ${r.jobNumber}.` : "Report fetched from the Autel link: pick the car under Unmatched scans.")}`);
+}
 
 /** The manager attaches an unmatched scan to a job by hand; it is filed by the job's stage like a matched one. */
 export async function attachScan(scanId: string, formData: FormData) {

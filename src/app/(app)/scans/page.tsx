@@ -7,14 +7,14 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { SCANS_BUCKET } from "@/lib/scans";
-import { attachScan, ignoreScan, dismissInboundEmail, checkMailboxNow, disconnectMailboxAction } from "./actions";
+import { attachScan, ignoreScan, dismissInboundEmail, checkMailboxNow, disconnectMailboxAction, reprocessEmail } from "./actions";
 import { mailboxConfigured, type MailboxCheck } from "@/lib/mailbox";
 import { mailboxConnection } from "@/lib/google-mailbox";
 import { scansMailbox } from "@/lib/gmail";
 
 export const dynamic = "force-dynamic";
 
-type Scan = { id: string; received_at: string; from_email: string | null; subject: string | null; vin: string | null; storage_path: string; file_name: string | null; job_id: string | null; kind: string | null; status: string; job: { job_number: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null } | null } | null };
+type Scan = { id: string; received_at: string; from_email: string | null; subject: string | null; vin: string | null; storage_path: string; file_name: string | null; job_id: string | null; kind: string | null; status: string; source_url: string | null; report_id: string | null; car_hint: string | null; job: { job_number: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null } | null } | null };
 
 /** Scan reports that arrived by email: the unmatched ones to attach by hand, and the recent matched ones. */
 export default async function ScansPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
@@ -27,15 +27,27 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
   const { data: otherRows } = role === "owner" ? await createAdminClient().from("inbound_emails").select("id, received_at, from_email, subject, text_body").eq("is_active", true).order("received_at", { ascending: false }).limit(30) : { data: [] as { id: string; received_at: string; from_email: string | null; subject: string | null; text_body: string | null }[] };
   const otherEmails = (otherRows ?? []) as { id: string; received_at: string; from_email: string | null; subject: string | null; text_body: string | null }[];
   const [{ data: rows }, { data: jobs }] = await Promise.all([
-    admin.from("inbound_scans").select("id, received_at, from_email, subject, vin, storage_path, file_name, job_id, kind, status, job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).order("received_at", { ascending: false }).limit(200),
-    admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).order("gated_in_at", { ascending: false }),
+    admin.from("inbound_scans").select("id, received_at, from_email, subject, vin, storage_path, file_name, job_id, kind, status, source_url, report_id, car_hint, job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).order("received_at", { ascending: false }).limit(200),
+    admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name))").eq("is_open", true).order("gated_in_at", { ascending: false }),
   ]);
   const scans = (rows ?? []) as unknown as Scan[];
   const { data: signed } = scans.length ? await admin.storage.from(SCANS_BUCKET).createSignedUrls(scans.map((s) => s.storage_path), 3600) : { data: [] };
   const urls = new Map((signed ?? []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]));
   const unmatched = scans.filter((s) => s.status === "unmatched");
   const rest = scans.filter((s) => s.status !== "unmatched");
-  const openJobs = ((jobs ?? []) as unknown as { id: string; job_number: string; vehicle: Scan["job"] extends infer J ? (J extends { vehicle: infer V } ? V : never) : never }[]).map((j) => ({ id: j.id, label: `${j.vehicle ? formatPlate(j.vehicle) : j.job_number} · ${j.job_number}${j.vehicle?.vin ? ` · ${j.vehicle.vin}` : ""}` }));
+  type OpenJobRow = { id: string; job_number: string; vehicle: ({ has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; kind?: string | null; model_year: number | null; make: { name: string } | null }) | null };
+  const openJobRows = (jobs ?? []) as unknown as OpenJobRow[];
+  const openJobs = openJobRows.map((j) => ({ id: j.id, label: `${j.vehicle ? formatPlate(j.vehicle) : j.job_number} · ${j.job_number}${j.vehicle?.vin ? ` · ${j.vehicle.vin}` : ""}` }));
+  // "2011 Porsche" from the subject: the open cars of that make (and year when it matches) as one-tap suggestions.
+  const suggestionsFor = (hint: string | null) => {
+    if (!hint) return [];
+    const m = /^(\d{4})\s+(.+)$/.exec(hint.trim());
+    const year = m ? Number(m[1]) : null;
+    const make = (m ? m[2] : hint).trim().toLowerCase();
+    const byMake = openJobRows.filter((j) => (j.vehicle?.make?.name ?? "").toLowerCase().includes(make));
+    const exact = year ? byMake.filter((j) => j.vehicle?.model_year === year) : byMake;
+    return (exact.length ? exact : byMake).slice(0, 3).map((j) => ({ id: j.id, label: `${j.vehicle ? formatPlate(j.vehicle) : j.job_number} · ${j.job_number}` }));
+  };
   const lastCheck = (settings.scans_mailbox_last_check ?? null) as MailboxCheck | null;
   const mailbox = scansMailbox();
   const configured = mailboxConfigured();
@@ -50,8 +62,19 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
         <Badge tone={s.status === "unmatched" ? "amber" : s.status === "ignored" ? "neutral" : "green"}>{s.status === "unmatched" ? "No matching car" : s.status === "ignored" ? "Ignored" : s.status === "attached" ? "Attached by hand" : "Matched by VIN"}</Badge>
         <span className="text-xs text-muted">{formatDateTime(s.received_at)}{s.from_email ? ` · from ${s.from_email}` : ""}</span>
       </div>
-      <span className="text-xs text-muted">{s.subject || "No subject"}{s.vin ? ` · VIN ${s.vin}` : " · no VIN found"}</span>
+      <span className="text-xs text-muted">{s.subject || "No subject"}{s.vin ? ` · VIN ${s.vin}` : " · no VIN found"}{s.report_id ? ` · Report ${s.report_id}` : ""}{s.source_url ? " · fetched from the Autel link" : ""}</span>
       {s.job ? <Link href={`/jobs/${s.job_id}`} className="text-sm font-semibold underline underline-offset-4">{s.job.vehicle ? formatPlate(s.job.vehicle) : ""} · {s.job.job_number}</Link> : null}
+      {s.status === "unmatched" && canAttach && suggestionsFor(s.car_hint).length ? (
+        <div className="flex flex-wrap items-center gap-2" data-scan-suggestions>
+          <span className="text-xs font-semibold text-muted">Looks like {s.car_hint}:</span>
+          {suggestionsFor(s.car_hint).map((sg) => (
+            <form key={sg.id} action={attachScan.bind(null, s.id)}>
+              <input type="hidden" name="job_id" value={sg.id} />
+              <Button type="submit" tone="secondary" size="md" data-suggest-attach>Attach to {sg.label}</Button>
+            </form>
+          ))}
+        </div>
+      ) : null}
       {s.status === "unmatched" && canAttach ? (
         <div className="flex flex-wrap items-end gap-2">
           <form action={attachScan.bind(null, s.id)} className="flex flex-wrap items-end gap-2">
@@ -104,7 +127,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
             <ul className="divide-y divide-line">
               {otherEmails.map((m) => (
                 <li key={m.id} className="py-2 flex flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-semibold">{m.subject ?? "(no subject)"}</span><span className="text-xs text-muted">{m.from_email ?? ""} · {formatDateTime(m.received_at)}</span><form action={dismissInboundEmail.bind(null, m.id)} className="ml-auto"><Button type="submit" tone="ghost" size="md">Put away</Button></form></div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-semibold">{m.subject ?? "(no subject)"}</span><span className="text-xs text-muted">{m.from_email ?? ""} · {formatDateTime(m.received_at)}</span><span className="ml-auto inline-flex gap-2">{ownerHere ? <form action={reprocessEmail.bind(null, m.id)}><Button type="submit" tone="secondary" size="md" data-reprocess-email>Treat as a scan report</Button></form> : null}<form action={dismissInboundEmail.bind(null, m.id)}><Button type="submit" tone="ghost" size="md">Put away</Button></form></span></div>
                   {m.text_body ? <pre className="whitespace-pre-wrap rounded-control bg-chip p-3 text-xs font-sans">{m.text_body.slice(0, 4000)}</pre> : null}
                 </li>
               ))}
