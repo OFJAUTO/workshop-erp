@@ -276,6 +276,12 @@ export async function issueCreditNote(invoiceId: string, formData: FormData) {
   const { data: cn, error } = await admin.from("invoices").insert({ number, kind: "credit_note", job_id: bundle.invoice.job_id, customer_id: bundle.invoice.customer_id, vehicle_id: bundle.invoice.vehicle_id, credit_of: invoiceId, token: newToken(), subtotal_aed: round2(amount), discount_aed: 0, taxable_aed: round2(amount), vat_aed: vat, total_aed: round2(amount + vat), prepared_by: staff.id, issued_by: staff.id, approved_by: staff.id, notes: `Credit against ${bundle.invoice.number}: ${description}`, customer_snapshot: bundle.invoice.customer_snapshot, vehicle_snapshot: bundle.invoice.vehicle_snapshot, created_by: staff.id, updated_by: staff.id }).select("id").single();
   if (error || !cn) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not issue the credit note.")}`);
   await admin.from("invoice_lines").insert({ invoice_id: cn.id, position: 0, section: "services", description, quantity: 1, unit_price: round2(amount), amount_aed: round2(amount), vat_aed: vat, total_aed: round2(amount + vat), created_by: staff.id, updated_by: staff.id });
+  // A credit note on a job that carries a commission: the owner is flagged (a clawback may apply).
+  if (bundle.invoice.job_id) {
+    const { data: comm } = await admin.from("quotations").select("id, number, commission_to, commission_aed, commission_status").eq("job_id", bundle.invoice.job_id).eq("is_active", true).not("commission_to", "is", null).gt("commission_aed", 0).limit(5);
+    const hot = (comm ?? []).find((c) => c.commission_status !== "declined");
+    if (hot) await notifyRoles(["owner"], { type: "commission_approval", title: `Credit note on a job with a commission · ${hot.number}`, body: `${hot.commission_to} has AED ${Number(hot.commission_aed).toLocaleString("en-GB")} commission on this job and a credit note was just issued. Check it on the Commissions page.`, jobId: bundle.invoice.job_id, href: "/commissions" });
+  }
   if (bundle.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle.invoice.job_id, event_type: "credit_note", note: `${number} issued by ${staff.display_name} against ${bundle.invoice.number}: AED ${round2(amount + vat).toLocaleString("en-GB", { minimumFractionDigits: 2 })} with VAT (${description})`, created_by: staff.id });
   refresh(bundle.invoice.job_id, invoiceId);
   redirect(`/invoices/${cn.id}?message=${encodeURIComponent(`${number} issued.`)}`);

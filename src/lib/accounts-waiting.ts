@@ -1,5 +1,6 @@
 import "server-only";
 import { depositsWaiting } from "./deposits";
+import { payableCommissions } from "./commissions";
 import { PAYMENT_SELECT, toPayment } from "./invoice-data";
 import { round2 } from "./money";
 import type { ExtraWaiting } from "@/components/WaitingPanel";
@@ -92,6 +93,14 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     if (!po?.is_active || seenPo.has(l.po_id as string)) continue;
     seenPo.add(l.po_id as string);
     out.push({ jobId: `chk:${l.po_id}`, plate: po.number, car: po.supplier_name, what: "Invoice price differs from the LPO", amount: null, actionLabel: "Check", href: `/parts/orders/${l.po_id}`, always: true, urgency: "amber", hint: "Accept the new price or dispute it, line by line, on the LPO page." });
+  }
+
+  // 4b. Commissions approved by the owner whose customer invoice is settled: payable today.
+  {
+    const payable = await payableCommissions();
+    for (const c of payable) {
+      out.push({ jobId: `comm:${c.quotationId}`, plate: c.plate, car: c.recipient, what: `Commission to pay (${c.quotation})`, amount: aed(c.amount), actionLabel: "Open Commissions", href: "/commissions", always: true, urgency: "amber", since: c.decidedAt ?? c.setAt, hint: `Approved by the owner; ${c.customerPaidWhy}. Mark it paid on the Commissions page.` });
+    }
   }
 
   // 5. Recovery: claimed trips to approve, and a month ready to pay.
