@@ -229,6 +229,7 @@ const DEFAULTS = {
   deposit_percent: 50,
   /** What the customer gets for a deposit: "receipt" (the usual) or "tax_invoice" (a tax invoice for the advance as well). */
   deposit_document: "receipt" as "receipt" | "tax_invoice",
+  whatsapp_deposit_request_template: "Dear [name],\n\nTo order the parts for your *[make model]* ([plate]), we kindly ask for an advance payment of *AED [amount]* against quotation [quotation].\n\nYou can pay by card, transfer or cash at the workshop.\n\nOFJ Automotive",
   whatsapp_deposit_receipt_template: "Dear [name],\n\nThank you for your deposit of *AED [amount]* for the *[make model]* ([plate]).\n\nYour receipt is here:\n[link]\n\nOFJ Automotive",
   quote_validity_days: 7,
   quote_owner_approval_above_aed: 0,

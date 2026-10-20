@@ -526,15 +526,18 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
     const { data: lastEvent } = missing.length && opts.skipParts ? await admin.from("quotation_events").select("event_type").eq("quotation_id", q.id).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
     if (missing.length && opts.skipParts && lastEvent?.event_type !== "parts_left_off") await logQuoteEvent(q.id, q.job_id, staff.id, "parts_left_off", `${q.number} v${q.version} completed by ${staff.display_name} without ${missing.length} priced part${missing.length === 1 ? "" : "s"}: ${missing.map((m) => m.description).join(", ")}`);
   }
-  // No deposit asked for while the parts are above the Settings threshold: asked once (Add deposit / Send without a deposit, logged).
+  // No deposit asked for while the parts are above the Settings threshold, or the note to the customer
+  // mentions an advance or deposit without one set: asked once (Add deposit / Send without, logged).
   if (q.kind === "quotation") {
     const threshold = Number(settings.deposit_threshold_aed) || 0;
     const partsSell = quoteTotals(bundle.lines, q).partsSell;
     const noDeposit = !q.deposit_mode || q.deposit_mode === "none" || !(Number(q.deposit_aed) > 0);
-    if (threshold > 0 && partsSell > threshold && noDeposit && !q.deposit_skipped_at) {
-      if (!opts.skipDeposit) return { ask: "deposit", message: `No deposit on this quote. Parts come to AED ${partsSell.toLocaleString("en-GB")}. Send without a deposit?` };
+    const noteMentions = /\b(advance|deposit)\b/i.test(`${q.customer_note ?? ""} ${q.customer_request_note ?? ""}`);
+    const bigParts = threshold > 0 && partsSell > threshold;
+    if ((bigParts || noteMentions) && noDeposit && !q.deposit_skipped_at) {
+      if (!opts.skipDeposit) return { ask: "deposit", message: noteMentions && !bigParts ? "Your note to the customer mentions an advance or deposit, but none is set on this quote. Did you mean to ask for a deposit?" : `Big parts order (AED ${partsSell.toLocaleString("en-GB")}) and no deposit on this quote. Ask for a deposit?` };
       await admin.from("quotations").update({ deposit_skipped_at: new Date().toISOString(), deposit_skipped_by: staff.id, updated_by: staff.id }).eq("id", q.id);
-      await logQuoteEvent(q.id, q.job_id, staff.id, "deposit_skipped", `${q.number} v${q.version}: completed without a deposit by ${staff.display_name} (parts AED ${partsSell.toLocaleString("en-GB")})`);
+      await logQuoteEvent(q.id, q.job_id, staff.id, "deposit_skipped", `${q.number} v${q.version}: completed without a deposit by ${staff.display_name}${bigParts ? ` (parts AED ${partsSell.toLocaleString("en-GB")})` : " (the note mentioned an advance)"}`);
     }
   }
   const workLines = active.filter((l) => l.line_type !== "part" && !l.fee_kind);

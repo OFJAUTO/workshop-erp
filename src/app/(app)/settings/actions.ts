@@ -106,6 +106,7 @@ const TEXT_KEYS = [
   "whatsapp_quote_template",
   "whatsapp_quote_revised_template",
   "whatsapp_invoice_template",
+  "whatsapp_deposit_request_template",
   "whatsapp_deposit_receipt_template",
   "supplier_lpo_from_email",
   "supplier_lpo_email_text",

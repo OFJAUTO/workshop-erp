@@ -25,7 +25,7 @@ export type NextStepInput = {
   /** The quotation's plain-word state, when the job is at or past the quote. */
   quote?: QuoteState | null;
   /** Later stages: parts, work, QC, wash, invoice, delivery. */
-  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; invoiceKind?: "proforma" | "tax_invoice" | "credit_note" | null; invoiceSent?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null; planningOn?: "parts" | "workshop" | "advisor" | null; workFinishedAt?: string | null; washSentAt?: string | null; technicianNames?: string[]; /** The live parts picture (partsLiveOf): with it, the parts step is said from the rows, never a stored flag. */ parts?: { hasParts: boolean; toOrder: number; missing: number; late: number; readyDate: string | null; pendingLpo: boolean } | null } | null;
+  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; invoiceKind?: "proforma" | "tax_invoice" | "credit_note" | null; invoiceSent?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null; planningOn?: "parts" | "workshop" | "advisor" | null; workFinishedAt?: string | null; washSentAt?: string | null; technicianNames?: string[]; /** The live parts picture (partsLiveOf): with it, the parts step is said from the rows, never a stored flag. */ parts?: { hasParts: boolean; toOrder: number; missing: number; late: number; readyDate: string | null; pendingLpo: boolean } | null; /** The advance payment step: asked on the approved quotation, short while unpaid, stamped when the advisor sends the request. */ deposit?: { required: number; received: number; short: boolean; requestedAt: string | null } | null } | null;
 };
 
 export type NextStep = {
@@ -99,6 +99,14 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
   const x = j.extra ?? {};
   if (j.status === "approved" || j.status === "waiting_parts") {
     const since = j.stage_entered_at;
+    // The advance payment comes before the parts: the advisor sends the request, accounts record the
+    // money, and Parts wait (the owner can still approve the LPO with the override).
+    const dep = x.deposit ?? null;
+    if (dep && dep.short) {
+      const owed = `AED ${Math.max(0, dep.required - dep.received).toLocaleString("en-GB")}`;
+      if (!dep.requestedAt) return { done: { label: "Quotation approved by the customer", by: null }, next: `Send the customer the deposit request (${owed}).`, waitingOn: advisor, actorRole: "service_advisor", action: { label: "Send deposit request", href: `/jobs/${jobId}#deposit` }, since, line: `Advance payment, ${advisor} to send the request` };
+      return { done: { label: "Deposit request sent", by: j.advisorName }, next: `Deposit of ${owed} to receive. Accounts record it; Parts wait for it (the owner can approve the LPO without it).`, waitingOn: "accounts", actorRole: "accounts", action: { label: "Record the deposit", href: `/jobs/${jobId}/invoice` }, since: dep.requestedAt, line: "Waiting for the deposit" };
+    }
     const p = x.parts ?? null;
     const release: NextStep = { done: { label: p?.hasParts ? "Every part is here" : "Quotation approved by the customer", by: null }, next: `${j.managerLabel} picks the start day and the technicians, then releases the work.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Release work", href: `/jobs/${jobId}#planning` }, since, line: `Planning, waiting on ${j.managerLabel} to release the work` };
     const on = x.planningOn ?? (p ? (p.pendingLpo || p.toOrder > 0 || p.missing > 0 ? "parts" : "workshop") : "parts");

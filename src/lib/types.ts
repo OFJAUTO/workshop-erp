@@ -180,6 +180,9 @@ export function shortPlate(v: Pick<PlateFields, "plate_code" | "plate_number">) 
    --------------------------------------------------------------------------- */
 
 export type JobRow = {
+  /** The advisor sent the advance-payment request (section 3, 20 October 2026). */
+  deposit_requested_at?: string | null;
+  deposit_requested_by?: string | null;
   id: string;
   job_number: string;
   vehicle_id: string;

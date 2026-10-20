@@ -17,7 +17,10 @@ export function SendLinkDialog({
   children,
   pdf = null,
   note = null,
+  above = null,
 }: {
+  /** Extra controls shown above the message while keeping it (for example an optional payment-link box). */
+  above?: ReactNode;
   /** The document as a PDF: "Share PDF" hands the file to the share sheet (or downloads it on a PC). */
   pdf?: { href: string; fileName: string; jobId?: string | null; kind?: string } | null;
   /** A warning shown above the message (for example Pay now could not be switched on). */
@@ -68,6 +71,7 @@ export function SendLinkDialog({
         ) : message ? (
           <>
             {note ? <p className="text-sm font-semibold text-amber" data-pay-note>{note}</p> : null}
+            {above}
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Message to the customer</p>
             <textarea readOnly value={message} rows={6} className="w-full rounded-control border border-line bg-canvas p-3 text-sm" onFocus={(e) => e.currentTarget.select()} />
             {phoneDigits ? (

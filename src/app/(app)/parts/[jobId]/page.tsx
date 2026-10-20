@@ -28,6 +28,7 @@ import { emailSupplierLpo, markSupplierOrdered, receiveTicked, sendLpoForApprova
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
+import { depositState, depositShortText } from "@/lib/deposits";
 import { PartsTable, type TableRow } from "./PartsTable";
 
 export const dynamic = "force-dynamic";
@@ -133,6 +134,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   // The five steps across the top (one rule with the parts desk and the job card), and the parts still to receive.
   const stepParts = parts.map((p) => stepPartOf({ ...p, received_qty: Number(rawById.get(p.id)?.received_qty) || 0, issue_status: String(rawById.get(p.id)?.issue_status ?? "") || null, po_id: (rawById.get(p.id)?.po_id as string | null) ?? null, return_status: String(rawById.get(p.id)?.return_status ?? "none") }));
   const steps = partsSteps({ jobStatus: job.status, pricingDoneAt: job.parts_pricing_done_at, pricingReopenedAt: job.parts_pricing_reopened_at, parts: stepParts.map((sp, i) => ({ ...sp, from_stock: sp.from_stock || lpos.fromStock.some((f) => f.id === parts[i].id) })), mainLpoStatus: lpos.main?.status ?? null, toOrder: lpos.toOrder.length });
+  const dep = await depositState(jobId);
   const toReceive = parts.filter((p) => ["ordered", "partly_received"].includes(String(p.order_status)));
   const receivedParts = parts.filter((p) => String(p.order_status) === "received");
 
@@ -160,6 +162,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!job.is_open ? <Notice tone="info">This job is closed.</Notice> : null}
+      {dep.short ? <div data-deposit-wait><Notice tone="info">Waiting for the deposit: {depositShortText(dep)} Accounts record it; the owner can approve the LPO without it.</Notice></div> : null}
       <PartsSteps steps={steps} hrefs={{ pricing: "#pricing", approval: "#lpo", lpo: "#lpos", received: "#received", handover: `/parts/handover/${jobId}` }} />
 
       {hasApproved ? (

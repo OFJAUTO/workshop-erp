@@ -663,6 +663,9 @@ export function SettingsForm({
             <Field label="WhatsApp tax invoice message" hint="Sent with the tax invoice link once the proforma is paid. Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_invoice_template" defaultValue={v.whatsapp_invoice_template} rows={3} required />
             </Field>
+            <Field label="WhatsApp: deposit request" hint="The advisor sends it when a deposit is asked for. [name], [make model], [plate], [amount], [quotation]; a pasted payment link is added underneath.">
+              <Textarea name="whatsapp_deposit_request_template" defaultValue={v.whatsapp_deposit_request_template} rows={3} required />
+            </Field>
             <Field label="WhatsApp: deposit receipt" hint="[name], [make model], [plate], [amount], [link].">
               <Textarea name="whatsapp_deposit_receipt_template" defaultValue={v.whatsapp_deposit_receipt_template} rows={3} required />
             </Field>

@@ -44,6 +44,8 @@ import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
 import { shortFor } from "@/lib/short-links";
 import { greetingNameOf } from "@/lib/messages";
+import { depositState } from "@/lib/deposits";
+import { DepositRequestSend } from "./DepositRequestSend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
@@ -216,6 +218,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   const stageIndex = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"].indexOf(job.stage);
   const advisorName = card.gatedInBy ?? null;
+  // The advance payment is a real step between Approval and Parts when the quotation asks a deposit.
+  const dep = await depositState(id);
+  const hasDeposit = dep.required > 0;
   const step = nextStepOf(id, {
     status: job.status,
     is_open: job.is_open,
@@ -232,7 +237,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     gateInComplete: check.complete,
     loose,
     quote: qState,
-    extra: { parts: partsState.live, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, invoiceKind: bal?.invoice?.kind ?? null, invoiceSent: !!job.invoice_sent_at, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
+    extra: { deposit: hasDeposit ? { required: dep.required, received: dep.received, short: dep.short, requestedAt: job.deposit_requested_at ?? null } : null, parts: partsState.live, workDone: work?.lines.filter((l) => l.status === "done").length ?? 0, workTotal: work?.lines.length ?? 0, qcRound: job.qc_round, readyToInvoice: !!job.ready_to_invoice_at, invoiced: !!bal?.invoice, invoiceKind: bal?.invoice?.kind ?? null, invoiceSent: !!job.invoice_sent_at, balanceDue: bal?.balance ?? 0, readySent: !!job.ready_sent_at, deliveryAddress: (gateOut as unknown as { delivery_address?: string | null } | null)?.delivery_address ?? null, planningOn: plan?.waitingOn ?? null, workFinishedAt: job.work_done_at, washSentAt: job.wash_sent_at, technicianNames: plan?.technicians.filter((t) => !t.left_at).map((t) => t.display_name) ?? [] },
   });
   const canQuote = (role === "owner" || role === "service_advisor") && job.is_open && !staff.viewingAs;
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
@@ -265,10 +270,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // tile used bg-green-soft/50, which reads as white (why the earlier fix looked like coloured text only).
   const trackStages = (loose ? STAGE_ORDER.filter((s) => !LOOSE_SKIP_STAGES.includes(s as Stage)) : STAGE_ORDER) as Stage[];
   const quoteApproved = latestQuote ? latestQuote.status === "approved" : null;
+  const trackWithAdvance = hasDeposit ? trackStages.flatMap((st) => (st === "approval" ? [st, "advance" as const] : [st])) : trackStages;
   const stageDone = (s: string, i: number): boolean => {
     if (!job.is_open) return true;
-    const positional = i < trackStages.indexOf(job.stage as Stage);
+    const positional = i < trackWithAdvance.indexOf(job.stage as Stage);
     switch (s) {
+      case "advance": return !dep.short;
       case "inspection": return inspection ? inspection.inspection.status === "approved" : positional;
       case "quote":
       case "approval": return quoteApproved ?? positional;
@@ -279,7 +286,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       default: return positional;
     }
   };
-  const barStates = stageStates(trackStages, (s, i) => stageDone(s, i));
+  const barStates = stageStates(trackWithAdvance as string[], (s, i) => stageDone(s, i)) as Record<string, StageBoxState>;
   const approvalBox: StageBoxState = !job.is_open || job.first_approval_at ? "done" : "current";
   const inspBox = barStates.inspection ?? "done";
   const quoteBox = barStates.quote ?? "done";
@@ -396,7 +403,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {docAlerts.map((a) => <Badge key={a.key} tone={a.tone === "muted" ? "neutral" : a.tone}>{a.text}</Badge>)}
               </div>
             ) : null}
-            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} states={barStates} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
+            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} states={barStates} extra={hasDeposit ? [{ after: "approval" as Stage, key: "advance", label: "Advance payment", state: barStates.advance ?? "later" }] : []} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
@@ -544,6 +551,33 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               </form>
             ) : null}
           </div>
+        </Card>
+        ) : null}
+        {hasDeposit ? (
+        <Card id="deposit" className={tile(barStates.advance ?? "later")} data-stage-card="advance" data-state={barStates.advance ?? "later"}>
+          <span className={boxTitle(barStates.advance ?? "later")}>{tick(barStates.advance ?? "later")}Advance payment</span>
+          <span className="text-sm font-semibold">
+            {dep.short ? `AED ${Math.max(0, dep.required - dep.received).toLocaleString("en-GB")} to receive` : "Received in full"}
+            {` · asked AED ${dep.required.toLocaleString("en-GB")} on ${dep.quotationNumbers.join(", ")}`}
+            {dep.received > 0 ? ` · AED ${dep.received.toLocaleString("en-GB")} received` : ""}
+          </span>
+          {job.deposit_requested_at ? <span className="text-xs text-muted">Request sent {formatDayTime(job.deposit_requested_at)}</span> : null}
+          {dep.short ? <span className="text-xs text-muted">Recorded by accounts or the owner only. Parts wait for it; the owner can approve the LPO without it.</span> : null}
+          {dep.short && canQuote && customer ? (
+            <div className="mt-auto">
+              <DepositRequestSend
+                jobId={id}
+                message={String(settings.whatsapp_deposit_request_template ?? "")
+                  .replaceAll("[name]", greetName)
+                  .replaceAll("[make model]", vehicleTitle(vehicle))
+                  .replaceAll("[plate]", formatPlate(vehicle))
+                  .replaceAll("[amount]", Math.max(0, dep.required - dep.received).toLocaleString("en-GB", { minimumFractionDigits: 2 }))
+                  .replaceAll("[quotation]", dep.quotationNumbers.join(", "))}
+                phoneDigits={(customer.phone ?? "").replace(/[^\d]/g, "")}
+                requestedAt={job.deposit_requested_at ?? null}
+              />
+            </div>
+          ) : null}
         </Card>
         ) : null}
         <Card className={tile(partsBox)} data-stage-card="parts" data-state={partsBox}>
