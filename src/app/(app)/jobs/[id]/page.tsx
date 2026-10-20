@@ -1,4 +1,7 @@
 import { VinCopy } from "@/components/VinCopy";
+import { AFTERCARE_POINTS, aftercareOf } from "@/lib/aftercare";
+import { AftercareMessage, AftercareSignoff } from "./AftercareCard";
+import { signOffAftercare } from "../aftercare-actions";
 import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from "@/lib/stage-style";
 import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
@@ -104,6 +107,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
   const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
   const laterStage = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
+  const aftercare = await aftercareOf(id);
   const [partsState, work, qc, wash, bal, plan, { data: comebackRows }] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null), laterStage ? loadPlanning(job, settings) : Promise.resolve(null), admin.from("jobs").select("id, job_number, comeback_cause, comeback_free, gated_in_at").or(`comeback_of.eq.${id},id.eq.${job.comeback_of ?? id}`).neq("id", id)]);
   const comebackOriginal = job.comeback_of ? ((comebackRows ?? []).find((r) => r.id === job.comeback_of) ?? null) : null;
   const comebacksOfThis = (comebackRows ?? []).filter((r) => r.id !== job.comeback_of);
@@ -342,6 +346,20 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       />
 
       {message ? <Notice tone="success">{message}</Notice> : null}
+      {aftercare ? (
+        <Card className={`flex flex-col gap-2 ${aftercare.overdue ? "border-red-bar border-2" : aftercare.done_at ? "!border-green !bg-green-soft" : ""}`} data-aftercare-card>
+          <div className="flex flex-wrap items-center gap-2">
+            <SectionLabel>10-day after-care check</SectionLabel>
+            {aftercare.done_at ? <Badge tone="green">Done ✓ {formatDate(aftercare.done_at)}</Badge> : aftercare.overdue ? <Badge tone="red" data-aftercare-overdue>10-day check not done</Badge> : <Badge tone="neutral">Due {formatDate(aftercare.due_date)}</Badge>}
+          </div>
+          {!aftercare.done_at && (role === "owner" || role === "service_advisor") ? (
+            <AftercareMessage template={String(settings.whatsapp_aftercare_template ?? "")} date={formatDate(aftercare.due_date)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} />
+          ) : null}
+          {!aftercare.done_at && (role === "owner" || role === "workshop_manager" || role === "team_leader") && !staff.viewingAs ? (
+            <AftercareSignoff action={signOffAftercare.bind(null, id)} points={[...AFTERCARE_POINTS]} />
+          ) : null}
+        </Card>
+      ) : null}
       {job.department === "bodyshop" ? (
         <Card className="flex flex-wrap items-center gap-3 border-ink" data-bodyshop-link>
           <SectionLabel>Bodyshop</SectionLabel>

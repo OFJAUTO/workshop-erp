@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { recalcTripKm } from "@/lib/delivery";
+import { aftercareHourly } from "@/lib/aftercare";
 import { notifyLowStock } from "@/lib/stock";
 import { bodyshopHourly } from "@/lib/bodyshop";
 import { GATE_IN_BUCKET } from "@/lib/media";
@@ -383,6 +384,13 @@ export async function GET(request: NextRequest) {
     }
     report.kmRecalc = (noKm ?? []).length;
     report.kmFound = found;
+  }
+
+  // 23. The 10-day after-care checks: the day-8 reminder with the message ready, and one "not done" notice.
+  {
+    const a = await aftercareHourly();
+    report.aftercareReminded = a.reminded;
+    report.aftercareOverdue = a.overdue;
   }
 
   // 20. A car still "On the way" three hours after loading (or leaving): the advisor is reminded once; he can press

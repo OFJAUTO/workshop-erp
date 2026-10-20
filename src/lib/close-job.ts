@@ -1,6 +1,7 @@
 import "server-only";
 import { consumablesShare, jobFilmCost } from "./film";
 import { bodyshopLabourCost } from "./bodyshop";
+import { ensureAftercare } from "./aftercare";
 import { dubaiDate } from "./jobs";
 import { recordOwnerReport } from "./owner-report";
 import { getSettings } from "./settings";
@@ -9,6 +10,7 @@ import { createAdminClient } from "./supabase/admin";
 /** Closes a job at gate-out or delivery: the stamp, the history line, the follow-up date, the owner's report. */
 export async function closeJob(jobId: string, by: string | null, byName: string, how: string) {
   try { await updatePackageCostHistory(jobId); } catch { /* the history never blocks a close */ }
+  try { await ensureAftercare(jobId, by); } catch { /* the check never blocks a close */ }
   const admin = createAdminClient();
   const settings = await getSettings();
   const followDays = Number(settings.followup_days) || 3;
