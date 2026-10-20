@@ -34,12 +34,24 @@ async function uploadOne(jobId: string, kind: string, refId: string | null, file
  * photos per line, the wash, the delivery, a supplier invoice scan, the QC post-scan. Uploads straight to storage
  * with progress; a failure is logged with the device and shown with Retry, and the button always comes back.
  */
-export function JobFileUpload({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, compact = false }: { jobId: string; kind: string; refId?: string | null; files: JobFile[]; accept?: "photo" | "pdf" | "any"; label?: string; disabled?: boolean; onAdded?: (f: JobFile) => void; compact?: boolean }) {
+export function JobFileUpload({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, onRemoved, removable = false, compact = false }: { jobId: string; kind: string; refId?: string | null; files: JobFile[]; accept?: "photo" | "pdf" | "any"; label?: string; disabled?: boolean; onAdded?: (f: JobFile) => void; /** The X on each thumbnail: marks the file removed on the server, then tells the holder. */ onRemoved?: (f: JobFile) => void; removable?: boolean; compact?: boolean }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState<File[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function removeOne(f: JobFile) {
+    setError(null);
+    try {
+      const res = await fetch("/api/files/remove", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: f.id }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+      const r = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !r.ok) throw new Error(r.error ?? "Could not remove the file.");
+      onRemoved?.(f);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove the file.");
+    }
+  }
   const isPdf = (f: JobFile) => f.contentType === "application/pdf" || !!f.caption?.toLowerCase().endsWith(".pdf");
   const slides = files.filter((f) => !isPdf(f) && f.url).map((f) => ({ key: f.id, url: f.url as string, label: f.caption ?? "Photo", kind: (f.contentType ?? "").startsWith("video/") ? ("video" as const) : ("image" as const) }));
   const acceptAttr = accept === "pdf" ? "application/pdf,image/*" : "image/*,video/*,application/pdf";
@@ -74,18 +86,23 @@ export function JobFileUpload({ jobId, kind, refId = null, files, accept = "phot
     <div className="flex flex-col gap-2" data-job-file-upload>
       {files.length ? (
         <div className="flex flex-wrap gap-2">
-          {files.map((f) =>
-            isPdf(f) ? (
-              <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-3 text-sm font-semibold">PDF · {f.caption ?? "file"}</a>
-            ) : (
-              <button key={f.id} type="button" onClick={() => setOpen(slides.findIndex((s) => s.key === f.id))} className={`${compact ? "h-16 w-16" : "h-24 w-24"} overflow-hidden rounded-control bg-chip cursor-zoom-in`} aria-label="Enlarge">
-                {(f.contentType ?? "").startsWith("video/") ? <video src={f.url ?? undefined} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={f.url ?? ""} alt="Photo" className="h-full w-full object-cover" />
-                )}
-              </button>
-            ),
-          )}
+          {files.map((f) => (
+            <span key={f.id} className="relative inline-flex" data-invoice-file={f.id}>
+              {isPdf(f) ? (
+                <a href={f.url ?? "#"} target="_blank" rel="noreferrer" className={`inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-3 text-sm font-semibold ${removable ? "pr-9" : ""}`}>PDF · {f.caption ?? "file"}</a>
+              ) : (
+                <button type="button" onClick={() => setOpen(slides.findIndex((s) => s.key === f.id))} className={`${compact ? "h-16 w-16" : "h-24 w-24"} overflow-hidden rounded-control bg-chip cursor-zoom-in`} aria-label="Enlarge">
+                  {(f.contentType ?? "").startsWith("video/") ? <video src={f.url ?? undefined} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={f.url ?? ""} alt="Photo" className="h-full w-full object-cover" />
+                  )}
+                </button>
+              )}
+              {removable && !disabled ? (
+                <button type="button" onClick={() => void removeOne(f)} aria-label="Remove this file" data-remove-file={f.id} className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-ink/80 text-sm font-bold text-white">×</button>
+              ) : null}
+            </span>
+          ))}
         </div>
       ) : null}
       {!disabled ? (

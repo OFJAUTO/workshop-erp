@@ -393,6 +393,22 @@ export async function GET(request: NextRequest) {
     report.aftercareOverdue = a.overdue;
   }
 
+  // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the
+  // number and the date are entered. Accounts see the same LPOs on their Waiting list all along.
+  {
+    let told = 0;
+    const dayAgo = new Date(Date.now() - 20 * 3600000).toISOString();
+    const { data: missing } = await admin.from("purchase_orders").select("id, number, supplier_name, job_id, received_at, invoice_reminder_at").eq("supplier_invoice_status", "to_follow").eq("is_active", true).neq("status", "cancelled");
+    for (const po of missing ?? []) {
+      if (po.invoice_reminder_at && String(po.invoice_reminder_at) > dayAgo) continue;
+      const days = po.received_at ? Math.max(0, Math.floor((Date.now() - Date.parse(po.received_at as string)) / 86400000)) : 0;
+      await notifyRoles(["parts"], { type: "supplier_invoice_missing", title: `Invoice missing · ${po.number}`, body: `${po.supplier_name}: no invoice ${days ? `${days} day${days === 1 ? "" : "s"} after the delivery` : "yet"}. Chase it and enter the number and the date.`, jobId: (po.job_id as string | null) ?? null, href: `/parts/orders/${po.id}` });
+      await admin.from("purchase_orders").update({ invoice_reminder_at: new Date().toISOString() }).eq("id", po.id);
+      told++;
+    }
+    report.invoiceMissingReminders = told;
+  }
+
   // 20. A car still "On the way" three hours after loading (or leaving): the advisor is reminded once; he can press
   // "Mark delivered" and the driver's price follows on the Recovery page.
   {

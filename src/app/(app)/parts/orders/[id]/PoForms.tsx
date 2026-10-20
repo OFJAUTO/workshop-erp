@@ -12,7 +12,7 @@ type Line = { id: string; description: string; part_number: string | null; quant
 export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoice = false }: { lines: Line[]; action: (formData: FormData) => void; jobId?: string | null; poId?: string | null; /** The supplier invoice is asked for with the delivery. */ askInvoice?: boolean }) {
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [invoiceMode, setInvoiceMode] = useState<"later" | "now" | "follow">("later");
-  const [scan, setScan] = useState<JobFile | null>(null);
+  const [scans, setScans] = useState<JobFile[]>([]);
   return (
     <form action={action} className="flex flex-col gap-3" data-receive-form>
       <ul className="divide-y divide-line">
@@ -52,15 +52,16 @@ export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoi
           {invoiceMode === "follow" ? <input type="hidden" name="to_follow" value="on" /> : null}
           {invoiceMode === "now" ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier invoice number</span><Input name="invoice_number" required /></label>
+                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date on the invoice</span><Input name="invoice_date" type="date" required data-invoice-date /></label>
                 <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Invoice total before VAT (optional)</span><Input name="amount" inputMode="decimal" /></label>
               </div>
               {jobId ? (
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-muted">Scan of the invoice (required)</span>
-                  <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId ?? undefined} files={scan ? [scan] : []} accept="pdf" label="Photo or PDF of the invoice" onAdded={(f) => setScan(f)} />
-                  <input type="hidden" name="scan_path" value={scan?.path ?? ""} />
+                  <span className="text-xs font-semibold text-muted">Scan of the invoice (can follow, but the supplier cannot be paid without it)</span>
+                  <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId ?? undefined} files={scans} accept="pdf" label="Photo or PDF of the invoice" onAdded={(f) => setScans((xs) => [...xs, f])} onRemoved={(f) => setScans((xs) => xs.filter((x) => x.id !== f.id))} removable />
+                  <input type="hidden" name="scan_path" value={scans[0]?.path ?? ""} />
                 </div>
               ) : null}
               <details className="text-sm">
@@ -83,10 +84,10 @@ export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoi
   );
 }
 
-/** The supplier invoice: number plus a scan (phone camera or PC upload), or "Invoice to follow". Prices per line correct the job cost when they differ. */
+/** The supplier invoice: number and date compulsory, scans optional for now (needed before the supplier is paid), or "Invoice to follow". Prices per line correct the job cost when they differ. */
 export function SupplierInvoiceForm({ jobId, poId, lines, action }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void }) {
   const [toFollow, setToFollow] = useState(false);
-  const [scan, setScan] = useState<JobFile | null>(null);
+  const [scans, setScans] = useState<JobFile[]>([]);
   return (
     <form action={action} className="flex flex-col gap-3">
       <label className="flex items-center gap-2 text-sm font-semibold">
@@ -95,15 +96,16 @@ export function SupplierInvoiceForm({ jobId, poId, lines, action }: { jobId: str
       </label>
       {!toFollow ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier invoice number</span><Input name="invoice_number" required={!toFollow} /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date on the invoice</span><Input name="invoice_date" type="date" required={!toFollow} data-invoice-date /></label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Invoice total before VAT (optional)</span><Input name="amount" inputMode="decimal" /></label>
           </div>
           {jobId ? (
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">Scan of the invoice (required)</span>
-              <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId} files={scan ? [scan] : []} accept="pdf" label="Photo or PDF of the invoice" onAdded={(f) => setScan(f)} />
-              <input type="hidden" name="scan_path" value={scan?.path ?? ""} />
+              <span className="text-xs font-semibold text-muted">Scan of the invoice (can follow, but the supplier cannot be paid without it)</span>
+              <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId} files={scans} accept="pdf" label="Photo or PDF of the invoice" onAdded={(f) => setScans((xs) => [...xs, f])} onRemoved={(f) => setScans((xs) => xs.filter((x) => x.id !== f.id))} removable />
+              <input type="hidden" name="scan_path" value={scans[0]?.path ?? ""} />
             </div>
           ) : null}
           <details className="text-sm">

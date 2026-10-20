@@ -83,7 +83,7 @@ export async function loadWork(jobId: string): Promise<WorkBundle> {
     admin.from("work_lines").select(WORK_LINE_SELECT).eq("job_id", jobId).eq("is_active", true).order("position"),
     admin.from("work_sessions").select(WORK_SESSION_SELECT).eq("job_id", jobId).eq("is_active", true).order("started_at"),
     admin.from("additional_work").select(ADDITIONAL_SELECT).eq("job_id", jobId).eq("is_active", true).order("created_at"),
-    admin.from("job_files").select(JOB_FILE_SELECT).eq("job_id", jobId).in("kind", ["work_photo", "additional_work"]).order("taken_at"),
+    admin.from("job_files").select(JOB_FILE_SELECT).eq("job_id", jobId).in("kind", ["work_photo", "additional_work"]).is("removed_at", null).order("taken_at"),
   ]);
   const ls = ((lines ?? []) as Record<string, unknown>[]).map((l) => ({ ...(l as unknown as WorkLineRow), position: Number(l.position), hours_quoted: l.hours_quoted === null ? null : Number(l.hours_quoted) }));
   const ss = (sessions ?? []) as WorkSessionRow[];

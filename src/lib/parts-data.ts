@@ -48,6 +48,11 @@ export type PurchaseOrderRow = {
   supplier_invoice_amount: number | null;
   supplier_invoice_at: string | null;
   supplier_invoice_by: string | null;
+  /** The date printed on the supplier's invoice (compulsory with the number). */
+  supplier_invoice_date: string | null;
+  supplier_paid_at: string | null;
+  supplier_paid_by: string | null;
+  supplier_paid_reference: string | null;
   /** "main": the one LPO per job with every supplier, approved by the owner or accounts; "supplier": one supplier's parts, made from the main one (LPO-00012-1, -2...). */
   kind?: "main" | "supplier" | "stock";
   parent_id?: string | null;
@@ -77,7 +82,7 @@ export type PoLineRow = {
   stock_item_id: string | null;
 };
 
-export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status, notes, total_cost_aed, approved_by, approved_at, deposit_override_by, deposit_override_reason, ordered_at, ordered_by, received_at, supplier_invoice_status, supplier_invoice_number, supplier_invoice_path, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_by, verify_token, superseded_by, sent_at, sent_by, sent_method, created_at, created_by, kind, parent_id, sub_number, emailed_at, emailed_to, order_type, fixed_asset";
+export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status, notes, total_cost_aed, approved_by, approved_at, deposit_override_by, deposit_override_reason, ordered_at, ordered_by, received_at, supplier_invoice_status, supplier_invoice_number, supplier_invoice_path, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_by, supplier_invoice_date, supplier_paid_at, supplier_paid_by, supplier_paid_reference, verify_token, superseded_by, sent_at, sent_by, sent_method, created_at, created_by, kind, parent_id, sub_number, emailed_at, emailed_to, order_type, fixed_asset";
 export const PO_LINE_SELECT = "id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, list_price, discount_percent, expected_date, received_qty, received_at, flag, flag_note, invoice_unit_cost, invoice_check, stock_item_id";
 /** The part columns the Parts desk needs after approval, on top of the quotation ones. */
 export const PART_FULL_SELECT = PART_SELECT + ", stickers_printed, po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed, tech_received_qty, not_received_at, exchange_status, exchange_reason, exchange_note, exchange_at, replacement_part_id, replaced_part_id, not_needed_at, not_needed_by, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, credit_note_path, goodwill_cost_aed, ready_for_handover_at, ready_for_handover_by";

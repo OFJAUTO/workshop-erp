@@ -222,11 +222,10 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   redirect(`/parts/labels/${po.job_id}?auto=1&back=${encodeURIComponent(`${back}?message=${encodeURIComponent(doneMessage)}`)}`);
 }
 
-/** The supplier invoice: number and scan (compulsory), or "invoice to follow". A different price corrects the job cost. */
 /**
- * The supplier invoice against an LPO: number and scan (a stock order needs no scan), or "invoice to follow". A line
- * whose invoice price differs from the order by more than AED 1 is flagged for Accept new price or Dispute; the
- * job's cost follows the invoice price meanwhile.
+ * The supplier invoice against an LPO: number and date compulsory, or "invoice to follow". The scan can be added
+ * later, but the LPO cannot be marked paid without it. A line whose invoice price differs from the order by more
+ * than AED 1 is flagged for Accept new price or Dispute; the job's cost follows the invoice price meanwhile.
  */
 async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], formData: FormData, staff: { id: string; display_name: string }): Promise<{ error?: string; message?: string }> {
   const admin = createAdminClient();
@@ -239,8 +238,9 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice to follow (${staff.display_name})`, created_by: staff.id });
     return { message: "Noted: invoice to follow. It sits in the pending list and the job's profit stays provisional." };
   }
+  const invoiceDate = blankToNull(formData.get("invoice_date"));
   if (!number) return { error: "Enter the supplier invoice number, or tick Invoice to follow." };
-  if (!path && po.job_id) return { error: "Attach the scan of the supplier invoice (phone camera or PC upload)." };
+  if (!invoiceDate || !/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) return { error: "Enter the date printed on the supplier invoice." };
   const diffs: string[] = [];
   let mismatches = 0;
   const now = new Date().toISOString();
@@ -257,7 +257,7 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     }
     if (mismatch) mismatches++;
   }
-  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_path: path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...(mismatches ? {} : { supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id }), updated_by: staff.id }).eq("id", po.id);
+  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...(mismatches ? {} : { supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id }), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
   return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };
@@ -300,6 +300,37 @@ export async function decideInvoiceCheck(lineId: string, formData: FormData) {
   if (decision === "dispute") await notifyRoles(["owner", "parts"], { type: "supplier_invoice_mismatch", title: `Invoice price disputed · ${po?.number ?? ""}`, body: `${l.description}: LPO ${l.unit_cost.toFixed(2)}, invoice ${l.invoice_unit_cost?.toFixed(2) ?? "?"}. ${staff.display_name} disputes it: chase ${po?.supplier_name ?? "the supplier"} for a credit note.`, jobId: po?.job_id ?? null, href: back });
   refresh(po?.job_id ?? null, l.po_id);
   redirect(`${back}?message=${encodeURIComponent(decision === "accept" ? "New price accepted: the job cost follows the invoice." : "Disputed: the owner and Parts are told; the LPO price stands on the job until the supplier answers.")}`);
+}
+
+/**
+ * "Paid to supplier" on an LPO (the owner or accounts). Refused unless the supplier invoice is on file in
+ * full: the number, the date printed on it, and at least one scan or photo. That is the whole point of the
+ * invoice gate: no payment without the paper.
+ */
+export async function markSupplierPaid(poId: string, formData: FormData) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const role = staff.role_id as RoleId;
+  const back = `/parts/orders/${poId}`;
+  if (!(role === "owner" || role === "accounts") || staff.viewingAs) redirect(`${back}?error=${encodeURIComponent("Only the owner or accounts mark a supplier paid.")}`);
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", poId).maybeSingle();
+  if (!raw) redirect("/parts/orders");
+  const po = toPo(raw as Record<string, unknown>);
+  if (po.supplier_paid_at) redirect(`${back}?message=${encodeURIComponent("Already marked paid.")}`);
+  if (po.kind === "main") redirect(`${back}?error=${encodeURIComponent("Pay the supplier LPOs one by one, not the main LPO.")}`);
+  const missing: string[] = [];
+  if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number) missing.push("the invoice number");
+  if (!po.supplier_invoice_date) missing.push("the invoice date");
+  const { data: files } = po.job_id ? await admin.from("job_files").select("id").eq("kind", "supplier_invoice").eq("ref_id", poId).is("removed_at", null).limit(1) : { data: null };
+  const hasFile = (files ?? []).length > 0 || !!po.supplier_invoice_path;
+  if (!hasFile && po.job_id) missing.push("the scan or photo of the invoice");
+  if (missing.length) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: enter ${missing.join(", ")} first. No payment without the full invoice on file.`)}`);
+  const reference = blankToNull(formData.get("reference"));
+  const now = new Date().toISOString();
+  await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: staff.id, supplier_paid_reference: reference ? reference.slice(0, 120) : null, updated_by: staff.id }).eq("id", poId);
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: paid to ${po.supplier_name}${reference ? ` (${reference})` : ""} by ${staff.display_name}`, created_by: staff.id });
+  refresh(po.job_id, poId);
+  redirect(`${back}?message=${encodeURIComponent(`${po.number} marked paid to ${po.supplier_name}.`)}`);
 }
 
 /**

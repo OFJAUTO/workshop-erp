@@ -162,7 +162,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                     {c ? <span className="text-sm text-muted">{c.plate} · {c.car} · {c.job}</span> : p.kind === "stock" ? <span className="text-sm text-muted">for the shelf</span> : null}
                     <Badge tone={tone(p)}>{PO_STATUS_LABELS[p.status]}</Badge>
                     {late && p.status !== "cancelled" ? <Badge tone="red">{late} line{late === 1 ? "" : "s"} late</Badge> : null}
-                    {p.supplier_invoice_status === "to_follow" ? <Badge tone={invoiceAge >= redDays ? "red" : "amber"}>Invoice to follow · {invoiceAge} day{invoiceAge === 1 ? "" : "s"}</Badge> : null}
+                    {p.supplier_invoice_status === "to_follow" ? <Badge tone={invoiceAge >= redDays ? "red" : "amber"}>Invoice missing · {invoiceAge} day{invoiceAge === 1 ? "" : "s"}</Badge> : null}
                     {mismatch ? <Badge tone="red">{mismatch} price{mismatch === 1 ? "" : "s"} to check</Badge> : null}
                     {p.emailed_at ? <Badge tone="green">Emailed</Badge> : p.sent_at ? <Badge tone="green">Sent</Badge> : null}
                     <span className="ml-auto text-sm font-semibold">AED {p.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { approvedQuotations } from "@/lib/quote-data";
 import { notFound } from "next/navigation";
-import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
@@ -15,7 +15,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
-import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck } from "../../order-actions";
+import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid } from "../../order-actions";
+import { InvoiceFiles } from "./InvoiceFiles";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "../../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard } from "../../SupplierLpoCard";
@@ -52,7 +53,16 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const depositShort = depositRequired > 0 && depositReceived + 0.005 < depositRequired ? `Deposit AED ${depositRequired.toLocaleString("en-GB")} not received yet${depositReceived > 0 ? ` (AED ${depositReceived.toLocaleString("en-GB")} received so far)` : ""}. Quotation ${q?.number}.` : null;
   const canApprove = can(role, "approvePurchaseOrders") && (role === "owner" || staff.is_head_accountant) && !staff.viewingAs;
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
+  const canPay = (role === "owner" || role === "accounts") && !staff.viewingAs;
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;
+  // Every file of the supplier invoice (several pages photographed one by one are fine), removed ones left out.
+  const { data: invFileRows } = !isMain && po.job_id ? await admin.from("job_files").select("id, storage_path, content_type, caption").eq("job_id", po.job_id).eq("kind", "supplier_invoice").eq("ref_id", po.id).is("removed_at", null).order("created_at") : { data: [] };
+  const invUrls = await signJobFiles(((invFileRows ?? []) as { storage_path: string }[]).map((r) => r.storage_path));
+  const invoiceFiles = ((invFileRows ?? []) as { id: string; storage_path: string; content_type: string | null; caption: string | null }[]).map((r) => ({ id: r.id, path: r.storage_path, url: invUrls[r.storage_path] ?? null, caption: r.caption, contentType: r.content_type }));
+  const payMissing: string[] = [];
+  if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number) payMissing.push("the invoice number");
+  if (!po.supplier_invoice_date) payMissing.push("the invoice date");
+  if (!invoiceFiles.length && !po.supplier_invoice_path && po.job_id) payMissing.push("the scan or photo");
   const today = todayIso();
   const typeOf = (partId: string) => { const p = bundle.parts.find((x) => x.id === partId); return p ? partTypeText(p) : null; };
   const formLines = lines.map((l) => ({ id: l.id, description: l.description, part_number: l.part_number, quantity: l.quantity, received_qty: l.received_qty, unit_cost: l.unit_cost, flag: l.flag, invoice_check: l.invoice_check }));
@@ -82,7 +92,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <span>{v ? `${formatPlate(v)} · ${[v.make?.name, v.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {job?.job_number}</span>
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
-            {po.supplier_invoice_status === "to_follow" ? <Badge tone="red">Supplier invoice to follow</Badge> : null}
+            {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
+            {po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
           </span>
         }
         actions={
@@ -191,8 +202,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             </Card>
           ) : null}
           {!isMain && po.status === "received" && canManage && po.supplier_invoice_status !== "received" ? (
-            <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "border-red-bar" : ""}`}>
-              <SectionLabel>Supplier invoice</SectionLabel>
+            <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>
+              <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · missing" : ""}</SectionLabel>
+              {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>Invoice missing: chase {po.supplier_name} and enter the number and the date. Accounts see it on their list, and Parts get one reminder a day.</p> : null}
               <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} />
             </Card>
           ) : null}
@@ -209,12 +221,33 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 { label: "Ordered", value: po.ordered_at ? `${formatDateTime(po.ordered_at)} by ${po.ordered_by ? (names.get(po.ordered_by) ?? "") : ""}` : null },
                 { label: "Sent to supplier", value: po.sent_at ? `${formatDateTime(po.sent_at)} by ${po.sent_by ? (names.get(po.sent_by) ?? "") : ""}${po.sent_method ? ` (${po.sent_method})` : ""}` : null },
                 { label: "Received", value: po.received_at ? formatDateTime(po.received_at) : null },
-                { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_amount ? ` · AED ${po.supplier_invoice_amount.toFixed(2)}` : ""} · ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "To follow" : null },
+                { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_date ? ` dated ${formatDate(po.supplier_invoice_date)}` : ""}${po.supplier_invoice_amount ? ` · AED ${po.supplier_invoice_amount.toFixed(2)}` : ""} · entered ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "Missing (to follow)" : null },
+                { label: "Paid to supplier", value: po.supplier_paid_at ? `${formatDateTime(po.supplier_paid_at)} by ${po.supplier_paid_by ? (names.get(po.supplier_paid_by) ?? "") : ""}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}` : null },
                 ...(po.parent_id ? [{ label: "Main LPO", value: <Link href={`/parts/orders/${po.parent_id}`} className="underline underline-offset-4 font-semibold">{po.number.replace(/-\d+$/, "")}</Link> }] : []),
                 ...(scanUrl ? [{ label: "Scan", value: <a href={scanUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4 font-semibold">Open the supplier invoice</a> }] : []),
               ]}
             />
           </Card>
+          {!isMain && po.job_id && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
+            <Card className="flex flex-col gap-3" data-supplier-pay>
+              <SectionLabel>Invoice files &amp; payment</SectionLabel>
+              <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canManage || canPay} />
+              {po.supplier_paid_at ? (
+                <p className="text-sm font-semibold" data-paid-line>Paid to {po.supplier_name} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}</p>
+              ) : canPay ? (
+                payMissing.length ? (
+                  <p className="text-sm font-semibold text-amber-bar" data-pay-blocked>Cannot be marked paid yet: {payMissing.join(", ")} first. No payment without the full invoice on file.</p>
+                ) : (
+                  <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-wrap items-end gap-2" data-pay-form>
+                    <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
+                    <Button type="submit" size="md" data-mark-supplier-paid>Paid to supplier</Button>
+                  </form>
+                )
+              ) : (
+                <p className="text-xs text-muted">Accounts mark it paid once the number, the date and the scan are on file.</p>
+              )}
+            </Card>
+          ) : null}
           {(po.status === "received" || po.status === "partly_received") && po.job_id ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>Next for the workshop</SectionLabel>

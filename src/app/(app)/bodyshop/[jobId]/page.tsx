@@ -64,7 +64,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
     admin.from("quotations").select("id, number, status, total_aed, sent_at, responded_at").eq("job_id", jobId).eq("is_active", true).eq("kind", "quotation").order("created_at", { ascending: false }),
     approvedQuotations(jobId),
     admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("kind", "proforma").eq("is_active", true).not("deposit_for_quotation_id", "is", null).order("issued_at", { ascending: false }),
-    admin.from("job_files").select(JOB_FILE_SELECT).eq("job_id", jobId).in("kind", ["bodyshop_photo", "work_photo", "wash_photo", "gate_out_photo"]).order("taken_at"),
+    admin.from("job_files").select(JOB_FILE_SELECT).eq("job_id", jobId).in("kind", ["bodyshop_photo", "work_photo", "wash_photo", "gate_out_photo"]).is("removed_at", null).order("taken_at"),
   ]);
   const quotes = (quoteRows ?? []) as { id: string; number: string; status: string; total_aed: number | string | null; sent_at: string | null; responded_at: string | null }[];
   const latestQuote = quotes[0] ?? null;
