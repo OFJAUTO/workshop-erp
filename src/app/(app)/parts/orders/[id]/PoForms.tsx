@@ -3,16 +3,31 @@
 import { ReasonChips } from "@/components/ReasonChips";
 
 import { useState } from "react";
-import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
+import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
 import { Button, Input, Select, Textarea } from "@/components/ui";
 
 type Line = { id: string; description: string; part_number: string | null; quantity: number; received_qty: number; unit_cost: number; flag: string | null; invoice_check?: string | null };
 
-/** Receiving: a quantity per line, partial allowed, wrong or damaged flagged for return. */
-export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoice = false }: { lines: Line[]; action: (formData: FormData) => void; jobId?: string | null; poId?: string | null; /** The supplier invoice is asked for with the delivery. */ askInvoice?: boolean }) {
+/** The per-line invoice prices (a difference over AED 1 is flagged for Accept / Dispute). */
+function LinePrices({ lines, word }: { lines: Line[]; word: string }) {
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer min-h-11 flex items-center font-semibold text-muted">Prices on the invoice, if different from the {word} (more than AED 1 off is flagged)</summary>
+      <ul className="mt-2 divide-y divide-line">
+        {lines.map((l) => (
+          <li key={l.id} className="py-2 flex flex-wrap items-center gap-3">
+            <span className="flex-1 min-w-48 font-semibold">{l.description} <span className="text-muted font-normal">· {word} {l.unit_cost.toFixed(2)} each</span></span>
+            <Input name={`price__${l.id}`} inputMode="decimal" placeholder="invoice price each" className="w-40" data-invoice-price={l.id} />
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** Receiving: a quantity per line, partial allowed, wrong or damaged flagged for return; the ONE supplier-invoice box underneath. */
+export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoice = false, poTotal = null }: { lines: Line[]; action: (formData: FormData) => void; jobId?: string | null; poId?: string | null; /** The supplier invoice is asked for with the delivery. */ askInvoice?: boolean; poTotal?: number | null }) {
   const [flags, setFlags] = useState<Record<string, string>>({});
-  const [invoiceMode, setInvoiceMode] = useState<"later" | "now" | "follow">("later");
-  const [scans, setScans] = useState<JobFile[]>([]);
   return (
     <form action={action} className="flex flex-col gap-3" data-receive-form>
       <ul className="divide-y divide-line">
@@ -42,86 +57,23 @@ export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoi
         })}
       </ul>
       {askInvoice ? (
-        <div className="flex flex-col gap-2 rounded-control border border-line bg-canvas p-3" data-invoice-at-receipt>
-          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Supplier invoice</span>
-          <div className="grid grid-cols-3 gap-2">
-            {([["now", "Came with the delivery"], ["follow", "To follow"], ["later", "Enter it later"]] as const).map(([v, l]) => (
-              <button key={v} type="button" onClick={() => setInvoiceMode(v)} aria-pressed={invoiceMode === v} data-invoice-mode={v} className={`min-h-11 rounded-control border-2 px-2 text-sm font-bold ${invoiceMode === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{l}</button>
-            ))}
-          </div>
-          {invoiceMode === "follow" ? <input type="hidden" name="to_follow" value="on" /> : null}
-          {invoiceMode === "now" ? (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier invoice number</span><Input name="invoice_number" required /></label>
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date on the invoice</span><Input name="invoice_date" type="date" required data-invoice-date /></label>
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Invoice total before VAT (optional)</span><Input name="amount" inputMode="decimal" /></label>
-              </div>
-              {jobId ? (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-muted">Scan of the invoice (can follow, but the supplier cannot be paid without it)</span>
-                  <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId ?? undefined} files={scans} accept="pdf" label="Photo or PDF of the invoice" onAdded={(f) => setScans((xs) => [...xs, f])} onRemoved={(f) => setScans((xs) => xs.filter((x) => x.id !== f.id))} removable />
-                  <input type="hidden" name="scan_path" value={scans[0]?.path ?? ""} />
-                </div>
-              ) : null}
-              <details className="text-sm">
-                <summary className="cursor-pointer font-semibold text-muted">Prices on the invoice, if different from the order (more than AED 1 off is flagged)</summary>
-                <ul className="mt-2 divide-y divide-line">
-                  {lines.map((l) => (
-                    <li key={l.id} className="py-2 flex flex-wrap items-center gap-3">
-                      <span className="flex-1 min-w-48 font-semibold">{l.description} <span className="text-muted font-normal">· LPO {l.unit_cost.toFixed(2)} each</span></span>
-                      <Input name={`price__${l.id}`} inputMode="decimal" placeholder="invoice price each" className="w-40" data-invoice-price={l.id} />
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </>
-          ) : null}
-        </div>
+        <>
+          <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} />
+          <LinePrices lines={lines} word="LPO" />
+        </>
       ) : null}
       <div><Button type="submit" size="md" data-record-delivery>Record the delivery</Button></div>
     </form>
   );
 }
 
-/** The supplier invoice: number and date compulsory, scans optional for now (needed before the supplier is paid), or "Invoice to follow". Prices per line correct the job cost when they differ. */
-export function SupplierInvoiceForm({ jobId, poId, lines, action }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void }) {
-  const [toFollow, setToFollow] = useState(false);
-  const [scans, setScans] = useState<JobFile[]>([]);
+/** The supplier invoice entered on its own, after the delivery: the same ONE box. */
+export function SupplierInvoiceForm({ jobId, poId, lines, action, poTotal = null }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void; poTotal?: number | null }) {
   return (
     <form action={action} className="flex flex-col gap-3">
-      <label className="flex items-center gap-2 text-sm font-semibold">
-        <input type="checkbox" name="to_follow" checked={toFollow} onChange={(e) => setToFollow(e.target.checked)} className="h-5 w-5 accent-ink" />
-        Invoice to follow (no invoice from the supplier yet)
-      </label>
-      {!toFollow ? (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier invoice number</span><Input name="invoice_number" required={!toFollow} /></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date on the invoice</span><Input name="invoice_date" type="date" required={!toFollow} data-invoice-date /></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Invoice total before VAT (optional)</span><Input name="amount" inputMode="decimal" /></label>
-          </div>
-          {jobId ? (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">Scan of the invoice (can follow, but the supplier cannot be paid without it)</span>
-              <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId} files={scans} accept="pdf" label="Photo or PDF of the invoice" onAdded={(f) => setScans((xs) => [...xs, f])} onRemoved={(f) => setScans((xs) => xs.filter((x) => x.id !== f.id))} removable />
-              <input type="hidden" name="scan_path" value={scans[0]?.path ?? ""} />
-            </div>
-          ) : null}
-          <details className="text-sm">
-            <summary className="cursor-pointer font-semibold text-muted">Prices on the invoice, if different from the order</summary>
-            <ul className="mt-2 divide-y divide-line">
-              {lines.map((l) => (
-                <li key={l.id} className="py-2 flex flex-wrap items-center gap-3">
-                  <span className="flex-1 min-w-48 font-semibold">{l.description} <span className="text-muted font-normal">· PO {l.unit_cost.toFixed(2)} each</span></span>
-                  <Input name={`price__${l.id}`} inputMode="decimal" placeholder="invoice price each" className="w-40" />
-                </li>
-              ))}
-            </ul>
-          </details>
-        </>
-      ) : null}
-      <div><Button type="submit" size="md">{toFollow ? "Note: invoice to follow" : "Save the supplier invoice"}</Button></div>
+      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} />
+      <LinePrices lines={lines} word="PO" />
+      <div><Button type="submit" size="md" data-save-invoice>Save the supplier invoice</Button></div>
     </form>
   );
 }

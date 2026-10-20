@@ -207,7 +207,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         <Card id="received" className="flex flex-col gap-2" data-received-card>
           <SectionLabel right={steps.find((s) => s.key === "received")?.detail ?? undefined}>Parts received</SectionLabel>
           {toReceive.length ? <p className="text-xs text-muted">Tick what arrived, press Mark received, choose the stickers and type the supplier invoice. A wrong or damaged part: use the LPO page.</p> : null}
-          <ReceivePanel jobId={jobId} canAct={!!canOrder} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p) }))} received={receivedParts.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1 }))} />
+          <ReceivePanel jobId={jobId} canAct={!!canOrder} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p), poId: (rawById.get(p.id)?.po_id as string | null) ?? null }))} received={receivedParts.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1 }))} poTotals={Object.fromEntries(lpos.suppliers.map((s) => [s.po.id, s.po.total_cost_aed]))} />
         </Card>
       ) : null}
 

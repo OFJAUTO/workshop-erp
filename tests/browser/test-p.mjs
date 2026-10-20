@@ -109,9 +109,9 @@ await section("2 stock order", async () => {
   await afterSubmit(pp);
   check("2: Parts mark it ordered", (await sql("select status from public.purchase_orders where id = $1", [stockPoId]))[0]?.status === "ordered");
   await go(pp, `${base}/parts/orders/${stockPoId}`);
-  check("2: the delivery form asks for the supplier invoice at the same time", (await pp.locator("[data-invoice-at-receipt]").count()) === 1);
-  await pp.locator('[data-invoice-mode="now"]').click();
+  check("2: the delivery form asks for the supplier invoice at the same time (THE one box)", (await pp.locator("[data-receive-form] [data-supplier-invoice-box]").count()) === 1);
   await pp.locator('input[name="invoice_number"]').fill("SINV-E2E-1");
+  await pp.locator('input[name="invoice_date"]').fill("2026-10-20");
   await pp.locator("[data-receive-form] details summary").click();
   const lineId = (await sql("select id from public.purchase_order_lines where po_id = $1", [stockPoId]))[0]?.id;
   await pp.locator(`[data-invoice-price="${lineId}"]`).fill("12");

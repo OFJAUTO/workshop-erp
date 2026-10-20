@@ -198,14 +198,14 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Receive the delivery</SectionLabel>
-              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} jobId={po.job_id} poId={po.id} askInvoice={po.supplier_invoice_status !== "received"} />
+              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} jobId={po.job_id} poId={po.id} askInvoice={po.supplier_invoice_status !== "received"} poTotal={po.total_cost_aed} />
             </Card>
           ) : null}
           {!isMain && po.status === "received" && canManage && po.supplier_invoice_status !== "received" ? (
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>
               <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · missing" : ""}</SectionLabel>
               {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>Invoice missing: chase {po.supplier_name} and enter the number and the date. Accounts see it on their list, and Parts get one reminder a day.</p> : null}
-              <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} />
+              <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} />
             </Card>
           ) : null}
         </div>

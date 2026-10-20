@@ -13,6 +13,7 @@ import { loadPurchaseOrder } from "@/lib/parts-data";
 import { renderPoPdf } from "@/lib/pdf/invoice-pdf";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 
 function refresh(jobId: string | null, poId?: string | null) {
   revalidatePath("/parts");
@@ -127,30 +128,55 @@ export async function emailSupplierLpo(poId: string): Promise<{ error?: string; 
 
 /**
  * "Mark N received" with the stickers and the supplier invoice, all from the parts page: each ticked part is
- * received in full; the invoice number, date and amount land on the parts' supplier LPOs (empty means to follow).
+ * received in full. The supplier invoice goes through the ONE rulebook (src/lib/supplier-invoice.ts): number and
+ * date compulsory unless "Invoice to follow"; a nonsense number or a future date is refused; an amount more than
+ * 5% off the LPO total must be confirmed (checked when the ticked parts sit on one LPO). The checks run BEFORE
+ * anything is received, so a refusal never leaves half the work done.
  */
 export async function receiveTicked(jobId: string, formData: FormData): Promise<{ error?: string; ok?: boolean; message?: string }> {
   const staff = await requirePermission("managePurchaseOrders");
   if (staff.viewingAs) return { error: "Viewing only." };
   const ids = formData.getAll("part").map(String).filter(Boolean);
   if (!ids.length) return { error: "Tick at least one part." };
+  const admin = createAdminClient();
+  const { data: poRows } = await admin.from("part_items").select("po_id").in("id", ids).not("po_id", "is", null);
+  const poIds = Array.from(new Set((poRows ?? []).map((r) => r.po_id as string)));
+  const toFollow = formData.get("to_follow") === "on";
+  const num = blankToNull(formData.get("invoice_number"));
+  const date = blankToNull(formData.get("invoice_date"));
+  const amount = Number(String(formData.get("invoice_amount") ?? "").replace(/[^\d.]/g, "")) || null;
+  const clientKey = blankToNull(formData.get("client_key"));
+  const scanPath = blankToNull(formData.get("scan_path"));
+  // The invoice rules run first (only when a supplier LPO is involved; stray stock has no invoice to track).
+  if (poIds.length) {
+    const poTotal = poIds.length === 1 ? Number((await admin.from("purchase_orders").select("total_cost_aed").eq("id", poIds[0]).maybeSingle()).data?.total_cost_aed) || null : null;
+    const check = checkSupplierInvoice({ toFollow, number: num, date, amount, poTotal, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
+    if (!check.ok) return { error: check.error };
+  }
   for (const id of ids) {
     const r = await receivePartInFull(id, { id: staff.id, display_name: staff.display_name });
     if (r.error) return { error: r.error };
   }
-  const num = blankToNull(formData.get("invoice_number"));
-  const date = blankToNull(formData.get("invoice_date"));
-  const amount = Number(String(formData.get("invoice_amount") ?? "").replace(/[^\d.]/g, "")) || null;
-  if (num || date || amount) {
-    const admin = createAdminClient();
-    const { data: poRows } = await admin.from("part_items").select("po_id").in("id", ids).not("po_id", "is", null);
-    const poIds = Array.from(new Set((poRows ?? []).map((r) => r.po_id as string)));
-    for (const poId of poIds) {
-      await admin.from("purchase_orders").update({ supplier_invoice_number: num, supplier_invoice_date: date, supplier_invoice_amount: amount, supplier_invoice_status: "received", supplier_invoice_at: new Date().toISOString(), supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
+  let invoiceWord = "";
+  if (poIds.length) {
+    const now = new Date().toISOString();
+    if (toFollow) {
+      // Marked explicitly: the LPO shows amber "Invoice missing", accounts list it, Parts get a daily reminder.
+      for (const poId of poIds) {
+        await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId).neq("supplier_invoice_status", "received");
+      }
+      invoiceWord = " Invoice to follow: it sits on the missing list until the number and date are entered.";
+    } else {
+      for (const poId of poIds) {
+        await admin.from("purchase_orders").update({ supplier_invoice_number: num ? num.slice(0, 80) : null, supplier_invoice_date: date, supplier_invoice_amount: amount, ...(scanPath ? { supplier_invoice_path: scanPath } : {}), supplier_invoice_status: "received", supplier_invoice_at: now, supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
+      }
+      // Files uploaded before the save carry recv:<key>; they re-point to the (first) LPO so the scan shows on its page.
+      if (clientKey) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", `recv:${clientKey}`).is("removed_at", null);
+      invoiceWord = " Supplier invoice saved.";
     }
   }
   revalidatePath(`/parts/${jobId}`);
   revalidatePath("/parts");
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.` };
+  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${invoiceWord}` };
 }

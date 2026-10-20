@@ -1,37 +1,41 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Input } from "@/components/ui";
+import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
+import { Button } from "@/components/ui";
 
-export type ReceiveRow = { id: string; description: string; qty: number; supplier: string | null; state: string | null };
+export type ReceiveRow = { id: string; description: string; qty: number; supplier: string | null; state: string | null; poId: string | null };
 export type ReceivedRow = { id: string; description: string; qty: number };
 type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
 
+const newKey = () => `recvp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 /**
  * Receiving parts from the supplier, all on this page: a tick box per line, Select all, "Mark N received",
- * then one panel with a sticker switch per part (one sticker per unit), the supplier invoice number, date and
- * amount, and "Print stickers" / "No stickers". Received lines stay underneath, collapsed and light green.
+ * then one panel with a sticker switch per part (one sticker per unit), THE supplier-invoice box
+ * (SupplierInvoiceBox: number + date compulsory or "Invoice to follow", amount cross-checked, photos with X),
+ * and "Print stickers" / "No stickers". Received lines stay underneath, collapsed and light green.
  */
-export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action }) {
+export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals = {} }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action; /** LPO totals before VAT by po id, for the invoice-amount cross-check. */ poTotals?: Record<string, number> }) {
   const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [panel, setPanel] = useState(false);
   const [noSticker, setNoSticker] = useState<Set<string>>(new Set());
-  const [invNumber, setInvNumber] = useState("");
-  const [invDate, setInvDate] = useState("");
-  const [invAmount, setInvAmount] = useState("");
+  const [clientKey, setClientKey] = useState(newKey);
   const [msg, setMsg] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [pending, start] = useTransition();
   const ticked = rows.filter((r) => !unticked.has(r.id));
+  // The amount cross-check works when every ticked part sits on the SAME LPO; a mixed tick skips it.
+  const tickedPoIds = Array.from(new Set(ticked.map((r) => r.poId)));
+  const singlePoId = tickedPoIds.length === 1 && tickedPoIds[0] ? tickedPoIds[0] : null;
+  const poTotal = singlePoId ? (poTotals[singlePoId] ?? null) : null;
   const toggle = (id: string) => setUnticked((u) => { const n = new Set(u); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const submit = (print: boolean) => start(async () => {
     setMsg(null);
-    const fd = new FormData();
+    const fd = formRef.current ? new FormData(formRef.current) : new FormData();
     for (const r of ticked) fd.append("part", r.id);
-    fd.set("invoice_number", invNumber);
-    fd.set("invoice_date", invDate);
-    fd.set("invoice_amount", invAmount);
     const stickerIds = ticked.filter((r) => !noSticker.has(r.id)).map((r) => r.id);
     const r = await action(fd);
     if (r.error) { setMsg({ tone: "error", text: r.error }); return; }
@@ -40,11 +44,11 @@ export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId:
     setPanel(false);
     setUnticked(new Set());
     setNoSticker(new Set());
-    setInvNumber(""); setInvDate(""); setInvAmount("");
+    setClientKey(newKey());
     router.refresh();
   });
   return (
-    <div className="flex flex-col gap-3" data-receive-panel>
+    <form ref={formRef} onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-3" data-receive-panel>
       {rows.length ? (
         <>
           <ul className="flex flex-col gap-1 text-sm">
@@ -88,11 +92,8 @@ export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId:
                   );
                 })}
               </ul>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier invoice number</span><Input value={invNumber} onChange={(e) => setInvNumber(e.target.value)} placeholder="Or leave empty: to follow" data-invoice-number /></label>
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Invoice date</span><Input type="date" value={invDate} onChange={(e) => setInvDate(e.target.value)} data-invoice-date /></label>
-                <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Invoice amount (AED)</span><Input value={invAmount} onChange={(e) => setInvAmount(e.target.value)} inputMode="decimal" data-invoice-amount /></label>
-              </div>
+              <input type="hidden" name="client_key" value={clientKey} />
+              <SupplierInvoiceBox jobId={jobId} poId={singlePoId} poTotal={poTotal} clientKey={clientKey} />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="lg" disabled={pending} onClick={() => submit(true)} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
                 <Button type="button" tone="secondary" size="lg" disabled={pending} onClick={() => submit(false)} data-no-stickers>No stickers</Button>
@@ -117,6 +118,6 @@ export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId:
           </ul>
         </details>
       ) : null}
-    </div>
+    </form>
   );
 }

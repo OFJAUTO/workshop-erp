@@ -15,6 +15,7 @@ import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 import { ensureWorkLines } from "@/lib/work-data";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -180,6 +181,12 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   const po = toPo(raw as Record<string, unknown>);
   if (!["ordered", "partly_received"].includes(po.status)) redirect(`${back}?error=${encodeURIComponent("This order is not out for delivery.")}`);
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
+  // The invoice rules run BEFORE anything is received: number and date (checked by the one rulebook) or an
+  // explicit "Invoice to follow" — unless the invoice is already on file from an earlier delivery.
+  if (po.supplier_invoice_status !== "received") {
+    const check = checkSupplierInvoice({ toFollow: formData.get("to_follow") === "on", number: blankToNull(formData.get("invoice_number")), date: blankToNull(formData.get("invoice_date")), amount: Number(String(formData.get("invoice_amount") ?? "").replace(/[^\d.]/g, "")) || null, poTotal: Number(po.total_cost_aed) || null, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
+    if (!check.ok) redirect(`${back}?error=${encodeURIComponent(check.error)}`);
+  }
   let received = 0;
   const now = new Date().toISOString();
   for (const l of lines) {
@@ -234,15 +241,18 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   const toFollow = formData.get("to_follow") === "on";
   const number = blankToNull(formData.get("invoice_number"));
   const path = blankToNull(formData.get("scan_path"));
-  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
+  const amount = Number(String(formData.get("invoice_amount") ?? formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
   if (toFollow) {
     await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", po.id);
     if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice to follow (${staff.display_name})`, created_by: staff.id });
     return { message: "Noted: invoice to follow. It sits in the pending list and the job's profit stays provisional." };
   }
   const invoiceDate = blankToNull(formData.get("invoice_date"));
-  if (!number) return { error: "Enter the supplier invoice number, or tick Invoice to follow." };
-  if (!invoiceDate || !/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) return { error: "Enter the date printed on the supplier invoice." };
+  // The ONE rulebook (src/lib/supplier-invoice.ts): real-looking number, date not in the future,
+  // an amount more than 5% off the LPO total confirmed with a tick.
+  const check = checkSupplierInvoice({ toFollow: false, number, date: invoiceDate, amount: Number.isFinite(amount) && amount > 0 ? amount : null, poTotal: Number(po.total_cost_aed) || null, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
+  if (!check.ok) return { error: check.error };
+  if (!number || !invoiceDate) return { error: "Enter the supplier invoice number and date, or tick Invoice to follow." };
   const diffs: string[] = [];
   let mismatches = 0;
   const now = new Date().toISOString();
