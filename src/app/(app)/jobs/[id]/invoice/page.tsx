@@ -23,6 +23,10 @@ import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
 import { addPayNow, customerSaysPaid, issueInvoice, markReadyToInvoice, recordPayment, setPaymentLink, verifyPaymentAction } from "@/app/(app)/invoices/actions";
 import { ReadySendControl } from "../ReadySendControl";
 import { DepositReceiptSend } from "@/components/DepositReceiptSend";
+import { RecordDeposit } from "@/components/RecordDeposit";
+import { DepositRequestSend } from "../DepositRequestSend";
+import { depositState } from "@/lib/deposits";
+import { STAGE_BOX_CLASS, STAGE_BOX_TITLE, type StageBoxState } from "@/lib/stage-style";
 
 export const dynamic = "force-dynamic";
 
@@ -32,9 +36,11 @@ const m = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, m
 type LiveInvoice = MoneyInvoice & { id: string; total_aed: number; issued_at: string; issue_reason: string | null };
 
 /**
- * The money side of one job in four numbered steps: 1 PROFORMA SENT, 2 PAYMENT, 3 TAX INVOICE, 4 READY FOR GATE-OUT.
- * Only the current step has the black button; done steps are pale green with a tick, later steps grey. The invoice
- * is always a straight copy of the approved quotation: nothing to choose or type here.
+ * The money side of one job (rebuilt 21 October 2026, 1.3): a slim step bar (Deposit when asked ·
+ * Proforma · Payment · Tax invoice · Gate-out, the stage colours, explanations behind the tooltip), the
+ * money summary with the BALANCE DUE, one black "what to do now" action by stage and role, the payments
+ * and receipts with proof thumbnails, and the documents. The invoice stays a straight copy of the
+ * approved quotation. Only accounts and the owner record money; advisors see status and send links.
  */
 export default async function BuildInvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requirePermission("viewInvoices");
@@ -63,7 +69,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const depositRows = ((deposits ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
   const depositTotal = depositRows.reduce((a, p) => a + p.amount_aed, 0);
   // The deposit receipt goes to the customer with the quotation's own link token and the message from Settings.
-  const { data: approvedQ } = await createAdminClient().from("quotations").select("token").eq("job_id", id).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("version", { ascending: false }).limit(1).maybeSingle();
+  const { data: approvedQ } = await createAdminClient().from("quotations").select("number, token").eq("job_id", id).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("version", { ascending: false }).limit(1).maybeSingle();
+  const dep = await depositState(id);
   const quoteToken = approvedQ?.token ?? null;
   const depositMessage = (amount: number, link: string) =>
     String(settings.whatsapp_deposit_receipt_template ?? "")
@@ -117,30 +124,62 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const payNowOn = !!payLink && !payLink.paid_at && unpaid;
 
   const stateOf = (k: MoneyStepKey): "done" | "current" | "later" => (money.done.includes(k) ? "done" : money.current === k ? "current" : "later");
-  const stepClass = (s: "done" | "current" | "later") => (s === "done" ? "bg-green-soft/50 border-green" : s === "current" ? "bg-white ring-2 ring-ink border-ink" : "bg-canvas border-line opacity-80");
-  // Plain helpers that return markup (not components): the lint rule forbids components made during render.
-  const stepNumber = (n: number, s: "done" | "current" | "later") => (
-    <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-extrabold ${s === "done" ? "bg-green text-white" : s === "current" ? "bg-ink text-white" : "bg-chip text-muted"}`}>{s === "done" ? "✓" : n}</span>
-  );
   const chipTone = money.chip.tone === "ink" ? "ink" : money.chip.tone;
+  const gateReady = money.action === "gate_out";
 
-  const paymentLine = (p: PaymentRow) => {
+  // The slim step bar: Deposit (only when asked) → Proforma → Payment → Tax invoice → Gate-out, the
+  // stage colours, the old explanation sentences behind the tooltip. While a deposit is short and no
+  // proforma exists, the deposit is the one amber box and the rest wait.
+  const depRequested = dep.required > 0;
+  const depShort = depRequested && dep.short;
+  const demote = depShort && !live;
+  const barState = (k: MoneyStepKey): StageBoxState => (demote ? "later" : stateOf(k));
+  const barSteps: { key: string; label: string; state: StageBoxState; info: string }[] = [
+    ...(depRequested ? [{ key: "deposit", label: "Deposit", state: (!dep.short ? "done" : "current") as StageBoxState, info: `Asked on ${dep.quotationNumbers.join(", ")}: AED ${m(dep.required)}; AED ${m(dep.received)} received. Only accounts or the owner record it; Parts wait for it (the owner can approve the LPO without it).` }] : []),
+    { key: "proforma_sent", label: "Proforma", state: barState("proforma_sent"), info: "Prepared by itself when the car is Ready; the advisor sends it with the expected payment method. Money can be recorded before it is sent (a customer at the counter)." },
+    { key: "payment", label: "Payment", state: barState("payment"), info: "Only accounts or the owner record money. Card and transfer payments need their proof photo; more than the balance goes to the owner for approval." },
+    { key: "tax_invoice", label: "Tax invoice", state: barState("tax_invoice"), info: `Created by itself the moment the proforma is paid in full${nextTax ? ` (it will be ${nextTax})` : ""}. A tax invoice is never cancelled or deleted; corrections are by credit note, approved by the owner.` },
+    { key: "released", label: "Gate-out", state: barState("released"), info: "After full payment, or on the customer's credit terms. The advisor or accounts gate the car out." },
+  ];
+
+  const totalDue = live ? live.total_aed : draft.totals.total;
+  const paidSoFar = live ? (bal?.paid ?? 0) : depositTotal;
+  const balanceDue = live ? (bal?.balance ?? 0) : Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100);
+  const atMoneyStage = !!live || ["ready", "pending_payment", "in_delivery"].includes(job.status);
+  const balTone = balanceDue <= 0.005 && paidSoFar > 0 ? "text-green" : balanceDue > 0.005 && atMoneyStage ? "text-red" : "";
+  const outstandingDeposit = Math.max(0, Math.round((dep.required - dep.received) * 100) / 100);
+  const depositPanel = { jobId: id, plate: formatPlate(vehicle), car: vehicleTitle(vehicle), customer: customerName, quote: dep.quotationNumbers.join(", "), requested: dep.required, received: dep.received, outstanding: outstandingDeposit };
+  const depositRequestMessage = String(settings.whatsapp_deposit_request_template ?? "")
+    .replaceAll("[name]", greetingNameOf(customer))
+    .replaceAll("[make model]", vehicleTitle(vehicle))
+    .replaceAll("[plate]", formatPlate(vehicle))
+    .replaceAll("[amount]", outstandingDeposit.toLocaleString("en-GB", { minimumFractionDigits: 2 }))
+    .replaceAll("[quotation]", dep.quotationNumbers.join(", "));
+
+  const paymentLine = (p: PaymentRow, isDeposit: boolean) => {
     const by = p.received_by ? personOf.get(p.received_by) : null;
     const counter = !!by && by.role_id !== "owner" && by.role_id !== "accounts";
     const struck = p.status === "voided" || p.status === "reversed";
+    const needsBank = p.status === "recorded" && !p.verified_at && (counter || p.method === "cash");
     return (
-      <li key={p.id} className={`py-2 flex flex-wrap items-center gap-3 text-sm ${struck ? "text-muted line-through" : ""}`} data-payment-row={p.number}>
+      <li key={p.id} className={`py-2 flex flex-wrap items-center gap-3 text-sm ${struck ? "text-muted line-through" : ""}`} data-payment-row={p.number} {...(isDeposit ? { "data-deposit-row": p.number } : {})}>
         <span className="font-semibold">{p.number}</span>
         <span className="text-muted">{formatDayTime(p.received_at)}</span>
-        <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : struck ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""}</Badge>
+        <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : struck ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""}{isDeposit ? " · deposit" : ""}</Badge>
         {p.reference ? <span className="text-xs text-muted">{p.reference}</span> : null}
         <span className="text-xs text-muted">by {by?.display_name ?? "Network International"}</span>
         <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
-        {p.status === "recorded" && !p.verified_at && (counter || p.method === "cash") ? <Badge tone="amber">{p.method === "cash" ? "Cash: to confirm & bank" : "Recorded by advisor, to confirm"}</Badge> : null}
-        {p.status === "recorded" && !p.verified_at && (counter || p.method === "cash") && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-confirm-counter>Confirmed &amp; banked</Button></form> : null}
+        {needsBank ? <Badge tone="amber">{p.method === "cash" ? "Cash: to confirm & bank" : "Recorded by advisor, to confirm"}</Badge> : null}
+        {needsBank && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" {...(isDeposit ? { "data-confirm-deposit": "" } : { "data-confirm-counter": "" })}>Confirmed &amp; banked</Button></form> : null}
         {p.status === "pending_owner" ? <Badge tone="amber">Waiting for the owner</Badge> : null}
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
-        {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
+        {p.proof_path && proofUrls[p.proof_path] ? (
+          <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="inline-flex" data-proof-link aria-label={p.method === "card" ? "Card slip" : "Proof"}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={proofUrls[p.proof_path] ?? ""} alt={p.method === "card" ? "Card slip" : "Proof"} className="h-12 w-12 rounded-control object-cover border border-line" />
+          </a>
+        ) : null}
+        {isDeposit && p.status === "recorded" ? <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, depositShorts.get(p.id) ?? `${site}/api/pdf/receipt/${p.id}`)} phoneDigits={phoneDigits} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} /> : null}
       </li>
     );
   };
@@ -159,168 +198,152 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-3" data-money-steps>
-          {/* 1. PROFORMA SENT */}
-          {(() => {
-            const s = stateOf("proforma_sent");
-            return (
-              <Card className={`flex flex-col gap-3 ${stepClass(s)}`} data-step="proforma_sent" data-state={s}>
-                <div className="flex items-center gap-3">{stepNumber(1, s)}<span className="text-xs font-extrabold uppercase tracking-[0.08em]">Proforma sent</span>
-                  {proforma ? <span className="ml-auto text-sm font-semibold">{proforma.number}{proforma.sent_at ? ` · sent ${formatDayTime(proforma.sent_at)}` : " · not sent yet"}</span> : taxInvoice ? <span className="ml-auto text-sm font-semibold">Done</span> : null}
+          <Card className="flex flex-col gap-2" data-money-bar>
+            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${barSteps.length}, minmax(0, 1fr))` }}>
+              {barSteps.map((b) => (
+                <div key={b.key} data-step={b.key} data-state={b.state} title={b.info} className={`min-h-11 rounded-control px-1 py-1 flex items-center justify-center gap-1 text-center text-[11px] leading-tight ${STAGE_BOX_CLASS[b.state]} ${STAGE_BOX_TITLE[b.state]} ${b.state === "current" ? "font-bold" : "font-semibold"}`}>
+                  <span>{b.state === "done" ? "✓ " : ""}{b.label}</span>
+                  <span aria-hidden className="opacity-50">ⓘ</span>
                 </div>
-                {proforma?.expected_payment_method ? <p className="text-sm">Expected payment: <strong>{PAYMENT_METHOD_LABELS[proforma.expected_payment_method] ?? proforma.expected_payment_method}</strong>{bankCharges[proforma.expected_payment_method as keyof typeof bankCharges] ? ` (${bankCharges[proforma.expected_payment_method as keyof typeof bankCharges]}% bank charge, internal)` : ""}</p> : null}
-                {!live && money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && acting ? (
-                  <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full sm:w-auto">Prepare the proforma</Button></form>
-                ) : null}
-                {!live && money.action !== "prepare_proforma" && !taxInvoice ? <p className="text-sm text-muted">The proforma is prepared by itself when the car is Ready.</p> : null}
-                {proforma && canSend && unpaid ? (
+              ))}
+            </div>
+          </Card>
+
+          <Card className="flex flex-col gap-2" data-money-summary>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-money-figures>
+              <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(totalDue)}</span></div>
+              {depRequested ? (
+                <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(dep.received)}<span className="text-sm font-semibold text-muted"> of {m(dep.required)}</span></span></div>
+              ) : null}
+              <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(paidSoFar)}</span></div>
+              <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
+            </div>
+            {bal?.pendingAmount ? <p className="text-sm font-semibold text-amber">Cheque of AED {m(bal.pendingAmount)} pending clearance.</p> : null}
+            {live && !unpaid ? <p className="text-sm font-bold text-green">Paid in full{bal?.paidAt ? ` · ${formatDayTime(bal.paidAt)}` : ""}{taxInvoice && !taxInvoice.sent_at ? " · gate-out opens after the tax invoice is sent." : ""}</p> : null}
+            {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber">Tax invoice issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
+          </Card>
+
+          <Card className="flex flex-col gap-2 border-ink" data-what-now>
+            <SectionLabel>What to do now</SectionLabel>
+            {(() => {
+              if (!job.is_open) return <p className="text-sm text-muted">The car has left. Nothing to do here.</p>;
+              if (depShort && !live) {
+                return (
                   <div className="flex flex-col gap-2">
-                    <ReadySendControl jobId={id} size={s === "current" ? "lg" : "md"} token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} />
-                    {proforma.sent_at && !payNowOn && ngeniusConfigured() ? <form action={addPayNow.bind(null, proforma.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-add-pay-now>Add Pay now and resend</Button></form> : null}
+                    <p className="text-sm font-semibold">Deposit of AED {m(outstandingDeposit)} to receive ({dep.quotationNumbers.join(", ")}).</p>
+                    {canRecord ? <div><RecordDeposit d={depositPanel} charges={bankCharges} /></div> : null}
+                    {canSend && !canRecord ? <div className="flex flex-col gap-1"><DepositRequestSend jobId={id} message={depositRequestMessage} phoneDigits={phoneDigits} requestedAt={(job as { deposit_requested_at?: string | null }).deposit_requested_at ?? null} /><span className="text-xs text-muted">Only accounts or the owner record the money.</span></div> : null}
+                    {!canRecord && !canSend ? <p className="text-sm text-muted">Waiting for the deposit: accounts record it when it arrives.</p> : null}
                   </div>
-                ) : null}
-                {live && unpaid ? (
-                  <details className="text-sm" data-payment-link-box>
-                    <summary className="cursor-pointer min-h-11 flex items-center font-bold">{payNowOn ? (payLink?.provider === "ngenius" ? "Pay now is on the customer's page (Network International)" : "Pay now is on the customer's page (pasted link)") : "Payment link"}</summary>
-                    <div className="mt-2 flex flex-col gap-2">
-                      {payLink && !payLink.paid_at ? <p className="text-xs text-muted break-all">{payLink.provider === "ngenius" ? `Order for AED ${m(payLink.amount_aed ?? 0)} · ${payLink.opened_at ? `opened by the customer ${formatDateTime(payLink.opened_at)}` : "not opened yet"}` : `${payLink.url} · ${payLink.opened_at ? `opened ${formatDateTime(payLink.opened_at)}, works once` : "not opened yet"}`}</p> : null}
-                      {can(role, "issueInvoices") || can(role, "sendApproval") ? (
-                        <form action={setPaymentLink.bind(null, live.id)} className="flex flex-wrap items-center gap-2">
-                          <Input name="payment_link_url" placeholder={payLink ? "Paste a new https:// link to replace it" : "Paste an https:// payment link"} className="max-w-md" />
-                          <Button type="submit" tone="secondary" size="md">{payLink ? "Replace the link" : "Add Pay now to the customer page"}</Button>
-                        </form>
-                      ) : null}
-                    </div>
-                  </details>
-                ) : null}
-                {!live && (canRecord || depositRows.length > 0) ? (
-                  <details className="text-sm">
-                    <summary className="cursor-pointer min-h-11 flex items-center font-bold">Deposit before the proforma{depositTotal ? ` · AED ${m(depositTotal)} received` : ""}</summary>
-                    <div className="mt-2 flex flex-col gap-2">
-                      {depositRows.map((p) => (
-                        <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm" data-deposit-row={p.number}>
-                          <span className="font-semibold">{p.number}</span>
-                          <span>AED {m(p.amount_aed)} by {METHOD_LABELS[p.method]}</span>
-                          <span className="text-muted">{formatDateTime(p.received_at)}</span>
-                          <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a>
-                          {p.status === "recorded" && !p.verified_at && p.method === "cash" ? <Badge tone="amber">To confirm &amp; bank</Badge> : null}
-                          {p.status === "recorded" && !p.verified_at && p.method === "cash" && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-confirm-deposit>Confirmed &amp; banked</Button></form> : null}
-                          <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, depositShorts.get(p.id) ?? `${site}/api/pdf/receipt/${p.id}`)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} />
-                        </div>
-                      ))}
-                      {canRecord ? <PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100) : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /> : <p className="text-xs text-muted">Deposits are recorded by accounts.</p>}
-                    </div>
-                  </details>
-                ) : null}
-              </Card>
-            );
-          })()}
+                );
+              }
+              if (!live && money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && acting) {
+                return <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full sm:w-auto">Prepare the proforma</Button></form>;
+              }
+              if (proforma && unpaid && !proforma.sent_at) {
+                return (
+                  <div className="flex flex-col gap-2">
+                    {canSend ? <ReadySendControl jobId={id} size="lg" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : <p className="text-sm text-muted">The advisor sends {proforma.number} to the customer.</p>}
+                    {canRecord ? (
+                      <details className="border-t border-line pt-2" data-record-block data-folded>
+                        <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a payment before the proforma is sent</summary>
+                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
+                      </details>
+                    ) : null}
+                  </div>
+                );
+              }
+              if (live && unpaid && canRecord) {
+                return (
+                  <div className="flex flex-col gap-2" data-record-block>
+                    {creditDays ? <p className="text-sm font-semibold">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p> : <p className="text-sm font-semibold">Record the payment against {live!.number}.</p>}
+                    <PaymentForm invoiceId={live!.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
+                    {creditDays && can(role, "gateOut") && acting ? <div><LinkButton href={`/jobs/${id}/gate-out`} size="md" tone="secondary">Gate out on credit</LinkButton></div> : null}
+                  </div>
+                );
+              }
+              if (live && unpaid) {
+                return (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-muted" data-waiting-accounts>{proforma?.sent_at ? `Proforma sent ${formatDayTime(proforma.sent_at)} · ` : ""}{proforma?.expected_payment_method ? `Expected: ${PAYMENT_METHOD_LABELS[proforma.expected_payment_method] ?? proforma.expected_payment_method} · ` : ""}Waiting for accounts to record the payment.</p>
+                    {canSend && proforma ? <ReadySendControl jobId={id} size="md" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : null}
+                  </div>
+                );
+              }
+              if (taxInvoice && !unpaid && !taxInvoice.sent_at) {
+                return (
+                  <div className="flex flex-col gap-2">
+                    {canSend ? <ReadySendControl jobId={id} size="lg" token={taxInvoice.token} shortLink={taxShort} kind="tax_invoice" siteUrl={site} messageTemplate={invoiceTemplate} phoneDigits={phoneDigits} sentAt={taxInvoice.sent_at} pdf={taxInvoice.token ? { href: `/api/pdf/invoice/${taxInvoice.token}`, fileName: `OFJ Tax invoice ${taxInvoice.number}.pdf` } : null} /> : <p className="text-sm text-muted">The advisor sends {taxInvoice.number} to the customer.</p>}
+                    <p className="text-xs text-muted">After the tax invoice is sent, the car is gated out.</p>
+                  </div>
+                );
+              }
+              if (gateReady) {
+                return can(role, "gateOut") && acting ? <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full sm:w-auto">Gate out</LinkButton> : <p className="text-sm">Ready: the advisor or accounts gate the car out.</p>;
+              }
+              return <p className="text-sm text-muted">Nothing to do yet – the proforma is created by itself when the car is Ready.</p>;
+            })()}
+            {proforma && !taxInvoice && role === "owner" && acting ? (
+              <details className="text-xs" data-issue-early>
+                <summary className="cursor-pointer min-h-11 flex items-center font-semibold text-muted underline underline-offset-4">Issue the tax invoice early (owner only, with a reason)</summary>
+                <form action={issueInvoice.bind(null, id)} className="mt-2 flex flex-col gap-2 max-w-md">
+                  <Textarea name="reason" rows={2} required placeholder="Reason for issuing before full payment (accounts are told)" />
+                  <div><Button type="submit" size="md" tone="secondary">Issue the tax invoice now</Button></div>
+                </form>
+              </details>
+            ) : null}
+          </Card>
 
-          {/* 2. PAYMENT */}
-          {(() => {
-            const s = stateOf("payment");
-            return (
-              <Card className={`flex flex-col gap-3 ${stepClass(s)}`} data-step="payment" data-state={s}>
-                <div className="flex items-center gap-3">{stepNumber(2, s)}<span className="text-xs font-extrabold uppercase tracking-[0.08em]">Payment</span>{proforma?.customer_says_paid_at ? <Badge tone="amber">Customer says paid, checking</Badge> : null}</div>
-                {live && bal ? (
-                  <div className="grid grid-cols-3 gap-3" data-money-figures>
-                    <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Total</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(live.total_aed)}</span></div>
-                    <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Paid</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(bal.paid)}</span></div>
-                    <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Balance</span><span className={`text-xl sm:text-2xl font-extrabold ${bal.balance > 0 ? "text-red" : "text-green"}`} data-balance>AED {m(bal.balance)}</span></div>
-                  </div>
-                ) : <p className="text-sm text-muted">After the proforma.</p>}
-                {bal?.pendingAmount ? <p className="text-sm font-semibold text-amber">Cheque of AED {m(bal.pendingAmount)} pending clearance.</p> : null}
-                {payments.length ? <ul className="divide-y divide-line">{payments.map((p) => paymentLine(p))}</ul> : null}
-                {live && unpaid && canRecord && !creditDays && (s === "current" || role === "owner") ? (
-                  <div className="border-t border-line pt-3" data-record-block>
-                    <PaymentForm invoiceId={live.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live.number} isProforma={live.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
-                  </div>
-                ) : live && unpaid && canRecord && !creditDays ? (
-                  // Money can arrive before the proforma is sent (a customer at the counter): the form is there, folded.
-                  <details className="border-t border-line pt-3" data-record-block data-folded>
-                    <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a payment before the proforma is sent</summary>
-                    <div className="pt-2">
-                      <PaymentForm invoiceId={live.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live.number} isProforma={live.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
-                    </div>
-                  </details>
-                ) : null}
-                {live && unpaid && canRecord && creditDays ? (
-                  <div className="border-t border-line pt-3" data-record-block>
-                    <p className="text-sm font-semibold mb-2">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p>
-                    <PaymentForm invoiceId={live.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live.number} isProforma={live.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
-                  </div>
-                ) : null}
-                {live && unpaid && !canRecord ? (
-                  <p className="border-t border-line pt-3 text-sm text-muted" data-waiting-accounts>
-                    {proforma?.sent_at ? `Proforma sent ${formatDayTime(proforma.sent_at)} · ` : ""}{proforma?.expected_payment_method ? `Expected: ${PAYMENT_METHOD_LABELS[proforma.expected_payment_method] ?? proforma.expected_payment_method} · ` : ""}Waiting for accounts to record the payment.
-                  </p>
-                ) : null}
-                {live && unpaid && acting && s === "current" && !proforma?.customer_says_paid_at && (role === "service_advisor" || role === "owner") ? (
-                  <form action={customerSaysPaid.bind(null, live.id)} className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                    <input type="hidden" name="return_to" value={here} />
-                    <input type="hidden" name="method" value={proforma?.expected_payment_method ?? ""} />
-                    <Input name="note" placeholder="Note (optional): reference, time, bank" className="max-w-xs" />
-                    <Button type="submit" size="md" tone="secondary" data-customer-says-paid>Customer says paid</Button>
-                    <span className="text-xs text-muted">Accounts are asked to check the bank. Nothing is released by it.</span>
-                  </form>
-                ) : null}
-                {proforma?.customer_says_paid_at ? <p className="text-xs text-muted">Customer said paid {formatDateTime(proforma.customer_says_paid_at)}{proforma.customer_says_paid_method ? ` by ${PAYMENT_METHOD_LABELS[proforma.customer_says_paid_method] ?? proforma.customer_says_paid_method}` : ""}. Accounts check the bank and record it.</p> : null}
-                {live && !unpaid ? <p className="text-sm font-bold text-green">Paid in full{bal?.paidAt ? ` · ${formatDayTime(bal.paidAt)}` : ""}</p> : null}
-              </Card>
-            );
-          })()}
-
-          {/* 3. TAX INVOICE */}
-          {(() => {
-            const s = stateOf("tax_invoice");
-            return (
-              <Card className={`flex flex-col gap-3 ${stepClass(s)}`} data-step="tax_invoice" data-state={s}>
-                <div className="flex items-center gap-3">{stepNumber(3, s)}<span className="text-xs font-extrabold uppercase tracking-[0.08em]">Tax invoice</span>
-                  {taxInvoice ? <span className="ml-auto text-sm font-semibold">{taxInvoice.number} · {formatDayTime(taxInvoice.issued_at)}{taxInvoice.sent_at ? ` · sent ${formatDayTime(taxInvoice.sent_at)}` : ""}</span> : null}
-                </div>
-                {!taxInvoice ? <p className="text-sm text-muted">Created by itself the moment {proforma?.number ?? "the proforma"} is paid in full{nextTax ? ` (it will be ${nextTax})` : ""}. A tax invoice can&apos;t be cancelled or deleted; corrections are by credit note, approved by the owner.</p> : null}
-                {taxInvoice && canSend ? (
-                  <ReadySendControl jobId={id} size={s === "current" ? "lg" : "md"} token={taxInvoice.token} shortLink={taxShort} kind="tax_invoice" siteUrl={site} messageTemplate={invoiceTemplate} phoneDigits={phoneDigits} sentAt={taxInvoice.sent_at} pdf={taxInvoice.token ? { href: `/api/pdf/invoice/${taxInvoice.token}`, fileName: `OFJ Tax invoice ${taxInvoice.number}.pdf` } : null} />
-                ) : null}
-                {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber">Issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
-                {proforma && !taxInvoice && role === "owner" && acting ? (
-                  <details className="text-xs" data-issue-early>
-                    <summary className="cursor-pointer min-h-11 flex items-center font-semibold text-muted underline underline-offset-4">Issue the tax invoice early (owner only, with a reason)</summary>
-                    <form action={issueInvoice.bind(null, id)} className="mt-2 flex flex-col gap-2 max-w-md">
-                      <Textarea name="reason" rows={2} required placeholder="Reason for issuing before full payment (accounts are told)" />
-                      <div><Button type="submit" size="md" tone="secondary">Issue the tax invoice now</Button></div>
+          <Card className="flex flex-col gap-2" data-payments-card>
+            <SectionLabel right={`${depositRows.length + payments.length}`}>Payments &amp; receipts</SectionLabel>
+            {depositRows.length + payments.length === 0 ? <p className="text-sm text-muted">No money received yet.</p> : (
+              <ul className="divide-y divide-line">
+                {depositRows.map((p) => paymentLine(p, true))}
+                {payments.map((p) => paymentLine(p, false))}
+              </ul>
+            )}
+            {proforma?.customer_says_paid_at ? <p className="text-xs text-muted">Customer said paid {formatDateTime(proforma.customer_says_paid_at)}{proforma.customer_says_paid_method ? ` by ${PAYMENT_METHOD_LABELS[proforma.customer_says_paid_method] ?? proforma.customer_says_paid_method}` : ""}. Accounts check the bank and record it.</p> : null}
+            {live && unpaid && acting && !proforma?.customer_says_paid_at && (role === "service_advisor" || role === "owner") ? (
+              <form action={customerSaysPaid.bind(null, live.id)} className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                <input type="hidden" name="return_to" value={here} />
+                <input type="hidden" name="method" value={proforma?.expected_payment_method ?? ""} />
+                <Input name="note" placeholder="Note (optional): reference, time, bank" className="max-w-xs" />
+                <Button type="submit" size="md" tone="secondary" data-customer-says-paid>Customer says paid</Button>
+                <span className="text-xs text-muted">Accounts are asked to check the bank. Nothing is released by it.</span>
+              </form>
+            ) : null}
+            {!live && canRecord && !depShort ? (
+              <details className="border-t border-line pt-2 text-sm">
+                <summary className="cursor-pointer min-h-11 flex items-center font-bold text-muted">Record money before the proforma (an advance at the counter)</summary>
+                <div className="pt-2"><PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? balanceDue : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /></div>
+              </details>
+            ) : null}
+            {live && unpaid ? (
+              <details className="text-sm" data-payment-link-box>
+                <summary className="cursor-pointer min-h-11 flex items-center font-bold">{payNowOn ? (payLink?.provider === "ngenius" ? "Pay now is on the customer's page (Network International)" : "Pay now is on the customer's page (pasted link)") : "Payment link"}</summary>
+                <div className="mt-2 flex flex-col gap-2">
+                  {payLink && !payLink.paid_at ? <p className="text-xs text-muted break-all">{payLink.provider === "ngenius" ? `Order for AED ${m(payLink.amount_aed ?? 0)} · ${payLink.opened_at ? `opened by the customer ${formatDateTime(payLink.opened_at)}` : "not opened yet"}` : `${payLink.url} · ${payLink.opened_at ? `opened ${formatDateTime(payLink.opened_at)}, works once` : "not opened yet"}`}</p> : null}
+                  {can(role, "issueInvoices") || can(role, "sendApproval") ? (
+                    <form action={setPaymentLink.bind(null, live.id)} className="flex flex-wrap items-center gap-2">
+                      <Input name="payment_link_url" placeholder={payLink ? "Paste a new https:// link to replace it" : "Paste an https:// payment link"} className="max-w-md" />
+                      <Button type="submit" tone="secondary" size="md">{payLink ? "Replace the link" : "Add Pay now to the customer page"}</Button>
                     </form>
-                  </details>
-                ) : null}
-              </Card>
-            );
-          })()}
-
-          {/* 4. READY FOR GATE-OUT */}
-          {(() => {
-            const s = stateOf("released");
-            const gateReady = money.action === "gate_out";
-            return (
-              <Card className={`flex flex-col gap-3 ${stepClass(s)}`} data-step="released" data-state={s}>
-                <div className="flex items-center gap-3">{stepNumber(4, s)}<span className="text-xs font-extrabold uppercase tracking-[0.08em]">Ready for gate-out</span>{job.gated_out_at ? <span className="ml-auto text-sm font-semibold">Gated out {formatDayTime(job.gated_out_at)}</span> : null}</div>
-                {!job.is_open ? <p className="text-sm text-muted">The car has left.</p> : gateReady && can(role, "gateOut") && acting ? (
-                  <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full sm:w-auto">Gate out</LinkButton>
-                ) : gateReady ? <p className="text-sm">Ready: the advisor or accounts gate the car out.</p> : creditDays && live && unpaid ? (
-                  <p className="text-sm">Credit terms ({creditDays} days): the car may leave; the balance is due after. {can(role, "gateOut") && acting ? <LinkButton href={`/jobs/${id}/gate-out`} size="md" tone="secondary">Gate out on credit</LinkButton> : null}</p>
-                ) : (
-                  <p className="text-sm text-muted">{unpaid ? "After full payment." : !live ? "After the proforma is paid." : "After the tax invoice is sent."}</p>
-                )}
-              </Card>
-            );
-          })()}
+                  ) : null}
+                  {proforma?.sent_at && !payNowOn && ngeniusConfigured() && canSend ? <form action={addPayNow.bind(null, proforma.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" data-add-pay-now>Add Pay now and resend</Button></form> : null}
+                </div>
+              </details>
+            ) : null}
+          </Card>
         </div>
 
         <div className="flex flex-col gap-4">
-          {invoices.length ? (
-            <Card className="flex flex-col gap-1">
-              <SectionLabel>Documents</SectionLabel>
-              {invoices.map((i) => <p key={i.id} className="text-sm flex flex-wrap items-center gap-2"><LinkButton href={`/invoices/${i.id}`} tone="secondary" size="md">{i.number}</LinkButton><span className="text-xs text-muted">{i.kind === "tax_invoice" ? "Tax invoice" : i.kind === "proforma" ? (i.converted_to ? "Proforma, became the tax invoice" : i.deposit_for_quotation_id ? "Deposit proforma" : "Proforma") : "Credit note"} · {formatDayTime(i.issued_at)}</span>{i.status === "cancelled" ? <Badge tone="red">Cancelled</Badge> : null}</p>)}
-            </Card>
-          ) : null}
+          <Card className="flex flex-col gap-1" data-documents>
+            <SectionLabel>Documents</SectionLabel>
+            {approvedQ?.token ? <p className="text-sm flex flex-wrap items-center gap-2"><a href={`/api/pdf/quote/${approvedQ.token}`} target="_blank" rel="noreferrer" className="font-bold underline underline-offset-4">Quotation {approvedQ.number}</a><span className="text-xs text-muted">approved · PDF</span></p> : null}
+            {invoices.map((i) => <p key={i.id} className="text-sm flex flex-wrap items-center gap-2"><LinkButton href={`/invoices/${i.id}`} tone="secondary" size="md">{i.number}</LinkButton>{i.token ? <a href={`/api/pdf/invoice/${i.token}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">PDF</a> : null}<span className="text-xs text-muted">{i.kind === "tax_invoice" ? "Tax invoice" : i.kind === "proforma" ? (i.converted_to ? "Proforma, became the tax invoice" : i.deposit_for_quotation_id ? "Deposit proforma" : "Proforma") : "Credit note"} · {formatDayTime(i.issued_at)}</span>{i.status === "cancelled" ? <Badge tone="red">Cancelled</Badge> : null}</p>)}
+            {[...depositRows, ...payments].filter((p) => p.status === "recorded").map((p) => <p key={p.id} className="text-sm flex flex-wrap items-center gap-2"><a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="font-bold underline underline-offset-4">Receipt {p.number}</a><span className="text-xs text-muted">AED {m(p.amount_aed)}</span></p>)}
+            {!approvedQ?.token && invoices.length === 0 && depositRows.length + payments.length === 0 ? <p className="text-sm text-muted">Nothing yet.</p> : null}
+          </Card>
           <Card className="flex flex-col gap-2">
             <SectionLabel right={draft.quotationNumbers.length ? `a copy of ${draft.quotationNumbers.join(", ")}` : undefined}>Lines</SectionLabel>
             <p className="text-xs text-muted">Exactly what the customer approved: the same lines, discount and total. Nothing to choose or type here. A change needs a revised quotation or the owner.</p>

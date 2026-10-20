@@ -44,7 +44,8 @@ await section("1 send the proforma", async () => {
   const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1366, height: 1200 } });
   await go(page, `${base}/jobs/${jobId}/invoice`);
   check("1: step 1 is the current step", (await page.locator('[data-step="proforma_sent"][data-state="current"]').count()) === 1);
-  check("1: step 2 carries no black button yet (the form stays folded until the proforma is sent)", (await page.locator('[data-step="payment"] [data-record-payment]:visible').count()) === 0 && (await page.locator("[data-record-block][data-folded]").count()) === 1);
+  check("1: the advisor has no payment form anywhere (accounts record money)", (await page.locator("[data-record-payment]").count()) === 0 && (await page.locator("[data-record-block]").count()) === 0);
+  check("1: the what-to-do box carries the send control", (await page.locator('[data-what-now] [data-ready-send="proforma"]').count()) === 1);
   await page.locator('[data-ready-send="proforma"] button').first().click();
   await page.locator("[data-pay-how]").waitFor({ timeout: 10000 });
   check("1: the window asks how the customer will pay (four choices)", (await page.locator("[data-expected]").count()) === 4);
@@ -69,28 +70,27 @@ await section("1 send the proforma", async () => {
   check("1: gate-out is blocked while the balance is due", /Gate-out is blocked/i.test(plainText(gate.text)));
 });
 
-/* ---------------- 2. The advisor records cash at the counter; accounts confirm it ---------------- */
-await section("2 counter payment to confirm", async () => {
+/* ---------------- 2. Cash at the counter: accounts record it (advisors see status only) ---------------- */
+await section("2 counter cash by accounts", async () => {
   const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1366, height: 1200 } });
   await go(page, `${base}/jobs/${jobId}/invoice`);
-  check("2: the advisor may record cash and card only", (await page.locator("[data-method]").count()) === 2 && (await page.locator('[data-method="cash"]').count()) === 1);
-  await page.locator("[data-amount-partial]").click();
-  await page.locator("[data-amount-input]").fill("100");
-  await page.locator("[data-record-payment]").click();
-  await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
-  const pay = await until(async () => (await sql("select number, method, amount_aed::float as amount, verified_at from public.payments where invoice_id = $1 and status = 'recorded'", [proformaId]))[0], 30, 500);
-  check("2: the cash payment is recorded and not yet confirmed", pay?.method === "cash" && pay?.amount === 100 && !pay?.verified_at, JSON.stringify(pay));
-  await go(page, `${base}/jobs/${jobId}/invoice`);
-  const t = plainText(await page.content());
-  check("2: the page shows Part paid with the balance and the counter chip", /Part paid · AED 845 due/.test(t) && /Recorded by advisor, to confirm/.test(t));
+  check("2: the advisor has no method chips and sees Waiting for accounts", (await page.locator("[data-method]").count()) === 0 && (await page.locator("[data-waiting-accounts]").count()) === 1);
   await browser.close();
   const { browser: ab, page: ap } = await browserFor("accounts", { viewport: { width: 1366, height: 1200 } });
-  await go(ap, `${base}/dashboard`);
-  check("2: the accounts dashboard lists the counter payment to confirm", (await ap.locator(`[data-counter-row="${pay?.number}"]`).count()) === 1);
-  check("2: the accounts dashboard has the money tiles", (await ap.locator("[data-money-tiles] [data-tile]").count()) === 5);
-  await ap.locator(`[data-counter-row="${pay?.number}"] button`).click();
-  const confirmed = await until(async () => (await sql("select verified_at from public.payments where number = $1", [pay?.number]))[0]?.verified_at, 30, 500);
-  check("2: Confirmed sets the verification", !!confirmed);
+  await go(ap, `${base}/jobs/${jobId}/invoice`);
+  check("2: accounts get the open payment form in What to do now", (await ap.locator("[data-what-now] [data-record-payment]").count()) === 1);
+  await ap.locator("[data-amount-partial]").click();
+  await ap.locator("[data-amount-input]").fill("100");
+  await ap.locator('[data-method="cash"]').click().catch(() => null);
+  await ap.locator("[data-record-payment]").click();
+  await ap.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+  const pay = await until(async () => (await sql("select number, method, amount_aed::float as amount, verified_at from public.payments where invoice_id = $1 and status = 'recorded'", [proformaId]))[0], 30, 500);
+  check("2: the cash payment is recorded and verified at once (accounts took it)", pay?.method === "cash" && pay?.amount === 100 && !!pay?.verified_at, JSON.stringify(pay));
+  await go(ap, `${base}/jobs/${jobId}/invoice`);
+  const t = plainText(await ap.content());
+  check("2: the page shows Part paid with the balance", /Part paid · AED 845 due/.test(t));
+  check("2: the summary shows the balance in red", /845\.00/.test(plainText((await ap.locator("[data-balance]").innerHTML()) ?? "")));
+  check("2: the accounts dashboard has the money tiles", (await (async () => { await go(ap, `${base}/dashboard`); return (await ap.locator("[data-money-tiles] [data-tile]").count()) === 5; })()));
   await ab.close();
 });
 
@@ -115,7 +115,7 @@ await section("3 customer says paid", async () => {
 await section("4 final confirmation and the tax invoice", async () => {
   const { browser, page } = await browserFor("accounts", { viewport: { width: 1366, height: 1200 } });
   await go(page, `${base}/jobs/${jobId}/invoice`);
-  check("4: accounts may record transfer, cheque and link", (await page.locator("[data-method]").count()) === 3 && (await page.locator('[data-method="transfer"]').count()) === 1);
+  check("4: accounts may record every method", (await page.locator("[data-method]").count()) === 5 && (await page.locator('[data-method="transfer"]').count()) === 1);
   check("4: the expected method is pre-selected", (await page.locator('[data-method="transfer"]').getAttribute("aria-pressed")) === "true");
   await page.locator("[data-reference]").fill("12345");
   // A transfer now needs its proof photo before it can be recorded.
