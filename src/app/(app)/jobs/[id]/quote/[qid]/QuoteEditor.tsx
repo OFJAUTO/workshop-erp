@@ -305,7 +305,7 @@ export function QuoteEditor({
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null });
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, commission_status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
@@ -856,15 +856,18 @@ export function QuoteEditor({
     );
   };
 
-  // The Commission line of the internal box: works on sent and approved quotations too (it never touches the customer's figures).
+  // The Commission line of the internal box: works on sent and approved quotations too (it never touches the
+  // customer's figures). It reads and writes the editor's header state, so the whole internal box - profit,
+  // margin, total cost - moves the moment a commission is added, changed, approved or declined, no refresh.
   const commissionLine = (
     <CommissionLine
       quotationId={quotation.id}
-      commission={{ to: quotation.commission_to ?? null, kind: (quotation.commission_kind as "aed" | "percent" | null) ?? null, value: quotation.commission_value ?? null, status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), decisionNote: quotation.commission_decision_note ?? null }}
+      commission={{ to: header.commission_to ?? null, kind: (header.commission_kind as "aed" | "percent" | null) ?? null, value: header.commission_value ?? null, status: header.commission_status, decisionNote: quotation.commission_decision_note ?? null }}
       people={settings.commissionPeople ?? []}
       isOwner={isOwner}
       net={totals.net}
       disabled={!canSend}
+      onLocal={(c) => setHeader((h) => ({ ...h, commission_to: c.to, commission_kind: c.kind, commission_value: c.value, commission_status: c.status }))}
     />
   );
   const reviseAskDialog = reviseAsk && onAskRevise ? (
@@ -1258,7 +1261,7 @@ export function QuoteEditor({
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
                 <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
                 <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totals.totalCost)}</dd>
-                <dt className="font-bold">Profit before VAT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission pending)</span> : null}</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
+                <dt className="font-bold">Profit before VAT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
                 <dt className="text-muted">Labour margin</dt><dd className="text-right">{aed(totals.labourMargin)}</dd>
                 <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-[11px] font-semibold text-amber" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
               </dl>

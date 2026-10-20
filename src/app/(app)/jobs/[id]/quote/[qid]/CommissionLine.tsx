@@ -20,7 +20,7 @@ export type CommissionState = {
  * owner adding or changing one waits in amber for the owner, who approves, declines (with a note) or changes the
  * amount; the owner's own are approved at once. Never shown to the customer.
  */
-export function CommissionLine({ quotationId, commission, people, isOwner, net, disabled }: {
+export function CommissionLine({ quotationId, commission, people, isOwner, net, disabled, onLocal }: {
   quotationId: string;
   commission: CommissionState;
   people: string[];
@@ -28,6 +28,8 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
   /** The quotation total before VAT, for the live amount of a percentage. */
   net: number;
   disabled: boolean;
+  /** Tells the editor at once (before the save answers), so the internal box moves with no refresh; called again with the old values if the save fails. */
+  onLocal?: (c: { to: string | null; kind: "aed" | "percent" | null; value: number | null; status: CommissionState["status"] }) => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -40,12 +42,17 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
   const [error, setError] = useState<string | null>(null);
 
   const amountOf = (k: "aed" | "percent", v: number) => (k === "percent" ? net * (Math.min(100, Math.max(0, v)) / 100) : Math.max(0, v));
+  // The internal box moves at once: the editor is told the new values before the save answers, and told
+  // the old ones back if the server refuses.
+  const revert = { to: commission.to, kind: commission.kind, value: commission.value, status: commission.status };
   const run = (fn: () => Promise<{ error?: string } | void>) =>
     start(async () => {
       setError(null);
       const r = await fn();
-      if (r && "error" in r && r.error) setError(r.error);
-      else {
+      if (r && "error" in r && r.error) {
+        setError(r.error);
+        onLocal?.(revert);
+      } else {
         setEditing(false);
         setDeclining(false);
         router.refresh();
@@ -56,12 +63,14 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
     fd.set("to", who.trim());
     fd.set("kind", kind);
     fd.set("value", value);
+    onLocal?.({ to: who.trim() || null, kind, value: Number(value) || null, status: who.trim() ? (isOwner ? "approved" : "pending") : null });
     run(() => saveCommission(quotationId, fd));
   };
   const decide = (decision: "approve" | "decline") => {
     const fd = new FormData();
     fd.set("decision", decision);
     if (note.trim()) fd.set("note", note.trim());
+    onLocal?.(decision === "approve" ? { ...revert, status: "approved" } : { to: null, kind: null, value: null, status: "declined" });
     run(() => decideCommission(quotationId, fd));
   };
 
@@ -95,7 +104,7 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
     <>
       <dt className="text-muted" data-commission-line>
         Commission{summary ? ` · ${summary}` : ""}
-        {set && commission.status === "pending" ? <span className="ml-1 font-semibold text-amber" data-commission-pending>Waiting for owner approval</span> : null}
+        {set && commission.status === "pending" ? <span className="ml-1 font-semibold text-amber" data-commission-pending>Pending owner approval · already counted in the costs</span> : null}
       </dt>
       <dd className="text-right">
         <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
@@ -104,7 +113,7 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
           {!disabled && set && !editing ? (
             <>
               <button type="button" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} className="min-h-7 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-edit>Edit</button>
-              <button type="button" disabled={pending} onClick={() => { const fd = new FormData(); fd.set("to", ""); run(() => saveCommission(quotationId, fd)); }} className="min-h-7 px-1.5 text-[11px] font-bold text-red" data-commission-remove>Remove</button>
+              <button type="button" disabled={pending} onClick={() => { const fd = new FormData(); fd.set("to", ""); onLocal?.({ to: null, kind: null, value: null, status: null }); run(() => saveCommission(quotationId, fd)); }} className="min-h-7 px-1.5 text-[11px] font-bold text-red" data-commission-remove>Remove</button>
             </>
           ) : null}
         </span>

@@ -120,7 +120,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold" data-locked-total>{aed(totals.total)}</dd>
               {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold">{aed(totals.deposit)}</dd></> : null}
             </dl>
-            {showProfit ? <p className="border-t border-line pt-2 text-xs text-muted">Internal: profit {aed(totals.profit)} ({margin.toFixed(0)}% of the net){totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission pending)</span> : null}.</p> : null}
+            {showProfit ? <p className="border-t border-line pt-2 text-xs text-muted">Internal: profit {aed(totals.profit)} ({margin.toFixed(0)}% of the net){totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}.</p> : null}
             {showProfit && commissionLine ? <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 border-t border-line pt-2 text-xs" data-internal-box>{commissionLine}</dl> : null}
             {quotation.customer_note ? <p className="border-t border-line pt-2 text-xs text-muted">Note to the customer: {quotation.customer_note}</p> : null}
             <p className="text-xs text-muted">Every figure is as the customer approved it. Nothing here can be typed or removed.</p>

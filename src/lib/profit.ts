@@ -99,7 +99,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const hiddenRecovery = round2(hidden.filter((l) => !l.fee_kind && l.line_type === "recovery").reduce((a, l) => a + lineCost(l), 0));
     const recoveryCost = tripCost > 0 ? tripCost : hiddenRecovery;
     const jobQuotes = ((quotes ?? []) as { job_id: string; commission_aed: number | string | null; commission_status: string | null; materials_cost_aed: number | string | null }[]).filter((x) => x.job_id === invoice.job_id);
-    const commission = round2(jobQuotes.filter((x) => x.commission_status === "approved").reduce((a, x) => a + (Number(x.commission_aed) || 0), 0));
+    const commission = round2(jobQuotes.filter((x) => x.commission_status !== "declined").reduce((a, x) => a + (Number(x.commission_aed) || 0), 0));
     const materialsCost = round2(jobQuotes.reduce((a, x) => a + (Number(x.materials_cost_aed) || 0), 0));
     const clockMinutes = ((clockings ?? []) as { job_id: string; minutes: number | null }[]).filter((c) => c.job_id === invoice.job_id).reduce((a, c) => a + (Number(c.minutes) || 0), 0);
     const minutes = clockMinutes + ((sessions ?? []) as { job_id: string; minutes: number | null; started_at: string; ended_at: string | null }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + (s.minutes ?? (s.ended_at ? Math.round((Date.parse(s.ended_at) - Date.parse(s.started_at)) / 60000) : 0)), 0);
