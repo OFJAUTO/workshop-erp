@@ -70,6 +70,8 @@ export function GateOutForm({
   lastPin?: { url: string; details: string | null } | null;
 }) {
   const [method, setMethod] = useState<string>("customer");
+  const [oldPartsTicked, setOldPartsTicked] = useState(false);
+  const [oldPartsPhotos, setOldPartsPhotos] = useState<JobFile[]>([]);
   const [driver, setDriver] = useState<string>(contacts[0]?.id ?? "new");
   const [company, setCompany] = useState<string>("our_truck");
   const companyDrivers = drivers.filter((d) => (company === "our_truck" ? !d.company : company !== "other" && (d.company ?? "").toLowerCase() === company.toLowerCase()));
@@ -259,10 +261,18 @@ export function GateOutForm({
             </label>
           ) : null}
           {oldParts ? (
-            <label className="flex items-center gap-3 min-h-12 rounded-control border border-line-strong bg-white px-4 cursor-pointer">
-              <input type="checkbox" name="old_parts_handed" className="h-5 w-5 accent-ink" required />
-              <span className="text-sm font-bold">Old parts handed over (the customer asked for them)</span>
-            </label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-3 min-h-12 rounded-control border border-line-strong bg-white px-4 cursor-pointer">
+                <input type="checkbox" name="old_parts_handed" className="h-5 w-5 accent-ink" required checked={oldPartsTicked} onChange={(e) => setOldPartsTicked(e.target.checked)} data-old-parts-tick />
+                <span className="text-sm font-bold">Old parts handed over (the customer asked for them)</span>
+              </label>
+              {oldPartsTicked ? (
+                <div className="flex flex-col gap-1 rounded-control border border-line bg-canvas p-3" data-old-parts-photos>
+                  <span className="text-xs font-semibold text-muted">Photo of the old parts going with the customer (optional; kept on the job with the time and your name)</span>
+                  <JobFileUpload jobId={jobId} kind="gate_out_photo" caption="Old parts handed over" files={oldPartsPhotos} accept="photo" label="Photo" compact removable onAdded={(f) => setOldPartsPhotos((p) => [...p, f])} onRemoved={(f) => setOldPartsPhotos((p) => p.filter((x) => x.id !== f.id))} />
+                </div>
+              ) : null}
+            </div>
           ) : null}
 
           {blocked ? (

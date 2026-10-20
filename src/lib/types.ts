@@ -393,6 +393,8 @@ export type NotificationRow = {
 export type GateOutRow = {
   id: string;
   job_id: string;
+  /** The customer asked for the old parts and they went with the car (null: never asked). */
+  old_parts_handed?: boolean | null;
   keys_returned: number;
   keychain_returned: boolean;
   keys_match: boolean;

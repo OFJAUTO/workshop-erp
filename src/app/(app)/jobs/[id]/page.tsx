@@ -18,6 +18,7 @@ import { requirePermission } from "@/lib/auth";
 import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { hasLabourChargesLine, tasksFromInspection,inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
+import { signJobFiles } from "@/lib/work-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate, type Stage } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
@@ -86,11 +87,19 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   const supabase = await createClient();
   const admin = createAdminClient();
+
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
   if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
+  // The old-parts photos taken at gate-out: the job card history shows them with the time and who took them.
+  const { data: oldPartsRows } = gateOut ? await admin.from("job_files").select("id, storage_path, taken_at, uploaded_by").eq("job_id", id).eq("kind", "gate_out_photo").eq("caption", "Old parts handed over").is("removed_at", null).order("taken_at") : { data: [] };
+  const oldPartsUrls = await signJobFiles(((oldPartsRows ?? []) as { storage_path: string }[]).map((r) => r.storage_path));
+  const opByIds = Array.from(new Set((oldPartsRows ?? []).map((r) => r.uploaded_by as string | null).filter((x): x is string => !!x)));
+  const { data: opByRows } = opByIds.length ? await admin.from("staff").select("id, display_name").in("id", opByIds) : { data: [] as { id: string; display_name: string }[] };
+  const opNames = new Map((opByRows ?? []).map((x) => [x.id, x.display_name]));
+  const oldPartsPhotos = ((oldPartsRows ?? []) as { id: string; storage_path: string; taken_at: string; uploaded_by: string | null }[]).map((r) => ({ id: r.id, url: oldPartsUrls[r.storage_path] ?? null, taken_at: r.taken_at, byName: r.uploaded_by ? (opNames.get(r.uploaded_by) ?? null) : null }));
   const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
@@ -730,12 +739,27 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               <DescriptionList
                 items={[
                   { label: "Gated out", value: `${formatDateTime(job.gated_out_at)} by ${card.gatedOutBy ?? "unknown"}` },
+                  { label: "Old parts", value: gateOut.old_parts_handed == null ? null : gateOut.old_parts_handed ? `Handed over${oldPartsPhotos.length ? ` · ${oldPartsPhotos.length} photo${oldPartsPhotos.length === 1 ? "" : "s"} below` : ""}` : "Not handed" },
                   { label: "Keys returned", value: `${gateOut.keys_returned}, ${gateOut.keychain_returned ? "with keychain" : "no keychain"}${gateOut.keys_match ? "" : " (did not match gate-in)"}` },
                   { label: "Keys override", value: gateOut.keys_override_reason },
                   { label: "Dash cam reconnected", value: gateOut.dash_cam_reconnected == null ? "Not fitted" : gateOut.dash_cam_reconnected ? "Yes" : "No" },
                   { label: "Gate-out notes", value: gateOut.notes },
                 ]}
               />
+            ) : null}
+            {oldPartsPhotos.length ? (
+              <div className="flex flex-col gap-1" data-old-parts-history>
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Old parts handed over</span>
+                <div className="flex flex-wrap gap-2">
+                  {oldPartsPhotos.map((p) => (
+                    <figure key={p.id} className="flex flex-col gap-0.5">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <a href={p.url ?? "#"} target="_blank" rel="noreferrer"><img src={p.url ?? ""} alt="Old parts handed over" className="h-24 w-24 rounded-control object-cover" /></a>
+                      <figcaption className="text-[11px] text-muted">{formatDayTime(p.taken_at)}{p.byName ? ` · ${p.byName}` : ""}</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </div>
             ) : null}
           </Collapsible>
 

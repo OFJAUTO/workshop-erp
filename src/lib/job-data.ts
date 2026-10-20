@@ -79,7 +79,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
         .order("sent_at", { ascending: false }),
       client
         .from("gate_outs")
-        .select("id, job_id, keys_returned, keychain_returned, keys_match, keys_override_by, keys_override_reason, dash_cam_reconnected, balance_due_aed, release_approved_by, release_reason, notes, created_at")
+        .select("id, job_id, keys_returned, keychain_returned, keys_match, keys_override_by, keys_override_reason, dash_cam_reconnected, old_parts_handed, balance_due_aed, release_approved_by, release_reason, notes, created_at")
         .eq("job_id", jobId)
         .maybeSingle(),
       client.from("job_requests").select("id, job_id, position, text, is_active").eq("job_id", jobId).eq("is_active", true).order("position"),

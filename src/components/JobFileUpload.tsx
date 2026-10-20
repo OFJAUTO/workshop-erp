@@ -9,7 +9,7 @@ export type JobFile = { id: string; path: string; url: string | null; caption?: 
 
 const STEP_TIMEOUT_MS = 60_000;
 
-async function uploadOne(jobId: string, kind: string, refId: string | null, file: File, onProgress: (p: number) => void): Promise<JobFile> {
+async function uploadOne(jobId: string, kind: string, refId: string | null, file: File, onProgress: (p: number) => void, caption?: string): Promise<JobFile> {
   const type = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
   let step: UploadStep = "prepare";
   try {
@@ -19,10 +19,10 @@ async function uploadOne(jobId: string, kind: string, refId: string | null, file
     step = "upload";
     await putWithProgress(p.url, file, type, onProgress);
     step = "register";
-    const reg = await fetch("/api/files/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind, refId, path: p.path, contentType: type, caption: type === "application/pdf" ? file.name.slice(0, 120) : undefined }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+    const reg = await fetch("/api/files/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind, refId, path: p.path, contentType: type, caption: caption ?? (type === "application/pdf" ? file.name.slice(0, 120) : undefined) }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
     const r = (await reg.json()) as { ok?: boolean; id?: string; url?: string | null; error?: string };
     if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
-    return { id: r.id, path: p.path, url: r.url ?? null, caption: type === "application/pdf" ? file.name : null, contentType: type };
+    return { id: r.id, path: p.path, url: r.url ?? null, caption: caption ?? (type === "application/pdf" ? file.name : null), contentType: type };
   } catch (err) {
     reportUploadFailure({ jobId, kind: `job_${kind}`, step, error: err, sizeBytes: file.size, contentType: type, extra: { refId } });
     throw err;
@@ -34,7 +34,7 @@ async function uploadOne(jobId: string, kind: string, refId: string | null, file
  * photos per line, the wash, the delivery, a supplier invoice scan, the QC post-scan. Uploads straight to storage
  * with progress; a failure is logged with the device and shown with Retry, and the button always comes back.
  */
-export function JobFileUpload({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, onRemoved, removable = false, compact = false }: { jobId: string; kind: string; refId?: string | null; files: JobFile[]; accept?: "photo" | "pdf" | "any"; label?: string; disabled?: boolean; onAdded?: (f: JobFile) => void; /** The X on each thumbnail: marks the file removed on the server, then tells the holder. */ onRemoved?: (f: JobFile) => void; removable?: boolean; compact?: boolean }) {
+export function JobFileUpload({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, onRemoved, removable = false, compact = false, caption }: { jobId: string; kind: string; refId?: string | null; files: JobFile[]; accept?: "photo" | "pdf" | "any"; label?: string; disabled?: boolean; /** Written on every file uploaded here (what the photo shows). */ caption?: string; onAdded?: (f: JobFile) => void; /** The X on each thumbnail: marks the file removed on the server, then tells the holder. */ onRemoved?: (f: JobFile) => void; removable?: boolean; compact?: boolean }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState<File[]>([]);
@@ -65,7 +65,7 @@ export function JobFileUpload({ jobId, kind, refId = null, files, accept = "phot
       for (const file of list) {
         setProgress(0);
         try {
-          const added = await uploadOne(jobId, kind, refId, file, setProgress);
+          const added = await uploadOne(jobId, kind, refId, file, setProgress, caption);
           onAdded?.(added);
         } catch (err) {
           notDone.push(file);
