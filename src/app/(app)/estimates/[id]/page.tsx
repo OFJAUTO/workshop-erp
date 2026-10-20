@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { packagesOf } from "@/lib/packages";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -94,7 +95,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         categories={services.categories}
         services={services.services}
         usage={services.usage}
-        department={null}
+        packages={packagesOf(settings)} department={null}
         settings={{
           labourRate: labourRateFor(settings, null, vehicle?.make?.name ?? null),
           minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),

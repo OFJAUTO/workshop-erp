@@ -40,6 +40,9 @@ export type QuoteLine = {
   line_type: LineType;
   title: string;
   details: string | null;
+  /** A bodyshop package: the key in Settings and the snapshot of what the customer gets (one price). */
+  package_key?: string | null;
+  package_items?: unknown;
   group_label: string | null;
   source_type: "request" | "item" | "tyre" | "manual" | "estimate" | "package" | "service" | null;
   source_key: string | null;

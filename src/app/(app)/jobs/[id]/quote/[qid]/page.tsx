@@ -1,4 +1,5 @@
 import { invoicesForLock } from "@/lib/quote-lock-server";
+import { packagesOf } from "@/lib/packages";
 import { quoteLockOf } from "@/lib/quote-lock";
 import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
@@ -242,7 +243,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         categories={services.categories}
         services={services.services}
         usage={services.usage}
-        department={job?.department ?? null}
+        packages={packagesOf(settings)} department={job?.department ?? null}
         settings={editorSettings}
         readOnly={!canEdit}
         lock={lock}

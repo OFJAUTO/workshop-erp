@@ -11,6 +11,8 @@ export type VersionActor = { id: string; display_name: string };
 
 /** The line fields a new version copies: everything but the id, the quotation, the stamps and the customer's answer. */
 export const COPY_FIELDS = (l: QuoteLine) => ({
+  package_key: l.package_key ?? null,
+  package_items: l.package_items ?? null,
   line_type: l.line_type, positions: l.positions ?? null, title: l.title, details: l.details, group_label: l.group_label, source_type: l.source_type, source_key: l.source_key,
   quantity: l.quantity, unit_cost: l.unit_cost, markup_percent: l.markup_percent, unit_price: l.unit_price, hours: l.hours, labour_rate: l.labour_rate, discount_percent: l.discount_percent,
   discount_reason: l.discount_reason, line_total: l.line_total, part_item_id: l.part_item_id, package_id: l.package_id, service_id: l.service_id, visible_to_customer: l.visible_to_customer,

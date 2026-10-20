@@ -6,6 +6,8 @@ import { DEFAULT_CHECKLIST, type ChecklistSection } from "./inspection";
 export type Branch = { name: string; address: string };
 
 const DEFAULTS = {
+  /** Bodyshop packages the owner builds (Settings > Bodyshop packages): one customer price, the list included. */
+  bodyshop_packages: [] as unknown[],
   /** Dealer customer id -> supplier name, learned when a dealer PDF import is applied. */
   import_supplier_memory: {} as Record<string, string>,
   company_name: "OFJ Automotive",

@@ -6,10 +6,13 @@ import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, recover
 import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
+import { toSnapshot } from "@/lib/packages";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type LinePatch = {
+  package_key?: string | null;
+  package_items?: unknown;
   line_type?: string;
   title?: string;
   details?: string | null;
@@ -167,6 +170,8 @@ export async function POST(request: NextRequest) {
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
     if (p.hours_estimate !== undefined) out.hours_estimate = p.hours_estimate === null || p.hours_estimate === "" ? null : parseHours(p.hours_estimate);
     if (p.outside_work !== undefined) out.outside_work = !!p.outside_work;
+    if (p.package_key !== undefined) out.package_key = p.package_key ? String(p.package_key).slice(0, 60) : null;
+    if (p.package_items !== undefined) out.package_items = p.package_items ? toSnapshot(p.package_items) : null;
     if (p.film_colour !== undefined) out.film_colour = p.film_colour ? String(p.film_colour).trim().slice(0, 60) || null : null;
     if (p.film_code !== undefined) out.film_code = p.film_code ? String(p.film_code).trim().slice(0, 40) || null : null;
     if (p.tint_percent !== undefined) { const tp = n(p.tint_percent); out.tint_percent = tp === null ? null : Math.min(100, Math.max(1, Math.round(tp))); }

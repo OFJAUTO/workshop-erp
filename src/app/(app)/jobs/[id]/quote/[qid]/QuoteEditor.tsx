@@ -9,6 +9,7 @@ import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
 import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
+import { packageDetailsText, packageSnapshot, type BodyshopPackage } from "@/lib/packages";
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
@@ -212,6 +213,7 @@ export function QuoteEditor({
   services,
   usage,
   department,
+  packages,
   settings,
   readOnly,
   isOwner,
@@ -250,6 +252,8 @@ export function QuoteEditor({
   services: Service[];
   usage: Record<string, number>;
   department: string | null;
+  /** Bodyshop packages from Settings, for "+ Add a package". */
+  packages?: BodyshopPackage[];
   settings: EditorSettings;
   readOnly: boolean;
   /** Approved by the customer (or replaced, or invoiced): every figure as text, the one action in the bar. */
@@ -326,6 +330,8 @@ export function QuoteEditor({
   const [menuFor, setMenuFor] = useState<string | null>(null);
   // "Merge with another labour line": the picked line's hours join the target, the line itself goes.
   const [mergeFor, setMergeFor] = useState<string | null>(null);
+  // "+ Add a package": the bodyshop package chooser, with the only-if ticks (sunroof and friends).
+  const [packageAsk, setPackageAsk] = useState(false);
   const [draft, setDraft] = useState<null | "choose" | "saving">(null);
   /** Where the cursor goes after the next render: a new line's name box, or a filled line's hours or price box. */
   const [focusTarget, setFocusTarget] = useState<null | { id: string; field: "name" | "amount" }>(null);
@@ -648,6 +654,7 @@ export function QuoteEditor({
                 {isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id] ? <span data-last-price>Last time {aed(settings.lastPrices[svc.id])}</span> : null}
               </span>
             ) : null}
+            {l.package_items ? <span className="whitespace-pre-line px-1 text-[11px] leading-relaxed text-muted" data-package-items>{packageDetailsText(l.package_items)}</span> : null}
             {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
                 {positions.length ? <span>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}
@@ -1013,6 +1020,7 @@ export function QuoteEditor({
           {!disabled ? (
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button type="button" size="md" onClick={() => setDraft("choose")} disabled={draft === "saving"}>+ Add line</Button>
+              {(packages?.length ?? 0) > 0 && (department === "bodyshop" || department === "both") ? <Button type="button" tone="secondary" size="md" onClick={() => setPackageAsk(true)} data-add-package>+ Add a package</Button> : null}
               {isQuotation ? <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)}>+ Add a part</Button> : null}
               <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green" : ""}>
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
@@ -1362,6 +1370,17 @@ export function QuoteEditor({
           </div>
         </div>
       ) : null}
+      {packageAsk ? (
+        <PackageDialog
+          packages={packages ?? []}
+          onClose={() => setPackageAsk(false)}
+          onPick={(pkg, ticked) => {
+            const snap = packageSnapshot(pkg, ticked);
+            addLine({ line_type: "package", title: pkg.name, package_key: pkg.key, package_items: snap, quantity: 1, price_per: "job" } as Partial<QuoteLine>);
+            setPackageAsk(false);
+          }}
+        />
+      ) : null}
       {mergeFor ? (
         <MergeDialog
           lines={lines}
@@ -1491,6 +1510,46 @@ export function QuoteEditor({
  * The name box of a line: type freely with matching items from that kind's list suggested underneath,
  * or tap the small arrow at the end to open that kind's picker. Enter takes the top match or moves on.
  */
+/** The bodyshop package chooser: pick one, answer the only-if questions, one price follows. */
+function PackageDialog({ packages, onClose, onPick }: { packages: BodyshopPackage[]; onClose: () => void; onPick: (pkg: BodyshopPackage, tickedOptional: string[]) => void }) {
+  const [pick, setPick] = useState<BodyshopPackage | null>(packages.length === 1 ? packages[0] : null);
+  const [ticked, setTicked] = useState<string[]>([]);
+  const optional = pick ? pick.items.filter((i) => i.only_if) : [];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-package-ask onClick={onClose}>
+      <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+        <span className="text-lg font-extrabold">{pick ? pick.name : "Which package?"}</span>
+        {!pick ? (
+          <div className="flex flex-col gap-2">
+            {packages.map((p) => (
+              <button key={p.key} type="button" className="min-h-12 rounded-control border border-line-strong bg-white px-3 text-left text-sm font-bold" data-package-choice onClick={() => setPick(p)}>
+                {p.name}
+                <span className="block text-xs font-medium text-muted">{p.items.length} items{p.time_in_workshop ? ` · ${p.time_in_workshop}` : ""}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="whitespace-pre-line rounded-control bg-chip p-3 text-sm">{packageDetailsText(packageSnapshot(pick, pick.items.filter((i) => i.only_if).map((i) => i.label)))}</div>
+            {optional.map((i) => (
+              <label key={i.label} className="flex min-h-11 items-center gap-2 text-sm font-semibold">
+                <input type="checkbox" checked={ticked.includes(i.label)} onChange={(e) => setTicked((t) => (e.target.checked ? [...t, i.label] : t.filter((x) => x !== i.label)))} className="h-5 w-5 accent-ink" data-package-optional />
+                {i.label} — only if the car has one ({i.only_if})
+              </label>
+            ))}
+            <p className="text-xs text-muted">One price for the whole package: type it on the line after Add. The customer never sees item prices.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => onPick(pick, ticked)} data-package-add>Add the package</Button>
+              {packages.length > 1 ? <Button type="button" tone="ghost" size="md" onClick={() => setPick(null)}>Back</Button> : null}
+              <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** "Merge into another labour line": pick the target; the hours join it and this line goes. */
 function MergeDialog({ lines, fromId, onClose, onPick }: { lines: QuoteLine[]; fromId: string; onClose: () => void; onPick: (targetId: string) => void }) {
   const from = lines.find((x) => x.id === fromId);

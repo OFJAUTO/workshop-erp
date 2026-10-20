@@ -83,6 +83,9 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/services" tone="secondary">
               Services
             </LinkButton>
+            <LinkButton href="/settings/packages" tone="secondary">
+              Packages
+            </LinkButton>
             <LinkButton href="/settings/stickers" tone="secondary">
               Stickers
             </LinkButton>

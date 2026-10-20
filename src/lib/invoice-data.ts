@@ -1,4 +1,5 @@
 import "server-only";
+import { packageDetailsText } from "./packages";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
 import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
@@ -285,7 +286,7 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   return {
     section: isPart ? "parts" : "services",
     description: withPositions(title, l.positions),
-    details: l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : l.details,
+    details: l.package_items ? packageDetailsText(l.package_items) : l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : l.details,
     part_number: number,
     quantity: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : l.quantity || 1,
     hours: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : null,

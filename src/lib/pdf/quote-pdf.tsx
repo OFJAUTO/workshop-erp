@@ -11,6 +11,7 @@ import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { packageDetailsText } from "../packages";
 import { DocumentTail, GREY, InfoBoxes, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
 
 /**
@@ -42,7 +43,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     return {
       description: withPositions(title, l.positions),
       // A part: its availability in plain words (Today, Tomorrow, In 2 days) as the small grey line, then its type.
-      details: [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details].filter(Boolean).join(" · ") || null,
+      details: l.package_items ? packageDetailsText(l.package_items) : [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details].filter(Boolean).join(" · ") || null,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
       amount,
