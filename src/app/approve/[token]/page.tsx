@@ -25,9 +25,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * customer and the car, the requests, the videos and photos, then one light green box with the terms tick,
  * the name and the only Approve button, and Call and WhatsApp. No bar, no greeting, no small print.
  */
-export default async function ApprovalPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
+export default async function ApprovalPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string; preview?: string }> }) {
   const { token } = await params;
-  const { error } = await searchParams;
+  const { error, preview } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const company = companyFromSettings(settings);
@@ -43,7 +43,9 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   if (!card || !card.gateIn) return plain(<Notice tone="error">This job card is no longer available.</Notice>);
   const { vehicle, gateIn, requests, media, mediaUrls, job } = card;
 
-  if (!req.opened_at) {
+  // "View as customer" from the gate-in details page: the same page, but a staff preview never counts as
+  // the customer opening the link and never rings anyone.
+  if (!req.opened_at && preview !== "1") {
     await admin.from("approval_requests").update({ opened_at: new Date().toISOString(), status: req.status === "approved" ? "approved" : "opened" }).eq("id", req.id);
     await notifyStaff([req.sent_by, job.gated_in_by].filter((x): x is string => !!x), { type: "approval_opened", title: `${req.sent_to_name ?? "The customer"} opened the approval link`, body: `${formatPlate(vehicle)} · ${job.job_number}`, jobId: job.id, href: `/jobs/${job.id}` });
   }

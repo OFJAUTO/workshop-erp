@@ -7,23 +7,20 @@ import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
-import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
+import { Badge, Button, Card, ChoiceButtons, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { hasLabourChargesLine, tasksFromInspection,inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
 import { formatDate, formatDateTime, formatDayTime } from "@/lib/format";
-import { signJobFiles } from "@/lib/work-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate, type Stage } from "@/lib/jobs";
+import { CONDITIONS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, clockOf, formatPromised, jobTiming, labelOf, workingMinutesSince, workingTimeOf, dubaiDate, type Stage } from "@/lib/jobs";
 import { mediaChecklist } from "@/lib/media";
 import { missingItems } from "@/lib/media-checklist";
-import { describeMileage } from "@/lib/mileage";
 import { nextStepOf, waitedText } from "@/lib/next-step";
 import { PART_SELECT, loadQuoteSummary, toPart } from "@/lib/quote-data";
 import { INVOICE_SELECT, jobBalance, toInvoice } from "@/lib/invoice-data";
@@ -57,7 +54,6 @@ import { remindManagerToConfirm } from "../work-actions";
 import { loadPlanning } from "@/lib/planning";
 import { sendToWash, skipWash, washDone } from "../../wash/actions";
 import { WashForms } from "../../wash/WashForms";
-import { MediaGallery } from "./MediaGallery";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
 import { PlanningCard } from "./PlanningCard";
 import { TechniciansCard } from "./TechniciansCard";
@@ -93,13 +89,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
   if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
-  // The old-parts photos taken at gate-out: the job card history shows them with the time and who took them.
-  const { data: oldPartsRows } = gateOut ? await admin.from("job_files").select("id, storage_path, taken_at, uploaded_by").eq("job_id", id).eq("kind", "gate_out_photo").eq("caption", "Old parts handed over").is("removed_at", null).order("taken_at") : { data: [] };
-  const oldPartsUrls = await signJobFiles(((oldPartsRows ?? []) as { storage_path: string }[]).map((r) => r.storage_path));
-  const opByIds = Array.from(new Set((oldPartsRows ?? []).map((r) => r.uploaded_by as string | null).filter((x): x is string => !!x)));
-  const { data: opByRows } = opByIds.length ? await admin.from("staff").select("id, display_name").in("id", opByIds) : { data: [] as { id: string; display_name: string }[] };
-  const opNames = new Map((opByRows ?? []).map((x) => [x.id, x.display_name]));
-  const oldPartsPhotos = ((oldPartsRows ?? []) as { id: string; storage_path: string; taken_at: string; uploaded_by: string | null }[]).map((r) => ({ id: r.id, url: oldPartsUrls[r.storage_path] ?? null, taken_at: r.taken_at, byName: r.uploaded_by ? (opNames.get(r.uploaded_by) ?? null) : null }));
   const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
@@ -135,7 +124,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const docAlerts = (await loadDocAlerts([id], settings)).get(id) ?? [];
   const isVip = customer?.is_vip ?? customerPublic?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? customerPublic?.vip_note ?? vip?.vip_note ?? null;
-  const customerName = customer?.company_name ?? customer?.full_name ?? customerPublic?.company_name ?? customerPublic?.full_name ?? "Customer";
   // Messages greet the person: the saved contact for a company, the company without its legal ending otherwise.
   const greetName = greetingNameOf(customer ?? customerPublic);
 
@@ -149,8 +137,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canRequestMove = !can(role, "moveJobs") && can(role, "requestMove") && job.is_open;
   // Gate-in details can be corrected until the car leaves (every change is written in the history).
   const canEditGateIn = can(role, "editGateIn") && job.is_open && job.status !== "in_delivery";
-  // Photos and videos: anyone doing the gate-in while it is still open; only the owner once it is finished.
-  const canRemoveMedia = canEditGateIn && (role === "owner" || !check.complete);
   const canSend = can(role, "sendApproval") && job.is_open;
   // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
   const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
@@ -307,7 +293,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const tile = (state: StageBoxState) => `flex flex-col gap-2 ${STAGE_BOX_CARD[state]}`;
   const boxTitle = (state: StageBoxState) => `text-xs font-bold uppercase tracking-[0.08em] ${STAGE_BOX_TITLE[state]}`;
   const tick = (state: StageBoxState) => (state === "done" ? "✓ " : "");
-  const mapHref = gateIn?.location_lat != null && gateIn.location_lng != null ? `https://maps.google.com/?q=${gateIn.location_lat},${gateIn.location_lng}` : null;
   const overrides = events.filter((e) => e.event_type === "override");
   const pendingMove = moveRequests.find((m) => m.status === "pending");
   const defaultRoadTest = roadTest?.decision ?? (gateIn?.condition === "does_not_run" ? "not_possible" : null);
@@ -339,6 +324,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         }
         actions={
           <>
+            {loose ? (
+              <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" data-gate-in-details>
+                Gate-in details
+              </LinkButton>
+            ) : null}
             {canEditGateIn && !check.complete && !loose ? (
               <LinkButton href={`/jobs/${id}/media`} size="lg">
                 {(() => { const m = missingItems(check); return m.length === 1 ? `Finish gate-in: ${m[0].name} missing` : `Finish gate-in: ${m.length} items missing (${m.map((x) => x.name).join(", ")})`; })()}
@@ -513,6 +503,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className={boxTitle(approvalBox)}>{tick(approvalBox)}Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
           <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
+          <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" size="md" className="mt-auto" data-gate-in-details>
+            Gate-in details
+          </LinkButton>
         </Card>
         ) : null}
         {!loose ? (
@@ -704,103 +697,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
-          <Collapsible title="Gate-in details" right={gateIn ? `${formatDateTime(job.gated_in_at)}` : undefined}>
-            {canEditGateIn ? (
-              <div>
-                <LinkButton href={`/jobs/${id}/gate-in/edit`} tone="ghost" size="md" data-edit-gate-in>
-                  Edit gate-in
-                </LinkButton>
-              </div>
-            ) : null}
-            {gateIn ? (
-              <DescriptionList
-                items={[
-                  { label: "Gated in", value: `${formatDateTime(job.gated_in_at)} by ${card.gatedInBy ?? "unknown"}` },
-                  { label: "Department", value: JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label ?? "Not set" },
-                  {
-                    label: "Location",
-                    value: (
-                      <span>
-                        {gateIn.location_name ?? ""}
-                        {gateIn.location_type !== "branch" && gateIn.location_address ? ` · ${gateIn.location_address}` : ""}
-                        {mapHref ? (
-                          <>
-                            {" · "}
-                            <a href={mapHref} target="_blank" rel="noreferrer" className="underline underline-offset-4">
-                              Map
-                            </a>
-                          </>
-                        ) : null}
-                      </span>
-                    ),
-                  },
-                  { label: "Arrived by", value: labelOf(ARRIVED_BY, gateIn.arrived_by) },
-                  { label: "Condition", value: labelOf(CONDITIONS, gateIn.condition) },
-                  { label: vehicle.fuel_type === "electric" ? "Battery" : "Fuel level", value: vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : null) : labelOf(FUEL_LEVELS, gateIn.fuel_level) },
-                  { label: "Cleanliness", value: labelOf(CLEANLINESS, gateIn.cleanliness) },
-                  { label: "Dash cam", value: gateIn.dash_cam ? "Fitted, to be disconnected" : "Not fitted" },
-                  { label: "Major damage", value: gateIn.major_damage ? "Yes" : "No" },
-                  { label: "Mileage", value: describeMileage(gateIn.mileage, gateIn.mileage_unit ?? "km") },
-                  { label: "Keys", value: `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}` },
-                  { label: "Old parts returned to customer", value: gateIn.old_parts_return ? "Yes" : "No" },
-                  { label: "Notes", value: gateIn.notes ? <span className="whitespace-pre-wrap">{gateIn.notes}</span> : null },
-                ]}
-              />
-            ) : (
-              <p className="text-sm text-muted">No gate-in record.</p>
-            )}
-            {gateOut ? (
-              <DescriptionList
-                items={[
-                  { label: "Gated out", value: `${formatDateTime(job.gated_out_at)} by ${card.gatedOutBy ?? "unknown"}` },
-                  { label: "Old parts", value: gateOut.old_parts_handed == null ? null : gateOut.old_parts_handed ? `Handed over${oldPartsPhotos.length ? ` · ${oldPartsPhotos.length} photo${oldPartsPhotos.length === 1 ? "" : "s"} below` : ""}` : "Not handed" },
-                  { label: "Keys returned", value: `${gateOut.keys_returned}, ${gateOut.keychain_returned ? "with keychain" : "no keychain"}${gateOut.keys_match ? "" : " (did not match gate-in)"}` },
-                  { label: "Keys override", value: gateOut.keys_override_reason },
-                  { label: "Dash cam reconnected", value: gateOut.dash_cam_reconnected == null ? "Not fitted" : gateOut.dash_cam_reconnected ? "Yes" : "No" },
-                  { label: "Gate-out notes", value: gateOut.notes },
-                ]}
-              />
-            ) : null}
-            {oldPartsPhotos.length ? (
-              <div className="flex flex-col gap-1" data-old-parts-history>
-                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Old parts handed over</span>
-                <div className="flex flex-wrap gap-2">
-                  {oldPartsPhotos.map((p) => (
-                    <figure key={p.id} className="flex flex-col gap-0.5">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <a href={p.url ?? "#"} target="_blank" rel="noreferrer"><img src={p.url ?? ""} alt="Old parts handed over" className="h-24 w-24 rounded-control object-cover" /></a>
-                      <figcaption className="text-[11px] text-muted">{formatDayTime(p.taken_at)}{p.byName ? ` · ${p.byName}` : ""}</figcaption>
-                    </figure>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </Collapsible>
-
-          <Collapsible title="Vehicle and customer details">
-            <DescriptionList
-              items={[
-                { label: "Customer", value: seesCustomerDetails && customer ? <Link href={`/customers/${customer.id}`} className="font-semibold underline underline-offset-4">{customerName}</Link> : customerName },
-                ...(seesCustomerDetails && customer ? [{ label: "Phone", value: customer.phone }, { label: "Customer number", value: customer.customer_number }] : []),
-                { label: "Car", value: <Link href={`/vehicles/${vehicle.id}`} className="font-semibold underline underline-offset-4">{vehicleTitle(vehicle)}</Link> },
-                { label: "Plate", value: formatPlate(vehicle) },
-                { label: "VIN", value: vehicle.vin ? <span className="font-mono">{vehicle.vin}</span> : null },
-                { label: "Colour", value: vehicle.colour },
-              ]}
-            />
-          </Collapsible>
-
-          <Collapsible title="Gate-in photos and videos" right={`${media.length}`}>
-            {canEditGateIn && job.is_open ? (
-              <div>
-                <LinkButton href={`/jobs/${id}/media`} tone="ghost" size="md" data-add-media>
-                  Add photos or video
-                </LinkButton>
-              </div>
-            ) : null}
-            <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} canRemove={canRemoveMedia} />
-          </Collapsible>
-
           <Collapsible title="History" right={`${events.length}`}>
             <ul className="flex flex-col divide-y divide-line">
               {events.filter((e) => can(role, "viewInvoices") || !MONEY_EVENTS.has(e.event_type)).map((e) => (

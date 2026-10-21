@@ -4,28 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lightbox, type LightboxSlide } from "@/components/Lightbox";
 import { formatDateTime } from "@/lib/format";
-import type { GateInMediaRow } from "@/lib/types";
+import { MEDIA_KIND_LABELS, type GateInMediaRow } from "@/lib/types";
 import { WHEEL_KINDS, WHEEL_LABELS, isWheelKind, wheelConditionText } from "@/lib/wheels";
 
-const KIND_LABEL: Record<GateInMediaRow["kind"], string> = {
-  car_picture: "Car picture",
-  video: "Walk-around video",
-  video_exterior: "Exterior video",
-  video_interior: "Interior video",
-  dashboard_photo: "Dashboard",
-  keys_photo: "Keys",
-  keys_photo_front: "Keys, front",
-  keys_photo_back: "Keys, back",
-  damage_photo: "Damage",
-  gate_out_photo: "Gate-out",
-  wheel_fl: "Front left wheel",
-  wheel_fr: "Front right wheel",
-  wheel_rl: "Rear left wheel",
-  wheel_rr: "Rear right wheel",
-  item_photo: "Item photo",
-  assessment_photo: "Assessment photo",
-  item_collect_photo: "Item collected, photo",
-};
+const KIND_LABEL = MEDIA_KIND_LABELS;
 
 type Slide = LightboxSlide;
 
