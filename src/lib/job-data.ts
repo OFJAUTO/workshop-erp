@@ -61,7 +61,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
         .select("id, customer_number, full_name, company_name, phone, is_vip, vip_note")
         .eq("id", job.customer_id)
         .maybeSingle(),
-      client.from("customer_vip_flags").select("is_vip, vip_note").eq("id", job.customer_id).maybeSingle(),
+      createAdminClient().from("customers").select("is_vip, vip_note").eq("is_active", true).eq("id", job.customer_id).maybeSingle(),
       client
         .from("gate_ins")
         .select("id, job_id, arrived_by, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, mileage_unit, mileage_miles, keys_count, keys_keychain, customer_requests, notes, old_parts_return, damage_note, wheels_required, location_type, location_name, location_address, location_lat, location_lng, is_complete, completed_at, created_at, updated_at")
@@ -83,7 +83,7 @@ export async function loadJobCard(client: SupabaseClient, jobId: string): Promis
         .eq("job_id", jobId)
         .maybeSingle(),
       client.from("job_requests").select("id, job_id, position, text, is_active").eq("job_id", jobId).eq("is_active", true).order("position"),
-      client.from("customer_public").select("full_name, company_name, is_vip, vip_note").eq("id", job.customer_id).maybeSingle(),
+      createAdminClient().from("customers").select("full_name, company_name, is_vip, vip_note").eq("is_active", true).eq("id", job.customer_id).maybeSingle(),
     ]);
   if (!vehicle) return null;
 

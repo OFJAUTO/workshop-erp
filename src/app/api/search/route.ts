@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     .limit(8);
   const rows = (jobs ?? []) as unknown as { id: string; job_number: string; status: string; is_open: boolean; customer_id: string; vehicle: (Parameters<typeof formatPlate>[0] & { photo_path: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null }) | null }[];
   const seesCustomers = can(staff.role_id as RoleId, "viewCustomers");
-  const { data: names } = seesCustomers && rows.length ? await admin.from("customer_public").select("id, full_name, company_name").in("id", rows.map((r) => r.customer_id)) : { data: [] };
+  const { data: names } = seesCustomers && rows.length ? await admin.from("customers").select("id, full_name, company_name").eq("is_active", true).in("id", rows.map((r) => r.customer_id)) : { data: [] };
   const nameOf = new Map((names ?? []).map((n) => [n.id, n.company_name ?? n.full_name]));
   const pictures = await signCarPictures(rows.map((r) => r.vehicle?.photo_path));
   const hits = rows.map((r) => ({

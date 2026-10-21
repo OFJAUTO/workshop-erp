@@ -1,6 +1,7 @@
 import "server-only";
 import type { CurrentStaff } from "@/lib/auth";
 import type { BookingKind, CollectMethod } from "@/lib/calendar";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import type { AdvisorOption, CustomerOption, JobOption, VehicleOption } from "./AppointmentForm";
@@ -105,11 +106,11 @@ export function reminderTemplateFor(kind: BookingKind, settings: { whatsapp_remi
   }
 }
 
-/** Roles that may not read customers still get the name (never the phone) through the limited view. */
-export async function fillCustomerNames(supabase: Client, appts: AppointmentFull[]) {
+/** Roles that may not read customers still get the name (never the phone): a narrow server-side read. */
+export async function fillCustomerNames(_supabase: Client, appts: AppointmentFull[]) {
   const missing = appts.filter((a) => !a.customer);
   if (!missing.length) return;
-  const { data } = await supabase.from("customer_public").select("id, full_name, company_name, is_vip").in("id", Array.from(new Set(missing.map((a) => a.customer_id))));
+  const { data } = await createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", Array.from(new Set(missing.map((a) => a.customer_id))));
   const byId = new Map((data ?? []).map((c) => [c.id, c]));
   for (const a of missing) {
     const c = byId.get(a.customer_id);

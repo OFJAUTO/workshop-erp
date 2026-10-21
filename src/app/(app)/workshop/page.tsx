@@ -4,6 +4,7 @@ import { Card, Empty, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
 import { can, type RoleId } from "@/lib/roles";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 
@@ -14,8 +15,10 @@ export default async function WorkshopListPage() {
   const staff = await requirePermission("viewWorkshopList");
   const role = staff.role_id as RoleId;
   const supabase = await createClient();
-  const { data } = await supabase.from("workshop_board").select("job_id, job_number, status, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make, model, technician").order("gated_in_at", { ascending: false });
-  const rows = (data ?? []) as Row[];
+  // The board is a narrow server-side read of every open car (plate, car, status, technician) - no money.
+  type RawRow = { id: string; job_number: string; status: JobStatus; assignee: { display_name: string } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null };
+  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, gated_in_at, assignee:staff!jobs_assigned_to_fkey(display_name), vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).order("gated_in_at", { ascending: false });
+  const rows: Row[] = ((data ?? []) as unknown as RawRow[]).map((j) => ({ job_id: j.id, job_number: j.job_number, status: j.status, has_plate: j.vehicle?.has_plate ?? false, plate_country: j.vehicle?.plate_country ?? "UAE", plate_emirate: j.vehicle?.plate_emirate ?? null, plate_code: j.vehicle?.plate_code ?? null, plate_number: j.vehicle?.plate_number ?? null, vin: j.vehicle?.vin ?? null, make: j.vehicle?.make?.name ?? null, model: j.vehicle?.model?.name ?? null, technician: j.assignee?.display_name ?? null }));
   // Approved reports open for everyone except technicians (the QC inspector reads them here).
   const showReports = role !== "technician";
   const { data: approved } = showReports && rows.length ? await supabase.from("inspections").select("job_id").eq("status", "approved").eq("is_active", true).in("job_id", rows.map((r) => r.job_id)) : { data: [] as { job_id: string }[] };

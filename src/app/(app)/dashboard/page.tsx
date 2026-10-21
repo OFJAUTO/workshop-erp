@@ -79,7 +79,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const quoteSummaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
   const partsLiveMap = await loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id));
   const [{ data: names }, pictures] = await Promise.all([
-    all.length ? supabase.from("customer_public").select("id, full_name, company_name, is_vip").in("id", customerIds) : Promise.resolve({ data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] }),
+    all.length ? createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", customerIds) : Promise.resolve({ data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] }),
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
   ]);
   const nameOf = new Map((names ?? []).map((n) => [n.id, n]));

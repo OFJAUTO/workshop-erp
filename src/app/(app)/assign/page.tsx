@@ -12,6 +12,7 @@ import { JOB_DEPARTMENTS, jobConcernsSide, sideOfDepartment, roadTestSuggested }
 import { STATUS_LABELS, clockOf, jobTiming, type JobStatus, type Stage } from "@/lib/jobs";
 import { ROAD_TEST_CHOICES } from "@/lib/road-test";
 import { getSettings } from "@/lib/settings";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { assignJob } from "../jobs/actions";
@@ -32,6 +33,7 @@ type Row = {
   gated_in_at: string;
   first_approval_at: string | null;
   assigned_to: string | null;
+  customer_id: string;
   assignment_note: string | null;
   assignment_note_at: string | null;
   vehicle: { photo_path: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null } | null;
@@ -50,7 +52,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const [{ data: jobs }, , { data: load }, { data: requestRows }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, assignment_note, assignment_note_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), customer:customer_public(full_name, company_name, is_vip), gate_in:gate_ins(is_complete, condition, customer_requests, notes), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
+      .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, customer_id, assignment_note, assignment_note_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(is_complete, condition, customer_requests, notes), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
       .eq("is_open", true)
       .is("assigned_to", null)
       .in("status", ["gate_in_pending", "pending_approval", "pending_inspection"])
@@ -62,6 +64,10 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const loads = await technicianLoads(settings, side);
   const requestsOf = (jobId: string) => ((requestRows ?? []) as { job_id: string; text: string }[]).filter((r) => r.job_id === jobId).map((r) => r.text);
   const rows = ((jobs ?? []) as unknown as Row[]).filter((j) => jobConcernsSide(j.department, side));
+  // The customer's name for the card (never the phone): a narrow server-side read.
+  const { data: custNames } = rows.length ? await createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", Array.from(new Set(rows.map((j) => j.customer_id)))) : { data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] };
+  const custOf = new Map((custNames ?? []).map((c) => [c.id, c]));
+  for (const j of rows) j.customer = custOf.get(j.customer_id) ?? null;
   void load;
   const pictures = await signCarPictures(rows.map((j) => j.vehicle?.photo_path));
   const ready = rows.filter((j) => j.status === "pending_inspection");

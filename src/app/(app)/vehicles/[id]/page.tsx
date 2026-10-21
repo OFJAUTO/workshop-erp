@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehiclePhotoRow, type VehicleRow } from "@/lib/types";
 import { addVehiclePhoto, setVehicleActive, setVehicleProfilePhoto } from "../actions";
@@ -52,8 +53,8 @@ export default async function VehiclePage({
   const photos = (photosData ?? []) as VehiclePhotoRow[];
 
   const [{ data: vipRow }, { data: pub }, { data: visitRows }] = await Promise.all([
-    supabase.from("customer_vip_flags").select("is_vip, vip_note").eq("id", v.customer_id).maybeSingle(),
-    supabase.from("customer_public").select("full_name, company_name").eq("id", v.customer_id).maybeSingle(),
+    createAdminClient().from("customers").select("is_vip, vip_note").eq("is_active", true).eq("id", v.customer_id).maybeSingle(),
+    createAdminClient().from("customers").select("full_name, company_name").eq("is_active", true).eq("id", v.customer_id).maybeSingle(),
     supabase.from("jobs").select("id, job_number, status, gated_in_at, gated_out_at, is_open").eq("vehicle_id", id).order("gated_in_at", { ascending: false }),
   ]);
   const visits = (visitRows ?? []) as { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean }[];

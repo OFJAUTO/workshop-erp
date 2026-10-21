@@ -67,7 +67,7 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
   });
   const [pictures, { data: vip }, { data: partRows }] = await Promise.all([
     signCarPictures(rows.map((j) => j.vehicle?.photo_path)),
-    rows.length ? supabase.from("customer_vip_flags").select("id, is_vip").in("id", Array.from(new Set(rows.map((j) => j.customer_id)))) : Promise.resolve({ data: [] as { id: string; is_vip: boolean }[] }),
+    rows.length ? admin.from("customers").select("id, is_vip").eq("is_active", true).in("id", Array.from(new Set(rows.map((j) => j.customer_id)))) : Promise.resolve({ data: [] as { id: string; is_vip: boolean }[] }),
     rows.length ? admin.from("part_items").select("job_id, description, issue_status, order_status, expected_date, delivery_date, return_status").in("job_id", rows.map((j) => j.id)).eq("is_active", true).neq("order_status", "none").neq("return_status", "returned") : Promise.resolve({ data: [] }),
   ]);
   const vipIds = new Set((vip ?? []).filter((v) => v.is_vip).map((v) => v.id));

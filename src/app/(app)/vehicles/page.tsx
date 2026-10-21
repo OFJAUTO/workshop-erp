@@ -3,6 +3,7 @@ import { Badge, Button, Empty, Input, LinkButton, PageHeader } from "@/component
 import { requirePermission } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
 import { VehicleCard } from "./VehicleCard";
@@ -45,7 +46,7 @@ export default async function VehiclesPage({
   const rows = (data ?? []) as unknown as Row[];
 
   const { data: names } = rows.length
-    ? await supabase.from("customer_public").select("id, full_name, company_name, is_vip").in("id", Array.from(new Set(rows.map((r) => r.customer_id))))
+    ? await createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", Array.from(new Set(rows.map((r) => r.customer_id))))
     : { data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] };
   const nameOf = new Map((names ?? []).map((n) => [n.id, n]));
   const vipIds = new Set((names ?? []).filter((v) => v.is_vip).map((v) => v.id));
