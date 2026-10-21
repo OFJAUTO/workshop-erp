@@ -117,8 +117,9 @@ export async function startQuotation(jobId: string) {
     // and the estimate keeps a tombstone - it never lists as its own commission again.
     const { data: estCom } = await admin.from("quotations").select("number, commission_to, commission_kind, commission_value, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note").eq("id", job!.estimate_id).maybeSingle();
     if (estCom?.commission_to) {
-      const { number: _estNumber, ...comFields } = estCom;
-      await admin.from("quotations").update({ ...comFields, commission_status: estCom.commission_status ?? "approved", updated_by: staff!.id }).eq("id", created!.id);
+      const comFields: Record<string, unknown> = { ...estCom, commission_status: estCom.commission_status ?? "approved" };
+      delete comFields.number;
+      await admin.from("quotations").update({ ...comFields, updated_by: staff!.id }).eq("id", created!.id);
       await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_aed: 0, commission_status: "superseded", commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, updated_by: staff!.id }).eq("id", job!.estimate_id);
       await logQuoteEvent(created!.id, jobId, staff!.id, "commission_carried", `${created!.number}: the commission for ${estCom.commission_to} moved over from estimate ${estCom.number}`);
       await logQuoteEvent(job!.estimate_id!, jobId, staff!.id, "commission_carried", `${estCom.number}: the commission for ${estCom.commission_to} moved to ${created!.number} when the estimate became the job's quotation`);
