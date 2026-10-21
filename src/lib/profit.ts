@@ -63,7 +63,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   const invoices = rows.map((r) => ({ invoice: toInvoice(r), job: r.job as { job_number: string; department: string | null; comeback_of: string | null; comeback_cause: string | null; comeback_claim_status: string | null; comeback_claim_amount: number | string | null; vehicle: { plate_number: string | null; plate_code: string | null; plate_emirate: string | null; has_plate: boolean; vin: string | null } | null } | null }));
   const ids = invoices.map((i) => i.invoice.id);
   const jobIds = Array.from(new Set(invoices.map((i) => i.invoice.job_id).filter((x): x is string => !!x)));
-  const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }, { data: hiddenRows }, { data: trips }, { data: clockings }, { data: quotes }] = await Promise.all([
+  const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }, { data: hiddenRows }, { data: trips }, { data: clockings }, { data: quotes }, { data: comRows }] = await Promise.all([
     admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed").in("invoice_id", ids).eq("is_active", true),
     admin.from("payments").select(PAYMENT_SELECT).in("invoice_id", ids).eq("is_active", true),
     jobIds.length ? admin.from("work_sessions").select("job_id, minutes, started_at, ended_at").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
@@ -76,8 +76,10 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("recovery_trips").select("job_id, price_aed, delivered_at, status").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     // Bodyshop cars clock on the section tablets, not on work sessions.
     jobIds.length ? admin.from("bodyshop_clockings").select("job_id, minutes").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
-    // Approved commissions and bodyshop materials, from the job's approved quotations.
-    jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, materials_cost_aed").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).eq("status", "approved") : Promise.resolve({ data: [] }),
+    // Bodyshop materials from the approved quotations; the commission is read separately below, because
+    // the job's ONE commission rides on the newest version, whatever its quotation status is right now.
+    jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, materials_cost_aed, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).eq("status", "approved") : Promise.resolve({ data: [] }),
+    jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
   // The comebacks of these jobs (our fault), to take their losses off the original job.
   const { data: cbJobs } = jobIds.length && !filter.noComebacks ? await admin.from("jobs").select("id, comeback_of").in("comeback_of", jobIds).in("comeback_cause", ["workmanship", "faulty_part"]) : { data: [] as { id: string; comeback_of: string }[] };
@@ -98,8 +100,13 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const tripCost = round2(jobTrips.reduce((a, t) => a + (Number(t.price_aed) || 0), 0));
     const hiddenRecovery = round2(hidden.filter((l) => !l.fee_kind && l.line_type === "recovery").reduce((a, l) => a + lineCost(l), 0));
     const recoveryCost = tripCost > 0 ? tripCost : hiddenRecovery;
-    const jobQuotes = ((quotes ?? []) as { job_id: string; commission_aed: number | string | null; commission_status: string | null; materials_cost_aed: number | string | null }[]).filter((x) => x.job_id === invoice.job_id);
-    const commission = round2(jobQuotes.filter((x) => x.commission_status !== "declined").reduce((a, x) => a + (Number(x.commission_aed) || 0), 0));
+    const jobQuotes = ((quotes ?? []) as { job_id: string; materials_cost_aed: number | string | null }[]).filter((x) => x.job_id === invoice.job_id);
+    // The job's ONE commission: the newest row still carrying one (paid first), wherever it sits.
+    type ComRow = { job_id: string; commission_aed: number | string | null; commission_status: string | null; version: number; created_at: string; commission_paid_at: string | null };
+    const jobComs = ((comRows ?? []) as ComRow[]).filter((x) => x.job_id === invoice.job_id && x.commission_status !== "declined" && x.commission_status !== "superseded");
+    const comRank = (x: ComRow) => `${x.commission_paid_at ? 1 : 0}·${String(Number(x.version)).padStart(4, "0")}·${x.created_at}`;
+    const theCom = jobComs.sort((a, b) => (comRank(a) < comRank(b) ? 1 : -1))[0] ?? null;
+    const commission = round2(Number(theCom?.commission_aed) || 0);
     const materialsCost = round2(jobQuotes.reduce((a, x) => a + (Number(x.materials_cost_aed) || 0), 0));
     const clockMinutes = ((clockings ?? []) as { job_id: string; minutes: number | null }[]).filter((c) => c.job_id === invoice.job_id).reduce((a, c) => a + (Number(c.minutes) || 0), 0);
     const minutes = clockMinutes + ((sessions ?? []) as { job_id: string; minutes: number | null; started_at: string; ended_at: string | null }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + (s.minutes ?? (s.ended_at ? Math.round((Date.parse(s.ended_at) - Date.parse(s.started_at)) / 60000) : 0)), 0);

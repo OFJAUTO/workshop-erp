@@ -37,6 +37,7 @@ begin
   delete from public.recovery_trips where driver_name like 'E2e %' or location_details like 'E2e%';
   delete from public.recovery_drivers where name like 'E2e %';
   delete from public.inbound_scans where storage_path like 'e2e/%' or from_email like '%@e2e.test';
+  update public.settings set value = coalesce((select jsonb_agg(x) from jsonb_array_elements_text(value) x where x not ilike 'e2e %'), '[]'::jsonb) where key = 'commission_people';
   delete from public.notifications where job_id = any(job_ids);
   delete from public.audit_log where (new_data->>'job_id') = any(job_ids::text[]) or (old_data->>'job_id') = any(job_ids::text[]) or (new_data->>'id') = any(job_ids::text[]) or (old_data->>'id') = any(job_ids::text[]) or record_id = any(job_ids::text[]);
   delete from public.jobs where id = any(job_ids);

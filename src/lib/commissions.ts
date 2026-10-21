@@ -48,15 +48,28 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; toP
   const admin = createAdminClient();
   const settings = await getSettings();
   const people = ((settings.commission_people ?? []) as string[]).map(String);
+  // ONE commission per job: quotations only (an estimate's commission moves over when it becomes the
+  // job's quotation), never a superseded tombstone, and - belt and braces - one row per job here too.
   const { data: qs } = await admin
     .from("quotations")
-    .select(`id, number, version, job_id, commission_to, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_at, commission_decision_note, commission_paid_at, commission_paid_by, commission_paid_method, commission_paid_note, job:jobs!quotations_job_id_fkey(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)))`)
+    .select(`id, number, version, job_id, commission_to, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_at, commission_decision_note, commission_paid_at, commission_paid_by, commission_paid_method, commission_paid_note, created_at, job:jobs!quotations_job_id_fkey(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)))`)
     .eq("is_active", true)
+    .eq("kind", "quotation")
+    .not("job_id", "is", null)
     .not("commission_to", "is", null)
     .gt("commission_aed", 0)
     .order("commission_set_at", { ascending: false })
     .limit(400);
-  const rows = (qs ?? []) as unknown as Record<string, unknown>[];
+  const all = ((qs ?? []) as unknown as Record<string, unknown>[]).filter((r) => (r.commission_status as string | null) !== "superseded");
+  // Newest version per job wins; older leftovers never show (and never offer a second "Mark paid").
+  const byJob = new Map<string, Record<string, unknown>>();
+  const rank = (r: Record<string, unknown>) => `${r.commission_paid_at ? 1 : 0}·${String(Number(r.version)).padStart(4, "0")}·${r.created_at}`;
+  for (const r of all) {
+    const k = r.job_id as string;
+    const have = byJob.get(k);
+    if (!have || rank(r) > rank(have)) byJob.set(k, r);
+  }
+  const rows = Array.from(byJob.values());
   const jobIds = Array.from(new Set(rows.map((r) => r.job_id as string | null).filter((x): x is string => !!x)));
   const [{ data: invRaw }, { data: paysRaw }, { data: cnotes }, { data: staffRows }] = await Promise.all([
     jobIds.length ? admin.from("invoices").select("*").in("job_id", jobIds).eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").is("converted_to", null) : Promise.resolve({ data: [] }),

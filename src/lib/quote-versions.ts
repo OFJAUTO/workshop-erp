@@ -36,12 +36,27 @@ export async function createNextVersion(quotationId: string, by: VersionActor, o
   if (!REVISABLE.includes(q.status)) return { error: "This version cannot be revised." };
   const admin = createAdminClient();
   const urgentOnly = !!opts.urgentOnly;
+  // ONE commission per job (21 October): the new version carries the commission WHOLE - who gets it,
+  // its approval, even a payment already made - and the old version keeps only a tombstone below.
+  const { data: com } = await admin
+    .from("quotations")
+    .select("commission_to, commission_kind, commission_value, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note, commission_paid_at, commission_paid_by, commission_paid_method, commission_paid_note")
+    .eq("id", q.id)
+    .maybeSingle();
+  const carried = com?.commission_to ? { ...com, commission_status: com.commission_status ?? "approved" } : {};
   const { data: created, error } = await admin
     .from("quotations")
-    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, commission_to: q.commission_to ?? null, commission_kind: q.commission_kind ?? null, commission_value: q.commission_value ?? null, created_by: by.id, updated_by: by.id })
+    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, ...carried, created_by: by.id, updated_by: by.id })
     .select("id")
     .single();
   if (error || !created) return { error: error?.message ?? "Could not revise." };
+  if (com?.commission_to) {
+    await admin
+      .from("quotations")
+      .update({ commission_to: null, commission_kind: null, commission_value: null, commission_aed: 0, commission_status: "superseded", commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, commission_paid_at: null, commission_paid_by: null, commission_paid_method: null, commission_paid_note: null, updated_by: by.id })
+      .eq("id", q.id);
+    await logQuoteEvent(q.id, q.job_id, by.id, "commission_carried", `${q.number}: the commission for ${com.commission_to} moved to version ${q.version + 1} - one commission per job, never a new one`);
+  }
   // Urgent only: the labour lines marked Urgent, their parts, and every other charge. The rest is kept against the car as declined work.
   const active = bundle.lines.filter((l) => l.is_active && !l.fee_kind);
   const keepLabour = active.filter((l) => blockOf(l) === "labour" && (!urgentOnly || l.urgency === "urgent"));

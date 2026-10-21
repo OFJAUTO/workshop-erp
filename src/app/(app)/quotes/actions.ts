@@ -113,6 +113,16 @@ export async function startQuotation(jobId: string) {
   if (job!.estimate_id) {
     const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", job!.estimate_id).eq("is_active", true).order("position");
     lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !l.fee_kind).map((l) => ({ quotation_id: created!.id, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: staff!.id, updated_by: staff!.id }));
+    // ONE commission per job: a commission set on the estimate moves onto the job's quotation whole,
+    // and the estimate keeps a tombstone - it never lists as its own commission again.
+    const { data: estCom } = await admin.from("quotations").select("number, commission_to, commission_kind, commission_value, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note").eq("id", job!.estimate_id).maybeSingle();
+    if (estCom?.commission_to) {
+      const { number: _estNumber, ...comFields } = estCom;
+      await admin.from("quotations").update({ ...comFields, commission_status: estCom.commission_status ?? "approved", updated_by: staff!.id }).eq("id", created!.id);
+      await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_aed: 0, commission_status: "superseded", commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, updated_by: staff!.id }).eq("id", job!.estimate_id);
+      await logQuoteEvent(created!.id, jobId, staff!.id, "commission_carried", `${created!.number}: the commission for ${estCom.commission_to} moved over from estimate ${estCom.number}`);
+      await logQuoteEvent(job!.estimate_id!, jobId, staff!.id, "commission_carried", `${estCom.number}: the commission for ${estCom.commission_to} moved to ${created!.number} when the estimate became the job's quotation`);
+    }
   } else {
     // The labour list is the advisor's own: nothing from the report is pre-filled. The parts list comes from the approved report through the part requests below.
     lines = [];
@@ -796,6 +806,16 @@ export async function saveCommission(quotationId: string, formData: FormData): P
   if (!Number.isFinite(v) || v <= 0) return { error: "Enter the amount: AED, or a percentage of the total before VAT." };
   const value = kind === "percent" ? Math.min(100, round2(v)) : round2(v);
   const status = isOwner ? "approved" : "pending";
+  // ONE commission per job: setting it here supersedes any commission sitting on another quotation of
+  // the same job (an older number, a leftover) - a job never carries two.
+  if (q.job_id) {
+    const { data: others } = await admin.from("quotations").select("id, number, version, commission_to, commission_paid_at").eq("job_id", q.job_id).eq("is_active", true).neq("id", q.id).not("commission_to", "is", null).or("commission_status.is.null,commission_status.neq.superseded");
+    for (const o of others ?? []) {
+      if (o.commission_paid_at) return { error: `A commission on this job was already paid (${o.number} v${o.version}, to ${o.commission_to}). One commission per job; ask the owner if it must change.` };
+      await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_aed: 0, commission_status: "superseded", commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, updated_by: staff.id }).eq("id", o.id);
+      await logQuoteEvent(o.id, q.job_id, staff.id, "commission_superseded", `${o.number} v${o.version}: the commission for ${o.commission_to} was replaced by the one on ${q.number} v${q.version} (one commission per job)`);
+    }
+  }
   const { error } = await admin.from("quotations").update({ commission_to: to, commission_kind: kind, commission_value: value, commission_status: status, commission_set_by: staff.id, commission_set_at: now, commission_decided_by: isOwner ? staff.id : null, commission_decided_at: isOwner ? now : null, commission_decision_note: null, updated_by: staff.id }).eq("id", q.id);
   if (error) return { error: error.message };
   const people = ((settings.commission_people ?? []) as string[]).map(String);
