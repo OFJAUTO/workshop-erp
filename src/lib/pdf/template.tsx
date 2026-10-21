@@ -322,7 +322,7 @@ export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLab
           <Text style={styles.cNo}>{startAt + i}</Text>
           <View style={styles.cDesc}>
             <Text>
-              <Text style={styles.lineTitle}>{l.description}</Text>
+              <Text style={styles.lineTitle}>{cleanDocTitle(l.description)}</Text>
               {l.partNumber ? <Text style={styles.lineDetails}> · {l.partNumber}</Text> : null}
             </Text>
             {l.tag ? <Text style={[styles.tag, { color: GREY }]}>{l.tag.toUpperCase()}</Text> : null}

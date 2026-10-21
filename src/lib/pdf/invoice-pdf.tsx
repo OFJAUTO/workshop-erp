@@ -17,14 +17,23 @@ const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", cr
 
 /** One invoice line in the section box: description, a small grey line of details, qty, rate, amount. Never a part number. */
 function docLine(l: InvoiceLineRow): SectionLine {
+  const comp = l.price_display === "complimentary" || l.price_display === "included";
+  const disc = Number(l.discount_percent) || 0;
   return {
     description: l.description,
     details: l.hours !== null ? null : l.details,
     qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
     rate: l.unit_price,
     amount: l.amount_aed,
-    complimentary: l.amount_aed === 0,
+    complimentary: comp || l.amount_aed === 0,
+    compWord: comp ? (l.price_display === "included" ? "Included" : "Complimentary") : undefined,
+    discountPercent: disc > 0 ? disc : undefined,
+    discountAmount: disc > 0 ? round2(l.unit_price * l.quantity - l.amount_aed) : undefined,
   };
+}
+/** The lines' own discounts inside one section (already inside the stored amounts). */
+function lineDiscountsOf(lines: InvoiceLineRow[]): number {
+  return round2(lines.reduce((a, l) => a + ((Number(l.discount_percent) || 0) > 0 ? Math.max(0, l.unit_price * l.quantity - l.amount_aed) : 0), 0));
 }
 
 function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice">) {
@@ -59,10 +68,13 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const { invoice, lines, payments, job } = bundle;
   const currency = currencyOf(settings);
   const vatPercent = invoice.taxable_aed ? round2((invoice.vat_aed / invoice.taxable_aed) * 100) || 5 : 5;
-  const services = lines.filter((l) => l.section === "services").map(docLine);
+  const serviceRows = lines.filter((l) => l.section === "services");
+  const services = serviceRows.map(docLine);
   const fees = lines.filter((l) => l.section === "fees").map(docLine);
   const parts = lines.filter((l) => l.section === "parts").map(docLine);
   const sum = (ls: SectionLine[]) => round2(ls.reduce((a, l) => a + l.amount, 0));
+  // The lines' own discounts (line 1's 22%): the sections show the pre-discount figure, the green row takes it off.
+  const lineDiscounts = lineDiscountsOf(lines);
   // The labour discount as a percentage when it divides cleanly, else the amount alone.
   const labourSum = sum(services);
   const pct = invoice.discount_aed && labourSum ? round2((invoice.discount_aed / labourSum) * 100) : 0;
@@ -95,11 +107,12 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
           <TotalsBox
             currency={currency}
             sections={[
-              { label: "Labour and services", value: labourSum },
-              { label: "Parts", value: sum(parts) },
-              ...(fees.length ? [{ label: "Other charges", value: sum(fees) }] : []),
+              { label: lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(labourSum + lineDiscountsOf(serviceRows)) },
+              { label: "Parts", value: round2(sum(parts) + lineDiscountsOf(lines.filter((l) => l.section === "parts"))) },
+              ...(fees.length ? [{ label: "Other charges", value: round2(sum(fees) + lineDiscountsOf(lines.filter((l) => l.section === "fees"))) }] : []),
             ]}
             green={[
+              ...(lineDiscounts > 0 ? [{ label: "Discount", value: lineDiscounts }] : []),
               ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []),
               ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []),
               ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : []),
