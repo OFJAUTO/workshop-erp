@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Badge, Button, Card, Empty, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
@@ -55,7 +56,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
   const ownerHere = role === "owner" && !staff.viewingAs;
 
   const row = (s: Scan) => (
-    <li key={s.id} className="py-3 flex flex-col gap-2">
+    <li key={s.id} className="py-3 flex flex-col gap-2" data-flash-id={s.id}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <a href={urls.get(s.storage_path) ?? "#"} target="_blank" rel="noreferrer" className="font-bold underline underline-offset-4">{s.file_name ?? "scan.pdf"}</a>
         {s.kind ? <Badge tone="ink">{s.kind === "pre" ? "Pre-scan" : "Post-scan"}</Badge> : null}
@@ -97,6 +98,8 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
+      {/* Section 10: a new report appears in the lists by itself and flashes its row. */}
+      <LiveRefresh tables={["inbound_scans"]} pollMs={20000} />
       <PageHeader title="Scan reports" subtitle={`Autel reports read from ${mailbox || "the scans mailbox"} every five minutes. Matched by the VIN (subject, body or inside the report) to the open job; the rest wait here.`} actions={canAttach ? <form action={checkMailboxNow}><Button type="submit" size="lg" data-check-mailbox>Check the mailbox now</Button></form> : undefined} />
       <div className="flex flex-wrap items-center gap-2 text-sm" data-mailbox-status>
         {!configured ? <Badge tone="amber">Mailbox not set up yet</Badge> : !connection ? <Badge tone="amber">Mailbox not connected yet</Badge> : connection.last_error ? <Badge tone="red">Mailbox problem</Badge> : <Badge tone="green">Connected as {connection.mailbox}</Badge>}

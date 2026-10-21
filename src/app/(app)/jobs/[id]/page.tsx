@@ -299,7 +299,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests"]} jobId={id} />
+      {/* Section 10: inbound_scans is live and the net is 20 s, so a scan report appears on the job card by itself. */}
+      <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests", "inbound_scans"]} jobId={id} pollMs={20000} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={formatPlate(vehicle)}
@@ -514,7 +515,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="text-sm font-semibold">{inspectionState.text}</span>
           {roadTest ? <Badge tone={roadTest.status === "done" ? "green" : roadTest.status === "not_started" && roadTest.decision === "needed" ? "amber" : "neutral"}>{roadTestLine(roadTest)}</Badge> : null}
           {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
-          {(scanRows ?? []).length ? <span className="text-xs text-muted">Scan reports: {(scanRows ?? []).filter((s) => s.kind === "pre").length} pre, {(scanRows ?? []).filter((s) => s.kind === "post").length} post · <a href="/scans" className="underline underline-offset-4">list</a></span> : null}
+          {(scanRows ?? []).length ? (
+            <span className="text-xs font-semibold" data-flash-id={(scanRows ?? [])[0]?.id} data-scan-line>
+              Scan report received {formatDayTime((scanRows ?? [])[0]?.received_at)} ✓
+              <span className="text-muted font-normal"> · {(scanRows ?? []).filter((s) => s.kind === "pre").length} pre, {(scanRows ?? []).filter((s) => s.kind === "post").length} post · <a href="/scans" className="underline underline-offset-4">list</a></span>
+            </span>
+          ) : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {insp ? (
               <LinkButton href={`/jobs/${id}/inspection`} tone={insp.status === "submitted" && can(role, "approveInspections") ? "primary" : "secondary"} size="md">

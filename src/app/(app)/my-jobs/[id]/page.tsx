@@ -210,7 +210,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "inspections", "road_tests", "work_sessions", "job_technicians", "part_items"]} jobId={id} />
+      {/* Section 10: inbound_scans is live and the net is 20 s, so an emailed scan report appears by itself. */}
+      <LiveRefresh tables={["jobs", "inspections", "road_tests", "work_sessions", "job_technicians", "part_items", "inbound_scans"]} jobId={id} pollMs={20000} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={
@@ -304,7 +305,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
       ) : (
         <>
           {scanGateOn && insp && insp.status !== "approved" && insp.status !== "submitted" ? (
-            <ScanStepCard inspectionId={insp.id} files={(bundle?.media ?? []).filter((m) => m.is_prescan).map((m) => ({ id: m.id, kind: m.kind, url: bundle?.mediaUrls[m.storage_path] ?? null, caption: m.caption, isPrescan: true }))} readAt={insp.scan_read_at} approvedAt={insp.scan_approved_at} notPossibleReason={insp.scan_not_possible_reason} canAct={mine && !staff.viewingAs} />
+            <ScanStepCard jobId={id} inspectionId={insp.id} files={(bundle?.media ?? []).filter((m) => m.is_prescan).map((m) => ({ id: m.id, kind: m.kind, url: bundle?.mediaUrls[m.storage_path] ?? null, caption: m.caption, isPrescan: true }))} receivedAt={(bundle?.media ?? []).filter((m) => m.is_prescan).map((m) => m.taken_at).sort().at(-1) ?? null} readAt={insp.scan_read_at} approvedAt={insp.scan_approved_at} notPossibleReason={insp.scan_not_possible_reason} canAct={mine && !staff.viewingAs} />
           ) : null}
           {roadTestCard}
           {requestsCard}

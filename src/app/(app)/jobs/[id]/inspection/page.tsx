@@ -1,6 +1,7 @@
 import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
+import { LiveRefresh } from "@/components/LiveRefresh";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -189,6 +190,8 @@ export default async function InspectionReportPage({ params }: { params: Promise
 
   return (
     <>
+      {/* Section 10: the manager's view hears a new scan report (and the report itself) without a reload. */}
+      <LiveRefresh tables={["jobs", "inspections", "inbound_scans"]} jobId={id} pollMs={20000} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Inspection · ${formatPlate(vehicle)}`}
