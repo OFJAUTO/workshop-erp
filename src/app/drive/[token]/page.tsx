@@ -27,7 +27,7 @@ export default async function DrivePage({ params }: { params: Promise<{ token: s
         {car.car ? <p className="text-lg font-bold">{car.car}</p> : null}
         <p className="text-base font-semibold text-[#5F6368]">{scheduleWords(trip.scheduled_date, trip.scheduled_slot)}{trip.location_details ? ` · ${trip.location_details}` : ""}</p>
       </div>
-      <DriveClient token={token} kind={trip.kind} />
+      <DriveClient token={token} kind={trip.kind} loadedAt={trip.loaded_at ?? null} />
     </main>
   );
 }

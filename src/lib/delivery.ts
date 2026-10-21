@@ -176,3 +176,28 @@ export async function completeTripByDriver(token: string, input: { bytes: Buffer
   }
   return { ok: true, kind: trip.kind };
 }
+
+/** Section 7 (21 October 2026): the pick-up's FIRST step - the driver pressed "Car loaded" with the photo.
+ *  The trip stamps loaded_at, the advisor is told, and the page moves to "Delivered to OFJ". Idempotent. */
+export async function markTripLoadedByDriver(token: string, input: { bytes: Buffer; contentType: string }): Promise<{ ok: true } | { error: string }> {
+  const admin = createAdminClient();
+  const trip = await tripByToken(token);
+  if (!trip) return { error: "This link is no longer valid." };
+  if (trip.delivered_at) return { error: "Already done, thank you." };
+  if (trip.loaded_at) return { ok: true };
+  if (!input.bytes.length || input.bytes.length > 25 * 1024 * 1024) return { error: "The photo did not come through. Try again." };
+  const ext = input.contentType.includes("png") ? "png" : input.contentType.includes("webp") ? "webp" : "jpg";
+  const path = `recovery/${trip.id}-loaded-${Date.now()}.${ext}`;
+  const { error: upErr } = await admin.storage.from("job-files").upload(path, input.bytes, { contentType: input.contentType || "image/jpeg", upsert: false });
+  if (upErr) return { error: "The photo could not be saved. Try again." };
+  const now = new Date().toISOString();
+  await admin.from("recovery_trips").update({ loaded_at: now, loaded_photo_path: path, updated_by: trip.created_by }).eq("id", trip.id);
+  const car = await tripCar(trip);
+  if (trip.job_id) {
+    await admin.from("job_files").insert({ job_id: trip.job_id, kind: "delivery_photo", storage_path: path, content_type: input.contentType || "image/jpeg", caption: "Car loaded (driver's photo)", uploaded_by: trip.created_by }).then(() => null, () => null);
+    await notifyStaff(car.advisorIds, { type: "delivery", title: `Car loaded · ${car.jobNumber ?? ""}`, body: `${car.plate}: ${trip.driver_name ?? "the driver"} pressed Car loaded with the photo; on the way to OFJ.`, jobId: trip.job_id, href: `/jobs/${trip.job_id}` });
+  } else {
+    await notifyRoles(["owner"], { type: "delivery", title: `Car loaded: ${car.plate || trip.location_details || "pick-up"}`, body: `${trip.driver_name ?? "The driver"} pressed Car loaded; on the way to OFJ.`, jobId: null, href: "/recovery" });
+  }
+  return { ok: true };
+}

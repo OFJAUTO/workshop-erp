@@ -21,6 +21,8 @@ import { activeDeliveryTrip, driverMessageFor, loadDrivers, lastPinOf } from "@/
 import { onTheWayMessage } from "@/lib/recovery";
 import { greetingNameOf } from "@/lib/messages";
 import { DeliveryPanel } from "./DeliveryPanel";
+import { shortFor } from "@/lib/short-links";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { loadJobItems } from "@/lib/loose-items";
 import { CollectItemsForm } from "./CollectItemsForm";
 import { GateOutForm } from "./GateOutForm";
@@ -83,6 +85,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
               driverText={driverText}
               customerText={customerText}
               customerPhone={custRow?.phone ?? ""}
+              shortLink={trip.token ? await shortFor(`${PRODUCTION_SITE_URL}/drive/${trip.token}`, "drive") : null}
               markDeliveredAction={advisorMarkDelivered.bind(null, id)}
             />
           ) : loose ? (

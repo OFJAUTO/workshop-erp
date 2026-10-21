@@ -133,7 +133,7 @@ export async function createPickupTrip(formData: FormData) {
   if (!trip) redirect(`${back}?error=${encodeURIComponent("The trip could not be saved.")}`);
   if (recoveryKind) await admin.from("recovery_trips").update({ recovery_kind: recoveryKind, updated_by: staff.id }).eq("id", trip.id);
   revalidatePath("/recovery");
-  redirect(`${back}?message=${encodeURIComponent(`${kind === "pickup" ? "Pick-up" : "Delivery"} saved. Send the link from its row.`)}&sent=${trip.id}`);
+  redirect(`${back}?message=${encodeURIComponent(`${kind === "pickup" ? "Pick-up" : "Delivery"} saved ✓ — send it to ${driverName ?? "the driver"} now (the buttons are on its row below).`)}&sent=${trip.id}`);
 }
 
 /** The owner or accounts answer a claimed price: Approved, Queried (with a note to whoever runs the trips), or Paid. */
@@ -242,4 +242,14 @@ export async function markMonthPaid(formData: FormData) {
   await admin.from("recovery_payouts").upsert({ who, month, total_aed: Math.round(total * 100) / 100, trip_count: unpaid.length, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" });
   revalidatePath("/recovery");
   redirect(`/recovery?month=${month}&message=${encodeURIComponent(`${who}: ${month} marked paid (AED ${total.toLocaleString("en-GB")}). The month is locked.`)}`);
+}
+
+/** Section 7: "Send to driver" on a recovery-page row (pick-ups and jobless trips included). */
+export async function markTripSentById(tripId: string) {
+  const staff = await requirePermission("gateOut");
+  const admin = createAdminClient();
+  const { data: t } = await admin.from("recovery_trips").select("id, sent_at").eq("id", tripId).maybeSingle();
+  if (!t) return;
+  if (!t.sent_at) await admin.from("recovery_trips").update({ sent_at: new Date().toISOString(), updated_by: staff.id }).eq("id", tripId);
+  revalidatePath("/recovery");
 }

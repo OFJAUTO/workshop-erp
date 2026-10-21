@@ -2,14 +2,16 @@ import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
-import { loadDrivers, TRIP_SELECT, type TripRow } from "@/lib/delivery";
-import { formatDate, formatDateTime } from "@/lib/format";
-import { haversineKm, parseCoords, scheduleWords, usualRange } from "@/lib/recovery";
+import { driverMessageFor, loadDrivers, tripCar, TRIP_SELECT, type TripRow } from "@/lib/delivery";
+import { formatDate } from "@/lib/format";
+import { haversineKm, onTheWayMessage, parseCoords, scheduleWords, usualRange } from "@/lib/recovery";
 import { getSettings } from "@/lib/settings";
-import { getSiteUrl } from "@/lib/site";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
+import { shortFor } from "@/lib/short-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { createPickupTrip, decideTrip, markMonthPaid, recalcDistance, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
+import { TripActions } from "@/components/TripActions";
+import { createPickupTrip, decideTrip, markMonthPaid, markTripSentById, recalcDistance, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
 import { NewTripForm } from "./NewTripForm";
 import { ReasonChips } from "@/components/ReasonChips";
 
@@ -33,11 +35,10 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   const canDecide = (role === "owner" || role === "accounts") && !staff.viewingAs;
   // Advisors see the trips list only: date, kind, car, who, the pin and the photo. Never a price, a km cost or a total.
   const seesMoney = role === "owner" || role === "accounts";
-  const { message, error, month: monthParam, who: whoParam, sent } = await searchParams;
+  const { message, error, month: monthParam, who: whoParam } = await searchParams;
   const month = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7);
   const admin = createAdminClient();
   const settings = await getSettings();
-  const site = await getSiteUrl();
   const home = parseCoords(String(settings.workshop_location_pin ?? ""));
   const [{ data: rows }, drivers, { data: companyRows }, { data: payoutRows }] = await Promise.all([
     admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).order("created_at", { ascending: false }).limit(400),
@@ -58,6 +59,14 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   const photoUrl = new Map((signed ?? []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]));
   const whoOf = (t: TripRow) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
   const kmOf = (t: TripRow) => (t.road_km !== null ? Number(t.road_km) : home && t.lat !== null && t.lng !== null ? haversineKm(home, { lat: t.lat, lng: t.lng }) : null);
+  // Open trips get the ONE trip component: the driver message, the short link and the customer's "on its way" text.
+  const openTrips = trips.filter((t) => !t.delivered_at && t.token).slice(0, 20);
+  const tripExtras = new Map<string, { driverText: string; shortLink: string; customerText: string | null; customerPhone: string | null }>();
+  for (const t of openTrips) {
+    const [driverText, shortLink, car] = await Promise.all([driverMessageFor(t), shortFor(`${PRODUCTION_SITE_URL}/drive/${t.token}`, "drive"), tripCar(t)]);
+    const customerText = car.customerPhone ? onTheWayMessage(String(settings.whatsapp_on_the_way_template ?? ""), { name: car.customerName ?? "", car: car.car, truckPlate: t.truck_plate ?? "", driverName: t.driver_name ?? "", driverMobile: t.driver_phone ?? "" }) : null;
+    tripExtras.set(t.id, { driverText, shortLink, customerText, customerPhone: car.customerPhone });
+  }
   const history = trips.filter((t) => ["approved", "paid"].includes(t.status)).map((t) => ({ km: kmOf(t), price: t.price_aed === null ? null : Number(t.price_aed) }));
   const inMonth = trips.filter((t) => (t.delivered_at ?? t.created_at).startsWith(month));
   const whoList = Array.from(new Set(trips.map(whoOf))).sort();
@@ -142,7 +151,22 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                       {seesMoney ? <Badge tone={STATUS_TONES[t.status]}>{STATUS_LABELS[t.status]}</Badge> : <Badge tone={t.delivered_at ? "green" : "amber"} data-plain-status>{t.delivered_at ? `Delivered ✓ ${new Date(t.delivered_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" })}` : t.loaded_at || t.sent_at ? "On the way" : "Booked"}</Badge>}
                     </span>
                   </div>
-                  {!t.delivered_at ? <p className="text-xs text-muted">{scheduleWords(t.scheduled_date, t.scheduled_slot)}{t.sent_at ? ` · link sent to the driver ${formatDateTime(t.sent_at)}` : t.token ? ` · driver link: ${site}/drive/${t.token}` : ""}{sent === t.id && t.token ? "" : ""}</p> : null}
+                  {!t.delivered_at ? <p className="text-xs text-muted">{scheduleWords(t.scheduled_date, t.scheduled_slot)}</p> : null}
+                  {tripExtras.has(t.id) ? (
+                    <TripActions
+                      kind={t.kind}
+                      driverName={t.driver_name}
+                      driverPhone={t.driver_phone}
+                      customerPhone={tripExtras.get(t.id)!.customerPhone}
+                      driverText={tripExtras.get(t.id)!.driverText}
+                      customerText={tripExtras.get(t.id)!.customerText}
+                      shortLink={tripExtras.get(t.id)!.shortLink}
+                      sentAt={t.sent_at}
+                      loadedAt={t.loaded_at}
+                      deliveredAt={t.delivered_at}
+                      onMarkSent={markTripSentById.bind(null, t.id)}
+                    />
+                  ) : null}
                   {t.marked_by && price === null && canDecide ? (
                     <form action={setTripPrice.bind(null, t.id)} className="flex flex-wrap items-center gap-2">
                       <Input name="price" inputMode="decimal" placeholder="Driver's price (AED)" className="w-40 min-h-9" data-trip-price-box />

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { completeTripByDriver } from "@/lib/delivery";
+import { completeTripByDriver, markTripLoadedByDriver } from "@/lib/delivery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,6 +17,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const price = Number(String(form.get("price") ?? "").replace(",", "."));
   if (!(photo instanceof File)) return NextResponse.json({ error: "Take the photo first." }, { status: 400 });
   const bytes = Buffer.from(await photo.arrayBuffer());
+  // Pick-ups have two steps: "Car loaded" (photo only) first, then "Delivered to OFJ" with the price.
+  // A price always means the driver is finishing, whatever the step field says - driver-proof.
+  if (String(form.get("step") ?? "") === "loaded" && !(price > 0)) {
+    const r = await markTripLoadedByDriver(token, { bytes, contentType: photo.type || "image/jpeg" });
+    if ("error" in r) return NextResponse.json(r, { status: 400 });
+    return NextResponse.json(r);
+  }
   const r = await completeTripByDriver(token, { bytes, contentType: photo.type || "image/jpeg", price });
   if ("error" in r) return NextResponse.json(r, { status: 400 });
   return NextResponse.json(r);
