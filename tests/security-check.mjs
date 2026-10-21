@@ -31,9 +31,11 @@ check("anon can execute no public function", anonFns.length === 0, anonFns.slice
 // 2c. no policy applies to anon.
 const anonPol = await q(`select tablename || '/' || policyname as p from pg_policies where schemaname = 'public' and (roles::text like '%anon%' or roles::text = '{public}')`);
 check("no policy applies to anon", anonPol.length === 0, anonPol.map((r) => r.p).join(", "));
-// 2d. future tables get no anon grants (default ACLs clean).
-const defAcl = await q(`select coalesce(string_agg(d.defaclobjtype::text, ','), '') as t from pg_default_acl d join pg_namespace n on n.oid = d.defaclnamespace where n.nspname = 'public' and array_to_string(d.defaclacl, ',') like '%anon%'`);
-check("future tables get no anon grants by default", !defAcl[0]?.t, defAcl[0]?.t);
+// 2d. future tables get no anon grants by default. Our migrations run as postgres (db-sql.mjs and the
+// dashboard), so postgres's default ACLs are the ones that matter; supabase_admin's own defaults only
+// apply to objects the platform itself creates and postgres is not allowed to change them.
+const defAcl = await q(`select coalesce(string_agg(d.defaclobjtype::text, ','), '') as t from pg_default_acl d join pg_namespace n on n.oid = d.defaclnamespace where n.nspname = 'public' and d.defaclrole = 'postgres'::regrole and array_to_string(d.defaclacl, ',') like '%anon%'`);
+check("future tables created by our migrations get no anon grants", !defAcl[0]?.t, defAcl[0]?.t);
 
 // 3. No owner views (security definer) left in public.
 const ownerViews = await q(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'v' and coalesce(array_to_string(c.reloptions, ','), '') not like '%security_invoker=on%' order by 1`);

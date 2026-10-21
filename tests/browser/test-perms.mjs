@@ -32,9 +32,15 @@ const invoicePage = `${base}/jobs/${jobId}/invoice`;
   await page.goto(invoicePage, { waitUntil: "load" });
   await page.waitForTimeout(1200);
   check("B: advisor sees no Record payment form", (await page.locator("[data-record-block]").count()) === 0);
+  // Since the money-page rebuild (21 Oct, 1.3) the advisor's first move on an unsent proforma is Send;
+  // the read-only "Waiting for accounts" line takes over once it is sent.
+  await sql("update public.invoices set sent_at = now() where id = $1", [seed.json.invoice.id]);
+  await page.reload({ waitUntil: "load" });
+  await page.waitForTimeout(1200);
   check("B: advisor sees the read-only waiting line", (await page.locator("[data-waiting-accounts]").count()) === 1, await page.locator("[data-waiting-accounts]").textContent().catch(() => ""));
   const waiting = (await page.locator("[data-waiting-accounts]").textContent().catch(() => "")) ?? "";
   check("B: the line says waiting for accounts", /Waiting for accounts/i.test(waiting), waiting);
+  check("B: still no Record payment form after sending", (await page.locator("[data-record-block]").count()) === 0);
   await browser.close();
 }
 
