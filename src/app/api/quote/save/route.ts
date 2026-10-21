@@ -54,6 +54,8 @@ type LinePatch = {
   /** Who pays for the recovery (us: cost only, off the customer's quotation) and whether to mention it as free. */
   recovery_paid_by?: string | null;
   recovery_mention_free?: boolean;
+  /** Sold at 0 on purpose: 'complimentary' or 'included' is a valid line that prints the word, not a price. */
+  price_display?: string | null;
 };
 type Body = {
   quotationId?: string;
@@ -167,6 +169,7 @@ export async function POST(request: NextRequest) {
       out.unit_cost = n(p.unit_cost);
     }
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
+    if (p.price_display !== undefined) out.price_display = p.price_display && ["complimentary", "included"].includes(String(p.price_display)) ? String(p.price_display) : "normal";
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
     if (p.hours_estimate !== undefined) out.hours_estimate = p.hours_estimate === null || p.hours_estimate === "" ? null : parseHours(p.hours_estimate);
     if (p.outside_work !== undefined) out.outside_work = !!p.outside_work;
@@ -265,13 +268,13 @@ export async function POST(request: NextRequest) {
       if (who !== "us" && who !== "customer") return "Who pays for the recovery: us or the customer?";
       out.recovery_paid_by = who;
       const free = p.recovery_mention_free !== undefined ? p.recovery_mention_free === true : current?.recovery_mention_free === true;
-      if (who === "us") Object.assign(out, { unit_price: 0, visible_to_customer: free, recovery_mention_free: free });
-      else Object.assign(out, { visible_to_customer: true, recovery_mention_free: false });
+      if (who === "us") Object.assign(out, { unit_price: 0, visible_to_customer: free, recovery_mention_free: free, price_display: free ? "complimentary" : "normal", ...(free ? { title: "Complimentary pick-up & drop-off" } : {}) });
+      else Object.assign(out, { visible_to_customer: true, recovery_mention_free: false, price_display: "normal" });
     }
     if (p.recovery_mention_free !== undefined && p.recovery_paid_by === undefined) {
       const on = p.recovery_mention_free === true;
       out.recovery_mention_free = on;
-      if ((current?.recovery_paid_by ?? (current?.visible_to_customer === false ? "us" : "customer")) === "us") Object.assign(out, { visible_to_customer: on, unit_price: 0 });
+      if ((current?.recovery_paid_by ?? (current?.visible_to_customer === false ? "us" : "customer")) === "us") Object.assign(out, { visible_to_customer: on, unit_price: 0, price_display: on ? "complimentary" : "normal", ...(on ? { title: "Complimentary pick-up & drop-off" } : {}) });
     }
     return out;
   };

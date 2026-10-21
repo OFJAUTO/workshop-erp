@@ -102,6 +102,8 @@ export type QuoteLine = {
   film_colour?: string | null;
   film_code?: string | null;
   tint_percent?: number | null;
+  /** Sold at 0 on purpose: 'complimentary' or 'included' prints the word instead of a price; cost still counts. */
+  price_display?: "normal" | "complimentary" | "included" | null;
 };
 
 export type QuoteRow = {
@@ -367,6 +369,23 @@ export function isHidden(l: Pick<QuoteLine, "line_type" | "visible_to_customer">
   if (l.fee_kind === "bank_charge") return true;
   return (l.line_type === "recovery" || l.line_type === "other") && l.visible_to_customer === false;
 }
+/** A line given free on purpose (one priced package line + its included items): sells for nothing,
+ *  passes "Before sending", keeps its internal cost, and prints the word instead of a price. */
+export function isComplimentary(l: { price_display?: string | null }) {
+  return l.price_display === "complimentary" || l.price_display === "included";
+}
+/** The word on the customer's documents: "Complimentary" or "Included". */
+export function complimentaryWord(l: { price_display?: string | null }) {
+  return l.price_display === "included" ? "Included" : "Complimentary";
+}
+/** Document titles lose trailing dashes and stray separators: "PPF - EXTERIOR -" prints "PPF - EXTERIOR". */
+export function cleanDocTitle(t: string | null | undefined) {
+  return String(t ?? "").replace(/[\s\-–—·,;:]+$/g, "").trim();
+}
+/** The line's own discount in dirhams (the green "Discount 22%: −AED 4,840.00" under the line). */
+export function lineDiscountAmount(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer"> & { price_display?: string | null }) {
+  return round2(linePrice(l) * ((l.discount_percent ?? 0) / 100));
+}
 /** An option the advisor did not pick: it counts for nothing and the customer never sees it. */
 export function isUnchosen(l: { option_group?: string | null; chosen?: boolean; left_off?: boolean }) {
   return (!!l.option_group && l.chosen === false) || !!l.left_off;
@@ -376,9 +395,10 @@ export function takesTotalDiscount(l: Pick<QuoteLine, "line_type" | "unit_cost" 
   return !isHidden(l) && (l.line_type === "labour" || l.line_type === "package" || l.line_type === "fee" || (l.line_type === "other" && (l.unit_cost === null || l.unit_cost === undefined)));
 }
 
-/** The selling price of one line before its own discount. Hidden lines sell for nothing. */
-export function linePrice(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "visible_to_customer">): number {
+/** The selling price of one line before its own discount. Hidden and complimentary lines sell for nothing. */
+export function linePrice(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "visible_to_customer"> & { price_display?: string | null }): number {
   if (isHidden(l)) return 0;
+  if (isComplimentary(l)) return 0;
   switch (l.line_type) {
     case "part":
       return round2((l.unit_cost ?? 0) * (1 + (l.markup_percent ?? 0) / 100) * (l.quantity || 1));
@@ -392,7 +412,7 @@ export function linePrice(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_co
 }
 
 /** After the line's own discount, before VAT. */
-export function lineTotal(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer">): number {
+export function lineTotal(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer"> & { price_display?: string | null }): number {
   return round2(linePrice(l) * (1 - (l.discount_percent ?? 0) / 100));
 }
 
@@ -415,7 +435,7 @@ export function floorPrice(l: Pick<QuoteLine, "unit_cost" | "quantity">, minMark
 }
 /** Why a line with a cost breaks the floor, or null. A markup the owner set below the minimum (confirmed) is allowed. */
 export function floorProblem(l: QuoteLine, minMarkup: number): string | null {
-  if (!hasCostFloor(l) || isHidden(l)) return null;
+  if (!hasCostFloor(l) || isHidden(l) || isComplimentary(l)) return null;
   if (l.markup_confirmed && (l.markup_percent ?? 0) < minMarkup) return null;
   const net = lineTotal(l);
   const floor = floorPrice(l, minMarkup);
@@ -425,6 +445,8 @@ export function floorProblem(l: QuoteLine, minMarkup: number): string | null {
 
 export type QuoteTotals = {
   subtotal: number;
+  /** The sum of the lines' own discounts (already inside subtotal), for the green rows on the documents. */
+  lineDiscounts: number;
   discountBase: number;
   /** The labour discount (our own labour lines), or the old labour-and-services discount on older quotations. */
   discount: number;
@@ -531,6 +553,8 @@ export function quoteTotals(
 ): QuoteTotals {
   const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
+  // The lines' own discounts (line 1's 22%), shown in green on every customer document.
+  const lineDiscounts = round2(counted.reduce((a, l) => a + lineDiscountAmount(l), 0));
   const { base: discountBase, discount } = labourDiscountOf(counted, q);
   const pct = (q.vat_percent ?? 5) / 100;
   let net = round2(subtotal - discount);
@@ -588,7 +612,7 @@ export function quoteTotals(
   const depositRaw = q.deposit_mode === "aed" ? dv : q.deposit_mode === "percent_parts" ? partsSell * (Math.min(100, dv) / 100) : q.deposit_mode === "percent_total" ? total * (Math.min(100, dv) / 100) : 0;
   const deposit = round2(Math.min(total, Math.max(0, depositRaw)));
   return {
-    subtotal, discountBase, discount, rounding, net, vat, total,
+    subtotal, lineDiscounts, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
     otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, totalCost, profit,
@@ -624,13 +648,14 @@ export function sendBlockers(
       else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       if (settings.confirmPercent && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
     }
+    const comp = isComplimentary(l);
     if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });
-    if (l.line_type === "labour" && !(l.hours && l.hours > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the hours` });
-    if ((l.line_type === "package" || l.line_type === "fee") && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
+    if (l.line_type === "labour" && !comp && !(l.hours && l.hours > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the hours` });
+    if ((l.line_type === "package" || l.line_type === "fee") && !comp && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
     if (l.line_type === "other" && !(l.title ?? "").trim()) out.push({ key: `line-${l.id}`, label: "An Other charge has no description" });
-    if (l.line_type === "other" && !hasCostFloor(l) && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
+    if (l.line_type === "other" && !comp && !hasCostFloor(l) && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
     if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && (l.unit_cost === null || l.unit_cost === undefined)) out.push({ key: `line-${l.id}`, label: `${short}: enter the cost per trip` });
-    if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price per trip, or hide the line` });
+    if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && !comp && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price per trip, or hide the line` });
     const floor = floorProblem(l, settings.minMarkup);
     if (floor) out.push({ key: `line-${l.id}`, label: `${short}: ${floor}` });
   }
@@ -639,9 +664,11 @@ export function sendBlockers(
 
 /** The customer's wording for a recovery line: "Recovery, closed box, two ways". */
 export function recoveryTitle(typeLabel: string | null | undefined, trips: number | null | undefined, free = false): string {
+  // A free recovery reads as a gift, not as a logistics code ("RECOVERY, NORMAL, TWO WAYS: FREE OF CHARGE").
+  if (free) return "Complimentary pick-up & drop-off";
   const t = Math.max(1, Math.round(Number(trips) || 1));
   const way = t === 1 ? "one way" : t === 2 ? "two ways" : `${t} trips`;
-  return `Recovery${typeLabel ? `, ${typeLabel.toLowerCase()}` : ""}, ${way}${free ? ": free of charge" : ""}`;
+  return `Recovery${typeLabel ? `, ${typeLabel.toLowerCase()}` : ""}, ${way}`;
 }
 
 /** Whole-dirham totals to offer when sending: the nearest ten below (the default) and above. */

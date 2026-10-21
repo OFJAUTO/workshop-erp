@@ -3,7 +3,7 @@ import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { amountInWords } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { discountLabelOf,blockOf, isHidden, isUnchosen, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, withPositions } from "@/lib/quotes";
+import { complimentaryWord, discountLabelOf, blockOf, isComplimentary, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, round2, withPositions } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { dubaiDate } from "@/lib/jobs";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -47,7 +47,10 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
       amount,
-      complimentary: amount === 0,
+      complimentary: isComplimentary(l) || amount === 0,
+      compWord: isComplimentary(l) ? complimentaryWord(l) : undefined,
+      discountPercent: (l.discount_percent ?? 0) > 0 ? l.discount_percent : undefined,
+      discountAmount: (l.discount_percent ?? 0) > 0 ? lineDiscountAmount(l) : undefined,
       tag: l.urgency === "urgent" && !isEstimate ? "Urgent" : null,
     };
   };
@@ -89,11 +92,13 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           <TotalsBox
             currency={currency}
             sections={[
-              { label: "Labour and services", value: totals.labourSell },
-              { label: "Parts", value: totals.partsSell },
-              ...(others.length ? [{ label: "Other charges", value: totals.otherSell }] : []),
+              // Before any discount: the green rows underneath then take the discounts off, so the story reads top to bottom.
+              { label: totals.lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(lines.filter((l) => blockOf(l) === "labour").reduce((a, l) => a + linePrice(l), 0)) },
+              { label: "Parts", value: round2(lines.filter((l) => blockOf(l) === "parts").reduce((a, l) => a + linePrice(l), 0)) },
+              ...(others.length ? [{ label: "Other charges", value: round2(lines.filter((l) => blockOf(l) === "other").reduce((a, l) => a + linePrice(l), 0)) }] : []),
             ]}
             green={[
+              ...(totals.lineDiscounts > 0 ? [{ label: "Discount", value: totals.lineDiscounts }] : []),
               ...(totals.discount ? [{ label: discountLabel, value: totals.discount }] : []),
               ...(totals.rounding < 0 ? [{ label: "Round-off", value: Math.abs(totals.rounding) }] : []),
             ]}

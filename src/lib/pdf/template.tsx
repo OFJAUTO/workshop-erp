@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import { Document, Font, Image, Page, Path, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
 import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
+import { cleanDocTitle } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 
@@ -553,7 +554,7 @@ export function qtyText(quantity: number, hours?: number | null) {
  * proforma and the tax invoice: only the title and the numbers change between them.
  * ------------------------------------------------------------------------------------------------------------------ */
 
-export type SectionLine = { description: string; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; tag?: string | null };
+export type SectionLine = { description: string; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; /** "Complimentary" or "Included" (defaults to Complimentary). */ compWord?: string; /** The line's own discount: the green bold row under the description. */ discountPercent?: number; discountAmount?: number; tag?: string | null };
 
 const sec = StyleSheet.create({
   box: { borderWidth: 1, borderColor: RULE, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
@@ -601,13 +602,18 @@ export function SectionBox({ title, lines, subtotalLabel }: { title: string; lin
         <View key={i} style={sec.row} wrap={false}>
           <Text style={sec.no}>{i + 1}</Text>
           <View style={sec.desc}>
-            <Text style={styles.lineTitle}>{l.description}</Text>
+            <Text style={styles.lineTitle}>{cleanDocTitle(l.description)}</Text>
             {l.tag ? <Text style={[styles.tag, { color: GREY }]}>{l.tag.toUpperCase()}</Text> : null}
             {l.details ? <Text style={[styles.lineDetails, { fontSize: px(10.5) }]}>{l.details}</Text> : null}
+            {l.discountAmount && l.discountAmount > 0.004 ? (
+              <Text style={{ color: GREEN, fontWeight: 800, fontSize: px(10.5), marginTop: px(2) }}>
+                Discount{l.discountPercent ? ` ${moneyDigits(l.discountPercent).replace(/\.00$/, "")}%` : ""}: −AED {moneyDigits(l.discountAmount)}
+              </Text>
+            ) : null}
           </View>
           <Text style={sec.qty}>{l.qty}</Text>
           {l.complimentary ? (
-            <Text style={[sec.rate, { width: px(84 + 96), color: GREY }]}>Complimentary</Text>
+            <Text style={[sec.rate, { width: px(84 + 96), color: GREEN, fontWeight: 700 }]}>{l.compWord ?? "Complimentary"}</Text>
           ) : (
             <>
               <Text style={sec.rate}>{moneyDigits(l.rate)}</Text>
@@ -640,7 +646,7 @@ export function TotalsBox({ sections, green = [], net, vatPercent, vat, total, t
       <View style={sec.totals}>
         {sections.map((r) => (
           <View key={r.label} style={sec.tRow}>
-            <Text style={sec.tLabel}>{r.label}</Text>
+            <Text style={[sec.tLabel, { flex: 1, paddingRight: px(8) }]}>{r.label}</Text>
             <Text>{moneyDigits(r.value)}</Text>
           </View>
         ))}

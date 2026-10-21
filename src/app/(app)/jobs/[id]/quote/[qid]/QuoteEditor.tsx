@@ -16,7 +16,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { marginToneOf, aed, blockOf, discountLabelOf, estimateLineSuspect, floorPrice, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -166,7 +166,7 @@ export type PartsWait = { unavailable?: { label: string; note: string | null }[]
 type Suggestion = { id: string; title: string; hint: string; service: Service | null };
 
 const num = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
-const finishedLine = (l: QuoteLine) => (l.line_type === "labour" ? !!l.title.trim() && (l.hours ?? 0) > 0 : l.line_type === "package" ? !!l.title.trim() && (l.unit_price ?? 0) > 0 : !!l.title.trim());
+const finishedLine = (l: QuoteLine) => (isComplimentary(l) ? !!l.title.trim() : l.line_type === "labour" ? !!l.title.trim() && (l.hours ?? 0) > 0 : l.line_type === "package" ? !!l.title.trim() && (l.unit_price ?? 0) > 0 : !!l.title.trim());
 const chip = (on: boolean, extra = "") => `min-h-9 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${extra}`;
 const boxLabel = "flex flex-col gap-0.5 text-[11px] font-semibold text-muted";
 /** One job on several positions: front, rear, both; a pair or all four for paired jobs (control arms, discs); or one side. */
@@ -324,6 +324,8 @@ export function QuoteEditor({
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
   const [lowAsk, setLowAsk] = useState<string | null>(null);
+  /** A price typed as 0: ask whether the line is Complimentary / Included (the PPF package pattern). */
+  const [compAsk, setCompAsk] = useState<string | null>(null);
   const [depositAsk, setDepositAsk] = useState<string | null>(null);
   // The battery warranty picked on a battery line (12, 24, 36 months), kept here until the page refreshes.
   const [warranty, setWarrantyMap] = useState<Record<string, number>>({});
@@ -776,7 +778,7 @@ export function QuoteEditor({
               <label className="inline-flex items-center gap-1 whitespace-nowrap" title="The hours quoted to the customer">
                 <span className="text-[10px] font-semibold text-muted">Hours</span>
                 {/* The shared input style is full width, so each of the three boxes carries its own width. */}
-                <Input id={`amount-${l.id}`} data-amount value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); hoursBlur(l, e.currentTarget.value); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="0" style={{ width: "4.5rem" }} className={amountBox(blocked && !(l.hours && l.hours > 0) ? "border-red-bar" : "")} />
+                <Input id={`amount-${l.id}`} data-amount value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); hoursBlur(l, e.currentTarget.value); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="0" style={{ width: "4.5rem" }} className={amountBox(blocked && !(l.hours && l.hours > 0) && !isComplimentary(l) ? "border-red-bar" : "")} />
                 <span className="text-[11px] font-semibold text-muted">h</span>
               </label>
               {showProfit ? (
@@ -793,7 +795,7 @@ export function QuoteEditor({
           ) : (
             <>
               <span className="inline-flex items-center gap-1">
-                <Input id={`amount-${l.id}`} data-amount value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label={perUnit ? `Price per ${l.price_per}` : "Price"} placeholder="0" className={`w-24 text-right min-h-10 px-1 ${blocked && !(l.unit_price && l.unit_price > 0) ? "border-red-bar" : ""}`} />
+                <Input id={`amount-${l.id}`} data-amount value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const raw = e.target.value.trim(); if (raw !== "" && Number(raw.replace(",", ".")) === 0 && !isComplimentary(l) && l.fee_kind !== "bank_charge") setCompAsk(l.id); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label={perUnit ? `Price per ${l.price_per}` : "Price"} placeholder="0" className={`w-24 text-right min-h-10 px-1 ${blocked && !(l.unit_price && l.unit_price > 0) && !isComplimentary(l) ? "border-red-bar" : ""}`} />
                 <span className="text-[11px] font-semibold text-muted">AED</span>
               </span>
               {isService && (showProfit || l.outside_work) ? (
@@ -811,7 +813,7 @@ export function QuoteEditor({
               ) : null}
             </>
           )}
-          <span className="w-24 text-right font-bold">{aed(total)}</span>
+          {isComplimentary(l) ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-green" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
           {!disabled ? (
             <span className="relative" data-line-menu>
               <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuAnchor(e.currentTarget); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
@@ -827,6 +829,16 @@ export function QuoteEditor({
                   {l.line_type === "labour" ? <MenuItem label={isOwner ? "Change rate" : "Raise rate"} onClick={() => { setMenuFor(null); openOnly(l.id, `rate-${l.id}`); }} /> : null}
                   {l.line_type === "labour" && lines.some((o) => o.id !== l.id && o.line_type === "labour" && !o.left_off) ? <MenuItem label="Merge into another labour line…" onClick={() => { setMenuFor(null); setMergeFor(l.id); }} /> : null}
                   {isOwner || settings.advisorDiscount ? <MenuItem label={isOwner ? "Owner discount" : "Discount"} onClick={() => { setMenuFor(null); openOnly(l.id, `disc-${l.id}`); }} /> : null}
+                  {l.line_type !== "part" && l.fee_kind !== "bank_charge" ? (
+                    isComplimentary(l) ? (
+                      <MenuItem label="Charge normally (not complimentary)" onClick={() => { setMenuFor(null); patch(l.id, { price_display: "normal" }, true); }} />
+                    ) : (
+                      <>
+                        <MenuItem label="Complimentary (free for the customer)" onClick={() => { setMenuFor(null); patch(l.id, l.line_type === "labour" || l.line_type === "recovery" ? { price_display: "complimentary" } : { price_display: "complimentary", unit_price: 0 }, true); }} />
+                        <MenuItem label="Included in package" onClick={() => { setMenuFor(null); patch(l.id, l.line_type === "labour" || l.line_type === "recovery" ? { price_display: "included" } : { price_display: "included", unit_price: 0 }, true); }} />
+                      </>
+                    )
+                  ) : null}
                   <MenuItem label="Remove" red onClick={() => { setMenuFor(null); removeLine(l.id); }} />
                 </FloatingMenu>
               ) : null}
@@ -879,8 +891,8 @@ export function QuoteEditor({
     const type = recoveryTypes.find((t) => t.key === l.recovery_type) ?? null;
     const title = recoveryTitle(type?.label ?? null, trips, free);
     const setTrips = (n: number) => patch(l.id, { recovery_trips: n, quantity: n }, true);
-    const setPaidBy = (who: "us" | "customer") => patch(l.id, { recovery_paid_by: who, recovery_mention_free: who === "us" ? !!l.recovery_mention_free : false, visible_to_customer: who === "customer" || (who === "us" && !!l.recovery_mention_free), unit_price: who === "us" ? 0 : Number(type?.price) || l.unit_price || 0 }, true);
-    const setFree = (on: boolean) => patch(l.id, { recovery_mention_free: on, visible_to_customer: on, unit_price: 0 }, true);
+    const setPaidBy = (who: "us" | "customer") => patch(l.id, { recovery_paid_by: who, recovery_mention_free: who === "us" ? !!l.recovery_mention_free : false, visible_to_customer: who === "customer" || (who === "us" && !!l.recovery_mention_free), unit_price: who === "us" ? 0 : Number(type?.price) || l.unit_price || 0, price_display: who === "us" && !!l.recovery_mention_free ? "complimentary" : "normal", ...(who === "us" && !!l.recovery_mention_free ? { title: "Complimentary pick-up & drop-off" } : {}) }, true);
+    const setFree = (on: boolean) => patch(l.id, { recovery_mention_free: on, visible_to_customer: on, unit_price: 0, price_display: on ? "complimentary" : "normal", ...(on ? { title: "Complimentary pick-up & drop-off" } : {}) }, true);
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-2 rounded-control border border-line px-3 py-2 ${paidBy === "us" ? "bg-chip" : "bg-white"}`}>
         {failChip(l.id)}
@@ -1572,6 +1584,19 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" onClick={() => setLowAsk(null)} data-low-profit-fix>Go back and fix</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => { setLowAsk(null); completeNow(false, false, false, true); }} data-low-profit-send>Send anyway</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {compAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-complimentary-ask>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">Price 0: mark as Complimentary?</span>
+            <p className="text-sm text-muted">The customer sees the word instead of a price; the line stays valid and our own cost still counts against profit.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => { const id = compAsk; setCompAsk(null); patch(id, { price_display: "complimentary", unit_price: 0 }, true); }} data-comp-yes>Complimentary</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { const id = compAsk; setCompAsk(null); patch(id, { price_display: "included", unit_price: 0 }, true); }} data-comp-included>Included in package</Button>
+              <Button type="button" tone="ghost" size="md" onClick={() => setCompAsk(null)} data-comp-no>No, it needs a price</Button>
             </div>
           </div>
         </div>
