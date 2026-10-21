@@ -34,6 +34,13 @@ export type CommissionRow = {
   paidMethod: string | null;
   paidNote: string | null;
   creditNotes: number;
+  /** Section 2: the voucher that settled it, and whether its signed proof is uploaded yet. */
+  voucherId: string | null;
+  voucherNumber: string | null;
+  paidOn: string | null;
+  proofPath: string | null;
+  proofMissing: boolean;
+  reference: string | null;
 };
 
 /** "Jamshaid · +971 50 123 4567" in Settings → name + phone; a bare name has no phone. */
@@ -44,7 +51,7 @@ export function recipientPhone(name: string, people: string[]): string | null {
   return m ? m[1].trim() : null;
 }
 
-export async function loadCommissions(): Promise<{ pending: CommissionRow[]; toPay: CommissionRow[]; paid: CommissionRow[] }> {
+export async function loadCommissions(): Promise<{ pending: CommissionRow[]; ready: CommissionRow[]; waiting: CommissionRow[]; paid: CommissionRow[] }> {
   const admin = createAdminClient();
   const settings = await getSettings();
   const people = ((settings.commission_people ?? []) as string[]).map(String);
@@ -52,7 +59,7 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; toP
   // job's quotation), never a superseded tombstone, and - belt and braces - one row per job here too.
   const { data: qs } = await admin
     .from("quotations")
-    .select(`id, number, version, job_id, commission_to, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_at, commission_decision_note, commission_paid_at, commission_paid_by, commission_paid_method, commission_paid_note, created_at, job:jobs!quotations_job_id_fkey(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)))`)
+    .select(`id, number, version, job_id, commission_to, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_at, commission_decision_note, commission_paid_at, commission_paid_by, commission_paid_method, commission_paid_note, commission_payment_id, created_at, voucher:commission_payments(id, number, method, paid_on, reference, proof_path), job:jobs!quotations_job_id_fkey(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)))`)
     .eq("is_active", true)
     .eq("kind", "quotation")
     .not("job_id", "is", null)
@@ -101,6 +108,7 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; toP
         why = customerPaid ? "Invoice paid in full" : `${inv.number} still owes AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
       }
       const status: CommissionRow["status"] = r.commission_paid_at ? "paid" : (r.commission_status as string | null) === "pending" ? "pending" : "approved";
+      const voucher = (r.voucher as { id: string; number: string; method: string; paid_on: string; reference: string | null; proof_path: string | null } | null) ?? null;
       return {
         quotationId: r.id as string,
         quotation: r.number as string,
@@ -122,20 +130,36 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; toP
         decisionNote: (r.commission_decision_note as string | null) ?? null,
         paidAt: (r.commission_paid_at as string | null) ?? null,
         paidByName: r.commission_paid_by ? (names.get(r.commission_paid_by as string) ?? null) : null,
-        paidMethod: (r.commission_paid_method as string | null) ?? null,
+        paidMethod: voucher?.method ?? (r.commission_paid_method as string | null) ?? null,
         paidNote: (r.commission_paid_note as string | null) ?? null,
         creditNotes: r.job_id ? (creditByJob.get(r.job_id as string) ?? 0) : 0,
+        voucherId: voucher?.id ?? null,
+        voucherNumber: voucher?.number ?? null,
+        paidOn: voucher?.paid_on ?? null,
+        proofPath: voucher?.proof_path ?? null,
+        proofMissing: !!r.commission_paid_at && !voucher?.proof_path,
+        reference: voucher?.reference ?? null,
       };
     });
+  // Section 2: "Approved" splits into Ready to pay (the customer's invoice is settled) and
+  // Approved - waiting for the customer to pay (no Mark paid there).
   return {
     pending: out.filter((r) => r.status === "pending"),
-    toPay: out.filter((r) => r.status === "approved"),
+    ready: out.filter((r) => r.status === "approved" && r.customerPaid),
+    waiting: out.filter((r) => r.status === "approved" && !r.customerPaid),
     paid: out.filter((r) => r.status === "paid"),
   };
 }
 
 /** The payable ones (approved AND the customer's invoice paid in full), for Mathew's Waiting on you. */
 export async function payableCommissions(): Promise<CommissionRow[]> {
-  const { toPay } = await loadCommissions();
-  return toPay.filter((r) => r.customerPaid);
+  const { ready } = await loadCommissions();
+  return ready;
+}
+
+/** Paid commissions whose signed voucher or bank slip is still missing: amber until uploaded. */
+export async function proofMissingPayments(): Promise<{ id: string; number: string; recipient: string; amount: number; method: string; paidOn: string }[]> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("commission_payments").select("id, number, recipient, amount_aed, method, paid_on").eq("is_active", true).is("proof_path", null).order("paid_on", { ascending: false }).limit(50);
+  return ((data ?? []) as { id: string; number: string; recipient: string; amount_aed: number | string; method: string; paid_on: string }[]).map((r) => ({ id: r.id, number: r.number, recipient: r.recipient, amount: Number(r.amount_aed) || 0, method: r.method, paidOn: r.paid_on }));
 }

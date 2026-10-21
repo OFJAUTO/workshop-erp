@@ -10,11 +10,12 @@ export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff || !(staff.role_id === "owner" || staff.role_id === "accounts")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const month = request.nextUrl.searchParams.get("month") ?? new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 7);
-  const { pending, toPay, paid } = await loadCommissions();
+  const { pending, ready, waiting, paid } = await loadCommissions();
   const inMonth = (d: string | null) => !!d && d.startsWith(month);
   const rows = [
     ...pending.filter((r) => inMonth(r.setAt)).map((r) => ({ state: "Pending owner approval", ...r })),
-    ...toPay.filter((r) => inMonth(r.decidedAt ?? r.setAt)).map((r) => ({ state: r.customerPaid ? "Approved, payable" : "Approved, waiting for the customer", ...r })),
+    ...ready.filter((r) => inMonth(r.decidedAt ?? r.setAt)).map((r) => ({ state: "Ready to pay", ...r })),
+    ...waiting.filter((r) => inMonth(r.decidedAt ?? r.setAt)).map((r) => ({ state: "Approved, waiting for the customer", ...r })),
     ...paid.filter((r) => inMonth(r.paidAt)).map((r) => ({ state: "Paid", ...r })),
   ].map((r) => ({
     state: r.state,
@@ -31,7 +32,10 @@ export async function GET(request: NextRequest) {
     added_at: r.setAt ? new Date(r.setAt) : "",
     paid_at: r.paidAt ? new Date(r.paidAt) : "",
     paid_by: r.paidByName ?? "",
-    method: r.paidMethod ?? "",
+    method: r.paidMethod === "transfer" ? "Bank transfer" : (r.paidMethod ?? ""),
+    voucher: r.voucherNumber ?? "",
+    reference: r.reference ?? "",
+    proof: r.status === "paid" ? (r.proofMissing ? "Missing" : "Uploaded") : "",
     note: r.paidNote ?? "",
   }));
   const buffer = await buildXlsx([
@@ -52,7 +56,10 @@ export async function GET(request: NextRequest) {
         { header: "Added", key: "added_at", width: 16, numFmt: "dd mmm yyyy" },
         { header: "Paid", key: "paid_at", width: 16, numFmt: "dd mmm yyyy" },
         { header: "Paid by", key: "paid_by", width: 14 },
-        { header: "Method", key: "method", width: 12 },
+        { header: "Method", key: "method", width: 14 },
+        { header: "Voucher no.", key: "voucher", width: 12 },
+        { header: "Reference", key: "reference", width: 16 },
+        { header: "Proof", key: "proof", width: 10 },
         { header: "Note", key: "note", width: 24 },
       ],
       rows,

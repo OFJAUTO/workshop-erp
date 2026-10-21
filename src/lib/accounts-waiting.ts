@@ -1,6 +1,6 @@
 import "server-only";
 import { depositsWaiting } from "./deposits";
-import { payableCommissions } from "./commissions";
+import { payableCommissions, proofMissingPayments } from "./commissions";
 import { PAYMENT_SELECT, toPayment } from "./invoice-data";
 import { round2 } from "./money";
 import type { ExtraWaiting } from "@/components/WaitingPanel";
@@ -99,7 +99,11 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
   {
     const payable = await payableCommissions();
     for (const c of payable) {
-      out.push({ jobId: `comm:${c.quotationId}`, plate: c.plate, car: c.recipient, what: `Commission to pay (${c.quotation})`, amount: aed(c.amount), actionLabel: "Open Commissions", href: "/commissions", always: true, urgency: "amber", since: c.decidedAt ?? c.setAt, hint: `Approved by the owner; ${c.customerPaidWhy}. Mark it paid on the Commissions page.` });
+      out.push({ jobId: `comm:${c.quotationId}`, plate: c.plate, car: c.recipient, what: `Commission to pay (${c.quotation})`, amount: aed(c.amount), actionLabel: "Open Commissions", href: "/commissions", always: true, urgency: "amber", since: c.decidedAt ?? c.setAt, hint: `Approved by the owner; ${c.customerPaidWhy}. Pay it on the Commissions page (cash prints a voucher to sign).` });
+    }
+    // 4c. Paid without the signed voucher or the bank slip: amber until the proof is uploaded.
+    for (const p of await proofMissingPayments()) {
+      out.push({ jobId: `comproof:${p.id}`, plate: p.number, car: p.recipient, what: `Commission paid – proof missing (${p.method === "cash" ? "signed voucher" : "bank slip"})`, amount: aed(p.amount), actionLabel: "Upload proof", href: "/commissions", always: true, urgency: "amber", hint: "Open Commissions and upload the signed voucher photo or the bank slip on the paid row." });
     }
   }
 
