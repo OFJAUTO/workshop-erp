@@ -1,24 +1,18 @@
-import Link from "next/link";
-import { CarPicture } from "@/components/CarPicture";
-import { TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { TechnicianPicker } from "@/components/TechnicianPicker";
 import { technicianLoads } from "@/lib/technician-load";
-import { Badge, Button, Card, ChoiceButtons, Empty, PageHeader, SectionLabel, Textarea } from "@/components/ui";
+import { Button, Card, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
-import { formatDateTime } from "@/lib/format";
-import { JOB_DEPARTMENTS, jobConcernsSide, sideOfDepartment, roadTestSuggested } from "@/lib/inspection";
-import { STATUS_LABELS, clockOf, jobTiming, type JobStatus, type Stage } from "@/lib/jobs";
-import { ROAD_TEST_CHOICES } from "@/lib/road-test";
+import { formatDate } from "@/lib/format";
+import { jobConcernsSide, sideOfDepartment, roadTestSuggested } from "@/lib/inspection";
+import { clockOf, formatWait, jobTiming, workingMinutesSince, workingTimeOf, type JobStatus, type Stage } from "@/lib/jobs";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
-import { assignJob } from "../jobs/actions";
 import { electricalTasks } from "@/lib/bodyshop";
 import { electricalDoneAction } from "../bodyshop/actions";
-import { formatDate } from "@/lib/format";
+import { AssignBoard, type BoardCar } from "./AssignBoard";
 
 type Row = {
   id: string;
@@ -72,80 +66,35 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const pictures = await signCarPictures(rows.map((j) => j.vehicle?.photo_path));
   const ready = rows.filter((j) => j.status === "pending_inspection");
   const waiting = rows.filter((j) => j.status !== "pending_inspection");
-  const deptLabel = (d: string | null) => JOB_DEPARTMENTS.find((x) => x.value === d)?.label ?? "Not set";
-
-  const renderList = (items: Row[], canAssign: boolean) => (
-    <div className="flex flex-col gap-3">
-      {items.map((j) => {
-        const timing = jobTiming(j.promised_at, j.is_open, clockOf(j, settings));
-        const defaultRoadTest = j.gate_in?.condition === "does_not_run" ? "not_possible" : null;
-        const reqs = requestsOf(j.id);
-        const suggested = roadTestSuggested([...reqs, j.gate_in?.customer_requests ?? ""]);
-        return (
-          <Card key={j.id} className={`flex flex-col gap-4 ${timing.tone === "red" ? "border-red-bar" : timing.tone === "amber" ? "border-amber-bar" : ""}`}>
-            <div className="flex flex-col md:flex-row md:items-center gap-4">
-              <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full md:w-44" />
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link href={`/jobs/${j.id}`} className="text-[17px] font-extrabold tracking-[0.03em] hover:underline underline-offset-4">
-                    {j.vehicle ? formatPlate(j.vehicle) : j.job_number}
-                  </Link>
-                  {j.customer?.is_vip ? <Badge tone="ink">VIP</Badge> : null}
-                  {j.priority === "high" ? <Badge tone="outline">High priority</Badge> : null}
-                  <Badge tone="neutral">{deptLabel(j.department)}</Badge>
-                  {j.status === "pending_inspection" ? <TimingBadge timing={timing} /> : null}
-                  {j.gate_in?.condition === "does_not_run" ? <Badge tone="red">Does not run</Badge> : null}
-                </div>
-                <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
-                <span className="text-xs text-muted">
-                  {j.customer?.company_name ?? j.customer?.full_name} · {j.job_number} · gated in {formatDateTime(j.gated_in_at)} · {STATUS_LABELS[j.status]}
-                </span>
-                {reqs.length ? (
-                  <ol className="flex flex-col gap-1 rounded-control bg-chip px-3 py-2 text-sm">
-                    {reqs.map((t, i) => (
-                      <li key={i} className="flex gap-2"><span className="w-5 shrink-0 text-muted">{i + 1}.</span><span className="font-semibold">{t}</span></li>
-                    ))}
-                  </ol>
-                ) : j.gate_in?.customer_requests ? <p className="text-sm rounded-control bg-chip px-3 py-2 whitespace-pre-wrap"><span className="font-bold">Customer asked:</span> {j.gate_in.customer_requests}</p> : null}
-                {j.gate_in?.notes ? <p className="text-sm"><span className="font-bold">Gate-in notes:</span> {j.gate_in.notes}</p> : null}
-                {j.assignment_note ? (
-                  <p className="text-sm rounded-control bg-chip px-3 py-2">
-                    <span className="font-bold">Note from {j.note_by?.display_name ?? "the advisor"}:</span> {j.assignment_note}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            {canAssign ? (
-              <form action={assignJob.bind(null, j.id)} className="flex flex-col gap-3 border-t border-line pt-4">
-                <input type="hidden" name="back" value="/assign" />
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1" data-field>
-                    <span className="text-sm font-semibold" data-field-label>Technicians (tick one or more)</span>
-                    <TechnicianPicker technicians={loads} hint="Freest first. The first ticked technician is the lead: he does the inspection. A busy technician can still be ticked; it asks once." />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-sm font-semibold">Road test{suggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber">Road test suggested: the requests mention noise, vibration, steering, turning or braking</span> : null}</span>
-                    <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_CHOICES} />
-                  </div>
-                </div>
-                <label className="flex flex-col gap-1">
-                  <span className="text-sm font-semibold">Note <span className="font-medium text-muted">(required when the road test is not possible)</span></span>
-                  <Textarea name="road_test_note" rows={1} placeholder="For example: does not start, or no plates" />
-                </label>
-                <div>
-                  <Button type="submit" size="md">
-                    Assign
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <span className="text-xs text-muted">{j.status === "gate_in_pending" ? "Gate-in photos or video still missing." : "Waiting for the customer to approve the job card."}</span>
-            )}
-          </Card>
-        );
-      })}
-    </div>
-  );
+  const wt = workingTimeOf(settings);
+  const now = new Date();
+  const boardCarOf = (j: Row, canAssign: boolean): BoardCar => {
+    const timing = jobTiming(j.promised_at, j.is_open, clockOf(j, settings));
+    const reqs = requestsOf(j.id);
+    return {
+      id: j.id,
+      plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number,
+      car: [j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ") || "Car",
+      customer: j.customer?.company_name ?? j.customer?.full_name ?? "Customer",
+      jobNumber: j.job_number,
+      department: j.department,
+      pictureUrl: j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null,
+      need: j.department === "bodyshop" ? "Bodyshop work to assign" : "Inspection to assign",
+      waited: formatWait(workingMinutesSince(j.first_approval_at ?? j.gated_in_at, wt, now), wt),
+      tone: canAssign ? (timing.tone === "red" ? "red" : timing.tone === "amber" ? "amber" : "none") : "none",
+      vip: !!j.customer?.is_vip,
+      high: j.priority === "high",
+      doesNotRun: j.gate_in?.condition === "does_not_run",
+      requests: reqs.length ? reqs : j.gate_in?.customer_requests ? [j.gate_in.customer_requests] : [],
+      gateInNotes: j.gate_in?.notes ?? null,
+      advisorNote: j.assignment_note ? { by: j.note_by?.display_name ?? "the advisor", text: j.assignment_note } : null,
+      canAssign,
+      blockedWhy: canAssign ? null : j.status === "gate_in_pending" ? "Gate-in photos or video still missing." : "Waiting for the customer to approve the job card.",
+      roadTestSuggested: j.department !== "bodyshop" && roadTestSuggested([...reqs, j.gate_in?.customer_requests ?? ""]),
+      defaultRoadTest: j.gate_in?.condition === "does_not_run" ? "not_possible" : null,
+    };
+  };
+  const boardCars = [...ready.map((j) => boardCarOf(j, true)), ...waiting.map((j) => boardCarOf(j, false))];
 
   const electrical = await electricalTasks();
   return (
@@ -154,10 +103,6 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
       <PageHeader title="To assign" subtitle={side ? `${side === "mechanical" ? "Mechanical" : "Bodyshop"} cars waiting for a technician` : "All cars waiting for a technician"} />
       {message ? <p className="rounded-control bg-green-soft px-4 py-3 text-sm font-semibold text-green">{message}</p> : null}
       {error ? <p className="rounded-control bg-red-soft px-4 py-3 text-sm font-semibold text-red">{error}</p> : null}
-      <Card className="flex flex-col gap-2">
-        <SectionLabel right={`${loads.filter((l) => l.status === "free").length} free`}>Technicians, freest first</SectionLabel>
-        <TechnicianPicker technicians={loads} pick={false} />
-      </Card>
       {electrical.length ? (
         <Card className="flex flex-col gap-2 border-ink" data-electrical-tasks>
           <SectionLabel right={`${electrical.length}`}>Electrical resets from the bodyshop</SectionLabel>
@@ -172,15 +117,8 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
           </ul>
         </Card>
       ) : null}
-      <section className="flex flex-col gap-3">
-        <SectionLabel right={`${ready.length}`}>Ready to assign (customer approved)</SectionLabel>
-        <p className="text-xs text-muted">Target: {Number(settings.assignment_target_minutes) || 30} working minutes from the customer&apos;s approval. Past it the card turns amber, then red, and the owner is told.</p>
-        {ready.length ? renderList(ready, true) : <Empty title="Nothing waiting to be assigned" />}
-      </section>
-      <section className="flex flex-col gap-3">
-        <SectionLabel right={`${waiting.length}`}>Gated in, not yet approved</SectionLabel>
-        {waiting.length ? renderList(waiting, false) : <p className="text-sm text-muted">None.</p>}
-      </section>
+      <p className="text-[13px] text-muted">Target: {Number(settings.assignment_target_minutes) || 30} working minutes from the customer&apos;s approval. Past it the card turns amber, then red, and the owner is told. Tap a car, tick the people, Assign.</p>
+      <AssignBoard cars={boardCars} people={loads} />
     </>
   );
 }

@@ -228,10 +228,12 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/assign`);
-    const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    await tickTech(page, box);
-    await page.locator("label:has(input[name=road_test][value=needed])").first().click();
-    await page.getByRole("button", { name: "Assign" }).first().click();
+    // The rebuilt board (batch 21 Oct, section 6): tap the car, tick the person, pick the road test, Assign.
+    await page.locator(`[data-assign-car="${jobId}"]`).click();
+    await sleep(500);
+    await page.locator(`[data-assign-person="${techId}"]`).click();
+    await page.getByText("Road test first", { exact: true }).click();
+    await page.locator("[data-assign-submit]").click();
     await submitted(page);
     check("a2: assign confirmed on screen — R1", /message=|Assigned/.test(page.url() + ((await page.textContent("body")) ?? "")));
     await shot(page, "a2-assign-actor");

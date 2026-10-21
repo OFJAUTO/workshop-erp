@@ -55,6 +55,7 @@
     "test:security": "node --env-file=.env.local tests/security-check.mjs",
     "test:comp": "node --env-file=.env.local tests/browser/test-complimentary.mjs",
     "test:docdiscount": "node --env-file=.env.local tests/browser/test-docdiscount.mjs",
+    "test:assign": "node --env-file=.env.local tests/browser/test-assign.mjs",
     "test:lpoflow": "node --env-file=.env.local tests/browser/test-lpoflow.mjs",
     "test:partnames": "node --env-file=.env.local tests/browser/test-partnames.mjs",
     "test:paypage": "node --env-file=.env.local tests/browser/test-paypage.mjs",

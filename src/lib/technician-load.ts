@@ -12,6 +12,10 @@ export type TechnicianLoad = {
   id: string;
   display_name: string;
   department_id: string | null;
+  /** The person's team inside their side (section 6): Technicians / Electricians / Helpers, or the bodyshop teams. */
+  team?: string | null;
+  /** team_leader rows lead their team. */
+  role_id?: string;
   photoUrl: string | null;
   /** green: free, amber: on a car but not working now, red: clock running. */
   status: "free" | "paused" | "working";
@@ -32,12 +36,12 @@ export type TechnicianLoad = {
 export async function technicianLoads(settings: Settings, side: "mechanical" | "bodyshop" | null): Promise<TechnicianLoad[]> {
   const admin = createAdminClient();
   const [{ data: techs }, { data: links }, { data: sessions }, { data: pauses }] = await Promise.all([
-    admin.from("staff").select("id, display_name, department_id, photo_path, break_start, break_end").eq("role_id", "technician").eq("is_active", true).order("display_name"),
+    admin.from("staff").select("id, display_name, department_id, team, role_id, photo_path, break_start, break_end").in("role_id", ["technician", "team_leader"]).eq("is_active", true).order("display_name"),
     admin.from("job_technicians").select("job_id, staff_id, done_at, job:jobs!inner(id, job_number, status, is_open, budget_hours, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).is("left_at", null),
     admin.from("work_sessions").select(WORK_SESSION_SELECT).eq("is_active", true),
     admin.from("work_pauses").select("job_id, technician_id").is("ended_at", null).eq("is_active", true),
   ]);
-  const people = ((techs ?? []) as { id: string; display_name: string; department_id: string | null; photo_path: string | null; break_start: string | null; break_end: string | null }[]).filter((t) => !side || !sideOfDepartment(t.department_id) || sideOfDepartment(t.department_id) === side);
+  const people = ((techs ?? []) as { id: string; display_name: string; department_id: string | null; team: string | null; role_id: string; photo_path: string | null; break_start: string | null; break_end: string | null }[]).filter((t) => !side || !sideOfDepartment(t.department_id) || sideOfDepartment(t.department_id) === side);
   type Link = { job_id: string; staff_id: string; done_at: string | null; job: { id: string; job_number: string; status: string; is_open: boolean; budget_hours: number | string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null } | null } };
   const rows = ((links ?? []) as unknown as Link[]).filter((l) => l.job.is_open && !["ready", "pending_payment", "in_delivery", "closed", "pending_wash", "pending_qc"].includes(l.job.status));
   const openJobIds = Array.from(new Set(rows.map((l) => l.job_id)));
@@ -70,7 +74,7 @@ export async function technicianLoads(settings: Settings, side: "mechanical" | "
     const nowCar = cars.find((c) => c.running);
     const now = status === "working" ? `Working on ${nowCar?.plate ?? "a car"}` : status === "paused" ? (paused.has(p.id) ? `Paused · ${cars.map((c) => c.plate).join(", ")}` : `On ${cars.length} car${cars.length === 1 ? "" : "s"}, clock off`) : "Free";
     loadHours = Math.round(loadHours * 10) / 10;
-    return { id: p.id, display_name: p.display_name, department_id: p.department_id, photoUrl: p.photo_path ? (urlOf.get(p.photo_path) ?? null) : null, status, now, cars, loadHours, weekHours, percent: weekHours > 0 ? Math.round((loadHours / weekHours) * 100) : 0 };
+    return { id: p.id, display_name: p.display_name, department_id: p.department_id, team: p.team, role_id: p.role_id, photoUrl: p.photo_path ? (urlOf.get(p.photo_path) ?? null) : null, status, now, cars, loadHours, weekHours, percent: weekHours > 0 ? Math.round((loadHours / weekHours) * 100) : 0 };
   });
   return out.sort((a, b) => a.percent - b.percent || (a.status === "free" ? -1 : 1) - (b.status === "free" ? -1 : 1) || a.display_name.localeCompare(b.display_name));
 }

@@ -64,12 +64,14 @@ try {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/assign`);
-    const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    const values = await page.locator("input[name=technician]").evaluateAll((els) => els.map((e) => e.getAttribute("value")));
-    check("assign page lists the free technician", (await box.count()) === 1, `tech ${techId} · boxes ${values.join(",")} · ${page.url()}`);
-    await tickTech(page, box);
-    await page.locator("label:has(input[name=road_test][value=needed])").first().click();
-    await page.getByRole("button", { name: "Assign" }).first().click();
+    // The rebuilt board (batch 21 Oct, section 6): tap the car, tick the person, pick the road test, Assign.
+    await page.locator(`[data-assign-car="${jobId}"]`).click();
+    await sleep(500);
+    const person = page.locator(`[data-assign-person="${techId}"]`);
+    check("assign page lists the free technician", (await person.count()) === 1, `tech ${techId} · ${page.url()}`);
+    await person.click();
+    await page.getByText("Road test first", { exact: true }).click();
+    await page.locator("[data-assign-submit]").click();
     await submitted(page);
     await browser.close();
   }
@@ -293,31 +295,28 @@ try {
   const st9 = (await sql("select status from public.jobs where id = $1", [jobId]))[0];
   check("car is in Work after planning", st9?.status === "in_work", JSON.stringify(st9));
 
-  // 10. Parts hand the part over; the technician confirms with his PIN.
+  // 10. The desk marks the parts Ready; the technician takes them with his PIN on his own tablet (19 Oct flow).
   m = await mark();
   {
     const { browser, page } = await browserForId(partsId);
     await go(page, `${base}/parts/handover/${jobId}`);
-    const boxes = page.locator("input[name=part]");
-    for (let i = 0; i < (await boxes.count()); i++) if (!(await boxes.nth(i).isChecked())) await boxes.nth(i).check();
-    await page.locator("select[name=technician]").selectOption(techId);
-    await page.locator("button[type=submit]:has-text('Hand over')").click();
-    await page.waitForURL((u) => /\/print\/stickers\//.test(u.toString()) || /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
+    const ready = page.locator("[data-mark-ready]");
+    check("the desk's Ready for handover button is there (19 Oct)", (await ready.count()) === 1, (await page.textContent("body") ?? "").slice(0, 120));
+    if (await ready.count()) { await ready.click(); await submitted(page); }
     await browser.close();
   }
-  await told("10a handover requested", m, jobId, [{ id: techId, label: "the technician" }]);
+  await told("10a parts marked ready", m, jobId, [{ id: techId, label: "the technician" }]);
   m = await mark();
   {
     const { browser, page } = await browserForId(techId, { viewport: { width: 820, height: 1180 }, touch: true });
     await go(page, `${base}/my-jobs/${jobId}`);
-    // 12 Oct, 9: "Parts for this car" under Start work: Receive parts, then the ticks and the PIN.
-    const receive = page.getByRole("button", { name: "Receive parts" }).first();
-    check("Receive parts under Start work (12 Oct, 9)", (await receive.count()) === 1, (await page.textContent("body") ?? "").match(/.{0,30}waiting for you.{0,20}/)?.[0] ?? "");
-    if (await receive.count()) { await receive.click(); await sleep(400); }
-    const pin = page.locator("input[aria-label=PIN]");
-    if (await pin.count()) { await pin.fill("1234"); await page.getByRole("button", { name: "I received these parts" }).click(); await sleep(3500); }
-    const ho = await sql("select status from public.part_handovers where job_id = $1 order by created_at desc limit 1", [jobId]);
-    check("handover confirmed with the PIN", ho[0]?.status === "confirmed", JSON.stringify(ho));
+    // The technician TICKS each part, types his PIN and confirms.
+    const nTake = await page.locator("[data-part-take][data-ticked='0'] button").count();
+    for (let i = 0; i < nTake; i++) { await page.locator("[data-part-take][data-ticked='0'] button").first().click(); await sleep(300); }
+    const pin = page.locator("[data-receive-pin]");
+    if (await pin.count()) { await pin.fill("1234"); await page.locator("[data-receive-parts]").click(); await sleep(3500); }
+    const ho = await sql("select count(*)::int as n from public.part_items where job_id = $1 and is_active and issue_status = 'confirmed'", [jobId]);
+    check("handover confirmed with the PIN", (ho[0]?.n ?? 0) >= 1, JSON.stringify(ho));
     // 11. Work: Working, then Job finished.
     m = await mark();
     await go(page, `${base}/my-jobs/${jobId}`);
@@ -368,6 +367,10 @@ try {
     const { browser, page } = await browserForId(advisorId);
     await go(page, `${base}/jobs/${jobId}`);
     await page.getByRole("button", { name: "Send to wash" }).click();
+    await sleep(700);
+    // "Is the car wash free?" (18 Oct): answer it, then the send goes through.
+    const free = page.getByRole("button", { name: /free|Yes/i }).first();
+    if (await free.count()) await free.click();
     await submitted(page);
     await page.getByRole("button", { name: "Wash done" }).click();
     await submitted(page);

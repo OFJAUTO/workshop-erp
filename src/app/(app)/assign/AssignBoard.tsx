@@ -1,0 +1,153 @@
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { useState } from "react";
+import { assignJob } from "@/app/(app)/jobs/actions";
+import { Badge, Button, Card, ChoiceButtons, Empty, Textarea } from "@/components/ui";
+import type { TechnicianLoad } from "@/lib/technician-load";
+import { TEAMS, teamOf, type Side } from "@/lib/teams";
+
+export type BoardCar = {
+  id: string;
+  plate: string;
+  car: string;
+  customer: string;
+  jobNumber: string;
+  department: string | null;
+  pictureUrl: string | null;
+  need: string;
+  waited: string;
+  tone: "red" | "amber" | "none";
+  vip: boolean;
+  high: boolean;
+  doesNotRun: boolean;
+  requests: string[];
+  gateInNotes: string | null;
+  advisorNote: { by: string; text: string } | null;
+  canAssign: boolean;
+  blockedWhy: string | null;
+  roadTestSuggested: boolean;
+  defaultRoadTest: string | null;
+};
+
+const ROAD_TEST_CHOICES = [
+  { value: "needed", label: "Road test first" },
+  { value: "not_needed", label: "No road test" },
+  { value: "not_possible", label: "Not possible" },
+];
+
+/** Section 6 (21 October 2026): cars on the LEFT, one assign panel on the RIGHT with the team grouped
+ *  under team headers - the team list appears ONCE, never under each car. Tablet-friendly, 14px+. */
+export function AssignBoard({ cars, people }: { cars: BoardCar[]; people: TechnicianLoad[] }) {
+  const [selectedId, setSelectedId] = useState<string | null>(cars.find((c) => c.canAssign)?.id ?? null);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const selected = cars.find((c) => c.id === selectedId) ?? null;
+  const sides: Side[] = selected?.department === "bodyshop" ? ["bodyshop"] : selected?.department === "both" ? ["mechanical", "bodyshop"] : ["mechanical"];
+  const isBodyshopOnly = selected?.department === "bodyshop";
+  const toggle = (id: string) => setTicked((t) => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const pick = (id: string) => { setSelectedId(id); setTicked(new Set()); };
+  const sideOfPerson = (p: TechnicianLoad): Side => (["bodyshop", "paint", "ppf_tint", "detailing"].includes(p.department_id ?? "") ? "bodyshop" : "mechanical");
+  const groups = sides.flatMap((side) =>
+    TEAMS[side]
+      .map((team) => ({ side, team, members: people.filter((p) => sideOfPerson(p) === side && teamOf(p) === team.key) }))
+      .filter((g) => g.members.length > 0),
+  );
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] gap-4 items-start" data-assign-board>
+      {/* LEFT: the cars waiting. */}
+      <div className="flex flex-col gap-2" data-assign-cars>
+        {cars.length === 0 ? <Empty title="Nothing waiting to be assigned" /> : null}
+        {cars.map((c) => (
+          <button key={c.id} type="button" onClick={() => pick(c.id)} data-assign-car={c.id} aria-pressed={selectedId === c.id}
+            className={`flex w-full items-center gap-3 rounded-card border bg-white p-3 text-left ${selectedId === c.id ? "border-ink ring-2 ring-ink" : c.tone === "red" ? "border-red-bar" : c.tone === "amber" ? "border-amber-bar" : "border-line"} ${c.canAssign ? "" : "opacity-70"}`}>
+            <span className="relative h-16 w-24 shrink-0 overflow-hidden rounded-control bg-chip">
+              {c.pictureUrl ? <Image src={c.pictureUrl} alt={c.plate} fill sizes="96px" className="object-cover" unoptimized /> : <span className="flex h-full w-full items-center justify-center text-[10px] font-bold uppercase text-faint">No photo</span>}
+            </span>
+            <span className="min-w-0 flex-1 flex flex-col gap-0.5">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-[16px] font-extrabold tracking-[0.03em]">{c.plate}</span>
+                {c.vip ? <Badge tone="ink">VIP</Badge> : null}
+                {c.high ? <Badge tone="outline">High priority</Badge> : null}
+                {c.doesNotRun ? <Badge tone="red">Does not run</Badge> : null}
+                <Badge tone="neutral">{c.department === "bodyshop" ? "Bodyshop" : c.department === "both" ? "Both sides" : "Mechanical"}</Badge>
+              </span>
+              <span className="truncate text-[14px] font-semibold">{c.car}</span>
+              <span className="truncate text-[13px] text-muted">{c.customer} · {c.jobNumber}</span>
+              <span className="text-[13px]"><span className="font-semibold">{c.need}</span> · waiting {c.waited}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* RIGHT: tap a car, assign its people - the ONE team list. */}
+      <Card className="lg:sticky lg:top-4 flex flex-col gap-3 p-4" data-assign-panel>
+        {!selected ? (
+          <p className="text-[14px] text-muted">Tap a car on the left to assign it.</p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[17px] font-extrabold tracking-[0.03em]">{selected.plate}</span>
+              <span className="text-[14px] font-semibold">{selected.car}</span>
+              <Link href={`/jobs/${selected.id}`} className="text-[13px] font-semibold underline underline-offset-4">Open the job card</Link>
+            </div>
+            {selected.requests.length ? (
+              <ol className="flex flex-col gap-1 rounded-control bg-chip px-3 py-2 text-[14px]">
+                {selected.requests.map((t, i) => <li key={i} className="flex gap-2"><span className="w-5 shrink-0 text-muted">{i + 1}.</span><span className="font-semibold">{t}</span></li>)}
+              </ol>
+            ) : null}
+            {selected.gateInNotes ? <p className="text-[13px]"><span className="font-bold">Gate-in notes:</span> {selected.gateInNotes}</p> : null}
+            {selected.advisorNote ? <p className="rounded-control bg-chip px-3 py-2 text-[13px]"><span className="font-bold">Note from {selected.advisorNote.by}:</span> {selected.advisorNote.text}</p> : null}
+            {!selected.canAssign ? (
+              <p className="rounded-control bg-amber-soft px-3 py-2 text-[14px] font-semibold" data-assign-blocked>{selected.blockedWhy ?? "This car cannot be assigned yet."}</p>
+            ) : (
+              <form action={assignJob.bind(null, selected.id)} className="flex flex-col gap-3" data-assign-form>
+                <input type="hidden" name="back" value="/assign" />
+                {ticked.size ? [...ticked].map((id) => <input key={id} type="hidden" name="technician" value={id} />) : null}
+                {groups.map((g) => (
+                  <div key={`${g.side}-${g.team.key}`} className="flex flex-col gap-1" data-team={g.team.key}>
+                    <span className="text-[12px] font-bold uppercase tracking-[0.08em] text-muted">{g.team.label}{sides.length > 1 ? ` · ${g.side === "bodyshop" ? "Bodyshop" : "Mechanical"}` : ""}</span>
+                    <ul className="flex flex-col">
+                      {g.members.map((p) => {
+                        const on = ticked.has(p.id);
+                        return (
+                          <li key={p.id}>
+                            <button type="button" onClick={() => toggle(p.id)} aria-pressed={on} data-assign-person={p.id}
+                              className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
+                              <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                              <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-chip">
+                                {p.photoUrl ? <Image src={p.photoUrl} alt={p.display_name} fill sizes="36px" className="object-cover" unoptimized /> : <span className="flex h-full w-full items-center justify-center text-[13px] font-extrabold text-muted">{p.display_name.slice(0, 1)}</span>}
+                              </span>
+                              <span className="min-w-0 flex-1 flex flex-col">
+                                <span className="truncate text-[15px] font-semibold">{p.display_name}{p.role_id === "team_leader" ? <span className="ml-1 text-[11px] font-bold uppercase text-muted">· Leader</span> : null}</span>
+                                <span className={`text-[12px] ${p.status === "free" ? "font-semibold text-green" : "text-muted"}`}>{p.now}</span>
+                              </span>
+                              <span className="shrink-0 text-right text-[12px] text-muted">{p.loadHours} h<br />of {Math.round(p.weekHours)} h</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))}
+                {groups.length === 0 ? <p className="text-[13px] text-muted">Nobody on this side yet: set the teams on the Team page.</p> : null}
+                {!isBodyshopOnly ? (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[14px] font-semibold">Road test{selected.roadTestSuggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-[12px] font-bold text-amber">Suggested: the requests mention noise, vibration, steering or braking</span> : null}</span>
+                    <ChoiceButtons name="road_test" columns={3} defaultValue={selected.defaultRoadTest} options={ROAD_TEST_CHOICES} />
+                  </div>
+                ) : <p className="text-[13px] text-muted" data-no-roadtest>Bodyshop car: no road test, no mechanical inspection. The car runs on the bodyshop board.</p>}
+                <label className="flex flex-col gap-1">
+                  <span className="text-[14px] font-semibold">Note <span className="font-medium text-muted">{isBodyshopOnly ? "(optional)" : "(required when the road test is not possible)"}</span></span>
+                  <Textarea name="road_test_note" rows={1} placeholder={isBodyshopOnly ? "Anything the team should know" : "For example: does not start, or no plates"} />
+                </label>
+                <Button type="submit" size="lg" disabled={ticked.size === 0} data-assign-submit>Assign{ticked.size ? ` (${ticked.size})` : ""}</Button>
+              </form>
+            )}
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}

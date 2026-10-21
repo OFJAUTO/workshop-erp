@@ -14,6 +14,8 @@ import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { toMiles } from "@/lib/mileage";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { sectionOfDepartment as sectionOfBodyshop } from "@/lib/bodyshop-kinds";
+import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { ROAD_TEST_DECISION_LABELS, type RoadTestDecision } from "@/lib/road-test";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -85,14 +87,21 @@ export async function assignJob(jobId: string, formData: FormData) {
   const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at, department").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
   const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
-  const choice = readRoadTestChoice(formData);
+  // Server-enforced sides (section 6): a manager assigns his own side's work only; the owner assigns anything.
+  if (staff.role_id !== "owner") {
+    const mySide = sideOfDepartment(staff.department_id);
+    if (!jobConcernsSide(job.department, mySide)) redirect(`${back}?error=` + encodeURIComponent("This car belongs to the other side: its own manager assigns it."));
+  }
+  // Bodyshop cars have no road test and no mechanical inspection: the choice is simply not asked.
+  const choice: { decision: RoadTestDecision; note: string | null } | string = job.department === "bodyshop" ? { decision: "not_needed", note: null } : readRoadTestChoice(formData);
   if (typeof choice === "string") redirect(`${back}?error=` + encodeURIComponent(choice));
 
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
   if (!job.first_approval_at && staff.role_id !== "owner") redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The customer has not approved the job card yet. No inspection before that."));
 
-  const { data: techRows } = technicianIds.length ? await supabase.from("staff").select("id, display_name, role_id, is_active").in("id", technicianIds).eq("is_active", true).eq("role_id", "technician") : { data: [] };
+  // Hands-on people: technicians and team leaders (the bodyshop's installers lead with their teams).
+  const { data: techRows } = technicianIds.length ? await supabase.from("staff").select("id, display_name, role_id, is_active, department_id").in("id", technicianIds).eq("is_active", true).in("role_id", ["technician", "team_leader"]) : { data: [] };
   const techs = technicianIds.map((tid) => (techRows ?? []).find((t) => t.id === tid)).filter((t): t is NonNullable<typeof t> => !!t);
   const tech = techs[0];
   if (!tech) redirect(`${back}?error=` + encodeURIComponent("Tick at least one technician."));
@@ -121,8 +130,16 @@ export async function assignJob(jobId: string, formData: FormData) {
     await ensureInspection(jobId, tech.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
     await applyRoadTestChoice(jobId, jobRow?.job_number ?? "", { id: tech.id, display_name: tech.display_name }, choice, { id: staff.id, display_name: staff.display_name });
   }
+  // Bodyshop cars: the people land on the bodyshop board too (one row each, never doubled).
+  if (jobRow?.department === "bodyshop") {
+    const admin = createAdminClient();
+    for (const t of techs) {
+      const { data: already } = await admin.from("bodyshop_assignments").select("id").eq("job_id", jobId).eq("staff_id", t.id).is("removed_at", null).limit(1);
+      if (!already?.length) await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: t.id, section: sectionOfBodyshop(t.department_id) ?? "ppf", assigned_by: staff.id, created_by: staff.id, updated_by: staff.id });
+    }
+  }
   const waitsForRoadTest = jobRow?.department !== "bodyshop" && choice.decision === "needed";
-  await notifyStaff(techs.map((t) => t.id), { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: waitsForRoadTest ? `Assigned by ${staff.display_name}. The QC inspector does the road test first; you are told when the inspection opens.` : `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: `/my-jobs/${jobId}` });
+  await notifyStaff(techs.map((t) => t.id), { type: "job_assigned", title: `New car for you · ${jobRow?.job_number ?? ""}`, body: waitsForRoadTest ? `Assigned by ${staff.display_name}. The QC inspector does the road test first; you are told when the inspection opens.` : jobRow?.department === "bodyshop" ? `Assigned by ${staff.display_name}. The car is on the bodyshop board.` : `Assigned by ${staff.display_name}. Open it on the tablet and start the inspection.`, jobId, href: jobRow?.department === "bodyshop" ? `/bodyshop/${jobId}` : `/my-jobs/${jobId}` });
   refresh(jobId);
   revalidatePath("/assign");
   revalidatePath("/road-tests");

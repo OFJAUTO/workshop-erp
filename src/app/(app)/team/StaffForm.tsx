@@ -5,6 +5,7 @@ import { PERSON_COLOURS } from "@/lib/calendar";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ChoiceButtons, Field, Input } from "@/components/ui";
 import { ALL_ROLES, DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId } from "@/lib/roles";
+import { TEAMS } from "@/lib/teams";
 
 export function StaffForm({
   action,
@@ -70,6 +71,14 @@ export function StaffForm({
                 value: d,
                 label: DEPARTMENT_LABELS[d],
               }))}
+            />
+          </Field>
+          <Field label="Team" hint="Groups this person under a team header on the To-assign page. Mechanical: Technicians, Electricians, Helpers. Bodyshop: Dismantle & refit, PPF, Painting, Detailing & cleaning.">
+            <ChoiceButtons
+              name="team"
+              columns={4}
+              defaultValue={v.team ?? ""}
+              options={[{ value: "", label: "None" }, ...Object.values(TEAMS).flat().map((t) => ({ value: t.key, label: t.label }))]}
             />
           </Field>
 

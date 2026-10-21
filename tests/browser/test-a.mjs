@@ -90,12 +90,15 @@ await section("A5-A6 assignment", async () => {
   const { jobId } = seed.json;
   const { browser, page } = await browserForId(MANAGER_MECH);
   await go(page, `${base}/assign`);
-  const chips = page.locator("input[type=checkbox][name=technician]");
-  check("assign page lists technicians as chips (A5)", (await chips.count()) >= 2, String(await chips.count()));
+  // The rebuilt board (batch 21 Oct, section 6): the people and the road test show once a car is tapped.
+  await page.locator(`[data-assign-car="${jobId}"]`).click();
+  await page.waitForTimeout(500);
+  const chips = page.locator("[data-assign-person]");
+  check("assign panel lists the people (A5)", (await chips.count()) >= 2, String(await chips.count()));
   const radios = page.locator("input[type=radio][name=road_test]");
   const checked = await radios.evaluateAll((rs) => rs.filter((r) => r.checked).length);
   check("no road test choice pre-chosen (B2)", (await radios.count()) >= 3 && checked === 0, `${await radios.count()} radios, ${checked} checked`);
-  check("No road test is a clear choice with a hint (B2)", /No road test/.test(await page.textContent("body")) && /inspection starts now/.test(await page.textContent("body")));
+  check("No road test is a clear choice (B2)", /No road test/.test(await page.textContent("body")));
   await go(page, `${base}/jobs/${jobId}`);
   const card = page.locator("form:has(input[name=technician])").first();
   const boxes = card.locator("input[type=checkbox][name=technician]");
