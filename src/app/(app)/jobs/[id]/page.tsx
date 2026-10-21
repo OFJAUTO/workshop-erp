@@ -50,7 +50,7 @@ import { DepositRequestSend } from "./DepositRequestSend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
-import { assignJob, moveJob, setJobPriority, setPromisedDate } from "../actions";
+import { assignJob, decideInspectionFee, moveJob, setJobPriority, setPromisedDate } from "../actions";
 import { decideRoadTest, remindManager, setAssignmentNote } from "../assignment-actions";
 import { decideMove, requestMove } from "../move-actions";
 import { remindManagerToConfirm } from "../work-actions";
@@ -330,7 +330,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
-            {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : null}
+            {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : <Badge tone="outline" data-fee-badge>Inspection fee: AED {Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}{job.first_approval_at ? " · locked" : ""}</Badge>}
             {job.comeback_of ? <Badge tone={job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "outline" : "red"}>{job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "Return visit" : "Comeback"}{comebackOriginal ? ` of ${comebackOriginal.job_number}` : ""}{job.comeback_free ? " · free of charge" : ""}</Badge> : null}
             {comebacksOfThis.length ? <Badge tone="red">Came back: {comebacksOfThis.map((c) => c.job_number).join(", ")}</Badge> : null}
             <TimingBadge timing={timing} />
@@ -384,6 +384,15 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
       ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {job.inspection_fee_request_aed !== null && job.inspection_fee_request_aed !== undefined && role === "owner" && !staff.viewingAs ? (
+        <Card className="flex flex-wrap items-center gap-3 border-amber-bar" data-fee-request>
+          <span className="text-sm font-semibold">Inspection fee below 750 asked: <span className="font-extrabold">AED {Number(job.inspection_fee_request_aed).toLocaleString("en-GB")}</span>{Number(job.inspection_fee_request_aed) === 0 ? " (waived)" : ""} instead of AED {Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}.</span>
+          <form action={decideInspectionFee.bind(null, id)} className="ml-auto flex gap-2">
+            <Button type="submit" name="decision" value="approve" size="md" data-fee-approve>Approve AED {Number(job.inspection_fee_request_aed).toLocaleString("en-GB")}</Button>
+            <Button type="submit" name="decision" value="refuse" tone="secondary" size="md" data-fee-refuse>Keep AED {Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}</Button>
+          </form>
+        </Card>
+      ) : null}
       {isVip && vipNote ? (
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>

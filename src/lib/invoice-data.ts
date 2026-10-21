@@ -215,7 +215,7 @@ export type InvoiceDraft = { lines: DraftLine[]; totals: DraftTotals; quotationN
 export async function buildInvoiceDraft(jobId: string, settings: Settings): Promise<InvoiceDraft> {
   const admin = createAdminClient();
   const [{ data: job }, quotes] = await Promise.all([
-    admin.from("jobs").select("id, inspection_fee_due, comeback_free").eq("id", jobId).maybeSingle(),
+    admin.from("jobs").select("id, inspection_fee_due, inspection_fee_aed, comeback_free").eq("id", jobId).maybeSingle(),
     approvedQuotations(jobId),
   ]);
   const qs = quotes;
@@ -251,7 +251,7 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
   }
   const out = lines;
   if (job?.inspection_fee_due && !qs.length) {
-    const fee = Number(settings.inspection_fee_aed) || 0;
+    const fee = Number((job as { inspection_fee_aed?: number | string | null }).inspection_fee_aed ?? settings.inspection_fee_aed) || 0;
     if (fee > 0) {
       out.push({ section: "fees", description: "Inspection fee", details: "No work was approved after the inspection", part_number: null, quantity: 1, hours: null, unit_price: fee, amount_aed: fee, cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: false });
       quotedTotal += round2(fee + round2(fee * (vatPercent / 100)));

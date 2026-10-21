@@ -36,6 +36,7 @@ export function GateInForm({
   draftKey,
   returnTo,
   recoveryTypes = [],
+  inspectionFee = null,
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -61,8 +62,12 @@ export function GateInForm({
   recoveryTypes?: { key: string; label: string }[];
   /** Where Save returns to: "media" for the photos step (its Back button leads here). */
   returnTo?: string;
+  /** Section 8: the inspection fee if no work is approved - the default (premium brands higher), who may lower it, and the lock after approval. */
+  inspectionFee?: { default: number; premium: boolean; isOwner: boolean; locked: boolean } | null;
 }) {
   const [arrivedBy, setArrivedBy] = useState(initialValues?.arrived_by ?? "");
+  const [fee, setFee] = useState(initialValues?.inspection_fee ?? String(inspectionFee?.default ?? 750));
+  const [feeOther, setFeeOther] = useState(() => { const f = initialValues?.inspection_fee ?? String(inspectionFee?.default ?? 750); return ![750, 1000, 1500, 2000].includes(Number(f)); });
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
   const atBranch = branches.some((b) => b.name === location);
@@ -202,6 +207,23 @@ export function GateInForm({
                   <Field label="Is this a comeback for a previous job?" hint="A car back within the window for the same problem. The manager picks the cause after the inspection; only the owner can make it free.">
                     <ChoiceButtons name="comeback_of" columns={2} defaultValue={v.comeback_of ?? ""} options={[{ value: "", label: "No, a new visit" }, ...comebacks.map((c) => ({ value: c.id, label: c.label, hint: c.hint }))]} />
                   </Field>
+                ) : null}
+                {inspectionFee && !inspectionFee.locked ? (
+                  <Field label="Inspection fee if no work is approved" hint={`${inspectionFee.premium ? `Premium brand: defaults to AED ${inspectionFee.default.toLocaleString("en-GB")}. ` : ""}${inspectionFee.isOwner ? "" : "Below AED 750 or waiving goes to the owner for approval."}`}>
+                    <div className="flex flex-wrap items-center gap-2" data-inspection-fee>
+                      {[750, 1000, 1500, 2000].map((f) => (
+                        <button key={f} type="button" onClick={() => { setFee(String(f)); setFeeOther(false); }} aria-pressed={!feeOther && fee === String(f)} data-fee-chip={f}
+                          className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${!feeOther && fee === String(f) ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                          {f.toLocaleString("en-GB")}
+                        </button>
+                      ))}
+                      <button type="button" onClick={() => setFeeOther(true)} aria-pressed={feeOther} data-fee-other className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${feeOther ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Other…</button>
+                      {feeOther ? <Input value={fee} onChange={(e) => setFee(e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" aria-label="Inspection fee (AED)" placeholder="AED" className="w-28 text-right" data-fee-box /> : null}
+                      <input type="hidden" name="inspection_fee" value={fee} />
+                    </div>
+                  </Field>
+                ) : inspectionFee?.locked ? (
+                  <p className="text-sm text-muted" data-inspection-fee-locked>Inspection fee if no work is approved: <span className="font-bold">AED {inspectionFee.default.toLocaleString("en-GB")}</span> — locked (the customer approved the job card).</p>
                 ) : null}
                 <Field label="Priority">
                 <ChoiceButtons

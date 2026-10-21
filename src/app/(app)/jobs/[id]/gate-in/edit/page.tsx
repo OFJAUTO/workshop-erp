@@ -10,7 +10,7 @@ import { updateGateIn } from "../../../actions";
 import { GateInForm } from "../../../../gate-in/GateInForm";
 
 export default async function AmendGateInPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ from?: string }> }) {
-  await requirePermission("editGateIn");
+  const staff = await requirePermission("editGateIn");
   const { id } = await params;
   const { from } = await searchParams;
   const fromMedia = from === "media";
@@ -37,6 +37,7 @@ export default async function AmendGateInPage({ params, searchParams }: { params
       <div className="max-w-3xl">
         <GateInForm
           action={updateGateIn.bind(null, id)}
+          inspectionFee={{ default: Number(card.job.inspection_fee_aed ?? settings.inspection_fee_aed) || 750, premium: false, isOwner: staff.role_id === "owner", locked: !!card.job.first_approval_at }}
           draftKey={`gate-in-edit-${id}`}
           isElectric={card.vehicle.fuel_type === "electric"}
           mode="edit"

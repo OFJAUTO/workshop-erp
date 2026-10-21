@@ -62,7 +62,8 @@
     "test:paypage": "node --env-file=.env.local tests/browser/test-paypage.mjs",
     "test:urgency": "node --env-file=.env.local tests/browser/test-urgency.mjs",
     "test:depositpanel": "node --env-file=.env.local tests/browser/test-deposit-panel.mjs",
-    "test:waiting": "node --env-file=.env.local tests/browser/test-waiting.mjs"
+    "test:waiting": "node --env-file=.env.local tests/browser/test-waiting.mjs",
+    "test:fee": "node --env-file=.env.local tests/browser/test-fee.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

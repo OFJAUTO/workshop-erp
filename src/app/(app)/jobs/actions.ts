@@ -264,7 +264,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   const vipNote = blankToNull(formData.get("vip_note"));
 
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, priority, is_open, customer_id, customer:customers(is_vip, vip_note)").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, priority, is_open, customer_id, first_approval_at, job_number, inspection_fee_aed, customer:customers(is_vip, vip_note)").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
   const { data: gi } = await supabase.from("gate_ins").select("is_complete, arrived_by, recovery_type, condition, fuel_level, battery_percent, cleanliness, dash_cam, major_damage, mileage, mileage_unit, mileage_miles, keys_count, keys_keychain, notes, old_parts_return").eq("job_id", jobId).maybeSingle();
   if (!gi) return { error: "No gate-in record found.", values };
@@ -294,6 +294,21 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   if (error) return { error: error.message, values };
   const dept = String(formData.get("department") ?? "");
   if (["mechanical", "bodyshop", "both"].includes(dept)) await supabase.from("jobs").update({ department: dept }).eq("id", jobId);
+  // Section 8: the inspection fee can change until the customer approves the job card, then it is locked.
+  const feeRaw = String(formData.get("inspection_fee") ?? "").replace(/[^\d.]/g, "");
+  if (feeRaw !== "") {
+    const asked = Math.max(0, Math.round(Number(feeRaw)));
+    const current = Number(job.inspection_fee_aed) || 0;
+    if (asked !== current) {
+      if (job.first_approval_at) return { error: "The inspection fee is locked: the customer already approved the job card with it.", values };
+      if (asked < 750 && staff.role_id !== "owner") {
+        await createAdminClient().from("jobs").update({ inspection_fee_request_aed: asked, inspection_fee_request_by: staff.id, updated_by: staff.id }).eq("id", jobId);
+        await notifyRoles(["owner"], { type: "inspection_fee_request", title: `Inspection fee below 750 asked · ${job.job_number}`, body: `${staff.display_name} asked for AED ${asked.toLocaleString("en-GB")}${asked === 0 ? " (waived)" : ""}. Approve or keep the current fee on the job card.`, jobId, href: `/jobs/${jobId}` });
+      } else {
+        await createAdminClient().from("jobs").update({ inspection_fee_aed: asked, inspection_fee_request_aed: null, inspection_fee_request_by: null, updated_by: staff.id }).eq("id", jobId);
+      }
+    }
+  }
   await supabase.from("vehicles").update({ mileage_unit: d.mileage_unit }).eq("id", (await supabase.from("jobs").select("vehicle_id").eq("id", jobId).maybeSingle()).data?.vehicle_id ?? "");
 
   if (!gi?.is_complete) {
@@ -361,7 +376,7 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   if (phone.length < 7) return { error: "Choose or enter the phone number to send to.", values };
 
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, status, is_open, job_number").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, status, is_open, job_number, inspection_fee_aed").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is closed.", values };
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos must be uploaded before the approval link can be created.", values };
@@ -386,9 +401,10 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
       terms_text_ar: blankToNull(settings.terms_and_conditions_ar),
       declaration_text: settings.declaration_text,
       declaration_text_ar: settings.declaration_text_ar,
-      inspection_fee_aed: Number(settings.inspection_fee_aed) || 0,
-      inspection_fee_notice: feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed),
-      inspection_fee_notice_ar: feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed),
+      // Section 8: the fee chosen for THIS car at gate-in (falls back to the Settings default).
+      inspection_fee_aed: Number(job.inspection_fee_aed ?? settings.inspection_fee_aed) || 0,
+      inspection_fee_notice: feeNotice(settings.inspection_fee_notice, job.inspection_fee_aed ?? settings.inspection_fee_aed),
+      inspection_fee_notice_ar: feeNotice(settings.inspection_fee_notice_ar, job.inspection_fee_aed ?? settings.inspection_fee_aed),
     })
     .select("id")
     .single();
@@ -508,4 +524,24 @@ export async function createUploadLinkToken(jobId: string): Promise<string> {
   });
   if (error) throw new Error(error.message);
   return token;
+}
+
+/** Section 8: the owner answers "inspection fee below 750 asked" - approve the asked figure or keep the current fee. */
+export async function decideInspectionFee(jobId: string, formData: FormData) {
+  const staff = await requirePermission("gateIn");
+  if (staff.role_id !== "owner" || staff.viewingAs) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("Only the owner decides the lower inspection fee."));
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, job_number, inspection_fee_aed, inspection_fee_request_aed, inspection_fee_request_by, first_approval_at").eq("id", jobId).maybeSingle();
+  if (!job || job.inspection_fee_request_aed === null) redirect(`/jobs/${jobId}?message=` + encodeURIComponent("Nothing to decide."));
+  if (job.first_approval_at) {
+    await admin.from("jobs").update({ inspection_fee_request_aed: null, inspection_fee_request_by: null, updated_by: staff.id }).eq("id", jobId);
+    redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The customer already approved the job card: the fee is locked."));
+  }
+  const approve = String(formData.get("decision") ?? "") === "approve";
+  const asked = Number(job.inspection_fee_request_aed);
+  await admin.from("jobs").update({ ...(approve ? { inspection_fee_aed: asked } : {}), inspection_fee_request_aed: null, inspection_fee_request_by: null, updated_by: staff.id }).eq("id", jobId);
+  await logEvent(admin, jobId, staff.id, { event_type: "inspection_fee", note: approve ? `Inspection fee set to AED ${asked.toLocaleString("en-GB")} by the owner (asked by a lower-fee request)` : `Lower inspection fee refused by the owner; AED ${Number(job.inspection_fee_aed).toLocaleString("en-GB")} stands` });
+  if (job.inspection_fee_request_by) await notifyStaff([job.inspection_fee_request_by], { type: "inspection_fee_request", title: `Inspection fee · ${job.job_number}`, body: approve ? `The owner approved AED ${asked.toLocaleString("en-GB")}.` : `The owner kept AED ${Number(job.inspection_fee_aed).toLocaleString("en-GB")}.`, jobId, href: `/jobs/${jobId}` });
+  refresh(jobId);
+  redirect(`/jobs/${jobId}?message=` + encodeURIComponent(approve ? `Inspection fee set to AED ${asked.toLocaleString("en-GB")}.` : "Lower fee refused: the current fee stands."));
 }

@@ -19,7 +19,7 @@ type Row = VehicleRow & {
 };
 
 export default async function NewGateInPage({ searchParams }: { searchParams: Promise<{ vehicle?: string; appointment?: string }> }) {
-  await requirePermission("gateIn");
+  const staff = await requirePermission("gateIn");
   const { vehicle: vehicleId, appointment: appointmentId } = await searchParams;
   if (!vehicleId) redirect("/gate-in");
 
@@ -91,6 +91,11 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             mileageContext={{ modelYear: v.model_year, lastKm: v.last_mileage, lastVisitAt: visits[0]?.gated_in_at ?? null }}
             estimates={openEstimates}
             comebacks={recentJobs}
+            inspectionFee={(() => {
+              const makeName = (v.make?.name ?? "").toLowerCase();
+              const premium = ((settings.premium_brands ?? []) as string[]).some((b) => makeName && b.toLowerCase() === makeName);
+              return { default: premium ? Number(settings.premium_brand_fee_aed) || 1500 : Number(settings.inspection_fee_aed) || 750, premium, isOwner: staff.role_id === "owner", locked: false };
+            })()}
             initialValues={{ priority: "normal", keys_count: "1", major_damage: "no", vip: v.customer?.is_vip ? "on" : "", vip_note: v.customer?.vip_note ?? "", appointment_id: appointment?.id ?? "", department: appointment?.department ?? "" }}
           />
         </div>

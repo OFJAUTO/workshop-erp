@@ -34,6 +34,7 @@ const NUMBER_KEYS = [
   "video_retention_months",
   "approval_reminder_hours",
   "inspection_fee_aed",
+  "premium_brand_fee_aed",
   "opening_hour",
   "closing_hour",
   "appointments_per_day",
@@ -79,7 +80,7 @@ const DECIMAL_LIMITS: Record<(typeof DECIMAL_KEYS)[number], [number, number, str
   bank_charge_transfer_percent: [0, 20, "Bank charge, bank transfer"],
 };
 /** Settings kept as a list, one entry per line on the form. */
-const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words", "tyre_brands", "damage_note_chips"] as const;
+const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words", "tyre_brands", "damage_note_chips", "premium_brands"] as const;
 const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years", "pads_bad_max", "pads_good_min"] as const;
 
 const TEXT_KEYS = [
@@ -158,6 +159,7 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   video_retention_months: [1, 120, "Video retention"],
   approval_reminder_hours: [1, 168, "Approval link reminder"],
   inspection_fee_aed: [0, 1000000, "Inspection fee"],
+  premium_brand_fee_aed: [0, 1000000, "Premium brand inspection fee"],
   opening_hour: [0, 23, "Opening hour"],
   closing_hour: [1, 24, "Closing hour"],
   appointments_per_day: [1, 100, "Appointments per day"],

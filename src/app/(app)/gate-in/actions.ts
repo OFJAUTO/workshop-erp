@@ -136,10 +136,24 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const supabase = await createClient();
   const { data: vehicle } = await supabase
     .from("vehicles")
-    .select("id, customer_id, is_active, photo_path, model_year, last_mileage, customer:customers(is_vip, vip_note)")
+    .select("id, customer_id, is_active, photo_path, model_year, last_mileage, make:vehicle_makes(name), customer:customers(is_vip, vip_note)")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
+
+  // Section 8: the inspection fee if no work is approved, chosen per car. Premium brands default higher;
+  // only the owner may go below AED 750 or waive it - anyone else's lower figure becomes a request to him.
+  const makeName = ((vehicle.make as unknown as { name: string } | null)?.name ?? "").toLowerCase();
+  const premium = ((settings.premium_brands ?? []) as string[]).some((b) => makeName && b.toLowerCase() === makeName);
+  const defaultFee = premium ? Number(settings.premium_brand_fee_aed) || 1500 : Number(settings.inspection_fee_aed) || 750;
+  const feeRaw = String(formData.get("inspection_fee") ?? "").replace(/[^\d.]/g, "");
+  const askedFee = feeRaw === "" ? defaultFee : Math.max(0, Math.round(Number(feeRaw)));
+  let inspectionFee = askedFee;
+  let feeRequest: number | null = null;
+  if (askedFee < 750 && staff.role_id !== "owner") {
+    inspectionFee = 750;
+    feeRequest = askedFee;
+  }
 
   // The mileage checks run here too, so a figure that looks wrong is only saved once the advisor confirmed it.
   const unit = d.mileage_unit as MileageUnit;
@@ -174,12 +188,15 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   if (comebackId && !comebackJob) return { error: "That previous job does not belong to this car.", values };
   // A bodyshop car quoted before it arrived: its booked job opens now instead of a new one (nothing is retyped).
   const booked = await bookedJobOf(blankToNull(formData.get("appointment_id")), vehicleId);
-  const jobFields = { vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null };
+  const jobFields = { vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null, inspection_fee_aed: inspectionFee, inspection_fee_request_aed: feeRequest, inspection_fee_request_by: feeRequest !== null ? staff.id : null };
   const nowIso = new Date().toISOString();
   const { data: job, error: jobError } = booked
     ? await createAdminClient().from("jobs").update({ ...jobFields, status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", booked.id).select("id, job_number").single()
     : await supabase.from("jobs").insert(jobFields).select("id, job_number").single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
+  if (feeRequest !== null) {
+    await notifyRoles(["owner"], { type: "inspection_fee_request", title: `Inspection fee below 750 asked · ${job.job_number}`, body: `${staff.display_name} asked for AED ${feeRequest.toLocaleString("en-GB")}${feeRequest === 0 ? " (waived)" : ""} instead of AED 750. Approve or keep 750 on the job card.`, jobId: job.id, href: `/jobs/${job.id}` });
+  }
 
   const { error: giError } = await supabase.from("gate_ins").insert({
     job_id: job.id,

@@ -81,7 +81,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     admin.from("quotations").select("id, version, status, created_at").eq("number", quotation.number).eq("kind", quotation.kind).order("version"),
     admin.from("customers").select("id, full_name, company_name, phone, email, trn").eq("id", quotation.customer_id).maybeSingle(),
     quotation.vehicle_id ? admin.from("vehicles").select("kind, id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
-    quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due, comeback_free").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
+    quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due, inspection_fee_aed, comeback_free").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? loadInspection(quotation.job_id) : Promise.resolve(null),
     quotation.created_by ? admin.from("staff").select("display_name").eq("id", quotation.created_by).maybeSingle() : Promise.resolve({ data: null }),
   ]);

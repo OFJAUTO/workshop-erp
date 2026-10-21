@@ -220,6 +220,9 @@ const DEFAULTS = {
   branches: [{ name: "OFJ Automotive (Al Quoz, Dubai)", address: "" }] as Branch[],
   approval_reminder_hours: 4,
   inspection_fee_aed: 750,
+  /** Section 8: brands whose inspection fee defaults higher, and that default. */
+  premium_brands: [] as string[],
+  premium_brand_fee_aed: 1500,
   inspection_fee_notice: "If no work is approved after the inspection, an inspection fee of AED [amount] will apply.",
   inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [amount] درهمًا.",
   opening_hour: 8,

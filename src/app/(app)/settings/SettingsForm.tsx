@@ -167,8 +167,14 @@ export function SettingsForm({
               <Field label="Approval link reminder (hours)" hint="Remind the advisor if a sent link is not opened in time.">
                 <Input name="approval_reminder_hours" defaultValue={v.approval_reminder_hours} inputMode="numeric" required />
               </Field>
-              <Field label="Inspection fee (AED)" hint="Charged when no work is approved after the inspection.">
+              <Field label="Inspection fee (AED)" hint="The default chosen at gate-in; charged when no work is approved after the inspection. Below AED 750 or waiving needs the owner.">
                 <Input name="inspection_fee_aed" defaultValue={v.inspection_fee_aed} inputMode="numeric" required />
+              </Field>
+              <Field label="Premium brands" hint="One per line. Cars of these makes default to the premium inspection fee at gate-in (changeable per car).">
+                <Textarea name="premium_brands" defaultValue={v.premium_brands} rows={4} />
+              </Field>
+              <Field label="Premium brand inspection fee (AED)">
+                <Input name="premium_brand_fee_aed" defaultValue={v.premium_brand_fee_aed} inputMode="numeric" />
               </Field>
               <Field label="Inspection target (minutes of working time)" hint="Past this the department manager and the owner are warned and the card turns red.">
                 <Input name="inspection_target_minutes" defaultValue={v.inspection_target_minutes} inputMode="numeric" required />

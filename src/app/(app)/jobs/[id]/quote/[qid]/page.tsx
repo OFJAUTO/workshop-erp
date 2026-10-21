@@ -151,7 +151,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
     markupWarn: Number(settings.markup_warn_percent) || 50,
     markupConfirm: Number(settings.markup_confirm_percent) || 100,
-    inspectionFee: Number(settings.inspection_fee_aed) || 0,
+    inspectionFee: Number((job as { inspection_fee_aed?: number | string | null } | null)?.inspection_fee_aed ?? settings.inspection_fee_aed) || 0,
     consumablesDefault: Number(settings.consumables_default_aed) || 0,
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,

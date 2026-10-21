@@ -208,6 +208,10 @@ export type JobRow = {
   assignment_overdue_notified_at: string | null;
   estimate_id: string | null;
   inspection_fee_due: boolean;
+  /** Section 8: the fee for THIS car if no work is approved (null = the Settings default), and a pending lower-fee request. */
+  inspection_fee_aed?: number | string | null;
+  inspection_fee_request_aed?: number | string | null;
+  inspection_fee_request_by?: string | null;
   parts_state: "none" | "ordering" | "ordered" | "received" | "issued";
   work_started_at: string | null;
   work_completed_at: string | null;
