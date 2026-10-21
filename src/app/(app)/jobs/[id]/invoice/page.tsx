@@ -105,7 +105,10 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const links = live ? await paymentLinksOf(live.id) : [];
   const payLink = currentPaymentLink(links);
   const nextTax = proforma && !taxInvoice ? await nextDocumentNumber("tax_invoice", settings) : null;
-  const { data: people } = payments.length ? await admin.from("staff").select("id, display_name, role_id").in("id", Array.from(new Set(payments.flatMap((p) => [p.received_by, p.verified_by]).filter((x): x is string => !!x)))) : { data: [] };
+  // Section 12: deposits (no invoice yet) are people's work too - without them in this lookup a cash
+  // deposit used to fall back to a provider name on screen.
+  const everyPayment = [...payments, ...depositRows];
+  const { data: people } = everyPayment.length ? await admin.from("staff").select("id, display_name, role_id").in("id", Array.from(new Set(everyPayment.flatMap((p) => [p.received_by, p.verified_by]).filter((x): x is string => !!x)))) : { data: [] };
   const personOf = new Map((people ?? []).map((p) => [p.id, p]));
   const acting = !staff.viewingAs && job.is_open;
   const canRecord = can(role, "recordPayments") && acting;
@@ -167,7 +170,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         <span className="text-muted">{formatDayTime(p.received_at)}</span>
         <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : struck ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""}{isDeposit ? " · deposit" : ""}</Badge>
         {p.reference ? <span className="text-xs text-muted">{p.reference}</span> : null}
-        <span className="text-xs text-muted">by {by?.display_name ?? "Network International"}</span>
+        {/* Only the actual method ever shows; a payment with no recorder came through Pay now. */}
+        {by?.display_name ? <span className="text-xs text-muted" data-paid-by>by {by.display_name}</span> : p.client_key?.startsWith("ngenius:") ? <span className="text-xs text-muted" data-paid-by>paid online (Pay now)</span> : null}
         <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
         {needsBank ? <Badge tone="amber">{p.method === "cash" ? "Cash: to confirm & bank" : "Recorded by advisor, to confirm"}</Badge> : null}
         {needsBank && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" {...(isDeposit ? { "data-confirm-deposit": "" } : { "data-confirm-counter": "" })}>Confirmed &amp; banked</Button></form> : null}
@@ -313,8 +317,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               </form>
             ) : null}
             {!live && canRecord && !depShort ? (
-              <details className="border-t border-line pt-2 text-sm">
-                <summary className="cursor-pointer min-h-11 flex items-center font-bold text-muted">Record money before the proforma (an advance at the counter)</summary>
+              <details className="border-t border-line pt-2 text-sm" data-advance-fold>
+                <summary className="cursor-pointer min-h-11 flex items-center font-bold text-muted">Record an advance payment (customer paying at the counter, before the proforma)</summary>
+                <p className="text-xs text-muted">It is recorded as a deposit with its own receipt and comes off the invoice total by itself. The receipt shows the method it was really paid by. Only accounts and the owner record money.</p>
                 <div className="pt-2"><PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? balanceDue : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /></div>
               </details>
             ) : null}

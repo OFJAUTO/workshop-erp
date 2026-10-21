@@ -30,7 +30,8 @@ export async function settleNgeniusOrder(reference: string): Promise<{ paid: boo
   const settings = await getSettings();
   // The invoice the money belongs to: the proforma, or the tax invoice it already became.
   const invoiceId = inv?.converted_to ?? row.invoice_id;
-  const r = await recordPaymentCore(SYSTEM_ACTOR, { invoiceId, jobId: row.job_id, method: "link", amount, reference: `N-Genius ${reference}${status.cardLast4 ? ` · card ****${status.cardLast4}` : ""}`, clientKey: `ngenius:${reference}`, notes: "Paid online through Pay now" }, settings);
+  // Section 12: the receipt names only the method and the card tail; the gateway's reference stays in client_key for tracing.
+  const r = await recordPaymentCore(SYSTEM_ACTOR, { invoiceId, jobId: row.job_id, method: "link", amount, reference: status.cardLast4 ? `Paid online · card ****${status.cardLast4}` : "Paid online", clientKey: `ngenius:${reference}`, notes: "Paid online through Pay now" }, settings);
   if (r.error) return { paid: true, error: r.error, invoiceId: row.invoice_id, token };
   await admin.from("payment_links").update({ paid_at: new Date().toISOString(), payment_id: r.paymentId ?? null, state: status.rawState }).eq("id", row.id);
   return { paid: true, invoiceId: row.invoice_id, token };
