@@ -376,14 +376,20 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   const prevDiscount = prev?.discount_percent === null || prev?.discount_percent === undefined ? null : Number(prev.discount_percent);
   let approvalStatus: string | null = (prev?.discount_approval_status as string | null | undefined) ?? null;
   let askOwner = false;
+  let ownerAuto = false;
   if (!needsApproval) approvalStatus = null;
-  else if ((approvalStatus === "approved" || approvalStatus === "pending") && prevDiscount === discount) {
+  else if (role === "owner") {
+    // Section 3 (21 October): the owner never asks himself - his own figure is approved on the spot.
+    if (approvalStatus !== "approved" || prevDiscount !== discount) ownerAuto = true;
+    approvalStatus = "approved";
+  } else if ((approvalStatus === "approved" || approvalStatus === "pending") && prevDiscount === discount) {
     // Already decided, or already asked, for this very discount.
   } else {
     approvalStatus = "pending";
     askOwner = true;
   }
-  const approval = { discount_approval_status: approvalStatus };
+  const approval: Record<string, unknown> = { discount_approval_status: approvalStatus };
+  if (ownerAuto) Object.assign(approval, { discount_approval_at: new Date().toISOString(), discount_approval_by: staff.id, discount_approval_note: "Set by the owner (approved at once)" });
   const completeNow = complete && approvalStatus !== "pending";
   let previousCost: number | null = null;
   let description = (row.name ?? "").trim().slice(0, 200);

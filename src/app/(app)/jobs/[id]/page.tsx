@@ -529,6 +529,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             ) : null}
           </div>
           {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} shortLink={reportLink?.token ? await shortFor(`${PRODUCTION_SITE_URL}/report/${reportLink.token}`) : null} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
+          {reportLink?.sent_at && inspection && inspection.inspection.updated_at > reportLink.sent_at ? (
+            <span className="text-xs font-semibold text-amber-bar" data-report-changed>Changed after it was sent. The customer&apos;s link always shows the latest; use Send again to tell them, or keep it internal.</span>
+          ) : null}
         </Card>
         ) : null}
         {seesQuote ? (

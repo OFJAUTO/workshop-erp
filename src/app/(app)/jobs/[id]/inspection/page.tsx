@@ -404,8 +404,15 @@ export default async function InspectionReportPage({ params }: { params: Promise
           {insp.status === "approved" ? (
             <Card className="flex flex-col gap-3">
               <SectionLabel>Changes after approval</SectionLabel>
-              <p className="text-xs text-muted">The approved report is locked. A change needs the owner&apos;s personal approval and opens the report for {unlockHours} hour{unlockHours === 1 ? "" : "s"}; every step is on the job&apos;s change log.</p>
-              {!locked ? <Notice tone="info">Open for changes until {formatDateTime(insp.unlocked_until)}. Make them on the technician screen.</Notice> : null}
+              {role === "owner" && !staff.viewingAs ? (
+                <div className="flex flex-wrap items-center gap-3" data-owner-edit>
+                  <LinkButton href={`/my-jobs/${id}`} size="md" data-owner-edit-report>Edit report</LinkButton>
+                  <p className="text-xs text-muted flex-1 min-w-60">You are the owner: edit anything directly — ratings, remarks, photos, labour hours, the parts list, notes, road test, battery — at any stage, no approval and no time window. Every change lands quietly on the job&apos;s history.</p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted">The approved report is locked. A change needs the owner&apos;s personal approval and opens the report for {unlockHours} hour{unlockHours === 1 ? "" : "s"}; every step is on the job&apos;s change log.</p>
+              )}
+              {!locked && role !== "owner" ? <Notice tone="info">Open for changes until {formatDateTime(insp.unlocked_until)}. Make them on the technician screen.</Notice> : null}
               {pendingChange ? (
                 <div className="rounded-control border border-amber-bar bg-amber-soft p-3 flex flex-col gap-2 text-sm">
                   <span className="font-semibold">Waiting for the owner</span>
@@ -424,7 +431,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                     </form>
                   ) : null}
                 </div>
-              ) : canRequest && locked ? (
+              ) : canRequest && locked && !(role === "owner" && !staff.viewingAs) ? (
                 <RequestChangeForm action={requestInspectionChange.bind(null, id)} />
               ) : null}
               {bundle.changeRequests.filter((c) => c.status !== "pending").length ? (

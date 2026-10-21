@@ -43,7 +43,7 @@ type Body = {
   noPartItems?: unknown;
   prescanVisible?: boolean;
   /** Report-level answers: the estimated hours, the big-job tags, the scan step. */
-  inspection?: { estimated_hours?: string | number | null; estimate_reason?: string | null; big_job_tags?: unknown; scan_read?: boolean; scan_not_possible_reason?: string | null; requests_note?: string | null };
+  inspection?: { estimated_hours?: string | number | null; estimate_reason?: string | null; big_job_tags?: unknown; scan_read?: boolean; scan_not_possible_reason?: string | null; requests_note?: string | null; manager_note_internal?: string | null };
 };
 
 const num = (v: unknown, max: number): number | null => {
@@ -84,7 +84,14 @@ export async function POST(request: NextRequest) {
   // A manager editing during review: stamp the change and keep the technician's original.
   const reviewing = isManager && insp.status === "submitted";
   const reviewStamp = reviewing ? { edited_by: staff.id, edited_at: new Date().toISOString() } : {};
-  if (inspectionLocked(insp)) return NextResponse.json({ error: "This report is approved and locked. Ask the owner to approve a change first." }, { status: 423 });
+  // Section 3 (21 October): the OWNER never asks himself - he edits an approved report directly, at any
+  // stage, and the job's history quietly says so (once an hour, not per keystroke; the audit log holds
+  // every old → new). Everyone else still needs his approval through a change request.
+  if (inspectionLocked(insp)) {
+    if (role !== "owner") return NextResponse.json({ error: "This report is approved and locked. Ask the owner to approve a change first." }, { status: 423 });
+    const { data: recent } = await admin.from("job_events").select("id").eq("job_id", insp.job_id).eq("event_type", "report_owner_edit").gte("created_at", new Date(Date.now() - 3600000).toISOString()).limit(1);
+    if (!(recent ?? []).length) await admin.from("job_events").insert({ job_id: insp.job_id, event_type: "report_owner_edit", note: `Inspection report edited by ${staff.display_name} after approval (owner, no approval needed)`, created_by: staff.id });
+  }
 
   const stamp = { updated_by: staff.id };
   /** A dangerous finding: the manager, the advisor and the owner hear at once. */
@@ -204,6 +211,11 @@ export async function POST(request: NextRequest) {
     if ("estimate_reason" in i) patch.estimate_reason = text(i.estimate_reason, 300);
     if ("requests_note" in i) patch.requests_note = text(i.requests_note, 2000);
     if ("big_job_tags" in i) patch.big_job_tags = Array.isArray(i.big_job_tags) ? Array.from(new Set(i.big_job_tags.map((t) => String(t).trim().slice(0, 40)).filter(Boolean))).slice(0, 12) : [];
+    // Section 3: the workshop manager's internal note, editable by managers and the owner at any stage.
+    if ("manager_note_internal" in i) {
+      if (!isManager) return NextResponse.json({ error: "Only the workshop manager or the owner change the manager's note." }, { status: 403 });
+      patch.manager_note_internal = text(i.manager_note_internal, 2000);
+    }
     if (i.scan_read) patch.scan_read_at = new Date().toISOString();
     if ("scan_not_possible_reason" in i) patch.scan_not_possible_reason = text(i.scan_not_possible_reason, 300);
     const { error } = await admin.from("inspections").update(patch).eq("id", insp.id);

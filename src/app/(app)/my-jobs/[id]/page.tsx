@@ -88,7 +88,10 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const loose = job.job_kind === "loose";
   const looseItems = loose ? await loadJobItems(id) : [];
   const scanGateOn = settings.prescan_gate_enabled === true;
-  const canFill = !inWork && !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked));
+  // Section 3 (21 October): the OWNER edits the report directly at every stage - approved, locked,
+  // even with the car in Work - no approval request, no one-hour window. Quietly logged by the save route.
+  const ownerDirect = role === "owner" && !staff.viewingAs;
+  const canFill = (!inWork && !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked))) || (ownerDirect && !!insp);
   const canAddPrescan = !!insp && mine && insp.technician_id === staff.id && insp.status === "submitted";
   const condition = gateIn ? labelOf(CONDITIONS, gateIn.condition) : "";
   const statusText = insp?.status === "submitted" ? "Submitted, waiting for manager" : waitingRoadTest ? "Waiting for road test" : job.work_done_at && inWork ? "Job finished, waiting for the manager" : STATUS_LABELS[job.status];
@@ -360,7 +363,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
               <Notice tone="success">
                 Approved by {bundle?.approver?.display_name ?? "the workshop manager"} on {formatDateTime(insp.approved_at)}.{" "}
                 <Link href={`/jobs/${id}/inspection`} className="underline underline-offset-4 font-semibold">Open the report</Link>
-                {locked ? " · Locked. A change needs the owner's approval; ask from the report page." : " · Open for changes until " + formatDateTime(insp.unlocked_until)}
+                {ownerDirect ? " · You are the owner: edit anything below, any time; changes are logged." : locked ? " · Locked. A change needs the owner's approval; ask from the report page." : " · Open for changes until " + formatDateTime(insp.unlocked_until)}
               </Notice>
             ) : null}
           </Card>
@@ -372,9 +375,9 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
         <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} compact />
       </Collapsible> : null}
 
-      {!inWork && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved") ? (
+      {(!inWork || ownerDirect) && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved" || ownerDirect) ? (
         <>
-          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: true, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
+          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: insp.status !== "approved" && !ownerDirect, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>
