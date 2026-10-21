@@ -811,3 +811,29 @@ export async function bodyshopLabourBySection(jobId: string, settings: Settings)
   }
   return [...by.entries()].map(([section, g]) => ({ section, people: g.people.size, hours: Math.round((g.minutes / 60) * 10) / 10, cost: round2((g.minutes / 60) * rate) })).sort((a, b) => b.hours - a.hours);
 }
+
+/** Section 4.4 (21 October 2026): what installers REALLY took on this model before - the average
+ *  clocked hours across closed bodyshop jobs of the same vehicle model, offered as a hint beside
+ *  the installer-hour estimate. Null until there is history. */
+export async function installerHistoryFor(vehicleId: string | null): Promise<{ jobs: number; avgHours: number } | null> {
+  if (!vehicleId) return null;
+  const admin = createAdminClient();
+  const { data: v } = await admin.from("vehicles").select("model_id").eq("id", vehicleId).maybeSingle();
+  if (!v?.model_id) return null;
+  const { data: cars } = await admin.from("vehicles").select("id").eq("model_id", v.model_id);
+  const carIds = (cars ?? []).map((c) => c.id as string);
+  if (!carIds.length) return null;
+  const { data: jobs } = await admin.from("jobs").select("id").in("vehicle_id", carIds).eq("is_open", false);
+  const jobIds = (jobs ?? []).map((j) => j.id as string);
+  if (!jobIds.length) return null;
+  const { data: clk } = await admin.from("bodyshop_clockings").select("job_id, started_at, ended_at, minutes").in("job_id", jobIds).eq("is_active", true).not("ended_at", "is", null);
+  if (!clk?.length) return null;
+  const byJob = new Map<string, number>();
+  for (const c of clk) {
+    const mins = c.minutes !== null ? Number(c.minutes) : Math.max(0, (Date.parse(c.ended_at as string) - Date.parse(c.started_at as string)) / 60000);
+    byJob.set(c.job_id as string, (byJob.get(c.job_id as string) ?? 0) + mins);
+  }
+  const totals = [...byJob.values()].filter((m) => m > 0);
+  if (!totals.length) return null;
+  return { jobs: totals.length, avgHours: Math.round((totals.reduce((a, b) => a + b, 0) / totals.length / 60) * 10) / 10 };
+}

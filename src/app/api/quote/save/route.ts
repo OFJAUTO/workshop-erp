@@ -56,6 +56,8 @@ type LinePatch = {
   recovery_mention_free?: boolean;
   /** Sold at 0 on purpose: 'complimentary' or 'included' is a valid line that prints the word, not a price. */
   price_display?: string | null;
+  /** Bodyshop costing: the estimated installer hours on the line (internal only). */
+  installer_hours?: number | string | null;
 };
 type Body = {
   quotationId?: string;
@@ -172,6 +174,7 @@ export async function POST(request: NextRequest) {
     if (p.price_display !== undefined) out.price_display = p.price_display && ["complimentary", "included"].includes(String(p.price_display)) ? String(p.price_display) : "normal";
     if (p.hours !== undefined) out.hours = parseHours(p.hours);
     if (p.hours_estimate !== undefined) out.hours_estimate = p.hours_estimate === null || p.hours_estimate === "" ? null : parseHours(p.hours_estimate);
+    if (p.installer_hours !== undefined) out.installer_hours = p.installer_hours === null || p.installer_hours === "" ? null : parseHours(p.installer_hours);
     if (p.outside_work !== undefined) out.outside_work = !!p.outside_work;
     if (p.package_key !== undefined) out.package_key = p.package_key ? String(p.package_key).slice(0, 60) : null;
     if (p.package_items !== undefined) out.package_items = p.package_items ? toSnapshot(p.package_items) : null;
@@ -351,6 +354,9 @@ export async function POST(request: NextRequest) {
       // A service set as fixed price in Settings is a fixed line even when the price is typed each time (line_kind), never hours x rate.
       type = (svc.line_kind ? svc.line_kind === "service" : svc.price_aed !== null) || svc.bodyshop_kind ? "package" : "labour";
       Object.assign(row, { quantity: type === "package" ? Math.max(1, Math.round(Number(svc.usual_quantity) || 1)) : 1, price_per: type === "package" ? (svc.price_per ?? "job") : null, line_type: type, title: svc.name, details: svc.description ?? null, service_id: svc.id, source_type: a.source_type && a.source_key ? a.source_type : "package", source_key: a.source_type && a.source_key ? a.source_key : null, unit_price: svc.price_aed !== null ? Number(svc.price_aed) : null, hours: svc.default_hours !== null ? Number(svc.default_hours) : null, labour_rate: labourRate });
+      // The service's default installer hours (bodyshop costing): copied onto the line, editable there.
+      const svcInstaller = svc.installer_hours !== null && svc.installer_hours !== undefined ? Number(svc.installer_hours) : svc.bodyshop_kind || svc.department === "bodyshop" ? Number(settings.bodyshop_default_installer_hours) || null : null;
+      if (type === "package" && svcInstaller) row.installer_hours = svcInstaller;
       // A job added for a finding keeps that finding, so its parts land under it.
       if (a.source_type && a.source_key && ["item", "tyre", "request"].includes(a.source_type)) Object.assign(row, { source_type: a.source_type, source_key: String(a.source_key).slice(0, 120) });
       if (Array.isArray(a.positions)) row.positions = Array.from(new Set(a.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8);

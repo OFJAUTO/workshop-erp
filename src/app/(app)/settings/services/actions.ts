@@ -67,7 +67,9 @@ function serviceFields(formData: FormData): Record<string, unknown> | string {
   const allowanceRaw = blankToNull(formData.get("time_allowance_hours"));
   const allowance = allowanceRaw === null ? null : parseHours(allowanceRaw);
   const suggestFor = Array.from(new Set(formData.getAll("suggest_for").map((v) => String(v).trim().slice(0, 120)).filter(Boolean))).slice(0, 40);
-  return { position_ask: formData.get("position_ask") === "on", outside_work: formData.get("outside_work") === "on", suggest_for: suggestFor, name: name.slice(0, 120), department, bodyshop_kind: (BODYSHOP_KINDS as readonly string[]).includes(String(formData.get("bodyshop_kind") ?? "")) ? String(formData.get("bodyshop_kind")) : null, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
+  const installerRaw = String(formData.get("installer_hours") ?? "").replace(",", ".").trim();
+  const installer = installerRaw === "" ? null : Math.max(0, Math.round(Number(installerRaw) * 100) / 100) || null;
+  return { position_ask: formData.get("position_ask") === "on", outside_work: formData.get("outside_work") === "on", installer_hours: installer, suggest_for: suggestFor, name: name.slice(0, 120), department, bodyshop_kind: (BODYSHOP_KINDS as readonly string[]).includes(String(formData.get("bodyshop_kind") ?? "")) ? String(formData.get("bodyshop_kind")) : null, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
 }
 
 export async function addCategory(formData: FormData) {

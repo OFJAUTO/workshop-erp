@@ -80,6 +80,7 @@ export async function saveBodyshopCosting(formData: FormData) {
   await upsert("bodyshop_waste_percent", "Film waste allowance (%)", Number(formData.get("waste_percent")) || 10);
   await upsert("bodyshop_consumables_monthly_aed", "Bodyshop consumables per month (AED)", Number(formData.get("consumables")) || 0);
   await upsert("bodyshop_cost_rate_aed", "Bodyshop labour cost rate (AED/h)", String(formData.get("bodyshop_rate") ?? "").trim());
+  await upsert("bodyshop_default_installer_hours", "Default installer hours for other bodyshop services", Number(formData.get("default_installer_hours")) || 8);
   revalidatePath("/settings/packages");
   redirect(`/settings/packages?message=${encodeURIComponent("Costing saved.")}`);
 }

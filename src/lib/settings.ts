@@ -20,6 +20,8 @@ const DEFAULTS = {
   bodyshop_consumables_monthly_aed: 1500,
   /** The bodyshop labour cost rate per hour; blank uses the workshop rate. */
   bodyshop_cost_rate_aed: "" as string | number,
+  /** Bodyshop costing: the fallback installer hours for a bodyshop service with no figure of its own. */
+  bodyshop_default_installer_hours: 8 as string | number,
   whatsapp_aftercare_template: "Good day! Your car is due for its complimentary 10-day after-care check on [date]. It takes about half an hour - we check the film edges and polish anything that needs it. When would suit you?",
   /** Real cost history per package (rolling average), for the advisor's low-price warning. */
   package_cost_history: {} as Record<string, { n: number; avg_cost: number }>,

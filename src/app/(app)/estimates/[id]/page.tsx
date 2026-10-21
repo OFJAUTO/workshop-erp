@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { installerHistoryFor } from "@/lib/bodyshop";
 import { packagesOf } from "@/lib/packages";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -105,6 +106,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
           technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
+          bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
+          installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
           goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),
           bankRateCard: Number(settings.bank_charge_card_percent) || 0,

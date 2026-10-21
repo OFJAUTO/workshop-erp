@@ -44,6 +44,7 @@ export default async function PackagesSettingsPage({ searchParams }: { searchPar
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Film waste allowance (%)<Input name="waste_percent" defaultValue={String(settings.bodyshop_waste_percent ?? 10)} inputMode="numeric" /></label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Consumables per month (AED)<Input name="consumables" defaultValue={String(settings.bodyshop_consumables_monthly_aed ?? 1500)} inputMode="decimal" /></label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Bodyshop labour rate (AED/h, blank = workshop rate)<Input name="bodyshop_rate" defaultValue={String(settings.bodyshop_cost_rate_aed ?? "")} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Default installer hours (other bodyshop services)<Input name="default_installer_hours" defaultValue={String(settings.bodyshop_default_installer_hours ?? 8)} inputMode="decimal" /></label>
           </div>
           <div><Button type="submit" size="md" data-save-costing>Save the costing</Button></div>
         </form>

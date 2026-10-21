@@ -9,6 +9,7 @@ import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
+import { installerHistoryFor } from "@/lib/bodyshop";
 import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor } from "@/lib/quote-data";
 import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -156,6 +157,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
     batteryWarrantyMonths: Number(settings.battery_warranty_months) || 12,
     technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
+    bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
+    installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
     goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
     bankChargePercent: highestBankCharge(settings),

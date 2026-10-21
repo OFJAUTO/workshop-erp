@@ -126,6 +126,10 @@ export type EditorSettings = {
   discountLimit: number;
   approvalAbove: number;
   technicianCostRate: number | null;
+  /** The bodyshop labour rate (AED/h): installer-hour estimates cost this in the internal box. */
+  bodyshopRate?: number;
+  /** What installers really took on this model before (closed jobs): the hint beside the estimate. */
+  installerHistory?: { jobs: number; avgHours: number } | null;
   bankChargePercent: number;
   /** The card and payment-link rates: the expected payment method picks one of them, live on the screen. */
   bankRateCard?: number;
@@ -562,7 +566,7 @@ export function QuoteEditor({
   // The estimated bank charge follows how the customer is expected to pay: card or "not sure" at the card rate, the payment link at its rate, cash, cheque and bank transfer at nothing.
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null });
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0 });
   const countedForDiscount = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off);
   const discountBases = {
     labour: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour" }).base,
@@ -799,9 +803,15 @@ export function QuoteEditor({
                 <span className="text-[11px] font-semibold text-muted">AED</span>
               </span>
               {isService && (showProfit || l.outside_work) ? (
-                <label className="inline-flex items-center gap-1" title="What this outside work costs us: never shown to the customer, counted against profit" data-our-cost>
+                <label className="inline-flex items-center gap-1" title={l.outside_work ? "What this outside work costs us: never shown to the customer, counted against profit" : "Our own cost on this service (film, materials, consumables): never shown to the customer, counted against profit"} data-our-cost>
                   <span className="text-[10px] font-semibold text-muted">our cost</span>
                   <Input value={num(l.unit_cost)} placeholder="0" onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our cost" className="w-16 text-right min-h-10 px-1 text-xs" data-our-cost />
+                </label>
+              ) : null}
+              {isService && showProfit && (svc?.bodyshop_kind || svc?.department === "bodyshop" || (l.installer_hours ?? 0) > 0) ? (
+                <label className="inline-flex items-center gap-1" title="Estimated installer hours (internal): from the service's default, counted at the bodyshop rate until real clockings replace it" data-installer-hours>
+                  <span className="text-[10px] font-semibold text-muted">Inst. h</span>
+                  <Input value={num(l.installer_hours)} placeholder="0" onChange={(e) => patch(l.id, { installer_hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Installer hours (internal)" className="w-14 text-right min-h-10 px-1 text-xs text-muted" />
                 </label>
               ) : null}
               {showQty ? (
@@ -1401,7 +1411,9 @@ export function QuoteEditor({
                   Labour at cost ({hoursText(totals.labourCostHours)} {totals.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED {settings.technicianCostRate ?? 0})
                   {totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="ml-1 font-semibold text-amber" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>· Est. h flagged, quoted hours used</span> : null}
                 </dt><dd className="text-right" data-labour-cost>{aed(totals.labourCost)}</dd>
-                {totals.outsideCost ? <><dt className="text-muted">Outside work, our cost</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
+                {totals.outsideCost ? <><dt className="text-muted">Outside work (another company)</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
+                {totals.ownServiceCost ? <><dt className="text-muted">Our services&apos; cost (film, materials)</dt><dd className="text-right" data-own-service-cost>{aed(totals.ownServiceCost)}</dd></> : null}
+                {totals.installerHours > 0 ? <><dt className="text-muted" data-installer-row>Estimated installer hours: {hoursText(totals.installerHours)} × AED {settings.bodyshopRate ?? 0}{settings.installerHistory ? <span className="block text-[11px]" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}</dt><dd className="text-right">{aed(totals.bodyshopLabourCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
                 {commissionLine}
                 {department === "bodyshop" || Number(header.materials_cost_aed) > 0 ? <><dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd></> : null}

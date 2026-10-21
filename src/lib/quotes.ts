@@ -104,6 +104,8 @@ export type QuoteLine = {
   tint_percent?: number | null;
   /** Sold at 0 on purpose: 'complimentary' or 'included' prints the word instead of a price; cost still counts. */
   price_display?: "normal" | "complimentary" | "included" | null;
+  /** Bodyshop services: the estimated installer hours (internal), from the service's default, editable. */
+  installer_hours?: number | null;
 };
 
 export type QuoteRow = {
@@ -321,7 +323,7 @@ export type PartRequest = {
   removed_reason?: string | null;
 };
 
-export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** "labour" (hours typed) or "service" (fixed price, typed when there is no default); null keeps the old rule: a price means a service. */ line_kind?: "labour" | "service" | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null; /** Outside work: the "our cost" box shows for everyone, never in the labour discount. */ outside_work?: boolean };
+export type Service = { id: string; category_id: string; name: string; department: string; price_aed: number | null; default_hours: number | null; /** "labour" (hours typed) or "service" (fixed price, typed when there is no default); null keeps the old rule: a price means a service. */ line_kind?: "labour" | "service" | null; /** A bodyshop package: the stages it brings; the advisor types the price. */ bodyshop_kind?: string | null; price_per?: string | null; usual_quantity?: number | null; time_allowance_hours?: number | null; includes_oil_change?: boolean; description: string | null; parts_requests: string[]; position: number; is_active: boolean; /** Asks "Front, rear or both?" when added. */ position_ask?: boolean; /** The report keys (item keys, "tyre:<pos>", "measure:battery_health") this job answers: it comes first under Suggested. */ suggest_for?: string[] | null; /** Outside work: the "our cost" box shows for everyone, never in the labour discount. */ outside_work?: boolean; /** Bodyshop costing: the default estimated installer hours copied onto new lines. */ installer_hours?: number | null };
 export type ServiceCategory = { id: string; name: string; position: number; is_active: boolean };
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
@@ -424,9 +426,11 @@ export function lineCost(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cos
   return 0;
 }
 
-/** A fixed-price line done outside (lathe work, an authorised injector service): its internal cost, never shown to the customer. */
-export function isOutsideWork(l: Pick<QuoteLine, "line_type"> & { fee_kind?: string | null }) {
-  return l.line_type === "package" || (l.line_type === "fee" && l.fee_kind !== "bank_charge");
+/** Work another company does for us (lathe work, an authorised injector service): only a line MARKED
+ *  outside work. Our own fixed-price services (film, tint, ceramic...) carry their own materials cost
+ *  instead - never "Outside work" (section 4, 21 October 2026). */
+export function isOutsideWork(l: Pick<QuoteLine, "line_type"> & { fee_kind?: string | null; outside_work?: boolean }) {
+  return (l.line_type === "package" && l.outside_work === true) || (l.line_type === "fee" && l.fee_kind !== "bank_charge");
 }
 
 /** The lowest net price allowed for a line with a cost: cost plus the minimum markup, after every discount. */
@@ -479,6 +483,11 @@ export type QuoteTotals = {
   labourCost: number;
   /** Fixed-price work done outside (lathe, injector service...): its internal "our cost". */
   outsideCost: number;
+  /** Our OWN fixed-price services' typed cost (film, tint, ceramic materials): never "outside work". */
+  ownServiceCost: number;
+  /** The estimated installer hours on the bodyshop/service lines (internal), and their cost at the bodyshop rate. */
+  installerHours: number;
+  bodyshopLabourCost: number;
   /** Recovery, Other and fee lines the customer pays for. */
   otherSell: number;
   /** What those lines, hidden or shown, cost us. */
@@ -549,7 +558,7 @@ export function labourDiscountOf(counted: QuoteLine[], q: QuoteHeaderForTotals):
 export function quoteTotals(
   lines: QuoteLine[],
   q: QuoteHeaderForTotals,
-  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null } = {},
+  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null; /** The bodyshop labour rate (AED/h): installer-hour estimates cost this. Leave unset where real clockings are counted instead (profit.ts). */ bodyshopRate?: number | null } = {},
 ): QuoteTotals {
   const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
@@ -587,6 +596,11 @@ export function quoteTotals(
   const labourSell = round2(labour.reduce((a, l) => a + lineTotal(l), 0));
   const labourCost = round2(labourCostHours * (opts.technicianCostRate ?? 0));
   const outsideCost = round2(labour.filter((l) => isOutsideWork(l)).reduce((a, l) => a + lineCost(l), 0));
+  // Our own fixed-price services (film, tint, ceramic...): their typed cost is OUR materials cost,
+  // and their estimated installer hours cost bodyshop labour - complimentary lines included.
+  const ownServiceCost = round2(labour.filter((l) => l.line_type === "package" && !isOutsideWork(l)).reduce((a, l) => a + lineCost(l), 0));
+  const installerHours = round2(labour.filter((l) => l.line_type === "package").reduce((a, l) => a + (Number(l.installer_hours) || 0), 0));
+  const bodyshopLabourCost = round2(installerHours * Math.max(0, opts.bodyshopRate ?? 0));
   const other = counted.filter((l) => blockOf(l) === "other" && !l.fee_kind);
   const otherSell = round2(other.filter((l) => !isHidden(l)).reduce((a, l) => a + lineTotal(l), 0));
   const otherCost = round2(other.reduce((a, l) => a + lineCost(l), 0));
@@ -603,7 +617,7 @@ export function quoteTotals(
   const commissionPending = commissionAsked > 0 && q.commission_status === "pending";
   const commission = q.commission_status === "declined" ? 0 : commissionAsked;
   const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
-  const totalCost = round2(partsCost + labourCost + outsideCost + otherCost + bankCharge + commission + materialsCost);
+  const totalCost = round2(partsCost + labourCost + outsideCost + ownServiceCost + bodyshopLabourCost + otherCost + bankCharge + commission + materialsCost);
   const profit = round2(net - totalCost);
   // The deposit is the advisor's choice on the quotation; the old rule (a share of the parts above a threshold) only suggests.
   const threshold = opts.depositThreshold ?? 0;
@@ -615,8 +629,8 @@ export function quoteTotals(
     subtotal, lineDiscounts, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
-    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, totalCost, profit,
-    labourMargin: round2(labourSell - discount - labourCost - outsideCost),
+    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, ownServiceCost, installerHours, bodyshopLabourCost, totalCost, profit,
+    labourMargin: round2(labourSell - discount - labourCost - outsideCost - ownServiceCost - bodyshopLabourCost),
     deposit,
     depositSuggested,
   };
