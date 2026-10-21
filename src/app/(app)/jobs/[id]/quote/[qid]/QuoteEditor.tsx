@@ -393,6 +393,8 @@ export function QuoteEditor({
   const { save, state, error, failed, retryFailed } = useQuoteAutosave(quotation.id, refresh, onConfirm);
   /** New lines drawn on screen before the server answers: kept through refreshes until the server row arrives. */
   const pendingNew = useRef<Set<string>>(new Set());
+  /** Section 11: the line order on screen while a reorder save is in flight (the merge keeps it until the server echoes it). */
+  const localOrder = useRef<string[] | null>(null);
   const failedOf = (lineId: string) => failed.filter((o) => ((o.patchLine as { id?: string } | undefined)?.id === lineId) || ((o.addLine as { id?: string } | undefined)?.id === lineId) || ((o.removeLine as { id?: string } | undefined)?.id === lineId));
   const failChip = (lineId: string) => {
     const ops = failedOf(lineId);
@@ -432,6 +434,15 @@ export function QuoteEditor({
       });
       for (const l of cur) if (!serverIds.has(l.id) && pendingNew.current.has(l.id)) out.push(l);
       for (const id of Array.from(pendingNew.current)) if (serverIds.has(id)) pendingNew.current.delete(id);
+      // Section 11: while a reorder is on its way to the server, the local order stands; once the server
+      // echoes the same order the note is dropped and the server leads again.
+      if (localOrder.current) {
+        const rank = new Map(localOrder.current.map((id, i) => [id, i]));
+        out.sort((a, b) => (rank.get(a.id) ?? 9e3) - (rank.get(b.id) ?? 9e3));
+        const serverSays = initialLines.filter((l) => rank.has(l.id)).map((l) => l.id).join(",");
+        const localSays = localOrder.current.filter((id) => serverIds.has(id)).join(",");
+        if (serverSays === localSays) localOrder.current = null;
+      }
       return out;
     });
   }
@@ -575,6 +586,60 @@ export function QuoteEditor({
   const labourLines = lines.filter((l) => l.is_active && blockOf(l) === "labour");
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
+
+  /* ----- Section 11: the jobs can be put in the customer's order - drag the ⋮⋮ handle, the ↑ ↓, or the menu.
+     The list renumbers itself and every customer document follows the same order (lines load by position). ----- */
+  const labourIdsRef = useRef<string[]>([]);
+  const restIdsRef = useRef<string[]>([]);
+  // Written after every render so the drag listeners (which outlive a render) always see the fresh order.
+  useEffect(() => {
+    labourIdsRef.current = labourLines.map((x) => x.id);
+    restIdsRef.current = lines.filter((x) => x.is_active && !x.fee_kind && blockOf(x) !== "labour").map((x) => x.id);
+  });
+  const setVisualOrder = (ids: string[]) => {
+    localOrder.current = ids;
+    const rank = new Map(ids.map((id, i) => [id, i]));
+    setLines((prev) => [...prev].sort((a, b) => (rank.get(a.id) ?? 9e3) - (rank.get(b.id) ?? 9e3)));
+  };
+  const moveLine = (l: QuoteLine, to: "up" | "down" | "top") => {
+    const jobs = [...labourIdsRef.current];
+    const i = jobs.indexOf(l.id);
+    const j = to === "top" ? 0 : to === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= jobs.length || j === i) return;
+    jobs.splice(i, 1);
+    jobs.splice(j, 0, l.id);
+    const ids = [...jobs, ...restIdsRef.current];
+    setVisualOrder(ids);
+    save({ reorder: { ids } });
+  };
+  /** The ⋮⋮ handle: hold and move over another row; the row follows the finger or mouse, one save at the end. */
+  const startDrag = (e: React.PointerEvent<HTMLElement>, id: string) => {
+    if (disabled) return;
+    e.preventDefault();
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      const el = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest?.('[id^="item-line-"]') as HTMLElement | null;
+      const overId = el ? el.id.slice("item-line-".length) : null;
+      if (!overId || overId === id) return;
+      const jobs = [...labourIdsRef.current];
+      const from = jobs.indexOf(id);
+      const to = jobs.indexOf(overId);
+      if (from < 0 || to < 0 || from === to) return;
+      jobs.splice(from, 1);
+      jobs.splice(to, 0, id);
+      moved = true;
+      setVisualOrder([...jobs, ...restIdsRef.current]);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (moved && localOrder.current) save({ reorder: { ids: localOrder.current } });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
   const namedLabour = labourLines.filter((l) => l.title.trim());
   const labourDone = namedLabour.filter(finishedLine).length;
   const blockers = sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm });
@@ -740,6 +805,17 @@ export function QuoteEditor({
       <div key={l.id} id={`item-line-${l.id}`} className="flex flex-col">
         {failChip(l.id)}
         <div className="flex flex-wrap items-center gap-2 py-1.5 px-2 text-sm">
+          {!disabled && labourLines.length > 1 ? (
+            <span
+              onPointerDown={(e) => startDrag(e, l.id)}
+              className="inline-flex h-10 w-5 shrink-0 cursor-grab touch-none select-none items-center justify-center text-[13px] font-extrabold leading-none tracking-[-0.18em] text-muted"
+              aria-label="Drag to reorder"
+              title="Drag to reorder"
+              data-drag-handle={l.id}
+            >
+              ⋮⋮
+            </span>
+          ) : null}
           <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${done ? "bg-green text-white" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
           <div className="flex-1 min-w-[12rem] flex flex-col gap-0.5">
@@ -824,6 +900,12 @@ export function QuoteEditor({
             </>
           )}
           {isComplimentary(l) ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-green" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
+          {!disabled && labourLines.length > 1 ? (
+            <span className="inline-flex flex-col" aria-label="Move this line">
+              <button type="button" disabled={index === 0} onClick={() => moveLine(l, "up")} aria-label="Move up" data-move-up={l.id} className="h-5 w-7 rounded-t-control border border-line text-[10px] font-bold leading-none text-muted disabled:opacity-30">▲</button>
+              <button type="button" disabled={index === labourLines.length - 1} onClick={() => moveLine(l, "down")} aria-label="Move down" data-move-down={l.id} className="h-5 w-7 rounded-b-control border border-t-0 border-line text-[10px] font-bold leading-none text-muted disabled:opacity-30">▼</button>
+            </span>
+          ) : null}
           {!disabled ? (
             <span className="relative" data-line-menu>
               <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuAnchor(e.currentTarget); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
@@ -831,6 +913,9 @@ export function QuoteEditor({
               </button>
               {menu ? (
                 <FloatingMenu anchor={menuAnchor} onClose={() => setMenuFor(null)} width={240} label="More for this line" data-line-menu="">
+                  {index > 0 ? <MenuItem label="Move up" onClick={() => { setMenuFor(null); moveLine(l, "up"); }} /> : null}
+                  {index < labourLines.length - 1 ? <MenuItem label="Move down" onClick={() => { setMenuFor(null); moveLine(l, "down"); }} /> : null}
+                  {index > 0 ? <MenuItem label="Move to top" onClick={() => { setMenuFor(null); moveLine(l, "top"); }} /> : null}
                   <MenuItem label={isService ? "Make it Labour (hours × rate)" : "Make it Fixed price (qty × price)"} onClick={() => { setMenuFor(null); switchKind(l); }} />
                   {isQuotation && !l.dangerous ? <MenuItem label={l.urgency === "urgent" ? "Not urgent" : "Mark as urgent"} onClick={() => { setMenuFor(null); patch(l.id, { urgency: l.urgency === "urgent" ? null : "urgent" }, true); }} /> : null}
                   {l.dangerous && isOwner ? <MenuItem label="Switch the safety warning off" onClick={() => { setMenuFor(null); patch(l.id, { dangerous: false, urgency: "urgent" }, true); }} /> : null}

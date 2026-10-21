@@ -471,6 +471,8 @@ export async function POST(request: NextRequest) {
   if (body.reorder) {
     let position = 0;
     for (const id of body.reorder.ids) await admin.from("quotation_lines").update({ position: position++, ...stamp }).eq("id", id).eq("quotation_id", q.id).is("fee_kind", null);
+    // The customer documents follow the same order, so a completed quotation reopens for a fresh look at Send.
+    await refreshed();
     return NextResponse.json({ ok: true });
   }
   if (body.header) {
