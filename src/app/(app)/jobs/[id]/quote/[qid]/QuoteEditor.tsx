@@ -1149,7 +1149,7 @@ export function QuoteEditor({
           {!disabled ? (
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button type="button" size="md" onClick={() => setDraft("choose")} disabled={draft === "saving"}>+ Add line</Button>
-              {(packages?.length ?? 0) > 0 && (department === "bodyshop" || department === "both") ? <Button type="button" tone="secondary" size="md" onClick={() => setPackageAsk(true)} data-add-package>+ Add a package</Button> : null}
+              {(packages?.length ?? 0) > 0 ? <Button type="button" tone="secondary" size="md" onClick={() => setPackageAsk(true)} data-add-package>+ Add a package</Button> : null}
               {isQuotation ? <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)}>+ Add a part</Button> : null}
               <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green" : ""}>
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
