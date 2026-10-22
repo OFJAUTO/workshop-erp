@@ -1,7 +1,7 @@
 import "server-only";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDateTime } from "@/lib/format";
-import { MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel, type ItemStatus } from "@/lib/inspection";
+import { MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel, type ItemStatus, needsAttention, itemExtraWords } from "@/lib/inspection";
 import type { InspectionBundle, InspectionMediaRow } from "@/lib/inspection-data";
 import { vehicleTitle, type JobCard } from "@/lib/job-data";
 import { feeNotice } from "@/lib/jobs";
@@ -26,8 +26,8 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   const insp = bundle.inspection;
   // N/A items do not apply to this car and are left out, as on the online report.
   const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY && i.status !== "na");
-  const attention = items.filter((i) => i.status === "bad" || (i.status === "average" && i.style !== "job")).sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
-  const passed = items.filter((i) => i.status === "good");
+  const attention = items.filter(needsAttention).sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
+  const passed = items.filter((i) => i.status === "good" && !needsAttention(i));
   const sections = Array.from(new Map(items.map((i) => [i.section_key, i.section_title])).entries());
   const m = (insp.measurements ?? {}) as Record<string, unknown>;
   const text = (v: unknown) => (v === null || v === undefined ? "" : String(v));
@@ -120,12 +120,13 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
         {attention.map((i) => (
           <View key={i.id} style={[styles.item, { borderColor: i.status === "bad" ? RED : AMBER }]} wrap={false}>
             <View style={styles.itemHead}>
-              <Tag text={itemStatusLabel(i.status, i.style)} color={i.style === "job" ? GREY : COLOR[i.status as ItemStatus]} />
+              <Tag text={i.status === "good" && i.service_due ? "Service due" : itemStatusLabel(i.status, i.style)} color={i.style === "job" ? GREY : i.status === "good" && i.service_due ? AMBER : COLOR[i.status as ItemStatus]} />
               <Text style={styles.lineTitle}>{i.item_label}</Text>
               <Text style={styles.small}>{i.section_title}</Text>
               {i.dangerous ? <Tag text="Dangerous" color={RED} /> : null}
             </View>
             {i.remarks ? <Text>{i.remarks}</Text> : null}
+            {itemExtraWords(i).filter((w) => !(w === "Service due" && i.status === "good")).map((w) => <Text key={w} style={{ fontWeight: 600 }}>{w}</Text>)}
             <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === i.item_key))} />
           </View>
         ))}

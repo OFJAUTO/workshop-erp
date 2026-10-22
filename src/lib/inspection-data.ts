@@ -82,8 +82,12 @@ export type InspectionItemRow = {
   disc_thickness: number | null;
   disc_minimum: number | null;
   parts_rows: unknown;
-  /** grade: Good / Average / Bad. job: OK / Required. */
-  style: "grade" | "job" | null;
+  /** grade: Good / Average / Bad. job: OK / Required. gas: Good / Low / Empty (the A/C gas). */
+  style: "grade" | "job" | "gas" | null;
+  /** A fluid whose change is due (the old "... service due" items, folded in on 23 October 2026). */
+  service_due?: boolean | null;
+  /** The A/C gas needs a recharge (ticked by itself when low or empty). */
+  recharge_needed?: boolean | null;
 };
 
 export type InspectionFindingRow = { id: string; inspection_id: string; job_request_id: string; found: string | null; needs: string | null; status: ItemStatus | null; edited_by: string | null; edited_at: string | null; original: Record<string, unknown> | null; edited_by_name?: string | null };
@@ -138,7 +142,7 @@ export async function loadInspection(jobId: string, path: "mechanical" | "bodysh
   const inspection = insp as unknown as InspectionRow;
   for (const k of ["estimated_hours", "estimated_hours_manager"] as const) if (inspection[k] !== null && inspection[k] !== undefined) inspection[k] = Number(inspection[k]);
   const [{ data: items }, { data: findings }, { data: media }, { data: changes }, { data: tech }, { data: approver }] = await Promise.all([
-    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original, dangerous, dangerous_reason, leak_severity, leak_repair, fluid_qty, fluid_unit, fluid_grade, fluid_spec, disc_condition, disc_action, disc_thickness, disc_minimum, parts_rows, style").eq("inspection_id", inspection.id).order("position"),
+    admin.from("inspection_items").select("id, inspection_id, section_key, section_title, item_key, item_label, position, status, remarks, parts_needed, labour_hours, edited_by, edited_at, original, dangerous, dangerous_reason, leak_severity, leak_repair, fluid_qty, fluid_unit, fluid_grade, fluid_spec, disc_condition, disc_action, disc_thickness, disc_minimum, parts_rows, style, service_due, recharge_needed").eq("inspection_id", inspection.id).is("merged_into", null).order("position"),
     admin.from("inspection_findings").select("id, inspection_id, job_request_id, found, needs, status, edited_by, edited_at, original").eq("inspection_id", inspection.id),
     admin.from("inspection_media").select("id, inspection_id, item_key, job_request_id, kind, is_prescan, storage_path, caption, duration_s, taken_at, uploaded_by").eq("inspection_id", inspection.id).is("removed_at", null).order("taken_at"),
     admin
@@ -206,7 +210,7 @@ export async function ensureInspection(jobId: string, technicianId: string, chec
     section_title: i.sectionTitle,
     item_key: i.key,
     item_label: i.label,
-    style: i.style === "job" ? "job" : "grade",
+    style: i.style === "job" || i.style === "gas" ? i.style : "grade",
     position,
     created_by: by,
     updated_by: by,

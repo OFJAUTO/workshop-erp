@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
-import { LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
+import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, acPartFor, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
 import { PartPicker } from "@/components/PartPicker";
 import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
@@ -76,6 +76,10 @@ export type ItemState = {
   disc_minimum: string;
   labour_hours: string;
   parts_rows: PartsRow[];
+  /** A fluid whose change is due ("Service due?" on engine oil, brake fluid, coolant, transmission). */
+  service_due?: boolean;
+  /** The A/C gas: recharge needed (ticked by itself when Low or Empty). */
+  recharge_needed?: boolean;
 };
 export type FindingState = { requestId: string; text: string; found: string; needs: string; status: ItemStatus | null };
 export type Suggestions = Record<string, { parts?: string[]; remarks?: string[] }>;
@@ -343,8 +347,22 @@ export function InspectionForm({
   };
   function setItemStatus(key: string, status: ItemStatus) {
     const extra: Partial<ItemState> = status === "bad" ? {} : { dangerous: false };
+    // The A/C gas: Low or Empty ticks "Recharge needed" by itself; Good or N/A clears it.
+    const it = items.find((i) => i.key === key);
+    if (it?.style === "gas") extra.recharge_needed = status === "average" || status === "bad";
     patchItem(key, { status, ...extra });
   }
+  /** The A/C gas: leak, repair, gas and grams; the remark is written from them unless the technician wrote his own, a repair adds its part. */
+  function setAc(it: ItemState, fields: Partial<ItemState>) {
+    const next = { ...it, ...fields };
+    const auto = autoRemarkFor(next);
+    const remarks = !it.remarks.trim() || it.remarks === autoRemarkFor(it) ? auto : it.remarks;
+    const part = fields.leak_repair ? acPartFor(fields.leak_repair) : null;
+    if (part) addEntryIfMissing(it.key, part);
+    patchItem(it.key, { ...fields, remarks, ...(fields.fluid_qty !== undefined || fields.fluid_grade !== undefined ? { fluid_unit: "g" } : {}) });
+  }
+  // Items that also ask "Service due?" (marked in the checklist).
+  const dueKeys = new Set(checklist.flatMap((s) => s.items.filter((i) => i.due).map((i) => i.key)));
   function allGood(sectionKey: string) {
     setItems((prev) => prev.map((i) => (i.sectionKey === sectionKey && !i.status ? { ...i, status: "good" } : i)));
     save({ sectionAllGood: sectionKey });
@@ -633,8 +651,9 @@ export function InspectionForm({
               const disc = isDiscItem(it.label);
               const pads = !disc && isPadItem(it.label) && /front|rear/i.test(it.label);
               const padKey = pads ? padMeasureKey(it.label) : null;
-              const fluid = isFluidItem(it.label);
-              const leak = isLeakItem(it.label);
+              const gas = it.style === "gas";
+              const fluid = !gas && isFluidItem(it.label);
+              const leak = !gas && isLeakItem(it.label);
               return (
                 <div key={it.key} id={`item-${it.key}`} className={`rounded-card border p-3 flex flex-col gap-3 ${it.dangerous ? "border-red-bar border-2" : isJob ? (it.status === "bad" ? "border-ink" : "border-line") : it.status === "bad" ? "border-red-bar" : it.status === "average" ? "border-amber-bar" : "border-line"}`}>
                   <p className="font-semibold flex flex-wrap items-center gap-2">
@@ -689,6 +708,37 @@ export function InspectionForm({
                         </div>
                       ) : null}
                       <Textarea value={it.remarks} onChange={(e) => patchItem(it.key, { remarks: e.target.value }, false)} rows={2} disabled={locked} textCase="sentence" />
+                    </div>
+                  ) : null}
+                  {dueKeys.has(it.key) && it.status !== "na" ? (
+                    <div className="flex flex-wrap items-center gap-2" data-service-due={it.key}>
+                      <span className="text-xs font-semibold text-muted">Service due?</span>
+                      {[{ v: false, l: "No" }, { v: true, l: "Yes, due" }].map((o) => (
+                        <button key={o.l} type="button" disabled={locked} aria-pressed={!!it.service_due === o.v} onClick={() => patchItem(it.key, { service_due: o.v })} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${!!it.service_due === o.v ? (o.v ? "border-ink bg-ink text-white" : "border-green bg-green-soft text-green") : "border-line-strong bg-white"}`} data-service-due-choice={o.v ? "yes" : "no"}>{o.l}</button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {gas && needsDetail ? (
+                    <div className="flex flex-col gap-2 rounded-control bg-chip p-2" data-ac-panel>
+                      <span className="text-xs font-semibold text-muted">Leak?</span>
+                      <Chips options={AC_LEAKS} value={it.leak_severity} onPick={(v) => setAc(it, { leak_severity: it.leak_severity === v ? "" : v })} disabled={locked} small />
+                      {it.leak_severity && it.leak_severity !== "none" ? (
+                        <>
+                          <span className="text-xs font-semibold text-muted">Repair</span>
+                          <Chips options={AC_REPAIRS} value={it.leak_repair} onPick={(v) => setAc(it, { leak_repair: it.leak_repair === v ? "" : v })} disabled={locked} small />
+                        </>
+                      ) : null}
+                      <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={!!it.recharge_needed} onChange={(e) => setAc(it, { recharge_needed: e.target.checked })} disabled={locked} className="h-5 w-5 accent-ink" data-ac-recharge />Recharge needed</label>
+                      <span className="text-xs font-semibold text-muted">Gas</span>
+                      <Chips options={AC_GASES.map((g) => ({ value: g, label: g }))} value={it.fluid_grade} onPick={(v) => setAc(it, { fluid_grade: it.fluid_grade === v ? "" : v })} disabled={locked} small />
+                      <span className="text-xs font-semibold text-muted">Quantity (grams)</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {AC_GRAM_CHIPS.map((c) => (
+                          <button key={c} type="button" disabled={locked} aria-pressed={it.fluid_qty === c} onClick={() => setAc(it, { fluid_qty: it.fluid_qty === c ? "" : c })} className={`min-h-11 min-w-12 rounded-control border px-2 text-sm font-bold ${it.fluid_qty === c ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-ac-grams={c}>{c}</button>
+                        ))}
+                        <Input value={it.fluid_qty} onChange={(e) => setAc(it, { fluid_qty: e.target.value })} inputMode="numeric" disabled={locked} aria-label="A/C gas in grams" style={{ width: "6rem" }} data-ac-grams-box />
+                        <span className="text-xs text-muted">g</span>
+                      </div>
                     </div>
                   ) : null}
                   {needsDetail && leak ? (

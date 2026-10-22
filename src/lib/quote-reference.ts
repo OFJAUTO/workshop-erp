@@ -1,4 +1,4 @@
-import { TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel } from "./inspection";
+import { TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemExtraWords, itemStatusLabel, needsAttention } from "./inspection";
 import type { InspectionBundle } from "./inspection-data";
 import { roadTestSummary, type RoadTestRow, type RoadTestSummary } from "./road-test";
 
@@ -28,16 +28,16 @@ export type QuoteReference = {
 export function quoteReferenceOf(b: InspectionBundle, requests: string[], roadTest: RoadTestRow | null = null): QuoteReference {
   const findings: ReferenceFinding[] = [];
   for (const i of b.items) {
-    const flagged = i.status === "bad" || (i.status === "average" && i.style !== "job");
-    if (!flagged) continue;
+    if (!needsAttention(i)) continue;
+    const dueOnly = i.status !== "bad" && i.status !== "average";
     findings.push({
       sourceType: "item",
       sourceKey: i.item_key,
       keys: [i.item_key],
       label: `${i.section_title} · ${i.item_label}`,
       status: i.status === "bad" ? "bad" : "average",
-      statusLabel: itemStatusLabel(i.status, i.style),
-      remark: i.remarks?.trim() || null,
+      statusLabel: dueOnly ? "Service due" : itemStatusLabel(i.status, i.style),
+      remark: [i.remarks?.trim(), ...itemExtraWords(i).filter((w) => !(dueOnly && w === "Service due"))].filter(Boolean).join(" · ") || null,
       dangerous: !!i.dangerous,
     });
   }

@@ -3,7 +3,7 @@ import { ContactButtons, CustomerFront, customerBoxes } from "@/components/Custo
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { formatDate } from "@/lib/format";
-import { ROAD_TEST_SECTION_KEY, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS } from "@/lib/inspection";
+import { ROAD_TEST_SECTION_KEY, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, needsAttention } from "@/lib/inspection";
 import { loadInspection } from "@/lib/inspection-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { notifyStaff } from "@/lib/notifications";
@@ -41,7 +41,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
   }
   const insp = bundle.inspection;
   const items = bundle.items.filter((i) => i.section_key !== ROAD_TEST_SECTION_KEY && i.status !== "na");
-  const attention = items.filter((i) => i.status === "bad" || (i.status === "average" && i.style !== "job")).sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
+  const attention = items.filter(needsAttention).sort((a, b) => (a.status === "bad" ? 0 : 1) - (b.status === "bad" ? 0 : 1));
   const m = (insp.measurements ?? {}) as Record<string, string | number>;
   const text = (v: unknown) => (v === null || v === undefined ? "" : String(v));
   const tyres = TYRE_POSITIONS.filter((p) => ["replace_now", "replace_soon"].includes(text(m[`tyre_${p.key}_action`]))).map((p) => ({

@@ -8,9 +8,12 @@ export const CHECK_STATUSES = ["good", "average", "bad"] as const;
 export type CheckStatus = (typeof CHECK_STATUSES)[number];
 export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = { good: "Good", average: "Average", bad: "Bad", na: "N/A" };
 
-/** Two answer styles: a component is graded Good / Average / Bad; a service item is a job, OK or Required. */
-export type ItemStyle = "grade" | "job";
-export const ITEM_STYLE_LABELS: Record<ItemStyle, string> = { grade: "Good / Average / Bad", job: "OK / Required" };
+/**
+ * Three answer styles: a component is graded Good / Average / Bad; a service item is a job, OK or Required; the A/C
+ * gas (23 October 2026) is Good / Low / Empty (stored as good / average / bad), with the recharge ticked by itself.
+ */
+export type ItemStyle = "grade" | "job" | "gas";
+export const ITEM_STYLE_LABELS: Record<ItemStyle, string> = { grade: "Good / Average / Bad", job: "OK / Required", gas: "Good / Low / Empty (A/C gas)" };
 export const JOB_ITEM_STATUSES = ["good", "bad", "na"] as const;
 export function itemStatusesFor(style?: ItemStyle | string | null): readonly ItemStatus[] {
   return style === "job" ? JOB_ITEM_STATUSES : ITEM_STATUSES;
@@ -19,8 +22,71 @@ export function itemStatusesFor(style?: ItemStyle | string | null): readonly Ite
 export function itemStatusLabel(status: ItemStatus | null | undefined, style?: ItemStyle | string | null): string {
   if (!status) return "";
   if (style === "job") return status === "good" ? "OK" : status === "bad" ? "Required" : status === "na" ? "N/A" : "Average";
+  if (style === "gas") return status === "good" ? "Good" : status === "average" ? "Low" : status === "bad" ? "Empty" : "N/A";
   return ITEM_STATUS_LABELS[status];
 }
+
+/* The A/C gas item (23 October 2026): low or empty asks about the leak and the repair, ticks the recharge by
+   itself, and takes the gas (R134a or R1234yf) and the quantity in grams. */
+export const AC_LEAKS = [
+  { value: "none", label: "No" },
+  { value: "sweating", label: "Sweating" },
+  { value: "dripping", label: "Dripping" },
+  { value: "heavy", label: "Heavy leak" },
+] as const;
+export const AC_REPAIRS = [
+  { value: "seal", label: "Seal" },
+  { value: "hose", label: "Hose or pipe" },
+  { value: "condenser", label: "Condenser" },
+  { value: "compressor", label: "Compressor" },
+  { value: "evaporator", label: "Evaporator" },
+  { value: "expansion_valve", label: "Expansion valve" },
+] as const;
+export const AC_GASES = ["R134a", "R1234yf"] as const;
+export const AC_GRAM_CHIPS = ["500", "600", "700", "800", "1000"] as const;
+/** The part an A/C repair needs, added to the parts list on its own. */
+export function acPartFor(repair: string | null | undefined): string | null {
+  switch (repair) {
+    case "seal": return "A/C seal kit";
+    case "hose": return "A/C hose or pipe";
+    case "condenser": return "A/C condenser";
+    case "compressor": return "A/C compressor";
+    case "evaporator": return "A/C evaporator";
+    case "expansion_valve": return "A/C expansion valve";
+    default: return null;
+  }
+}
+/**
+ * The ONE rule for "needs attention" on the report, its PDF and the quotation's reference: Bad, Average (a graded
+ * item), or a fluid whose service is due even when its level is fine.
+ */
+export function needsAttention(i: { status: ItemStatus | null; style?: string | null; service_due?: boolean | null }): boolean {
+  return i.status === "bad" || (i.status === "average" && i.style !== "job") || (!!i.service_due && i.status !== "na");
+}
+/** The extra words under an item on the report: "Service due", "Recharge needed: R1234yf 600 g" (unless the remark says it already). */
+export function itemExtraWords(i: { style?: string | null; service_due?: boolean | null; recharge_needed?: boolean | null; fluid_grade?: string | null; fluid_qty?: string | number | null; remarks?: string | null }): string[] {
+  const out: string[] = [];
+  if (i.service_due) out.push("Service due");
+  if (i.style === "gas" && i.recharge_needed && !/recharge/i.test(i.remarks ?? "")) out.push(rechargeWords(i));
+  return out;
+}
+/** "Recharge R1234yf 600 g": the words for the report and the quotation. */
+export function rechargeWords(i: { fluid_grade?: string | null; fluid_qty?: string | number | null }) {
+  const qty = String(i.fluid_qty ?? "").trim();
+  return ["Recharge needed", [i.fluid_grade, qty ? `${qty} g` : ""].filter(Boolean).join(" ")].filter(Boolean).join(": ");
+}
+
+/**
+ * The checklist items folded into another item on 23 October 2026 (section 6): the old rows keep their answers,
+ * marked merged_into, and every screen reads only the merged item.
+ */
+export const MERGED_ITEMS: Record<string, { into: string; as: "recharge" | "service_due" }> = {
+  "service_items.a_c_gas_recharge": { into: "air_conditioning.a_c_gas_level", as: "recharge" },
+  "service_items.engine_oil_service_due": { into: "engine_bay.engine_oil_level_and_condition", as: "service_due" },
+  "service_items.brake_fluid_change_due": { into: "engine_bay.brake_fluid", as: "service_due" },
+  "service_items.coolant_change_due": { into: "cooling.coolant_tank", as: "service_due" },
+  "service_items.transmission_oil_service_due": { into: "transmission_and_driveline.transmission_and_differential_fluid_condition", as: "service_due" },
+};
 
 /** The "Other" section is optional: an unmarked item there does not block the report. */
 export const OPTIONAL_SECTION_KEY = "other";
@@ -35,7 +101,8 @@ export const INSPECTION_STATUS_LABELS: Record<InspectionStatus, string> = {
   approved: "Approved by the workshop manager",
 };
 
-export type ChecklistItem = { key: string; label: string; style?: ItemStyle };
+/** due: the item also asks "Service due?" (a fluid with its own change interval: engine oil, brake fluid, coolant, transmission). */
+export type ChecklistItem = { key: string; label: string; style?: ItemStyle; due?: boolean };
 export type ChecklistSection = { key: string; title: string; items: ChecklistItem[] };
 
 /** The road test used to be a checklist section; it now belongs to the QC inspector. Old reports hide it. */
@@ -84,6 +151,12 @@ function section(title: string, labels: string[], jobLabels: string[] = []): Che
     }),
   };
 }
+
+const DUE_LABELS: Record<string, string> = {
+  "Engine oil level and condition": "Engine oil (level, condition, service due)",
+  "Brake fluid": "Brake fluid (level, condition, change due)",
+  "Transmission and differential fluid condition": "Transmission and differential fluid (condition, service due)",
+};
 
 /** The owner's starting checklist. Editable in Settings; every report keeps the version it was done with. */
 export const DEFAULT_CHECKLIST: ChecklistSection[] = [
@@ -151,9 +224,16 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Interior lights",
   ]),
   section("Air conditioning", ["A/C compressor / expansion valve / condenser / evaporator / pipes", "Cabin filter"]),
-  section("Service items", [], ["Engine oil service due", "Brake fluid change due", "Coolant change due", "Transmission oil service due", "A/C gas recharge", "Software update", "Software reset", "Coding / programming"]),
+  section("Service items", [], ["Software update", "Software reset", "Coding / programming"]),
   section("Other", ["Other"]),
-];
+].map((s) => ({
+  ...s,
+  // 23 October 2026: one A/C gas item, and the fluids ask "Service due?" themselves (no separate job items).
+  items: [
+    ...s.items.map((i) => (DUE_LABELS[i.label] ? { ...i, label: DUE_LABELS[i.label], due: true } : i)),
+    ...(s.key === "air_conditioning" ? [{ key: "air_conditioning.a_c_gas_level", label: "A/C gas", style: "gas" as const }] : []),
+  ],
+}));
 
 /** Tyres: four positions, plus an optional spare. */
 export const TYRE_POSITIONS = [
@@ -310,7 +390,9 @@ export function cleanChecklist(input: unknown): ChecklistSection[] | string {
       let ikey = String((i as { key?: unknown }).key ?? "").trim() || `${key}.${slugKey(label)}`;
       while (keys.has(ikey)) ikey += "_x";
       keys.add(ikey);
-      items.push((i as { style?: unknown }).style === "job" ? { key: ikey, label, style: "job" } : { key: ikey, label });
+      const style = (i as { style?: unknown }).style;
+      const due = (i as { due?: unknown }).due === true;
+      items.push({ key: ikey, label, ...(style === "job" || style === "gas" ? { style } : {}), ...(due ? { due: true } : {}) });
     }
     if (items.length === 0) return `The section "${title}" has no items.`;
     out.push({ key, title, items });
@@ -523,7 +605,7 @@ export function leakPartFor(repair: string | null | undefined, label: string): s
       return null;
   }
 }
-type StructuredItem = { label: string; style?: ItemStyle | string | null; disc_condition?: string; disc_action?: string; leak_severity?: string; leak_repair?: string; fluid_qty?: string; fluid_unit?: string; fluid_grade?: string };
+type StructuredItem = { label: string; style?: ItemStyle | string | null; status?: ItemStatus | null; disc_condition?: string; disc_action?: string; leak_severity?: string; leak_repair?: string; fluid_qty?: string; fluid_unit?: string; fluid_grade?: string; recharge_needed?: boolean };
 
 /**
  * The remark the system writes from the structured choices (evening of 12 October 2026, item 6): brake discs from the
@@ -531,6 +613,12 @@ type StructuredItem = { label: string; style?: ItemStyle | string | null; disc_c
  * no choice was made.
  */
 export function autoRemarkFor(i: StructuredItem): string {
+  if (i.style === "gas") {
+    const leak = AC_LEAKS.find((x) => x.value === i.leak_severity);
+    const repair = AC_REPAIRS.find((x) => x.value === i.leak_repair)?.label;
+    const parts = [leak ? (leak.value === "none" ? "no leak found" : `${leak.label.toLowerCase()} leak`) : "", repair ? `repair: ${repair.toLowerCase()}` : "", i.recharge_needed ? rechargeWords(i).toLowerCase().replace("r1234yf", "R1234yf").replace("r134a", "R134a") : ""];
+    return parts.filter(Boolean).join(" · ");
+  }
   if (isDiscItem(i.label) && (i.disc_condition || i.disc_action)) {
     const c = DISC_CONDITIONS.find((x) => x.value === i.disc_condition)?.label;
     const a = DISC_ACTIONS.find((x) => x.value === i.disc_action)?.label;
@@ -618,13 +706,15 @@ export function limitProblems(m: Record<string, string>, limits: InspectionLimit
   return out;
 }
 /** The form's state for one checklist item, from a stored row. */
-export function toItemState(i: { item_key: string; item_label: string; section_key: string; style?: string | null; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; labour_hours?: number | string | null; parts_rows?: unknown }) {
+export function toItemState(i: { item_key: string; item_label: string; section_key: string; style?: string | null; service_due?: boolean | null; recharge_needed?: boolean | null; status: ItemStatus | null; remarks: string | null; parts_needed: string | null; edited_by_name?: string | null; dangerous?: boolean | null; dangerous_reason?: string | null; leak_severity?: string | null; leak_repair?: string | null; fluid_qty?: number | string | null; fluid_unit?: string | null; fluid_grade?: string | null; fluid_spec?: string | null; disc_condition?: string | null; disc_action?: string | null; disc_thickness?: number | string | null; disc_minimum?: number | string | null; labour_hours?: number | string | null; parts_rows?: unknown }) {
   const s = (v: number | string | null | undefined) => (v === null || v === undefined ? "" : String(v));
   return {
     key: i.item_key,
     label: i.item_label,
     sectionKey: i.section_key,
-    style: i.style === "job" ? ("job" as ItemStyle) : ("grade" as ItemStyle),
+    style: i.style === "job" || i.style === "gas" ? (i.style as ItemStyle) : ("grade" as ItemStyle),
+    service_due: !!i.service_due,
+    recharge_needed: !!i.recharge_needed,
     status: i.status,
     remarks: i.remarks ?? "",
     parts_needed: i.parts_needed ?? "",

@@ -23,7 +23,7 @@ export function ChecklistEditor({ action, initial, initialComplaints = {} }: { a
   const [complaints, setComplaints] = useState<Record<string, string>>(Object.fromEntries(Object.entries(initialComplaints).map(([k, v]) => [k, (v ?? []).join(", ")])));
 
   const setSection = (i: number, patch: Partial<ChecklistSection>) => setSections((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
-  const setItem = (si: number, ii: number, patch: { label?: string; style?: ItemStyle }) =>
+  const setItem = (si: number, ii: number, patch: { label?: string; style?: ItemStyle; due?: boolean }) =>
     setSections((prev) => prev.map((s, idx) => (idx === si ? { ...s, items: s.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) } : s)));
 
   const small = "min-h-9 min-w-9 rounded-control border border-line-strong bg-white px-2 text-xs font-bold";
@@ -55,19 +55,22 @@ export function ChecklistEditor({ action, initial, initialComplaints = {} }: { a
               </label>
               <ul className="flex flex-col gap-2 pl-2">
                 {s.items.map((it, ii) => {
-                  const job = it.style === "job";
+                  const style: ItemStyle = it.style ?? "grade";
+                  // Tap to go round the three answer styles: Good / Average / Bad, OK / Required, Good / Low / Empty (A/C gas).
+                  const nextStyle: ItemStyle = style === "grade" ? "job" : style === "job" ? "gas" : "grade";
                   return (
                     <li key={it.key} className="flex items-center gap-2">
                       <Input value={it.label} onChange={(e) => setItem(si, ii, { label: e.target.value })} className="flex-1" aria-label="Item name" />
                       <button
                         type="button"
-                        onClick={() => setItem(si, ii, { style: job ? "grade" : "job" })}
-                        className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${job ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+                        onClick={() => setItem(si, ii, { style: nextStyle })}
+                        className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${style !== "grade" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
                         aria-label="Answer style"
                         title="Tap to switch the answer style"
                       >
-                        {job ? ITEM_STYLE_LABELS.job : ITEM_STYLE_LABELS.grade}
+                        {ITEM_STYLE_LABELS[style]}
                       </button>
+                      <button type="button" onClick={() => setItem(si, ii, { due: !it.due })} aria-pressed={!!it.due} className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${it.due ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`} title="The item also asks: Service due?" data-item-due>{it.due ? "Asks: service due ✓" : "Service due?"}</button>
                       <button type="button" className={small} onClick={() => setSection(si, { items: move(s.items, ii, ii - 1) })} aria-label="Move item up">↑</button>
                       <button type="button" className={small} onClick={() => setSection(si, { items: move(s.items, ii, ii + 1) })} aria-label="Move item down">↓</button>
                       <button type="button" className={`${small} text-red`} onClick={() => setSection(si, { items: s.items.filter((_, j) => j !== ii) })} aria-label="Remove item">✕</button>

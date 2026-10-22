@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { CHECK_STATUSES, DISC_ACTIONS, DISC_CONDITIONS, ITEM_STATUSES, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanMeasurementValue, cleanPartsRows, partsRowsText } from "@/lib/inspection";
+import { CHECK_STATUSES, DISC_ACTIONS, DISC_CONDITIONS, ITEM_STATUSES, LEAK_REPAIRS, AC_LEAKS, AC_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanMeasurementValue, cleanPartsRows, partsRowsText } from "@/lib/inspection";
 import { inspectionLocked, type InspectionRow } from "@/lib/inspection-data";
 import { cleanPartsList } from "@/lib/parts-list";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -27,6 +27,8 @@ type ItemPatch = {
   disc_action?: string | null;
   disc_thickness?: string | number | null;
   disc_minimum?: string | number | null;
+  service_due?: boolean;
+  recharge_needed?: boolean;
 };
 type Body = {
   inspectionId?: string;
@@ -124,7 +126,8 @@ export async function POST(request: NextRequest) {
     }
     if ("dangerous" in it) patch.dangerous = !!it.dangerous;
     if ("dangerous_reason" in it) patch.dangerous_reason = text(it.dangerous_reason, 300);
-    for (const [k, list] of [["leak_severity", LEAK_SEVERITIES], ["leak_repair", LEAK_REPAIRS], ["disc_condition", DISC_CONDITIONS], ["disc_action", DISC_ACTIONS]] as const) {
+    // The A/C gas adds "No" leak and its own repairs (condenser, compressor...) to the leak lists.
+    for (const [k, list] of [["leak_severity", [...LEAK_SEVERITIES, ...AC_LEAKS]], ["leak_repair", [...LEAK_REPAIRS, ...AC_REPAIRS]], ["disc_condition", DISC_CONDITIONS], ["disc_action", DISC_ACTIONS]] as const) {
       if (k in it) {
         const v = oneOf(it[k], list);
         if (v === undefined) return NextResponse.json({ error: `Bad ${k.replace("_", " ")}.` }, { status: 400 });
@@ -137,6 +140,8 @@ export async function POST(request: NextRequest) {
     if ("fluid_spec" in it) patch.fluid_spec = text(it.fluid_spec, 120);
     if ("disc_thickness" in it) patch.disc_thickness = num(it.disc_thickness, 1000);
     if ("disc_minimum" in it) patch.disc_minimum = num(it.disc_minimum, 1000);
+    if ("service_due" in it) patch.service_due = !!it.service_due;
+    if ("recharge_needed" in it) patch.recharge_needed = !!it.recharge_needed;
     const { data: cur } = await admin.from("inspection_items").select("item_label, status, remarks, parts_needed, original, dangerous, dangerous_reason").eq("inspection_id", insp.id).eq("item_key", String(it.key)).maybeSingle();
     if (!cur) return NextResponse.json({ error: "Item not found." }, { status: 404 });
     if (reviewing) Object.assign(patch, reviewStamp, cur.original ? {} : { original: { status: cur.status, remarks: cur.remarks, parts_needed: cur.parts_needed } });
