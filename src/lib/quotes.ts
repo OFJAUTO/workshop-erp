@@ -223,6 +223,10 @@ export type QuoteRow = {
   tint_spec?: unknown;
   tint_ack_at?: string | null;
   tint_ack_name?: string | null;
+  /** Section 4 (23 October 2026): a sent estimate withdrawn with its reason; a copy remembers its source. */
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+  copied_from_id?: string | null;
   commission_set_by?: string | null;
   commission_set_at?: string | null;
   commission_decided_by?: string | null;

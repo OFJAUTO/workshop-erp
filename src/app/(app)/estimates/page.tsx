@@ -7,6 +7,7 @@ import { QUOTE_STATUS_LABELS, aed, type QuoteStatus } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { EstimateMenu } from "./EstimateMenu";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ function olderThanDays(iso: string | null, days: number) {
   return !!iso && Date.now() - Date.parse(iso) > days * 86400000;
 }
 
-type Row = { id: string; number: string; version: number; status: QuoteStatus; total_aed: number; sent_at: string | null; opened_at: string | null; responded_at: string | null; valid_until: string | null; created_at: string; created_by: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; creator: { display_name: string } | null };
+type Row = { id: string; number: string; version: number; status: QuoteStatus; cancel_reason: string | null; cancelled_at: string | null; total_aed: number; sent_at: string | null; opened_at: string | null; responded_at: string | null; valid_until: string | null; created_at: string; created_by: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; creator: { display_name: string } | null };
 
 /** Estimates before the car arrives: being prepared, sent, accepted, expired or no reply, with follow-ups. */
 export default async function EstimatesPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
@@ -23,22 +24,24 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const { message } = await searchParams;
   const settings = await getSettings();
   const admin = createAdminClient();
-  let query = admin.from("quotations").select("id, number, version, status, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), creator:staff!quotations_created_by_fkey(display_name)").eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
+  let query = admin.from("quotations").select("id, number, version, status, cancel_reason, cancelled_at, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), creator:staff!quotations_created_by_fkey(display_name)").eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
   if (staff.role_id !== "owner") query = query.eq("created_by", staff.id);
   const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];
   const followDays = Number(settings.estimate_followup_days) || 2;
   const needsFollowUp = (r: Row) => (r.status === "sent" || r.status === "opened") && olderThanDays(r.sent_at, followDays);
-  const bucket = (r: Row) => (r.status === "approved" ? "accepted" : r.status === "expired" ? "expired" : r.status === "declined" ? "declined" : needsFollowUp(r) ? "noreply" : r.status === "sent" || r.status === "opened" ? "sent" : "draft");
-  const sections: { key: string; title: string }[] = [
+  // Cancelled (sent, then withdrawn) and expired (past "valid until" without a reply) share one folded section at the end.
+  const bucket = (r: Row) => (r.status === "approved" ? "accepted" : r.status === "expired" || r.status === "cancelled" ? "closed" : r.status === "declined" ? "declined" : needsFollowUp(r) ? "noreply" : r.status === "sent" || r.status === "opened" ? "sent" : "draft");
+  const sections: { key: string; title: string; folded?: boolean }[] = [
     { key: "noreply", title: "No reply: follow up" },
     { key: "sent", title: "Sent" },
     { key: "draft", title: "Being prepared" },
     { key: "accepted", title: "Accepted" },
-    { key: "expired", title: "Expired" },
     { key: "declined", title: "Declined" },
+    { key: "closed", title: "Cancelled / expired", folded: true },
   ];
-  const tone = (s: QuoteStatus) => (s === "approved" ? "green" : s === "declined" || s === "expired" ? "red" : s === "draft" ? "outline" : "amber");
+  const tone = (s: QuoteStatus) => (s === "approved" ? "green" : s === "declined" || s === "expired" ? "red" : s === "draft" || s === "cancelled" ? "outline" : "amber");
+  const mayManage = (r: Row) => !staff.viewingAs && (staff.role_id === "owner" || r.created_by === staff.id);
 
   return (
     <>
@@ -49,25 +52,33 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
       {sections.map((s) => {
         const items = rows.filter((r) => bucket(r) === s.key);
         if (!items.length) return null;
-        return (
-          <section key={s.key} className="flex flex-col gap-3">
+        const cards = items.map((r) => (
+          <Card key={r.id} className={`flex items-center gap-3 hover:border-ink ${s.key === "noreply" ? "border-amber-bar" : ""}`} data-estimate-row={r.number} data-estimate-status={r.status}>
+            <Link href={`/estimates/${r.id}`} className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+              <span className="font-extrabold">{r.number}</span>
+              <span className="font-semibold">{r.vehicle ? `${formatPlate(r.vehicle)} · ${[r.vehicle.make?.name, r.vehicle.model?.name].filter(Boolean).join(" ")}` : "No car"}</span>
+              <span className="text-sm text-muted">{r.customer?.company_name ?? r.customer?.full_name}</span>
+              <Badge tone={tone(r.status)}>{QUOTE_STATUS_LABELS[r.status]}</Badge>
+              {r.status === "cancelled" && r.cancel_reason ? <span className="text-xs font-semibold text-muted" data-cancel-reason>{r.cancel_reason}</span> : null}
+              <span className="ml-auto text-sm font-semibold">{aed(r.total_aed)}</span>
+              <span className="text-xs text-muted">
+                {r.sent_at ? `sent ${formatDateTime(r.sent_at)}` : `started ${formatDateTime(r.created_at)}`}
+                {r.valid_until ? ` · valid until ${formatDate(r.valid_until)}` : ""}
+                {r.creator ? ` · ${r.creator.display_name}` : ""}
+              </span>
+            </Link>
+            <EstimateMenu id={r.id} number={r.number} status={r.status} neverSent={!r.sent_at} canManage={mayManage(r)} />
+          </Card>
+        ));
+        return s.folded ? (
+          <details key={s.key} className="flex flex-col gap-3" data-estimates-closed>
+            <summary className="cursor-pointer list-none"><SectionLabel right={`${items.length}`}>{s.title} ▸</SectionLabel></summary>
+            <div className="mt-3 flex flex-col gap-3">{cards}</div>
+          </details>
+        ) : (
+          <section key={s.key} className="flex flex-col gap-3" data-estimates-section={s.key}>
             <SectionLabel right={`${items.length}`}>{s.title}</SectionLabel>
-            {items.map((r) => (
-              <Link key={r.id} href={`/estimates/${r.id}`} className="block">
-                <Card className={`flex flex-wrap items-center gap-3 hover:border-ink ${s.key === "noreply" ? "border-amber-bar" : ""}`}>
-                  <span className="font-extrabold">{r.number}</span>
-                  <span className="font-semibold">{r.vehicle ? `${formatPlate(r.vehicle)} · ${[r.vehicle.make?.name, r.vehicle.model?.name].filter(Boolean).join(" ")}` : "No car"}</span>
-                  <span className="text-sm text-muted">{r.customer?.company_name ?? r.customer?.full_name}</span>
-                  <Badge tone={tone(r.status)}>{QUOTE_STATUS_LABELS[r.status]}</Badge>
-                  <span className="ml-auto text-sm font-semibold">{aed(r.total_aed)}</span>
-                  <span className="text-xs text-muted">
-                    {r.sent_at ? `sent ${formatDateTime(r.sent_at)}` : `started ${formatDateTime(r.created_at)}`}
-                    {r.valid_until ? ` · valid until ${formatDate(r.valid_until)}` : ""}
-                    {r.creator ? ` · ${r.creator.display_name}` : ""}
-                  </span>
-                </Card>
-              </Link>
-            ))}
+            {cards}
           </section>
         );
       })}

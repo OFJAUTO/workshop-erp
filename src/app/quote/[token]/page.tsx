@@ -49,10 +49,12 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     </div>
   );
   // The link always opens the latest version the customer was sent: an older link follows the number to the newest one.
-  const { data: byToken } = await admin.from("quotations").select("id, kind, number").eq("token", token).maybeSingle();
+  const { data: byToken } = await admin.from("quotations").select("id, kind, number, status, cancelled_at").eq("token", token).maybeSingle();
   if (!byToken) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const { data: latest } = await admin.from("quotations").select("id, kind, status, valid_until, viewed_full_at, token, version, sent_at").eq("number", byToken.number).eq("kind", byToken.kind).eq("is_active", true).not("status", "in", "(draft,pending_owner,cancelled)").order("version", { ascending: false }).limit(1).maybeSingle();
   const row = latest ?? null;
+  // A sent estimate or quotation withdrawn by the workshop (section 4, 23 October 2026).
+  if (!row && byToken.status === "cancelled" && byToken.cancelled_at) return plain(<Notice tone="info">This {byToken.kind === "estimate" ? "estimate" : "quotation"} has been withdrawn. Please contact OFJ Automotive for an updated one.</Notice>);
   if (!row) return plain(<Notice tone="info">This quotation is being updated. The new version will be sent to you shortly.</Notice>);
   const liveToken = row.token ?? token;
   const isEstimate = row.kind === "estimate";
@@ -68,6 +70,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     const ids = [q.created_by, q.sent_by, job?.gated_in_by].filter((x): x is string => !!x);
     await notifyStaff(ids, { type: "quote_opened", title: `Customer opened ${isEstimate ? "the estimate" : "the quotation"} · ${q.number}`, body: vehicle ? formatPlate(vehicle) : "", jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}` : `/estimates/${q.id}` });
   }
+  if (q.status === "cancelled" && q.cancelled_at) return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} has been withdrawn. Please contact OFJ Automotive for an updated one.</Notice>);
   if (q.status === "superseded" || q.status === "cancelled" || q.status === "draft" || q.status === "pending_owner") return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} is being updated. The new version will be sent to you shortly.</Notice>);
 
   // Internal lines, unused options and parts left off never reach the customer.

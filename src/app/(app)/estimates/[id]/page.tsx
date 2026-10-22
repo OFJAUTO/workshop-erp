@@ -19,6 +19,7 @@ import { formatPlate } from "@/lib/types";
 import { reviseQuotation } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
+import { EstimateMenu } from "../EstimateMenu";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         actions={
           <>
             <LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>
+            <EstimateMenu id={q.id} number={q.number} status={q.status} neverSent={!q.sent_at} canManage={!staff.viewingAs && (isOwner || mine)} />
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>
@@ -72,6 +74,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {q.status === "cancelled" ? <Notice tone="info">Cancelled{q.cancel_reason ? `: ${q.cancel_reason}` : ""}. Kept because the customer saw it; their link says it was withdrawn.</Notice> : null}
       {accepted ? (
         <Card className="flex flex-col gap-2 border-green">
           <SectionLabel>Accepted by {q.approver_name} · {formatDateTime(q.responded_at)}</SectionLabel>
