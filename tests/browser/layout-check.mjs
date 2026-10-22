@@ -95,6 +95,9 @@ const roles = [
   bodyshopId ? { name: "bodyshop", id: bodyshopId } : null,
 ].filter(Boolean).filter((r) => !onlyRole || r.name === onlyRole);
 
+// Pages reached from inside another page (not in the menu) that still need checking.
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions"], accounts: ["/commissions"] };
+
 let pagesChecked = 0;
 let shots = 0;
 const findings = [];
@@ -104,7 +107,7 @@ for (const role of roles) {
   // Every page in this role's menu, plus wherever the role landed.
   const hrefs = await page.evaluate(() => [...document.querySelectorAll("aside a[href]")].map((a) => a.getAttribute("href")).filter((h) => h && h.startsWith("/") && !h.startsWith("/api")));
   const landed = new URL(page.url()).pathname;
-  const targets = [...new Set([landed, ...hrefs])];
+  const targets = [...new Set([landed, ...hrefs, ...(EXTRA_PAGES[role.name] ?? [])])];
   for (const path of targets) {
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 1050 });

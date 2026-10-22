@@ -523,15 +523,24 @@ export function isOwnService(l: Pick<QuoteLine, "line_type" | "visible_to_custom
   return l.line_type === "package" && !isHidden(l) && !(Number(l.unit_cost) > 0) && !l.outside_work;
 }
 /** The discount's base: our own labour lines (hours); with the "labour and services" scope our own services too. Never outside work, parts or other charges. */
-export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null; outside_work?: boolean }, scope: "labour" | "labour_services" | null | undefined = "labour") {
-  return (l.line_type === "labour" && !isHidden(l)) || (scope === "labour_services" && isOwnService(l));
+export function takesLabourDiscount(l: Pick<QuoteLine, "line_type" | "visible_to_customer" | "unit_cost"> & { fee_kind?: string | null; outside_work?: boolean; package_key?: string | null }, scope: "labour" | "labour_services" | null | undefined = "labour") {
+  // Section 8 (21 October): a bodyshop PACKAGE always takes the header discount (it is the "Package
+  // discount"), whatever the scope - a package-only quotation has no labour lines to discount.
+  return (l.line_type === "labour" && !isHidden(l)) || ((scope === "labour_services" || !!l.package_key) && isOwnService(l));
 }
 /** "Labour discount (10%)", "Labour and services discount", or the old "Discount (10%)": the same words on the screen, the link, the PDF and the invoice. */
-export function discountLabelOf(q: Pick<QuoteHeaderForTotals, "discount_kind" | "discount_value" | "discount_percent" | "discount_scope">): string {
-  const words = q.discount_scope === "labour_services" ? "Labour and services discount" : "Labour discount";
+export function discountLabelOf(q: Pick<QuoteHeaderForTotals, "discount_kind" | "discount_value" | "discount_percent" | "discount_scope">, opts: { hasPackage?: boolean } = {}): string {
+  // Section 8 (21 October): a quotation built around a package calls its discount a PACKAGE discount
+  // on every document (the same helper serves the editor, the link, the PDFs and the invoice).
+  const words = opts.hasPackage ? "Package discount" : q.discount_scope === "labour_services" ? "Labour and services discount" : "Labour discount";
   if (q.discount_kind === "percent") return `${words} (${q.discount_value}%)`;
   if (q.discount_kind === "aed") return words;
-  return `Discount (${q.discount_percent ?? 0}%)`;
+  return `${opts.hasPackage ? "Package discount" : "Discount"} (${q.discount_percent ?? 0}%)`;
+}
+
+/** Whether the quotation carries a chosen package line (the Package discount wording follows it). */
+export function hasPackageLine(lines: Pick<QuoteLine, "is_active" | "package_key" | "left_off" | "option_group" | "chosen">[]): boolean {
+  return lines.some((l) => l.is_active && !!l.package_key && !isUnchosen(l));
 }
 /** A service with an explicit kind follows it; otherwise a price means a fixed-price service and no price means labour by the hour. */
 export function isFixedService(s: Pick<Service, "price_aed" | "line_kind">) {

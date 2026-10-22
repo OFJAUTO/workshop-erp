@@ -12,7 +12,7 @@ const blankPackage = (): BodyshopPackage => ({ key: "", name: "", time_in_worksh
 
 /**
  * The owner's package builder: name, the included items each with its warranty, "only if the car has
- * one" questions, time in workshop and the two complimentary lines. The advisor later picks a package
+ * one" questions, the estimated completion and the two complimentary lines. The advisor later picks a package
  * and types ONE price; the customer sees the list with no item prices.
  */
 export function PackagesEditor({ initial, action }: { initial: BodyshopPackage[]; action: Save }) {
@@ -34,25 +34,29 @@ export function PackagesEditor({ initial, action }: { initial: BodyshopPackage[]
         <Card key={i} className="flex flex-col gap-3" data-package-card>
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex min-w-64 flex-1 flex-col gap-1"><span className="text-xs font-semibold text-muted">Package name</span><Input value={p.name} onChange={(e) => edit(i, { name: e.target.value })} placeholder="OFJ Full Protection Package" textCase="title" data-package-name /></label>
-            <label className="flex w-56 flex-col gap-1"><span className="text-xs font-semibold text-muted">Time in workshop (shown to the customer)</span><Input value={p.time_in_workshop} onChange={(e) => edit(i, { time_in_workshop: e.target.value })} placeholder="7–10 working days" /></label>
             <Button type="button" tone="ghost" size="md" onClick={() => setPackages((ps) => ps.filter((_, k) => k !== i))}>Remove package</Button>
           </div>
           <SectionLabel>What is included (no prices here: the advisor types one package price per job)</SectionLabel>
           <div className="flex flex-col gap-2">
-            {p.items.map((it, j) => (
-              <div key={j} className="flex flex-wrap items-center gap-2" data-package-item>
-                <Input value={it.label} onChange={(e) => editItem(i, j, { label: e.target.value })} placeholder="Full body PPF" className="min-w-56 flex-1" textCase="sentence" />
-                <Input value={it.warranty ?? ""} onChange={(e) => editItem(i, j, { warranty: e.target.value })} placeholder="Warranty (10 years)" style={{ width: "11rem" }} />
-                <label className="inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold">
-                  <input type="checkbox" checked={it.only_if !== null} onChange={(e) => editItem(i, j, { only_if: e.target.checked ? "the car has one" : null })} className="h-4 w-4 accent-ink" />
-                  only if…
-                </label>
-                {it.only_if !== null ? <Input value={it.only_if} onChange={(e) => editItem(i, j, { only_if: e.target.value })} placeholder="the car has a sunroof or panoramic roof" className="min-w-48" /> : null}
-                <button type="button" onClick={() => edit(i, { items: p.items.filter((_, m) => m !== j) })} className="min-h-9 px-2 text-xs font-bold text-red" aria-label="Remove item">×</button>
-              </div>
-            ))}
+            {p.items.map((it, j) => {
+              const on = it.only_if !== null;
+              return (
+                // ONE tidy row per item: name · warranty · Only if (with its condition inside the row) · ×.
+                // The last three travel together, so a narrow screen never strands the condition or the ×.
+                <div key={j} className="flex flex-wrap items-center gap-2 lg:flex-nowrap" data-package-item>
+                  <span className="min-w-0 flex-1 basis-56"><Input value={it.label} onChange={(e) => editItem(i, j, { label: e.target.value })} placeholder="Full body PPF" aria-label="Included item" textCase="sentence" /></span>
+                  <span className="w-44 shrink-0"><Input value={it.warranty ?? ""} onChange={(e) => editItem(i, j, { warranty: e.target.value })} placeholder="Warranty (10 years)" aria-label="Warranty" /></span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <button type="button" onClick={() => editItem(i, j, { only_if: on ? null : "the car has one" })} aria-pressed={on} className={`min-h-11 shrink-0 whitespace-nowrap rounded-control border px-3 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`} data-only-if-toggle>{on ? "Only if ✓" : "Only if…"}</button>
+                    {on ? <span className="w-52 shrink-0"><Input value={it.only_if ?? ""} onChange={(e) => editItem(i, j, { only_if: e.target.value })} placeholder="the car has a panoramic roof" aria-label="Only if the car…" className="text-xs" data-only-if-text /></span> : null}
+                    <button type="button" onClick={() => edit(i, { items: p.items.filter((_, m) => m !== j) })} className="min-h-11 min-w-11 shrink-0 rounded-control text-base font-bold text-red hover:bg-chip" aria-label="Remove item" data-item-remove>×</button>
+                  </span>
+                </div>
+              );
+            })}
             <Button type="button" tone="secondary" size="md" className="self-start" onClick={() => edit(i, { items: [...p.items, blankItem()] })}>+ Add an item</Button>
           </div>
+          <label className="flex max-w-sm flex-col gap-1"><span className="text-xs font-semibold text-muted">Estimated completion (shown to the customer, under the included list)</span><Input value={p.time_in_workshop} onChange={(e) => edit(i, { time_in_workshop: e.target.value })} placeholder="3–5 working days" data-estimated-completion /></label>
           <div className="flex flex-wrap gap-5">
             <label className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={p.pickup_dropoff} onChange={(e) => edit(i, { pickup_dropoff: e.target.checked })} className="h-5 w-5 accent-ink" />Complimentary pick-up &amp; drop-off</label>
             <label className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={p.aftercare_check} onChange={(e) => edit(i, { aftercare_check: e.target.checked })} className="h-5 w-5 accent-ink" />Complimentary 10-day after-care check</label>

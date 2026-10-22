@@ -29,7 +29,7 @@ const qid = seed.json?.quotationId;
 if (!jobId || !qid) { console.error("seed failed"); process.exit(1); }
 const advisor = (await sql("select id from public.staff where role_id = 'service_advisor' and is_active limit 1"))[0].id;
 await sql(`insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, unit_price, package_key, package_items, created_by, updated_by)
-  values ($1, 5, 'package', 'OFJ Platinum (Gloss)', 'manual', 1, 22000, 'ofj_platinum', '[{"label":"Full body PPF"},{"label":"Window tint"},{"label":"Ceramic coating on PPF"},{"label":"Interior leather ceramic"}]'::jsonb, $2, $2)`, [qid, advisor]);
+  values ($1, 5, 'package', 'OFJ Platinum (Gloss)', 'manual', 1, 22000, 'ofj_platinum', '{"key":"ofj_platinum","name":"OFJ Platinum (Gloss)","time_in_workshop":"3-5 working days","pickup_dropoff":true,"aftercare_check":true,"items":[{"label":"Full body PPF","warranty":null},{"label":"Window tint","warranty":null},{"label":"Ceramic coating on PPF","warranty":null},{"label":"Interior leather ceramic","warranty":null}]}'::jsonb, $2, $2)`, [qid, advisor]);
 
 const { browser, page } = await browserFor("owner", { viewport: { width: 1500, height: 1000 } });
 await go(page, `${base}/jobs/${jobId}/quote/${qid}`);

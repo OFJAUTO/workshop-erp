@@ -6,7 +6,7 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { discountLabelOf,aed, isHidden, isUnchosen, quoteTotals } from "@/lib/quotes";
+import { discountLabelOf,aed, isHidden, isUnchosen, quoteTotals , hasPackageLine } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -123,7 +123,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">
           <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{isEstimate ? "Estimate total" : "Total"} including VAT</span>
           <span className="text-3xl font-extrabold">{aed(totals.total)}</span>
-          {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{discountLabelOf(q)}: − {aed(totals.discount)}</span> : null}
+          {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}: − {aed(totals.discount)}</span> : null}
           {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
           {totals.deposit ? <span className="text-sm font-bold" data-deposit-required>Deposit required: {aed(totals.deposit)}</span> : null}
         </div>

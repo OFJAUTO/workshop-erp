@@ -18,7 +18,7 @@ export default async function PackagesSettingsPage({ searchParams }: { searchPar
     <>
       <PageHeader
         title="Bodyshop packages"
-        subtitle="What each package includes, the warranty per product and the time in workshop. The advisor picks a package and types ONE price; the customer sees the list with no item prices."
+        subtitle="What each package includes, the warranty per product and the estimated completion. The advisor picks a package and types ONE price; the customer sees the list with no item prices."
         actions={<LinkButton href="/settings" tone="secondary" size="lg">Back to Settings</LinkButton>}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}

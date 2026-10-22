@@ -241,7 +241,7 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
     const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
     // The labour discount as the quotation had it (our own labour lines; older quotations: labour and services).
     const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value, discount_scope: q.discount_scope });
-    if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope });
+    if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope }, { hasPackage: qLines.some((l) => !!l.package_key) });
     discount += d;
     discountBase += base;
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));

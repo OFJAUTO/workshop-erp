@@ -10,14 +10,14 @@ import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry 
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
 import { packageCostEstimate } from "@/lib/package-cost";
-import { packageDetailsText, packageSnapshot, type BodyshopPackage } from "@/lib/packages";
+import { ESTIMATED_COMPLETION, packageDetailsText, packageSnapshot, toSnapshot, type BodyshopPackage } from "@/lib/packages";
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory } from "@/lib/quotes";
+import { marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -1446,7 +1446,7 @@ export function QuoteEditor({
             <dt className="text-muted">Labour and services</dt><dd className="text-right">{aed(totals.labourSell)}</dd>
             <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
             <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
-            {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>{discountLabelOf(q)}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
+            {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
             {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"} data-roundoff-row>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
             <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
             <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
@@ -1517,7 +1517,8 @@ export function QuoteEditor({
                   const est = packageCostEstimate({
                     packagePrice: (pkg.unit_price ?? 0) * (pkg.quantity || 1),
                     title: pkg.title,
-                    itemLabels: ((pkg.package_items ?? []) as { label?: string }[]).map((x) => String(x?.label ?? "")),
+                    // The snapshot is an OBJECT ({ key, name, items: [...] }), read through the one parser.
+                    itemLabels: (toSnapshot(pkg.package_items)?.items ?? []).map((x) => x.label),
                     rolls,
                     filmRollPriceGloss: c.filmRollPriceGloss,
                     filmRollPriceMatte: c.filmRollPriceMatte,
@@ -1841,19 +1842,26 @@ function PackageDialog({ packages, onClose, onPick }: { packages: BodyshopPackag
             {packages.map((p) => (
               <button key={p.key} type="button" className="min-h-12 rounded-control border border-line-strong bg-white px-3 text-left text-sm font-bold" data-package-choice onClick={() => setPick(p)}>
                 {p.name}
-                <span className="block text-xs font-medium text-muted">{p.items.length} items{p.time_in_workshop ? ` · ${p.time_in_workshop}` : ""}</span>
+                <span className="block text-xs font-medium text-muted">{p.items.length} items{p.time_in_workshop ? ` · ${ESTIMATED_COMPLETION}: ${p.time_in_workshop}` : ""}</span>
               </button>
             ))}
           </div>
         ) : (
           <>
-            <div className="whitespace-pre-line rounded-control bg-chip p-3 text-sm">{packageDetailsText(packageSnapshot(pick, pick.items.filter((i) => i.only_if).map((i) => i.label)))}</div>
-            {optional.map((i) => (
-              <label key={i.label} className="flex min-h-11 items-center gap-2 text-sm font-semibold">
-                <input type="checkbox" checked={ticked.includes(i.label)} onChange={(e) => setTicked((t) => (e.target.checked ? [...t, i.label] : t.filter((x) => x !== i.label)))} className="h-5 w-5 accent-ink" data-package-optional />
-                {i.label} — only if the car has one ({i.only_if})
-              </label>
-            ))}
+            {optional.length ? (
+              <div className="flex flex-col gap-1 rounded-control border-2 border-ink p-3" data-package-optionals>
+                <span className="text-sm font-bold">Does the car have it?</span>
+                {optional.map((i) => (
+                  <label key={i.label} className="flex min-h-11 items-center gap-2 text-sm font-semibold">
+                    <input type="checkbox" checked={ticked.includes(i.label)} onChange={(e) => setTicked((t) => (e.target.checked ? [...t, i.label] : t.filter((x) => x !== i.label)))} className="h-5 w-5 accent-ink" data-package-optional={i.label} />
+                    {i.label} <span className="font-medium text-muted">— only if {i.only_if}</span>
+                  </label>
+                ))}
+                <span className="text-xs text-muted">Not ticked = it stays off every customer document.</span>
+              </div>
+            ) : null}
+            {/* What the customer will read: the ticked optional items only. */}
+            <div className="whitespace-pre-line rounded-control bg-chip p-3 text-sm" data-package-preview>{packageDetailsText(packageSnapshot(pick, ticked))}</div>
             <p className="text-xs text-muted">One price for the whole package: type it on the line after Add. The customer never sees item prices.</p>
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" onClick={() => onPick(pick, ticked)} data-package-add>Add the package</Button>

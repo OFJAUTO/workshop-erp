@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Badge, Card, SectionLabel } from "@/components/ui";
 import type { QuoteLock } from "@/lib/quote-lock";
-import { aed, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals } from "@/lib/quotes";
+import { aed, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals , hasPackageLine } from "@/lib/quotes";
 
 /**
  * A locked quotation (approved by the customer, replaced, or invoiced): every figure as plain text, no boxes, no
@@ -113,7 +113,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               <dt className="text-muted">Labour and services</dt><dd className="text-right">{aed(totals.labourSell)}</dd>
               <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
               <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
-              {totals.discount ? <><dt className="font-bold text-green">{discountLabelOf(quotation)}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
+              {totals.discount ? <><dt className="font-bold text-green">{discountLabelOf(quotation, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
               {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"}>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
               <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
               <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>

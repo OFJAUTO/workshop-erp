@@ -16,7 +16,7 @@ export type PackageItem = {
 export type BodyshopPackage = {
   key: string;
   name: string;
-  /** "5–7 working days" - shown to the customer. */
+  /** "5–7 working days" - shown to the customer as "Estimated completion" (the stored key keeps its old name). */
   time_in_workshop: string;
   items: PackageItem[];
   pickup_dropoff: boolean;
@@ -92,9 +92,18 @@ export function toSnapshot(raw: unknown): PackageSnapshot | null {
 export function packageDetailsText(raw: unknown): string | null {
   const s = toSnapshot(raw);
   if (!s) return null;
-  const lines = s.items.map((i) => `• ${i.label}${i.warranty ? ` — ${i.warranty.toLowerCase().includes("warrant") ? i.warranty : `${i.warranty} warranty`}` : ""}`);
-  if (s.time_in_workshop) lines.push(`Time in workshop: ${s.time_in_workshop}`);
+  const lines = s.items.map((i) => `• ${i.label}${i.warranty ? ` — ${warrantyWords(i.warranty)}` : ""}`);
   if (s.pickup_dropoff) lines.push("• Complimentary pick-up & drop-off");
   if (s.aftercare_check) lines.push("• Complimentary 10-day after-care check");
+  // Section 8: "Estimated completion" closes the list, on its own line.
+  if (s.time_in_workshop) lines.push(`${ESTIMATED_COMPLETION}: ${s.time_in_workshop}`);
   return lines.join("\n") || null;
+}
+
+/** Section 8 (21 October): the one name for the package's duration, on every screen and document. */
+export const ESTIMATED_COMPLETION = "Estimated completion";
+
+/** "10 years" → "10 years warranty"; words already saying warranty stay as they are. */
+export function warrantyWords(w: string): string {
+  return w.toLowerCase().includes("warrant") ? w : `${w} warranty`;
 }
