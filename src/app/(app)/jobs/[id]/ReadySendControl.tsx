@@ -113,7 +113,7 @@ export function ReadySendControl({
       </Button>
       {error && !open ? <span className="text-xs font-semibold text-red">{error}</span> : null}
       {open ? (
-        <SendLinkDialog title={title} message={step === "message" ? message : null} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} pdf={pdf ? { ...pdf, jobId, kind } : null} note={step === "message" ? note : null}>
+        <SendLinkDialog title={title} message={step === "message" ? message : null} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} pdf={pdf ? { ...pdf, jobId, kind } : null} note={step === "message" ? note : null} spell={token ? { kind: "invoice", token } : null}>
           {step === "how" ? (
             <div className="flex flex-col gap-4" data-pay-how>
               <div className="flex flex-col gap-2">

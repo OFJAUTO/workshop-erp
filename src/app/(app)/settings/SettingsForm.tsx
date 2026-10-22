@@ -171,7 +171,7 @@ export function SettingsForm({
                 <Input name="inspection_fee_aed" defaultValue={v.inspection_fee_aed} inputMode="numeric" required />
               </Field>
               <Field label="Premium brands" hint="One per line. Cars of these makes default to the premium inspection fee at gate-in (changeable per car).">
-                <Textarea name="premium_brands" defaultValue={v.premium_brands} rows={4} />
+                <Textarea name="premium_brands" defaultValue={v.premium_brands ?? listTexts.premium_brands} rows={4} data-premium-brands />
               </Field>
               <Field label="Premium brand inspection fee (AED)">
                 <Input name="premium_brand_fee_aed" defaultValue={v.premium_brand_fee_aed} inputMode="numeric" />
@@ -640,6 +640,9 @@ export function SettingsForm({
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="advisor_labour_discount" defaultChecked={!!flags.advisor_labour_discount} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Advisors can discount labour</span><span className="text-xs text-muted">On: a small discount column on labour and service lines for advisors. Off: only the owner discounts. Parts are never discounted by advisors.</span></span></label>
             <Field label="Known words" hint="Words that keep their capitals when the system tidies names and descriptions as people type: BMW, AMG, A/C. Separate with commas.">
               <Textarea name="known_words" defaultValue={v.known_words ?? listTexts.known_words} rows={4} required />
+            </Field>
+            <Field label="Workshop dictionary (spell check)" hint="Car words the spelling check before sending must never flag: model names, codes, workshop terms. Makes and models on the list, and the known words above, are accepted already. Separate with commas. Browsers and phone keyboards keep their own dictionary: add a word there with a long-press on the red underline.">
+              <Textarea name="spell_words" defaultValue={v.spell_words ?? listTexts.spell_words ?? ""} rows={3} spellCheck={false} data-spell-words />
             </Field>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="wash_board_show_times" defaultChecked={!!flags.wash_board_show_times} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Wash board shows the needed-by date</span><span className="text-xs text-muted">The promised date on each tile of the wash board.</span></span></label>
             <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" name="test_mode_enabled" defaultChecked={flags.test_mode_enabled !== false} className="mt-1 h-5 w-5 accent-ink" /><span className="flex flex-col text-sm"><span className="font-semibold">Testing phase</span><span className="text-xs text-muted">Shows the owner&apos;s &quot;Clear test data&quot; button on this page. Switch off at go-live.</span></span></label>

@@ -164,12 +164,13 @@ export function Input({ className = "", textCase, ...props }: React.InputHTMLAtt
   if (props.inputMode === "numeric" || props.inputMode === "decimal") return <NumericInput className={`${controlClass} ${className}`} {...props} />;
   // Names, codes and descriptions tidy their own case when the person leaves the box (the database does it again on save).
   if (textCase) return <CasedInput textCase={textCase} spellCheck={wordy && textCase !== "upper" ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
-  return <input spellCheck={wordy ? true : false} autoCorrect={wordy ? "on" : undefined} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
+  // Words get the browser's and the phone keyboard's spell check, autocorrect and sentence capitals (never switched off).
+  return <input spellCheck={wordy ? true : false} autoCorrect={wordy ? "on" : undefined} autoCapitalize={wordy ? "sentences" : undefined} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
 }
 
 export function Textarea({ className = "", textCase, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { textCase?: TextCase }) {
-  if (textCase) return <CasedTextarea textCase={textCase} spellCheck lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
-  return <textarea spellCheck autoCorrect="on" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
+  if (textCase) return <CasedTextarea textCase={textCase} spellCheck autoCorrect="on" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
+  return <textarea spellCheck autoCorrect="on" autoCapitalize="sentences" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
 }
 
 export function Select({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {

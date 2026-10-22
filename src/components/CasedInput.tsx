@@ -10,6 +10,7 @@ import { knownWordsFromPage, tidyText, type TextCase } from "@/lib/text-case";
 export function CasedInput({ textCase, onBlur, onChange, autoCapitalize, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { textCase: TextCase }) {
   return (
     <input
+      autoCorrect={textCase === "upper" ? "off" : "on"}
       autoCapitalize={autoCapitalize ?? (textCase === "upper" ? "characters" : textCase === "title" ? "words" : "sentences")}
       onChange={onChange}
       onBlur={(e) => {

@@ -74,7 +74,7 @@ export function ReportSendControl({ jobId, link, shortLink = null, messageTempla
         </Button>
       ) : null}
       {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
-      {open ? <SendLinkDialog title="Inspection report to the customer" message={message} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} /> : null}
+      {open ? <SendLinkDialog title="Inspection report to the customer" message={message} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} spell={{ kind: "report", jobId }} /> : null}
     </div>
   );
 }
