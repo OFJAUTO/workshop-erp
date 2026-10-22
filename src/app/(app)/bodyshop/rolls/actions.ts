@@ -88,7 +88,7 @@ export async function saveBodyshopCosting(formData: FormData) {
   await upsert("ceramic_cars_exterior_per_bottle", "Ceramic: cars per bottle (exterior)", Number(formData.get("ceramic_cars_ext")) || 4);
   await upsert("ceramic_cars_interior_per_bottle", "Ceramic: cars per bottle (interior)", Number(formData.get("ceramic_cars_int")) || 5.5);
   await upsert("big_car_film_rolls", "Big cars: film rolls", Number(formData.get("big_rolls")) || 1.5);
-  await upsert("ppf_handcut_surcharge_aed", "PPF: bespoke hand-cut surcharge (AED, 0 = none)", Math.max(0, Number(formData.get("handcut_surcharge")) || 0));
+  await upsert("ppf_handcut_surcharge_aed", "PPF: hand-cut surcharge (AED, 0 = none)", Math.max(0, Number(formData.get("handcut_surcharge")) || 0));
   await upsert("big_car_models", "Big cars (1.5 film rolls)", String(formData.get("big_models") ?? "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 60));
   revalidatePath("/settings/packages");
   redirect(`/settings/packages?message=${encodeURIComponent("Costing saved.")}`);

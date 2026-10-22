@@ -167,7 +167,7 @@ export type EditorSettings = {
   batteryWarrantyMonths?: number;
   /** Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate). */
   costing?: import("@/lib/quote-data").PackageCosting;
-  /** Section 10: the optional bespoke hand-cut surcharge (Settings, 0 = none). */
+  /** Section 10: the optional hand-cut surcharge (Settings, 0 = none). */
   handcutSurcharge?: number;
 };
 
@@ -178,7 +178,7 @@ export type PartsWait = { unavailable?: { label: string; note: string | null }[]
 
 type Suggestion = { id: string; title: string; hint: string; service: Service | null };
 
-const HANDCUT_SURCHARGE_TITLE = "Bespoke hand-cut surcharge";
+const HANDCUT_SURCHARGE_TITLE = "Hand-cut surcharge";
 const num = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 const finishedLine = (l: QuoteLine) => (isComplimentary(l) ? !!l.title.trim() : l.line_type === "labour" ? !!l.title.trim() && (l.hours ?? 0) > 0 : l.line_type === "package" ? !!l.title.trim() && (l.unit_price ?? 0) > 0 : !!l.title.trim());
 const chip = (on: boolean, extra = "") => `min-h-9 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${extra}`;

@@ -46,9 +46,9 @@ export async function loadHandover(token: string, settings: Settings): Promise<H
   const installDate = (job.gated_out_at ?? new Date().toISOString()).slice(0, 10);
   const years = Number(settings.ppf_warranty_years) || 10;
   const validUntil = `${Number(installDate.slice(0, 4)) + years}${installDate.slice(4)}`;
-  const brand = String(settings.ppf_brand_name || "OFJ PPF");
-  // Section 10: "OFJ PPF – Gloss · Bespoke hand-cut · Full body" - brand, finish, cutting method, coverage.
-  const filmText = (await ppfWarrantyWords(job.id, brand, approved.film ?? null)) ?? (approved.kinds.includes("coloured_ppf") ? `${brand} coloured film${approved.film?.colour ? ` · ${approved.film.colour}` : ""}${approved.film?.code ? ` (${approved.film.code})` : ""}` : `${brand} clear film`);
+  const brand = String(settings.ppf_brand_name || "OFJ Bespoke PPF");
+  // "OFJ Bespoke PPF – Gloss · Hand-cut · Full body · 10-year warranty" - brand, finish, cutting method, coverage, years.
+  const filmText = (await ppfWarrantyWords(job.id, brand, approved.film ?? null, years)) ?? (approved.kinds.includes("coloured_ppf") ? `${brand} coloured film${approved.film?.colour ? ` · ${approved.film.colour}` : ""}${approved.film?.code ? ` (${approved.film.code})` : ""}` : `${brand} clear film`);
   const v = job.vehicle;
   const adv = advisor as unknown as { display_name: string; staff_private: { phone: string | null } | { phone: string | null }[] | null } | null;
   const advPhone = adv ? (Array.isArray(adv.staff_private) ? adv.staff_private[0]?.phone : adv.staff_private?.phone) ?? null : null;

@@ -34,7 +34,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const { data: svcRows } = svcIds.length ? await createAdminClient().from("services").select("id, bodyshop_kind").in("id", svcIds) : { data: [] as { id: string; bodyshop_kind: string | null }[] };
   const kindSet = new Set((svcRows ?? []).map((s) => s.bodyshop_kind).filter((k): k is string => !!k));
   const kindOfService = new Map((svcRows ?? []).map((s) => [s.id, s.bodyshop_kind]));
-  const bodyshopNotes = [kindSet.has("ppf") || kindSet.has("coloured_ppf") ? `${String(settings.ppf_brand_name || "OFJ PPF")} · ${Number(settings.ppf_warranty_years) || 10}-year warranty: a written certificate comes with the car at handover.` : null, kindSet.has("ppf_removal") ? String(settings.ppf_removal_note || "") : null].filter((x): x is string => !!x);
+  const bodyshopNotes = [kindSet.has("ppf") || kindSet.has("coloured_ppf") ? `${String(settings.ppf_brand_name || "OFJ Bespoke PPF")} · ${Number(settings.ppf_warranty_years) || 10}-year warranty: a written certificate comes with the car at handover.` : null, kindSet.has("ppf_removal") ? String(settings.ppf_removal_note || "") : null].filter((x): x is string => !!x);
   const partOf = (id: string | null) => (id ? bundle.parts.find((p) => p.id === id) : undefined);
   const today = dubaiDate();
   // Section 11: the job's tint specification puts the shades on the tint items ("· 50% darkness").

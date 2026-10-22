@@ -1,13 +1,14 @@
 /**
  * Section 10 (21 October 2026): the PPF cutting method - ONE vocabulary for the quotation editor, every
  * customer document (under the PPF item, with a one-sentence explanation), the job card and the PPF
- * tablet (a big badge), the invoice and the warranty card ("OFJ PPF – Gloss · Bespoke hand-cut · Full
- * body"), and the monthly report (hand-cut against pre-cut). Pure: no imports.
+ * tablet (a big badge), the invoice and the warranty card ("OFJ Bespoke PPF – Gloss · Hand-cut · Full
+ * body · 10-year warranty"), and the monthly report (hand-cut against pre-cut). Pure: no imports.
+ * "OFJ Bespoke" is the PPF product's name (23 October 2026), so the cutting methods never use the word Bespoke.
  */
 export type CutMethod = "hand" | "machine" | "mixed";
 
 export const CUT_METHODS: { key: CutMethod; chip: string; long: string; short: string; badge: string; recommended?: boolean }[] = [
-  { key: "hand", chip: "Hand-cut", long: "Bespoke hand-cut – edges wrapped, seamless finish", short: "Bespoke hand-cut", badge: "HAND-CUT", recommended: true },
+  { key: "hand", chip: "Hand-cut", long: "Hand-cut – edges wrapped, seamless finish", short: "Hand-cut", badge: "HAND-CUT", recommended: true },
   { key: "machine", chip: "Pre-cut", long: "Machine pre-cut – computer-cut pattern", short: "Machine pre-cut", badge: "PRE-CUT" },
   { key: "mixed", chip: "Mixed", long: "Mixed – hand-cut and machine pre-cut", short: "Mixed cut", badge: "MIXED" },
 ];
@@ -15,13 +16,13 @@ export const CUT_METHODS: { key: CutMethod; chip: string; long: string; short: s
 /** The one sentence behind the ⓘ on the customer's documents. */
 export const CUT_EXPLAIN = "Hand-cut film is trimmed on your car and wrapped around the panel edges so no seams or edges show; pre-cut film is cut by a machine from a pattern and stops just short of the edges.";
 
-/** A PPF line's method: what was chosen, else bespoke hand-cut (the default and the recommendation). */
+/** A PPF line's method: what was chosen, else hand-cut (the default and the recommendation). */
 export function cutOf(method: string | null | undefined, note?: string | null): (typeof CUT_METHODS)[number] & { note: string | null } {
   const m = CUT_METHODS.find((c) => c.key === method) ?? CUT_METHODS[0];
   return { ...m, note: m.key === "mixed" && note ? note.trim() || null : null };
 }
 
-/** The full customer words: "Bespoke hand-cut – edges wrapped, seamless finish", with the note for Mixed. */
+/** The full customer words: "Hand-cut – edges wrapped, seamless finish", with the note for Mixed. */
 export function cutWords(method: string | null | undefined, note?: string | null): string {
   const c = cutOf(method, note);
   return c.note ? `${c.long} (${c.note})` : c.long;

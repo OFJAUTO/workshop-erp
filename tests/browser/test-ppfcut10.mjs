@@ -1,7 +1,7 @@
 // Evening section 10 proof: the PPF cutting method. Chips on the PPF line (Hand-cut recommended,
 // Pre-cut, Mixed + note), the optional hand-cut surcharge line, the method under the PPF item with the
 // ⓘ sentence on the PDF and the link, locked once approved, the big badge on the job card / bodyshop
-// page / PPF tablet, "Gloss · Bespoke hand-cut · Full body" on the warranty card, and the month's
+// page / PPF tablet, "OFJ Bespoke PPF – Gloss · Hand-cut · Full body" on the warranty card, and the month's
 // hand-cut against pre-cut table.
 // Run: node --env-file=.env.local tests/browser/test-ppfcut10.mjs   (dev server on :3100)
 import path from "node:path";
@@ -51,10 +51,10 @@ await go(page, `${base}/jobs/${jobId}/quote/${qid}`);
 await page.locator(`#item-line-${pl.id} [data-cut-chip="machine"]`).click();
 await sleep(800);
 await page.locator(`#item-line-${pl.id} [data-cut-chip="hand"]`).click();
-const sur = await until(async () => (await sql("select id, unit_price::text as p from public.quotation_lines where quotation_id = $1 and title = 'Bespoke hand-cut surcharge' and is_active", [qid]))[0]);
+const sur = await until(async () => (await sql("select id, unit_price::text as p from public.quotation_lines where quotation_id = $1 and title = 'Hand-cut surcharge' and is_active", [qid]))[0]);
 check("2: with a surcharge in Settings, Hand-cut adds the surcharge line (AED 250)", !!sur && Number(sur.p) === 250, JSON.stringify(sur ?? {}));
 await page.locator(`#item-line-${pl.id} [data-cut-chip="machine"]`).click();
-check("2: Pre-cut takes the surcharge line off", !!(await until(async () => ((await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and title = 'Bespoke hand-cut surcharge' and is_active", [qid]))[0].n === 0 ? 1 : null))));
+check("2: Pre-cut takes the surcharge line off", !!(await until(async () => ((await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and title = 'Hand-cut surcharge' and is_active", [qid]))[0].n === 0 ? 1 : null))));
 await sql("update public.settings set value = to_jsonb(0) where key = 'ppf_handcut_surcharge_aed'");
 await browser.close();
 
@@ -95,7 +95,7 @@ const hv = (await sql("select bodyshop_handover_token as t from public.jobs wher
 if (hv) {
   const w = await pdfText(`/api/pdf/warranty/${hv}`);
   // Section 12: the certificate is the warranty card - finish, coverage and cutting method sit in their own columns.
-  check("4: the warranty card names finish, cutting method and coverage", w.status === 200 && /OFJ PPF – Gloss/i.test(w.text) && /Bespoke hand-cut/i.test(w.text) && /Full body/i.test(w.text), w.text.match(/OFJ PPF – .{0,80}/i)?.[0] ?? `${w.status}`);
+  check("4: the warranty card names finish, cutting method and coverage", w.status === 200 && /OFJ Bespoke PPF – Gloss/i.test(w.text) && /Hand-cut/i.test(w.text) && !/Bespoke hand-cut/i.test(w.text) && /Full body/i.test(w.text), w.text.match(/OFJ Bespoke PPF – .{0,80}/i)?.[0] ?? `${w.status}`);
 } else check("4: the warranty card names finish, cutting method and coverage", false, "no handover token on the seed");
 
 /* ---------------- 5. The month's report: hand-cut against pre-cut ---------------- */

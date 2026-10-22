@@ -149,7 +149,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         })}
         {hasPpf ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-3 flex flex-col gap-0.5" data-ppf-warranty>
-            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{String(settings.ppf_brand_name || "OFJ PPF")} · {Number(settings.ppf_warranty_years) || 10}-year warranty</span>
+            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{String(settings.ppf_brand_name || "OFJ Bespoke PPF")} · {Number(settings.ppf_warranty_years) || 10}-year warranty</span>
             <span className="text-sm">Our own film, installed by our team, with a written warranty certificate at handover.</span>
           </div>
         ) : null}

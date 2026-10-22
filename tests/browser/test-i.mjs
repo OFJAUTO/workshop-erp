@@ -46,7 +46,7 @@ await section("1 quote before arrival", async () => {
   // The customer's link: PPF warranty block, old-film note, Approve needs the tick.
   const { browser, page } = await browserFor("owner", { viewport: { width: 430, height: 900 } });
   await go(page, `${base}/quote/${token}`);
-  check("7: the PPF quote link shows the OFJ PPF 10-year warranty block", (await page.locator("[data-ppf-warranty]").count()) === 1 && /10-year warranty/i.test((await page.locator("[data-ppf-warranty]").textContent()) ?? ""));
+  check("7: the PPF quote link shows the OFJ Bespoke PPF 10-year warranty block", (await page.locator("[data-ppf-warranty]").count()) === 1 && /10-year warranty/i.test((await page.locator("[data-ppf-warranty]").textContent()) ?? ""));
   check("1: the old-film note is on the link", /paint underneath can occasionally lift/i.test((await page.locator("[data-removal-note]").textContent().catch(() => "")) ?? ""));
   await shot(page, "05-ppf-quote-link");
   await page.getByRole("button", { name: "Approved" }).click();
@@ -274,7 +274,7 @@ await section("11-12 sign-off and going out", async () => {
   if (pdf.ok) {
     const buf = Buffer.from(await pdf.arrayBuffer());
     const text = await pdfText(buf);
-    check("7: the certificate carries OFJ PPF, the VIN, install and valid-until dates and no staff names", /OFJ PPF/i.test(text) && /WDC1234567E2E0001/i.test(text) && /valid until/i.test(text) && !/E2e |Arsalan|Omar/.test(text), text.replace(/\s+/g, " ").slice(0, 160));
+    check("7: the certificate carries OFJ Bespoke PPF, the VIN, install and valid-until dates and no staff names", /OFJ Bespoke PPF/i.test(text) && /WDC1234567E2E0001/i.test(text) && /valid until/i.test(text) && !/E2e |Arsalan|Omar/.test(text), text.replace(/\s+/g, " ").slice(0, 160));
     await pdfPng(buf, path.join(SHOTS, "07-warranty-certificate.png"));
   }
   // Gate-out with the final check date: the appointment is made, everyone is told the car left.

@@ -24,7 +24,7 @@ const DEFAULTS = {
   ceramic_cars_exterior_per_bottle: 4,
   ceramic_cars_interior_per_bottle: 5.5,
   package_installer_hours: 80,
-  // Section 10: an optional surcharge for bespoke hand-cut PPF (0 = none).
+  // Section 10: an optional surcharge for hand-cut PPF (0 = none).
   ppf_handcut_surcharge_aed: 0,
   // Section 11: the tint specification.
   tint_legal_max_darkness: 50,
@@ -292,9 +292,9 @@ const DEFAULTS = {
     "Dear [name],\n\nA reminder of your appointment at OFJ Automotive tomorrow:\n*[date] at [time]*\nFor: [reason]\n\nPlease reply to confirm.\n\nOFJ Automotive",
   whatsapp_approval_template: "Dear [name],\n\nYour *[make model]* ([plate]) has been received at OFJ Automotive.\n\nPlease review the check-in and approve the inspection:\n[link]\n\nOFJ Automotive",
   // The bodyshop (14 October 2026): the PPF warranty and care texts, the old-film note, the three customer updates, the final check.
-  ppf_brand_name: "OFJ PPF",
+  ppf_brand_name: "OFJ Bespoke PPF",
   ppf_warranty_years: 10,
-  ppf_warranty_text: "OFJ PPF is warranted against yellowing, cracking, peeling, bubbling and delamination for ten years from the installation date, when the film is cared for as described in the care instructions. The warranty covers the film and its reinstallation; it does not cover damage from accidents, stones, chemicals, abrasion, improper washing or removal by a third party. Valid for the vehicle named on this certificate.",
+  ppf_warranty_text: "OFJ Bespoke PPF is warranted against yellowing, cracking, peeling, bubbling and delamination for ten years from the installation date, when the film is cared for as described in the care instructions. The warranty covers the film and its reinstallation; it does not cover damage from accidents, stones, chemicals, abrasion, improper washing or removal by a third party. Valid for the vehicle named on this certificate.",
   ppf_care_text: "Wait 7 days before the first wash. Hand wash or touchless only; no automatic brushes. Use pH-neutral shampoo and microfibre only. Remove bird droppings, tree sap and insects as soon as you can. No wax or sealant with petroleum distillates; a PPF-safe sealant is fine. Keep pressure washers 50 cm away and off the film edges.",
   ppf_removal_note: "We take great care removing old film, but paint underneath can occasionally lift.",
   bodyshop_final_check_days: 10,

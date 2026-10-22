@@ -158,7 +158,7 @@ export async function warrantyCardOf(jobId: string, settings: Settings, opts: { 
   ]);
   const terms = termsOf(settings.warranty_terms);
   const handoverDay = job.gated_out_at ? dubaiDay(job.gated_out_at) : null;
-  const brand = String(settings.ppf_brand_name || "OFJ PPF");
+  const brand = String(settings.ppf_brand_name || "OFJ Bespoke PPF");
   const entryOf = (p: WarrantyProduct, k: string) => entries.find((e) => e.product === p && e.item_key === k) ?? null;
   const rows: WarrantyRow[] = fitted.map((c) => {
     const e = entryOf(c.product, c.itemKey);

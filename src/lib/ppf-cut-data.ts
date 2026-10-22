@@ -36,10 +36,10 @@ export async function cutMethodsForJobs(jobIds: string[]): Promise<Map<string, J
 }
 
 /**
- * The warranty card's film line: "OFJ PPF – Gloss · Bespoke hand-cut · Full body" - the brand, the
- * finish (from the package or the film colour), the cutting method and the coverage (the PPF item).
+ * The warranty card's film line: "OFJ Bespoke PPF – Gloss · Hand-cut · Full body · 10-year warranty" - the brand,
+ * the finish (from the package or the film colour), the cutting method, the coverage (the PPF item) and the years.
  */
-export async function ppfWarrantyWords(jobId: string, brand: string, film: { colour?: string | null; code?: string | null } | null): Promise<string | null> {
+export async function ppfWarrantyWords(jobId: string, brand: string, film: { colour?: string | null; code?: string | null } | null, years: number | null = null): Promise<string | null> {
   const { data } = await createAdminClient()
     .from("quotation_lines")
     .select("title, package_items, cut_method, cut_note, service:services(bodyshop_kind), quotation:quotations!inner(job_id, status, version, created_at, is_active, kind)")
@@ -59,7 +59,7 @@ export async function ppfWarrantyWords(jobId: string, brand: string, film: { col
   let coverage = ppfLabel.replace(/\bppf\b|paint protection film/gi, "").replace(/[-–—,·]+/g, " ").replace(/\s+/g, " ").trim();
   if (/^full$/i.test(coverage) || !coverage) coverage = "Full body";
   const c = cutOf(best.cut_method, best.cut_note);
-  return `${brand} – ${finish}${film?.code ? ` (${film.code})` : ""} · ${c.short} · ${coverage}`;
+  return `${brand} – ${finish}${film?.code ? ` (${film.code})` : ""} · ${c.short} · ${coverage}${years ? ` · ${years}-year warranty` : ""}`;
 }
 
 /**
@@ -86,7 +86,7 @@ export async function ppfByCutMethod(fromIso: string, toIso: string): Promise<{ 
     r.metres += ((film ?? []) as { job_id: string; metres: number | string | null }[]).filter((f) => f.job_id === id).reduce((a, f) => a + (Number(f.metres) || 0), 0);
     rows.set(k, r);
   }
-  const label = { hand: "Bespoke hand-cut", machine: "Machine pre-cut", mixed: "Mixed" } as Record<string, string>;
+  const label = { hand: "Hand-cut", machine: "Machine pre-cut", mixed: "Mixed" } as Record<string, string>;
   return ["hand", "machine", "mixed"].filter((k) => rows.has(k)).map((k) => {
     const r = rows.get(k)!;
     const hours = Math.round((r.minutes / 60) * 10) / 10;

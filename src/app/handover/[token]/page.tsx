@@ -37,7 +37,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
   const wCard = await warrantyCardOf(data.job.id, settings);
   const wToken = wCard?.rows.length ? await ensureWarrantyToken(data.job.id) : null;
   const wQr = wToken ? await qrDataUrl(`${PRODUCTION_SITE_URL}/warranty/${wToken}`, 320) : null;
-  const brand = String(settings.ppf_brand_name || "OFJ PPF");
+  const brand = String(settings.ppf_brand_name || "OFJ Bespoke PPF");
   const years = Number(settings.ppf_warranty_years) || 10;
   const meta = [
     { label: "Job", value: data.job.job_number },
