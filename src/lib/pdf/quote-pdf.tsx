@@ -13,6 +13,8 @@ import { qrPng } from "./qr";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { packageDetailsText, packageDocOf } from "../packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
+import { cleanTintSpec, decorateTint, lineTintWords } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { DocumentTail, GREY, InfoBoxes, PackageSection, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
 
 /**
@@ -35,6 +37,9 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const bodyshopNotes = [kindSet.has("ppf") || kindSet.has("coloured_ppf") ? `${String(settings.ppf_brand_name || "OFJ PPF")} · ${Number(settings.ppf_warranty_years) || 10}-year warranty: a written certificate comes with the car at handover.` : null, kindSet.has("ppf_removal") ? String(settings.ppf_removal_note || "") : null].filter((x): x is string => !!x);
   const partOf = (id: string | null) => (id ? bundle.parts.find((p) => p.id === id) : undefined);
   const today = dubaiDate();
+  // Section 11: the job's tint specification puts the shades on the tint items ("· 50% darkness").
+  const tintSpec = cleanTintSpec(q.tint_spec) ?? (await tintSpecForJob(q.job_id));
+  const tintLimit = tintLimitOf(settings);
   const toDoc = (l: (typeof lines)[number]): SectionLine => {
     const amount = lineTotal(l);
     const unit = lineUnitPrice(l);
@@ -45,7 +50,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     return {
       description: withPositions(title, l.positions),
       // A part: its availability in plain words (Today, Tomorrow, In 2 days) as the small grey line, then its type.
-      details: l.package_items ? packageDetailsText(l.package_items) : [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details, !l.package_items && lineIsPpf(l, kindOfService.get(l.service_id ?? "") ?? null) ? cutWords(l.cut_method, l.cut_note) : null].filter(Boolean).join(" · ") || null,
+      details: l.package_items ? packageDetailsText(l.package_items) : [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details, !l.package_items && lineIsPpf(l, kindOfService.get(l.service_id ?? "") ?? null) ? cutWords(l.cut_method, l.cut_note) : null, lineTintWords(l, kindOfService.get(l.service_id ?? "") ?? null, tintSpec, tintLimit)].filter(Boolean).join(" · ") || null,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
       amount,
@@ -86,7 +91,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
         ]}
       />
       {pkgLines.map((l) => {
-        const docModel = packageDocOf(l.package_items, { car: carName || null, ppfNote: lineIsPpf(l) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
+        const docModel = packageDocOf(l.package_items, { car: carName || null, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf(l) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
         return docModel ? <PackageSection key={l.id} doc={docModel} price={linePrice(l)} subtotal={lineTotal(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
       })}
       {services.length || !pkgLines.length ? <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" /> : null}

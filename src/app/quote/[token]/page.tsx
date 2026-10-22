@@ -14,6 +14,9 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { QuoteResponse } from "./QuoteResponse";
+import { TintCard } from "@/components/TintCard";
+import { aboveLimit, cleanTintSpec, decorateTint, lineIsTint, tintSummary } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +78,13 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const kinds = new Set((svcKinds ?? []).map((s) => s.bodyshop_kind).filter((k): k is string => !!k));
   const hasPpf = kinds.has("ppf") || kinds.has("coloured_ppf");
   const hasRemoval = kinds.has("ppf_removal");
+  // Section 11: the shades on the tint items; a window darker than the legal limit is the customer's request, ticked when approving.
+  const tintSpec = cleanTintSpec(q.tint_spec) ?? (await tintSpecForJob(q.job_id));
+  const tintLimit = tintLimitOf(settings);
+  const kindOf = new Map((svcKinds ?? []).map((s) => [s.id, s.bodyshop_kind]));
+  const tintLines = lines.filter((l) => lineIsTint(l, kindOf.get(l.service_id ?? "") ?? null));
+  const tintOutsidePackage = tintLines.some((l) => !l.package_key);
+  const tintOver = tintLines.length ? aboveLimit(tintSpec, tintLimit) : [];
   const totals = quoteTotals(lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const customerName = q.sent_to_name ?? customer?.company_name ?? customer?.full_name ?? "Customer";
   const carName = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
@@ -118,7 +128,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         meta={meta}
         boxes={boxes}
         view={{ href: `/api/pdf/quote/${liveToken}`, label: isEstimate ? "View estimate (PDF)" : "View quotation (PDF)", fileName: `OFJ ${isEstimate ? "Estimate" : "Quotation"} ${q.number}${q.version > 1 ? ` v${q.version}` : ""}.pdf` }}
-        action={open ? <QuoteResponse token={liveToken} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} /> : null}
+        action={open ? <QuoteResponse token={liveToken} customerName={customerName} total={totals.total} declaration={settings.declaration_text} declarationAr={settings.declaration_text_ar} isEstimate={isEstimate} terms={settings.terms_and_conditions} termsAr={settings.terms_and_conditions_ar} removalAck={hasRemoval ? String(settings.ppf_removal_note) : null} tintAck={tintOver.length ? `${tintOver.map((o) => `${o.label} ${o.shade}% darkness`).join(", ")} is darker than the legal limit of ${tintLimit}% darkness.` : null} /> : null}
         contact={<ContactButtons phone={company.phone} label="Questions or changes?" />}
       >
         {statusNotes}
@@ -131,7 +141,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           {totals.deposit ? <span className="text-sm font-bold" data-deposit-required>Deposit required: {aed(totals.deposit)}</span> : null}
         </div>
         {lines.filter((l) => !!l.package_key).map((l) => {
-          const docModel = packageDocOf(l.package_items, { car: carName || null, ppfNote: lineIsPpf(l) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
+          const docModel = packageDocOf(l.package_items, { car: carName || null, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf(l) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
           return docModel ? <PackageCard key={l.id} doc={docModel} price={linePrice(l)} subtotal={lineTotal(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
         })}
         {hasPpf ? (
@@ -140,6 +150,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
             <span className="text-sm">Our own film, installed by our team, with a written warranty certificate at handover.</span>
           </div>
         ) : null}
+        {tintOutsidePackage && tintSummary(tintSpec, tintLimit) ? <TintCard words={tintSummary(tintSpec, tintLimit)!} /> : null}
+        {q.tint_ack_at ? <p className="text-xs text-[#5F6368]" data-tint-acknowledged>Tint darker than the legal limit at your request, confirmed by {q.tint_ack_name} on {formatDateTime(q.tint_ack_at)}.</p> : null}
         {hasRemoval ? <p className="text-sm text-[#5F6368]" data-removal-note>{String(settings.ppf_removal_note)}</p> : null}
       </CustomerFront>
     );

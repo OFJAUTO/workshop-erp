@@ -28,6 +28,9 @@ import { filmUsageAction, tintUsageAction } from "../rolls/actions";
 import { RemovedItemForm } from "./RemovedItemForm";
 import { SignoffPanel } from "./SignoffPanel";
 import { UpdatesPanel, type UpdateState } from "./UpdatesPanel";
+import { TintFittedPhotos } from "@/components/TintFittedPhotos";
+import { aboveLimit, tintSummary } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +99,12 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
 
   // Section 10: the PPF cutting method, big, for the PPF team.
   const jobCut = (await cutMethodsForJobs([jobId])).get(jobId) ?? null;
+  // Section 11: the tint choice per window for the installer, and the photo after fitting.
+  const tintSpec = await tintSpecForJob(jobId);
+  const tintLimit = tintLimitOf(settings);
+  const tintWords = tintSummary(tintSpec, tintLimit);
+  const tintOver = aboveLimit(tintSpec, tintLimit);
+  const tintPhotos = photoFiles.filter((p) => p.caption === "Tint fitted");
   return (
     <>
       <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} />
@@ -109,7 +118,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-white" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
             <Badge tone={job.status === "closed" ? "neutral" : job.status === "ready" ? "green" : "ink"}>{statusLabel}</Badge>
             {job.promised_at ? <Badge tone={job.promised_at < today && job.is_open ? "red" : job.promised_at === today ? "amber" : "neutral"}>Handover {formatDate(job.promised_at)}</Badge> : null}
-            {kindWords.length ? <span className="text-sm text-muted">{kindWords.join(", ")}{film?.colour || film?.code ? ` · film ${[film.colour, film.code].filter(Boolean).join(" ")}` : ""}{tintPercent ? ` · tint ${tintPercent}%` : ""}</span> : null}
+            {kindWords.length ? <span className="text-sm text-muted">{kindWords.join(", ")}{film?.colour || film?.code ? ` · film ${[film.colour, film.code].filter(Boolean).join(" ")}` : ""}{!tintWords && tintPercent ? ` · tint ${tintPercent}%` : ""}</span> : null}
           </span>
         }
         actions={
@@ -162,6 +171,16 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <SectionLabel>Not started yet</SectionLabel>
           <p className="text-sm">{kinds.length ? "The stages are built from the approved packages when the gate-in photos are complete." : "No approved bodyshop packages yet: the quotation has to be approved first."}</p>
           {canManage && kinds.length ? <form action={startWorkAction.bind(null, jobId)}><Button type="submit" size="md" data-start-work>Start the work now</Button></form> : null}
+        </Card>
+      ) : null}
+
+      {tintWords ? (
+        <Card className="flex flex-col gap-2" data-tint-card-staff>
+          <SectionLabel>Window tint</SectionLabel>
+          <p className="text-lg font-extrabold leading-snug" data-tint-summary>{tintWords}</p>
+          {tintOver.length ? <p className="text-xs font-semibold">Above the legal limit at the customer&apos;s request: {tintOver.map((o) => `${o.label} ${o.shade}% darkness`).join(", ")}.</p> : null}
+          <span className="text-xs text-muted">Photo after fitting{tintPhotos.length ? ` (${tintPhotos.length})` : ""}: taken here or on the PPF tablet.</span>
+          <TintFittedPhotos jobId={jobId} files={tintPhotos} canAdd={!staff.viewingAs && (canLead || canQuote)} />
         </Card>
       ) : null}
 

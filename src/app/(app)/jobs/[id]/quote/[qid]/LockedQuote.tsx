@@ -10,7 +10,7 @@ import { aed, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCos
  * delete buttons, no menus. The banner says why it is locked and what the way forward is; the bar at the bottom
  * carries the one action this person has (Revise, or Ask owner to revise), or nothing.
  */
-export function LockedQuote({ quotation, lock, lines, totals, showProfit, actions, ownerBox, statusText, commissionLine = null }: {
+export function LockedQuote({ quotation, lock, lines, totals, showProfit, actions, ownerBox, statusText, commissionLine = null, tintBox = null }: {
   quotation: QuoteRow;
   lock: QuoteLock;
   lines: QuoteLine[];
@@ -21,6 +21,8 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
   statusText: string;
   /** The internal Commission line (editable even here: it never touches the customer's figures). */
   commissionLine?: ReactNode;
+  /** Section 11: the tint specification stays changeable after approval, until the tint work starts. */
+  tintBox?: ReactNode;
 }) {
   const live = lines.filter((l) => l.is_active && !l.fee_kind);
   const labour = live.filter((l) => blockOf(l) === "labour");
@@ -56,6 +58,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               </ol>
             )}
           </Card>
+          {tintBox}
           <Card className="flex flex-col gap-2">
             <SectionLabel right={`${parts.length}`}>Parts</SectionLabel>
             {parts.length === 0 ? <p className="text-sm text-muted">No parts on this quotation.</p> : (

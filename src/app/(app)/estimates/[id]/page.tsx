@@ -18,6 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { reviseQuotation } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
+import { TintSpecPanel } from "@/components/TintSpecPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +92,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
       ) : null}
       <QuoteEditor
         autoOpenPackages={openPackages === "1"}
+        tintBox={<TintSpecPanel quotation={q} settings={settings} isOwner={isOwner} viewOnly={!!staff.viewingAs} />}
         quotation={q}
         lines={bundle.lines}
         parts={[]}
@@ -110,7 +112,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
     handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
-    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "), q.film_rolls_est),
+    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec),
           installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
           goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),

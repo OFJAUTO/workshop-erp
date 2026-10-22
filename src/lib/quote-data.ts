@@ -13,7 +13,7 @@ import { rowState } from "./parts-rows";
 export const PARTS_BUCKET = "parts-diagrams";
 
 export const QUOTE_SELECT =
-  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, expected_payment_method, editing_by, editing_at, markup_skipped_at, markup_skipped_by, deposit_mode, deposit_value, deposit_set_by, deposit_set_at, deposit_skipped_at, deposit_skipped_by, revision_requested_at, revision_requested_by, revision_request_reason, revision_request_kind, revision_allowed_at, revision_allowed_by, revision_declined_at, revision_declined_by, revision_decision_note, discount_kind, discount_value, discount_scope, commission_to, commission_kind, commission_value, commission_aed, commission_paid_at, commission_paid_by, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note, materials_cost_aed, removal_ack_at, removal_ack_name, film_rolls_est, created_at, created_by, updated_at";
+  "id, kind, number, version, parent_id, job_id, customer_id, vehicle_id, estimate_id, status, token, discount_percent, vat_percent, subtotal_aed, discount_aed, vat_aed, total_aed, approved_total_aed, deposit_aed, promised_at, validity_days, valid_until, customer_note, customer_request_note, payment_by_card, owner_approval_reason, owner_approved_by, owner_approved_at, sent_at, sent_by, sent_method, sent_to_name, sent_to_phone, opened_at, responded_at, approver_name, approver_phone, decline_reason, reminded_at, completed_at, completed_by, parts_reminded_at, parts_escalated_at, danger_acknowledged_at, danger_acknowledged_by, not_quoted, rounded_total_aed, estimated_days, declined_note, viewed_full_at, declined_by, parts_price_changed_at, expected_payment_method, editing_by, editing_at, markup_skipped_at, markup_skipped_by, deposit_mode, deposit_value, deposit_set_by, deposit_set_at, deposit_skipped_at, deposit_skipped_by, revision_requested_at, revision_requested_by, revision_request_reason, revision_request_kind, revision_allowed_at, revision_allowed_by, revision_declined_at, revision_declined_by, revision_decision_note, discount_kind, discount_value, discount_scope, commission_to, commission_kind, commission_value, commission_aed, commission_paid_at, commission_paid_by, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note, materials_cost_aed, removal_ack_at, removal_ack_name, film_rolls_est, tint_spec, tint_ack_at, tint_ack_name, created_at, created_by, updated_at";
 export const LINE_SELECT = "id, quotation_id, position, line_type, title, details, group_label, source_type, source_key, quantity, unit_cost, markup_percent, unit_price, hours, labour_rate, discount_percent, discount_reason, line_total, part_item_id, package_id, service_id, visible_to_customer, urgency, advisor_added, customer_approved, is_active, part_type, brand, option_group, chosen, fee_kind, recovery_trips, recovery_provider, dangerous, parent_line_id, recovery_provider_kind, recovery_paid_by, recovery_mention_free, markup_confirmed, price_per, positions, left_off, recovery_type, hours_estimate, film_colour, film_code, tint_percent, revised_from_line_id, outside_work, package_key, package_items, price_display, installer_hours, cut_method, cut_note";
 export const SERVICE_SELECT = "id, category_id, name, department, price_aed, default_hours, price_per, usual_quantity, time_allowance_hours, includes_oil_change, description, parts_requests, position, is_active, position_ask, suggest_for, bodyshop_kind, line_kind, outside_work, installer_hours";
 export const PART_SELECT = "id, job_id, part_request_id, part_number, description, customer_name, original_description, list_price_aed, discount_percent, quantity_changed_at, removed_at, removed_by, removed_reason, discount_approval_status, client_key, availability_note, quantity, diagram_path, supplier, cost_aed, availability, delivery_date, priced_by, priced_at, confirm_status, confirmed_quantity, confirmed_by, confirmed_at, reject_note, order_status, added_by_role, is_active, created_at, part_type, brand, warranty_months, option_group, question_text, question_at, question_by, answer_text, answered_at, answered_by, positions";
@@ -464,10 +464,15 @@ export type PackageCosting = {
   bigRolls: number;
   /** The owner's per-job figure, when set on the quotation. */
   rollsEst: number | null;
+  /** Section 11: the tint specification's share of a car and the double-layer hours. */
+  tintFactor: number;
+  tintExtraHours: number;
 };
 
-export async function packageCostingOf(settings: Settings, carTitle: string | null, filmRollsEst: number | string | null | undefined): Promise<PackageCosting> {
+export async function packageCostingOf(settings: Settings, carTitle: string | null, filmRollsEst: number | string | null | undefined, tintSpec?: unknown): Promise<PackageCosting> {
   const { isBigCar } = await import("./package-cost");
+  const { cleanTintSpec, tintCostFactor } = await import("./tint");
+  const tint = tintCostFactor(cleanTintSpec(tintSpec), Number(settings.tint_double_layer_hours) >= 0 ? Number(settings.tint_double_layer_hours) || 0 : 1);
   const films = ((settings.film_types ?? []) as { name: string; roll_price: number; roll_m: number }[]).filter((f) => f?.name);
   const gloss = films.find((f) => /gloss/i.test(f.name)) ?? films[0] ?? { roll_price: 1429 };
   const matte = films.find((f) => /matt/i.test(f.name)) ?? gloss;
@@ -486,5 +491,7 @@ export async function packageCostingOf(settings: Settings, carTitle: string | nu
     bigCar: isBigCar(carTitle, ((settings.big_car_models ?? []) as string[]).map(String)),
     bigRolls: Number(settings.big_car_film_rolls) || 1.5,
     rollsEst: filmRollsEst === null || filmRollsEst === undefined || filmRollsEst === "" ? null : Number(filmRollsEst),
+    tintFactor: tint.factor,
+    tintExtraHours: tint.extraHours,
   };
 }

@@ -2,6 +2,7 @@
 
 import type { QuoteLock } from "@/lib/quote-lock";
 import { LockedQuote } from "./LockedQuote";
+import { lineIsTint } from "@/lib/tint";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/components/PartPicker";
@@ -265,6 +266,7 @@ export function QuoteEditor({
   revision = null,
   reviseReasons = [],
   ownerBox = null,
+  tintBox = null,
   autoSend = false,
   autoOpenPackages = false,
   completedAt = null,
@@ -317,6 +319,8 @@ export function QuoteEditor({
   reviseReasons?: string[];
   /** The owner's approval box (above the limit) or the revision request, shown under "Before sending". */
   ownerBox?: ReactNode;
+  /** Section 11: the tint specification box, shown under the labour and services while a line is tint work. */
+  tintBox?: ReactNode;
   /** Arriving from "send the revised quotation": complete and open the send window by itself. */
   autoSend?: boolean;
   /** Section 6: a bodyshop estimate lands with the package picker already open. */
@@ -852,7 +856,7 @@ export function QuoteEditor({
             {svc?.bodyshop_kind === "coloured_ppf" || svc?.bodyshop_kind === "tint" || (isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id]) ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted" data-bodyshop-detail>
                 {svc?.bodyshop_kind === "coloured_ppf" ? (<><Input value={l.film_colour ?? ""} onChange={(e) => patch(l.id, { film_colour: e.target.value })} placeholder="Film colour" disabled={disabled} className="min-h-8 w-32 text-xs" textCase="title" aria-label="Film colour" data-film-colour /><Input value={l.film_code ?? ""} onChange={(e) => patch(l.id, { film_code: e.target.value })} placeholder="Code" disabled={disabled} className="min-h-8 w-24 text-xs" textCase="upper" aria-label="Film code" data-film-code /></>) : null}
-                {svc?.bodyshop_kind === "tint" ? (<label className="inline-flex items-center gap-1"><Input value={l.tint_percent ?? ""} onChange={(e) => patch(l.id, { tint_percent: e.target.value === "" ? null : Number(e.target.value) })} inputMode="numeric" placeholder="Shade" disabled={disabled} className="min-h-8 w-16 text-xs text-right" aria-label="Tint shade percent" data-tint-shade /><span>%</span></label>) : null}
+                {svc?.bodyshop_kind === "tint" ? <button type="button" onClick={() => document.querySelector("[data-tint-box]")?.scrollIntoView({ behavior: "smooth", block: "center" })} className="min-h-8 font-semibold underline underline-offset-4" data-tint-goto>Darkness per window: Tint specification below</button> : null}
                 {isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id] ? <span data-last-price>Last time {aed(settings.lastPrices[svc.id])}</span> : null}
               </span>
             ) : null}
@@ -1126,6 +1130,8 @@ export function QuoteEditor({
       </form>
     </div>
   ) : null;
+  // Section 11: the tint box follows the lines - it shows while any line (or package item) is tint work.
+  const hasTint = !!tintBox && lines.some((l) => l.is_active && lineIsTint(l, services.find((s) => s.id === l.service_id)?.bodyshop_kind ?? null));
   // Approved by the customer, replaced or invoiced: nothing can be typed or removed; the bar carries the one way forward.
   if (lock?.locked) {
     const statusText = quotation.status === "approved" ? `Approved${quotation.approver_name ? ` by ${quotation.approver_name}` : ""}${quotation.responded_at ? `, ${formatDayTime(quotation.responded_at)}` : ""}` : quotation.status === "superseded" ? "Replaced by a newer version" : "Locked";
@@ -1139,6 +1145,7 @@ export function QuoteEditor({
           showProfit={showProfit}
           commissionLine={commissionLine}
           ownerBox={ownerBox}
+          tintBox={hasTint ? tintBox : null}
           statusText={statusText}
           actions={
             <>
@@ -1306,6 +1313,7 @@ export function QuoteEditor({
         </Card>
 
         {/* Block 2: parts, priced by Parts; the advisor sets the markup and Include or Leave off */}
+        {hasTint ? tintBox : null}
         <Card className="flex flex-col gap-3">
           <SectionLabel right={wait?.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} priced` : undefined}>Parts</SectionLabel>
           {partLines.length && !disabled ? (
@@ -1551,6 +1559,8 @@ export function QuoteEditor({
                     filmRollPriceGloss: c.filmRollPriceGloss,
                     filmRollPriceMatte: c.filmRollPriceMatte,
                     tintPerCar: c.tintPerCar,
+                    tintFactor: c.tintFactor,
+                    tintExtraHours: c.tintExtraHours,
                     ceramicExteriorPerCar: c.ceramicExteriorPerCar,
                     ceramicInteriorPerCar: c.ceramicInteriorPerCar,
                     consumablesPerCar: c.consumablesPerCar,

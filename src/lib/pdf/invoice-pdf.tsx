@@ -12,6 +12,8 @@ import { loadLogo } from "./images";
 import { qrPng } from "./qr";
 import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
+import { decorateTint, lineTintWords } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { DocumentTail, InfoBoxes, LinesTable, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
@@ -73,7 +75,14 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   // Section 9: a line billed from a bodyshop package gets the PROTECTION PACKAGE section; the rest stays in Labour and services.
   const pkgRows = lines.filter((l) => l.section === "services" && !!l.package_items);
   const serviceRows = lines.filter((l) => l.section === "services" && !l.package_items);
-  const services = serviceRows.map(docLine);
+  // Section 11: the job's tint specification puts the shades on the tint lines and package items.
+  const tintSpec = await tintSpecForJob(invoice.job_id);
+  const tintLimit = tintLimitOf(settings);
+  const services = serviceRows.map((l) => {
+    const d = docLine(l);
+    const tw = lineTintWords(l, null, tintSpec, tintLimit);
+    return tw ? { ...d, details: [d.details, tw].filter(Boolean).join(" · ") } : d;
+  });
   const fees = lines.filter((l) => l.section === "fees").map(docLine);
   const parts = lines.filter((l) => l.section === "parts").map(docLine);
   const sum = (ls: SectionLine[]) => round2(ls.reduce((a, l) => a + l.amount, 0));
@@ -105,7 +114,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
       {pkgRows.map((l) => {
-        const docModel = packageDocOf(l.package_items, { car: carTitle, ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
+        const docModel = packageDocOf(l.package_items, { car: carTitle, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
         const disc = Number(l.discount_percent) || 0;
         return docModel ? <PackageSection key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: round2(l.unit_price * l.quantity - l.amount_aed) } : null} /> : null;
       })}

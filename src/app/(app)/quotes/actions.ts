@@ -125,6 +125,8 @@ export async function startQuotation(jobId: string) {
       await logQuoteEvent(created!.id, jobId, staff!.id, "commission_carried", `${created!.number}: the commission for ${estCom.commission_to} moved over from estimate ${estCom.number}`);
       await logQuoteEvent(job!.estimate_id!, jobId, staff!.id, "commission_carried", `${estCom.number}: the commission for ${estCom.commission_to} moved to ${created!.number} when the estimate became the job's quotation`);
     }
+    const { data: estTint } = await admin.from("quotations").select("tint_spec").eq("id", job!.estimate_id).maybeSingle();
+    if (estTint?.tint_spec) await admin.from("quotations").update({ tint_spec: estTint.tint_spec, updated_by: staff!.id }).eq("id", created!.id);
   } else {
     // The labour list is the advisor's own: nothing from the report is pre-filled. The parts list comes from the approved report through the part requests below.
     lines = [];

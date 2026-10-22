@@ -8,7 +8,7 @@ import { aed } from "@/lib/quotes";
  * AED <total>?", with the terms and the customer's name, and records the amount approved. There is no
  * Declined button: the advisor marks a quotation declined after talking to the customer.
  */
-export function QuoteResponse({ token, customerName, total, declaration, declarationAr, isEstimate, terms, termsAr, removalAck = null }: { token: string; customerName: string; total: number; declaration: string; declarationAr: string | null; isEstimate: boolean; terms: string; termsAr: string | null; /** Old PPF removal on the quotation: the customer ticks that they understand paint may lift. */ removalAck?: string | null }) {
+export function QuoteResponse({ token, customerName, total, declaration, declarationAr, isEstimate, terms, termsAr, removalAck = null, tintAck = null }: { token: string; customerName: string; total: number; declaration: string; declarationAr: string | null; isEstimate: boolean; terms: string; termsAr: string | null; /** Old PPF removal on the quotation: the customer ticks that they understand paint may lift. */ removalAck?: string | null; /** Section 11: a window darker than the legal limit - the customer ticks that it is their own request. */ tintAck?: string | null }) {
   const [open, setOpen] = useState(false);
   const word = isEstimate ? "estimate" : "quotation";
   return (
@@ -36,6 +36,12 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
               <label className="flex items-start gap-3 cursor-pointer" data-removal-ack>
                 <input type="checkbox" name="removal_ack" className="mt-1 h-5 w-5 accent-ink" required />
                 <span className="text-sm">I understand old film removal may lift paint. <span className="text-xs text-[#5F6368]">{removalAck}</span></span>
+              </label>
+            ) : null}
+            {tintAck ? (
+              <label className="flex items-start gap-3 cursor-pointer" data-tint-ack>
+                <input type="checkbox" name="tint_ack" className="mt-1 h-5 w-5 accent-ink" required />
+                <span className="text-sm">Above the legal limit – my request. <span className="text-xs text-[#5F6368]">{tintAck} I asked for this darkness myself.</span></span>
               </label>
             ) : null}
             <label className="flex flex-col gap-1">

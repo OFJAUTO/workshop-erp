@@ -9,6 +9,9 @@ import { formatDate } from "@/lib/format";
 import { formatPlate } from "@/lib/types";
 import { SectionTablet, type TabletCar, type TabletPerson } from "./SectionTablet";
 import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
+import { getSettings } from "@/lib/settings";
+import { tintSummary } from "@/lib/tint";
+import { tintLimitOf, tintSpecsForJobs } from "@/lib/tint-data";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +63,11 @@ export default async function BodyshopTabletPage({ searchParams }: { searchParam
   // Section 10: the PPF team sees HOW to cut, big, on every car.
   const cuts = await cutMethodsForJobs(jobIds);
   for (const car of cars) { const c = cuts.get(car.jobId); car.cut = c ? { badge: c.badge, note: c.note } : null; }
+  // Section 11: the tint choice per window on every car, and the photo after fitting with the installer's PIN.
+  if (section === "ppf") {
+    const [specs, settings] = await Promise.all([tintSpecsForJobs(jobIds), getSettings()]);
+    for (const car of cars) car.tint = tintSummary(specs.get(car.jobId) ?? null, tintLimitOf(settings));
+  }
   return (
     <PublicShell note={`${SECTION_LABELS[section]} tablet`}>
       <div className="flex-1 flex flex-col gap-4 p-4 sm:p-6">

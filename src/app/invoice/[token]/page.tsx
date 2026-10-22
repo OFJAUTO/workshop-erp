@@ -3,6 +3,9 @@ import { CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { PackageCard } from "@/components/PackageCard";
 import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
+import { TintCard } from "@/components/TintCard";
+import { decorateTint, lineIsTint, tintSummary } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { PayNowButton } from "@/components/PayNowButton";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -54,6 +57,11 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
     { label: "Date", value: formatDate(invoice.issued_at) },
     ...(job ? [{ label: "Job card", value: job.job_number }] : []),
   ];
+  // Section 11: the job's tint specification on the tint items; tint outside a package gets its own small card.
+  const tintSpec = await tintSpecForJob(invoice.job_id);
+  const tintLimit = tintLimitOf(settings);
+  const tintOutsidePackage = bundle.lines.some((l) => !l.package_items && lineIsTint(l));
+  const tintWords = tintSummary(tintSpec, tintLimit);
   const snapshot = invoice.customer_snapshot;
   const boxes = customerBoxes(
     { full_name: snapshot?.full_name ?? customer?.full_name ?? null, company_name: snapshot?.company_name ?? customer?.company_name ?? null, phone: snapshot?.phone ?? customer?.phone ?? null },
@@ -125,9 +133,10 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
             <span className="text-3xl font-extrabold">{aed(invoice.total_aed)}</span>
           </div>
         )}
+        {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
         {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}
         {bundle.lines.filter((l) => l.section === "services" && !!l.package_items).map((l) => {
-          const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
+          const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null), decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
           const disc = Number(l.discount_percent) || 0;
           return docModel ? <PackageCard key={l.id} doc={docModel} price={Math.round(l.unit_price * l.quantity * 100) / 100} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: Math.round((l.unit_price * l.quantity - l.amount_aed) * 100) / 100 } : null} /> : null;
         })}

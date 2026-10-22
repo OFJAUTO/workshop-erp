@@ -16,6 +16,10 @@ export type PackageCostInputs = {
   filmRollPriceGloss: number;
   filmRollPriceMatte: number;
   tintPerCar: number;
+  /** Section 11: the tint specification's share of a car (sides & rear = 1; windshield and roof a third each; double layer doubles a window). */
+  tintFactor?: number;
+  /** Section 11: the extra installer hours for the double-layer windows. */
+  tintExtraHours?: number;
   ceramicExteriorPerCar: number;
   ceramicInteriorPerCar: number;
   consumablesPerCar: number;
@@ -51,20 +55,22 @@ export function packageCostEstimate(i: PackageCostInputs): PackageCostEstimate {
   const ceramicInt = /(interior|leather)[^·]*ceramic|ceramic[^·]*(interior|leather)/.test(text);
 
   const film = wantsFilm ? { rolls: i.rolls, matte, aed: r2(i.rolls * (matte ? i.filmRollPriceMatte : i.filmRollPriceGloss)) } : null;
-  const tint = wantsTint ? r2(i.tintPerCar) : 0;
+  const tintFactor = i.tintFactor && i.tintFactor > 0 ? i.tintFactor : 1;
+  const tint = wantsTint ? r2(i.tintPerCar * tintFactor) : 0;
   const ceramic = r2((ceramicExt ? i.ceramicExteriorPerCar : 0) + (ceramicInt ? i.ceramicInteriorPerCar : 0));
   const consumables = r2(i.consumablesPerCar);
-  const labour = { hours: i.hours, aed: r2(i.hours * i.ratePerHour) };
+  const hours = r2(i.hours + (wantsTint ? (i.tintExtraHours ?? 0) : 0));
+  const labour = { hours, aed: r2(hours * i.ratePerHour) };
   const recovery = r2(i.recoveryCost);
   const total = r2((film?.aed ?? 0) + tint + ceramic + consumables + labour.aed + recovery);
   const profit = r2(i.packagePrice - total);
   const percent = i.packagePrice > 0 ? Math.round((profit / i.packagePrice) * 100) : 0;
   const parts = [
     film ? `film ${film.rolls} roll${film.rolls === 1 ? "" : "s"}${film.matte ? " (matte)" : ""} ${aed(film.aed)}` : null,
-    tint ? `tint ${aed(tint)}` : null,
+    tint ? `tint ${aed(tint)}${tintFactor !== 1 ? ` (${tintFactor} × a car)` : ""}` : null,
     ceramic ? `ceramic ${aed(ceramic)}` : null,
     consumables ? `consumables ${aed(consumables)}` : null,
-    `labour ${labour.hours} h ${aed(labour.aed)}`,
+    `labour ${labour.hours} h${wantsTint && i.tintExtraHours ? ` (incl. ${i.tintExtraHours} h double layer)` : ""} ${aed(labour.aed)}`,
     recovery ? `recovery ${aed(recovery)}` : null,
   ].filter(Boolean);
   return { film, tint, ceramic, consumables, labour, recovery, total, profit, percent, words: `Estimated cost: ${parts.join(" · ")} → estimated profit ${aed(profit)} (${percent}%)` };

@@ -26,6 +26,7 @@ import { loadPricingRows } from "@/lib/parts-pricing";
 import { reasonsFor } from "@/lib/reasons";
 import { quoteReferenceOf } from "@/lib/quote-reference";
 import { ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
+import { TintSpecPanel } from "@/components/TintSpecPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -160,7 +161,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
     handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
-    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est),
+    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec),
     installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
     goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
@@ -281,6 +282,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         revision={{ requestedAt: q.revision_requested_at ?? null, requestedBy: requesterName, reason: q.revision_request_reason ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
         reviseReasons={reasonsFor(settings, "revise_after_approval")}
         ownerBox={ownerBox}
+        tintBox={<TintSpecPanel quotation={q} settings={settings} isOwner={isOwner} viewOnly={!!staff.viewingAs} />}
         autoSend={send === "1"}
       />
 

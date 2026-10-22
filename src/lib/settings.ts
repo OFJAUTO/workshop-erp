@@ -26,6 +26,11 @@ const DEFAULTS = {
   package_installer_hours: 80,
   // Section 10: an optional surcharge for bespoke hand-cut PPF (0 = none).
   ppf_handcut_surcharge_aed: 0,
+  // Section 11: the tint specification.
+  tint_legal_max_darkness: 50,
+  tint_double_layer_hours: 1,
+  tint_presets: [] as unknown,
+  whatsapp_tint_update_template: "Hello [name], here is the updated tint choice for your [make model] ([plate]): [tint]. If anything should be different, just reply to this message. OFJ Automotive",
   big_car_film_rolls: 1.5,
   big_car_models: ["G-Class", "Cullinan", "Urus", "Escalade", "Range Rover LWB", "GLS", "Phantom"],
   /** The bodyshop labour cost rate per hour; blank uses the workshop rate. */

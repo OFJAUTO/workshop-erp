@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSettings } from "@/lib/settings";
+import { aboveLimit, cleanTintSpec, lineIsTint } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 
 /** The customer's answer from the quotation page: Approved. (Declining is done by the advisor after talking to the customer.) */
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
@@ -14,7 +17,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   const agree = form.get("agree") === "on";
 
   const admin = createAdminClient();
-  const { data: q } = await admin.from("quotations").select("id, status, valid_until, kind").eq("token", token).maybeSingle();
+  const { data: q } = await admin.from("quotations").select("id, status, valid_until, kind, job_id, tint_spec").eq("token", token).maybeSingle();
   if (!q) return back("This link is not valid.");
   if (!["sent", "opened"].includes(q.status)) return back();
   if (q.valid_until && Date.parse(q.valid_until) < Date.now()) return back("This quotation has expired. Please ask the workshop for a new one.");
@@ -22,14 +25,21 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   if (action !== "approve") return back("Please call or WhatsApp us if you do not wish to go ahead.");
   if (!agree) return back("Please tick the box to agree to the terms and conditions.");
   // Old PPF removal on the quotation: the customer must tick that they understand paint may lift; who and when is kept.
-  const { data: lineRows } = await admin.from("quotation_lines").select("service_id").eq("quotation_id", q.id).eq("is_active", true).not("service_id", "is", null);
-  const svcIds = Array.from(new Set((lineRows ?? []).map((l) => l.service_id as string)));
+  const { data: lineRows } = await admin.from("quotation_lines").select("service_id, title, package_items, visible_to_customer, left_off").eq("quotation_id", q.id).eq("is_active", true);
+  const svcIds = Array.from(new Set((lineRows ?? []).map((l) => l.service_id as string | null).filter((x): x is string => !!x)));
   const { data: svcs } = svcIds.length ? await admin.from("services").select("id, bodyshop_kind").in("id", svcIds) : { data: [] as { id: string; bodyshop_kind: string | null }[] };
   const needsRemovalAck = (svcs ?? []).some((s) => s.bodyshop_kind === "ppf_removal");
   const removalAck = form.get("removal_ack") === "on";
   if (needsRemovalAck && !removalAck) return back("Please tick that you understand old film removal may lift paint.");
+  // Section 11: a window darker than the owner's legal limit is the customer's own request, ticked here; who and when is kept.
+  const kindOf = new Map((svcs ?? []).map((s) => [s.id, s.bodyshop_kind]));
+  const hasTint = (lineRows ?? []).some((l) => l.visible_to_customer !== false && !l.left_off && lineIsTint(l as { title: string; package_items: unknown }, kindOf.get(l.service_id as string) ?? null));
+  const tintSpec = hasTint ? (cleanTintSpec(q.tint_spec) ?? (await tintSpecForJob(q.job_id))) : null;
+  const needsTintAck = hasTint && aboveLimit(tintSpec, tintLimitOf(await getSettings())).length > 0;
+  if (needsTintAck && form.get("tint_ack") !== "on") return back("Please tick that the tint darker than the legal limit is your own request.");
   const res = await applyCustomerResponse(q.id, { approve: true, name, via: "customer", note });
   if (res.error) return back(res.error);
   if (needsRemovalAck) await admin.from("quotations").update({ removal_ack_at: new Date().toISOString(), removal_ack_name: name.slice(0, 120) }).eq("id", q.id);
+  if (needsTintAck) await admin.from("quotations").update({ tint_ack_at: new Date().toISOString(), tint_ack_name: name.slice(0, 120) }).eq("id", q.id);
   return back();
 }

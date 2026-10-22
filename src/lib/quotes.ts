@@ -215,6 +215,10 @@ export type QuoteRow = {
   commission_decision_note?: string | null;
   /** Section 7: the owner per-job film rolls for the package cost estimate (1 or 1.5 usually). */
   film_rolls_est?: number | null;
+  /** Section 11: the tint specification per window (see src/lib/tint.ts) and the customer's above-the-limit tick. */
+  tint_spec?: unknown;
+  tint_ack_at?: string | null;
+  tint_ack_name?: string | null;
   commission_set_by?: string | null;
   commission_set_at?: string | null;
   commission_decided_by?: string | null;

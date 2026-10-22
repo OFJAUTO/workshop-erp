@@ -4,8 +4,24 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui";
 
-export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[]; /** Section 10: the PPF cutting method badge (HAND-CUT / PRE-CUT / MIXED). */ cut?: { badge: string; note: string | null } | null };
+export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[]; /** Section 10: the PPF cutting method badge (HAND-CUT / PRE-CUT / MIXED). */ cut?: { badge: string; note: string | null } | null; /** Section 11: the tint choice per window, in the documents' words. */ tint?: string | null };
 export type TabletPerson = { id: string; name: string; photoUrl: string | null; clockedOn: string | null };
+
+/** A tablet photo redrawn as a JPEG of at most 1600 px (a few hundred KB); the original when the browser cannot decode it. */
+async function shrinkPhoto(file: File): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    return blob ?? file;
+  } catch {
+    return file;
+  }
+}
 
 /**
  * The shared section tablet: the section's cars in due order; tap a car, tap your face, type your PIN, and you are
@@ -16,7 +32,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const [carId, setCarId] = useState<string | null>(null);
   const [personId, setPersonId] = useState<string | null>(null);
   const [pin, setPin] = useState("");
-  const [mode, setMode] = useState<"clock" | "parts" | null>(null);
+  const [mode, setMode] = useState<"clock" | "parts" | "tint" | null>(null);
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
@@ -36,10 +53,23 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const readyParts = car?.readyParts ?? [];
   const tickedParts = readyParts.filter((p) => !unticked.has(p.id));
   const receiving = mode === "parts" && readyParts.length > 0;
+  const tintPhoto = mode === "tint" && !!car?.tint;
   async function submit(fullPin: string) {
     if (!car || !person || busy) return;
+    if (tintPhoto && !photo) { setNote({ text: "Take the photo first.", ok: false }); setPin(""); return; }
     setBusy(true);
-    const res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(receiving ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "receive_parts", partIds: tickedParts.map((p) => p.id) } : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction }) });
+    let res: Response;
+    if (tintPhoto && photo) {
+      const fd = new FormData();
+      fd.set("jobId", car.jobId);
+      fd.set("staffId", person.id);
+      fd.set("pin", fullPin);
+      fd.set("action", "tint_photo");
+      fd.set("photo", photo.blob, "tint-fitted.jpg");
+      res = await fetch("/api/tablet/bodyshop", { method: "POST", body: fd });
+    } else {
+      res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(receiving ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "receive_parts", partIds: tickedParts.map((p) => p.id) } : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction }) });
+    }
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string };
     setBusy(false);
     setPin("");
@@ -52,6 +82,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
     setCarId(null);
     setMode(null);
     setUnticked(new Set());
+    if (photo) URL.revokeObjectURL(photo.url);
+    setPhoto(null);
     router.refresh();
   }
   const press = (d: string) => {
@@ -76,6 +108,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               <span className="flex-1 min-w-0 flex flex-col">
                 <span className="text-xl font-extrabold tracking-[0.03em]">{c.plate} <span className="text-base font-semibold text-muted">· {c.title}{c.colour ? ` · ${c.colour}` : ""}</span></span>
                 {c.cut ? <span className="inline-flex w-fit items-center rounded-control bg-ink px-3 py-1 text-base font-extrabold tracking-[0.08em] text-white" data-cut-badge={c.cut.badge}>{c.cut.badge}{c.cut.note ? ` · ${c.cut.note}` : ""}</span> : null}
+                {c.tint ? <span className="text-base font-bold" data-tint-summary>Tint: {c.tint}</span> : null}
                 <span className="text-base text-muted">{c.coming ? `Coming: ${c.stage}` : c.stage}{c.onCar.length ? ` · ${c.onCar.map((p) => `${p.name}${p.clocked ? " ●" : ""}`).join(", ")}` : ""}</span>
               </span>
               <span className={`text-base font-bold ${c.tone === "red" ? "text-red" : c.tone === "amber" ? "text-amber" : "text-muted"}`}>{c.tone === "red" ? "Late" : c.tone === "amber" ? "Due today" : c.due ?? ""}</span>
@@ -99,7 +132,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
             ))}
           </div>
         </div>
-      ) : readyParts.length && mode === null ? (
+      ) : (readyParts.length || car.tint) && mode === null ? (
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-3">
             <Avatar name={person.name} photoUrl={person.photoUrl} size={56} />
@@ -108,7 +141,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
           <p className="text-base"><span className="font-bold">{car.plate} · {car.title}</span>: what are you doing?</p>
           <div className="flex flex-wrap justify-center gap-3">
             <button type="button" onClick={() => setMode("clock")} className="min-h-16 rounded-card border-2 border-line-strong bg-white px-6 text-lg font-extrabold" data-tablet-mode-clock>{direction === "in" ? "Clock in" : "Clock out"}</button>
-            <button type="button" onClick={() => setMode("parts")} className="min-h-16 rounded-card border-2 border-ink bg-white px-6 text-lg font-extrabold" data-tablet-mode-parts>Receive {readyParts.length} part{readyParts.length === 1 ? "" : "s"}</button>
+            {readyParts.length ? <button type="button" onClick={() => setMode("parts")} className="min-h-16 rounded-card border-2 border-ink bg-white px-6 text-lg font-extrabold" data-tablet-mode-parts>Receive {readyParts.length} part{readyParts.length === 1 ? "" : "s"}</button> : null}
+            {car.tint ? <button type="button" onClick={() => setMode("tint")} className="min-h-16 rounded-card border-2 border-ink bg-white px-6 text-lg font-extrabold" data-tablet-mode-tint>Tint fitted · photo</button> : null}
           </div>
           <button type="button" onClick={() => { setPersonId(null); setPin(""); }} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-base font-bold">Back</button>
         </div>
@@ -132,6 +166,19 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
                 );
               })}
               <p className="text-base mt-2">Then your PIN ({tickedParts.length} ticked):</p>
+            </div>
+          ) : tintPhoto ? (
+            <div className="w-full max-w-md flex flex-col items-center gap-2" data-tablet-tint-photo>
+              <p className="text-base text-center"><span className="font-bold">{car.plate}</span> · Tint: {car.tint}</p>
+              {photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photo.url} alt="Tint after fitting" className="max-h-56 rounded-card object-contain bg-chip" data-tablet-tint-preview />
+              ) : null}
+              <label className="flex min-h-14 cursor-pointer items-center justify-center rounded-card border-2 border-line-strong bg-white px-6 text-lg font-extrabold">
+                {photo ? "Take it again" : "Take the photo"}
+                <input type="file" accept="image/*" capture="environment" className="sr-only" data-tablet-tint-file onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f) return; const blob = await shrinkPhoto(f); if (photo) URL.revokeObjectURL(photo.url); setPhoto({ blob, url: URL.createObjectURL(blob) }); }} />
+              </label>
+              <p className="text-base mt-1">{photo ? "Then your PIN:" : "Take the photo, then your PIN."}</p>
             </div>
           ) : (
             <p className="text-base">{direction === "in" ? "Clock in on" : "Clock out of"} <span className="font-bold">{car.plate} · {car.title}</span>. Your PIN:</p>

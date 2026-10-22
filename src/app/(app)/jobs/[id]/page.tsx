@@ -58,6 +58,8 @@ import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
 import { AdvisorBadge } from "../../dashboard/DashboardCars";
 import { setAdvisorInCharge, toggleFollow } from "../advisor-actions";
 import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
+import { tintSummary } from "@/lib/tint";
+import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { PlanningCard } from "./PlanningCard";
 import { TechniciansCard } from "./TechniciansCard";
 import { ServiceStickerCard } from "./ServiceStickerCard";
@@ -150,6 +152,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const inChargeName = advisorChoices.find((a) => a.id === (job.advisor_id ?? job.gated_in_by))?.display_name ?? null;
   // Section 10: the PPF cutting method of this car, as a big badge.
   const jobCut = (await cutMethodsForJobs([id])).get(id) ?? null;
+  // Section 11: the tint choice per window, as approved (or as quoted until then).
+  const tintWords = tintSummary(await tintSpecForJob(id), tintLimitOf(settings));
   const viewerFollows = !!followRow?.is_active;
   // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
   const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
@@ -332,6 +336,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : <Badge tone="outline" data-fee-badge>Inspection fee: AED {Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}{job.first_approval_at ? " · locked" : ""}</Badge>}
             <AdvisorBadge name={inChargeName} />
             {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-white" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
+            {tintWords ? <span className="inline-flex items-center rounded-control border border-ink px-3 py-1 text-sm font-semibold normal-case" data-tint-summary>Tint: {tintWords}</span> : null}
             {job.comeback_of ? <Badge tone={job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "outline" : "red"}>{job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "Return visit" : "Comeback"}{comebackOriginal ? ` of ${comebackOriginal.job_number}` : ""}{job.comeback_free ? " · free of charge" : ""}</Badge> : null}
             {comebacksOfThis.length ? <Badge tone="red">Came back: {comebacksOfThis.map((c) => c.job_number).join(", ")}</Badge> : null}
             <TimingBadge timing={timing} />
