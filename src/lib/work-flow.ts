@@ -1,4 +1,5 @@
 import { withBreak } from "@/lib/breaks";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { workingTimeOf } from "@/lib/jobs";
 import "server-only";
 import { dubaiDate } from "./jobs";
@@ -26,8 +27,8 @@ async function event(jobId: string, by: string | null, event_type: string, note:
   await createAdminClient().from("job_events").insert({ job_id: jobId, event_type, note, created_by: by, ...extra });
 }
 async function advisorIds(jobId: string, gatedInBy: string | null) {
-  const { data: appr } = await createAdminClient().from("approval_requests").select("sent_by").eq("job_id", jobId);
-  return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  void gatedInBy;
+  return advisorsInCharge(jobId);
 }
 
 /** Which side's opening hours and break a person follows. */

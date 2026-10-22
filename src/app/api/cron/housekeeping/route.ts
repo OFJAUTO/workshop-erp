@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { recalcTripKm } from "@/lib/delivery";
 import { aftercareHourly } from "@/lib/aftercare";
 import { depositState } from "@/lib/deposits";
@@ -302,8 +303,7 @@ export async function GET(request: NextRequest) {
       const done = { ...(((j.doc_reminders as Record<string, string> | null) ?? {})) };
       const fresh = red.filter((a) => !done[a.key]);
       if (!fresh.length) continue;
-      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", j.id as string);
-      const people = Array.from(new Set([j.gated_in_by as string | null, ...(appr ?? []).map((a) => a.sent_by as string | null)].filter((x): x is string => !!x)));
+      const people = await advisorsInCharge(j.id as string);
       for (const a of fresh) {
         await notifyStaff(people, { type: "doc_not_sent", title: `${a.label} not sent · ${j.job_number}`, body: `${a.text}. Send it now.`, jobId: j.id as string, href: `/jobs/${j.id}` });
         done[a.key] = new Date().toISOString();
@@ -461,8 +461,7 @@ export async function GET(request: NextRequest) {
       if (!(Date.now() - since > 3 * 3600000)) continue;
       const { data: j } = await admin.from("jobs").select("job_number, status, gated_in_by").eq("id", t.job_id).maybeSingle();
       if (!j || j.status !== "in_delivery") continue;
-      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", t.job_id);
-      const ids = Array.from(new Set([j.gated_in_by, ...(appr ?? []).map((a) => a.sent_by as string | null)].filter((x): x is string => !!x)));
+      const ids = await advisorsInCharge(t.job_id);
       await notifyStaff(ids, { type: "delivery", title: `Still on the way after 3 hours · ${j.job_number}`, body: `The driver (${t.driver_name ?? "driver"}) has not pressed Delivered. Check with him, or press "Mark delivered" on the gate-out page (the price follows on the Recovery page).`, jobId: t.job_id, href: `/jobs/${t.job_id}/gate-out` });
       await admin.from("recovery_trips").update({ reminded_at: new Date().toISOString() }).eq("id", t.id);
       told++;

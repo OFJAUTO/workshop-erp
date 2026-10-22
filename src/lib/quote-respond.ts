@@ -1,4 +1,5 @@
 import { replaceProformaAfterRevision } from "./invoice-flow";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { createTrip, loadDrivers } from "./delivery";
 import { dropParts } from "@/lib/drop-parts";
 import "server-only";
@@ -14,15 +15,11 @@ import { formatPlate } from "./types";
 
 /** Everyone who should hear about a customer's answer: the advisor(s) of the job and the person who sent it. */
 export async function advisorsOf(q: Pick<QuoteRow, "job_id" | "created_by" | "sent_by">): Promise<string[]> {
-  const admin = createAdminClient();
   const ids = new Set<string>();
   if (q.created_by) ids.add(q.created_by);
   if (q.sent_by) ids.add(q.sent_by);
   if (q.job_id) {
-    const { data: job } = await admin.from("jobs").select("gated_in_by").eq("id", q.job_id).maybeSingle();
-    if (job?.gated_in_by) ids.add(job.gated_in_by);
-    const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", q.job_id);
-    for (const a of appr ?? []) if (a.sent_by) ids.add(a.sent_by);
+    for (const id of await advisorsInCharge(q.job_id)) ids.add(id);
   }
   return Array.from(ids);
 }

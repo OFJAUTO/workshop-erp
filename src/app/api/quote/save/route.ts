@@ -1,4 +1,5 @@
 import { refuseIfLocked } from "@/lib/quote-lock-server";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
@@ -122,8 +123,8 @@ export async function POST(request: NextRequest) {
     await admin.from("quotations").update({ editing_by: staff.id, editing_at: new Date().toISOString() }).eq("id", q.id);
     if (taking && q.job_id) {
       // The car's advisor hears when someone else starts on his quotation.
-      const [{ data: job }, { data: appr }] = await Promise.all([admin.from("jobs").select("gated_in_by, job_number").eq("id", q.job_id).maybeSingle(), admin.from("approval_requests").select("sent_by").eq("job_id", q.job_id)]);
-      const advisors = Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x && x !== staff.id)));
+      const { data: job } = await admin.from("jobs").select("gated_in_by, job_number").eq("id", q.job_id).maybeSingle();
+      const advisors = (await advisorsInCharge(q.job_id)).filter((x) => x !== staff.id);
       if (advisors.length && !advisors.includes(staff.id)) await notifyStaff(advisors, { type: "quote_other_editor", title: `${staff.display_name} is working on ${q.number} · ${job?.job_number ?? ""}`, body: "Your car's quotation is being changed by someone else.", jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${q.id}` });
     }
     return NextResponse.json({ ok: true });

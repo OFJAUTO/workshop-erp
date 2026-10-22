@@ -161,7 +161,7 @@ export async function createBodyshopJob(customerId: string, vehicleId: string, a
   const { data: open } = await admin.from("jobs").select("id, job_number, status").eq("vehicle_id", vehicleId).or("is_open.eq.true,status.eq.booked").maybeSingle();
   if (open) return { error: `This car already has ${open.status === "booked" ? "a booked quotation" : "an open job"} (${open.job_number}).` };
   const now = new Date().toISOString();
-  const { data: job, error } = await admin.from("jobs").insert({ vehicle_id: vehicleId, customer_id: customerId, status: "booked", stage: "quote", is_open: false, department: "bodyshop", priority: "normal", gated_in_by: actor.id, gated_in_at: now, booked_at: now, bodyshop_handover_token: randomBytes(18).toString("hex"), created_by: actor.id, updated_by: actor.id }).select("id, job_number").single();
+  const { data: job, error } = await admin.from("jobs").insert({ vehicle_id: vehicleId, customer_id: customerId, status: "booked", stage: "quote", is_open: false, department: "bodyshop", priority: "normal", gated_in_by: actor.id, advisor_id: actor.id, gated_in_at: now, booked_at: now, bodyshop_handover_token: randomBytes(18).toString("hex"), created_by: actor.id, updated_by: actor.id }).select("id, job_number").single();
   if (error || !job) return { error: error?.message ?? "Could not create the booking." };
   const { data: q, error: qErr } = await admin.from("quotations").insert({ kind: "quotation", job_id: job.id, customer_id: customerId, vehicle_id: vehicleId, validity_days: Number(settings.quote_validity_days) || 7, vat_percent: 5, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (qErr || !q) return { error: qErr?.message ?? "Could not start the quotation." };

@@ -1,6 +1,7 @@
 "use server";
 
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
@@ -31,9 +32,7 @@ const enc = encodeURIComponent;
 
 /** The job's advisors: who gated the car in and who sent the approval link. */
 async function advisorIds(jobId: string) {
-  const admin = createAdminClient();
-  const [{ data: job }, { data: appr }] = await Promise.all([admin.from("jobs").select("gated_in_by").eq("id", jobId).maybeSingle(), admin.from("approval_requests").select("sent_by").eq("job_id", jobId)]);
-  return Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  return advisorsInCharge(jobId);
 }
 
 /** Parts: one button after the customer's approval. The main LPO with every supplier goes to the owner or the head accountant. */

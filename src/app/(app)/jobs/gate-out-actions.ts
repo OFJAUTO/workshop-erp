@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
@@ -26,8 +27,8 @@ function refresh(jobId: string) {
 }
 
 async function advisorIds(jobId: string, gatedInBy: string | null) {
-  const { data: appr } = await createAdminClient().from("approval_requests").select("sent_by").eq("job_id", jobId);
-  return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  void gatedInBy;
+  return advisorsInCharge(jobId);
 }
 
 /**

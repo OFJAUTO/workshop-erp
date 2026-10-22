@@ -69,7 +69,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("jobs")
     .select(
-      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, invoice_sent_at, parts_pricing_done_at, plan_released_at, plan_date_confirmed_at, work_done_at, wash_sent_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
+      "id, job_number, job_kind, vehicle_id, customer_id, stage, status, priority, promised_at, assigned_to, assigned_at, gated_in_at, gated_in_by, gated_out_at, gated_out_by, first_approval_at, stage_entered_at, is_open, department, ready_sent_at, invoice_sent_at, parts_pricing_done_at, plan_released_at, plan_date_confirmed_at, work_done_at, wash_sent_at, created_at, updated_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), advisor_id, advisor:staff!jobs_advisor_id_fkey(display_name), gate_in:gate_ins(condition, dash_cam, is_complete, major_damage), inspection:inspections(status, technician_id, started_at, submitted_at, approved_at, elapsed_minutes, target_minutes), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at), road_test:road_tests(status, decision)",
     )
     .eq("is_open", true);
   const all = (data ?? []) as unknown as Row[];
@@ -155,6 +155,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       notSent: docNotSent(docAlerts.get(j.id) ?? []),
       priced: !!j.parts_pricing_done_at && ["pending_quote", "pending_customer_approval"].includes(j.status),
       urgency: inspOver ? [0, ...urgencyRank(j, clock, vipIds.has(j.customer_id)).slice(1)] : [...urgencyRank(j, clock, vipIds.has(j.customer_id))],
+      // Section 4: the advisor in charge, as a small badge, and whether this car is the viewer's own.
+      advisorName: ((j as unknown as { advisor: { display_name: string } | null }).advisor?.display_name ?? null),
+      mine: ((j as unknown as { advisor_id: string | null }).advisor_id ?? j.gated_in_by) === staff.id,
     };
   });
 
@@ -186,7 +189,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       {role === "owner" ? <DepositsWaiting /> : null}
 
-      <DashboardCars rows={rows} initialPending={pending} />
+      <DashboardCars rows={rows} initialPending={pending} advisorView={role === "service_advisor"} />
 
       {/* Nothing on screen when nothing runs: empty boxes are clutter. */}
       {onClock.length ? (

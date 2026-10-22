@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
@@ -33,8 +34,7 @@ export async function changeExpectedDate(partId: string, formData: FormData) {
     if (promisedMoved) patch.promised_at = latest;
     await admin.from("jobs").update(patch).eq("id", job.id);
     await admin.from("job_events").insert({ job_id: job.id, event_type: "parts_plan", note: `${p.description}: expected date moved ${p.expected_date ?? "unset"} → ${date} (${reason})${promisedMoved ? `; promised date moved to ${latest}` : ""}`, created_by: staff.id });
-    const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", job.id);
-    const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by as string | null)].filter((x): x is string => !!x)));
+    const ids = await advisorsInCharge(job.id);
     const plate = job.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : job.job_number;
     await notifyStaff(ids, { type: "parts_priced", title: `Part delayed on ${plate}: now expected ${date}`, body: `${p.description}: ${reason}.${promisedMoved ? ` The promised date moved to ${latest}.` : ""}`, jobId: job.id, href: `/jobs/${job.id}` });
   }

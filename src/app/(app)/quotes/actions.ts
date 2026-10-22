@@ -1,6 +1,7 @@
 "use server";
 
 import { invoicesForLock, loadQuoteLock, refuseIfLocked } from "@/lib/quote-lock-server";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { liveInvoicesOf } from "@/lib/quote-lock";
 import { dropParts } from "@/lib/drop-parts";
 import { createChargeInvoice } from "@/lib/invoice-flow";
@@ -411,8 +412,7 @@ export async function markQuoteSent(quotationId: string, method: string): Promis
     await logQuoteEvent(q.id, q.job_id, staff.id, "quote_sent", `${q.number} v${q.version} sent to the customer by ${staff.display_name} (${method})`);
     if (q.job_id) {
       // Sent by someone other than the car's advisor: the advisor is told.
-      const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", q.job_id);
-      const advisors = Array.from(new Set([bundle.job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+      const advisors = await advisorsInCharge(q.job_id);
       if (advisors.length && !advisors.includes(staff.id)) await notifyStaff(advisors, { type: "quote_other_editor", title: `${staff.display_name} sent ${q.number} · ${bundle.job?.job_number ?? ""}`, body: "Your car's quotation went to the customer, sent by someone else.", jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${q.id}` });
     }
     if (q.job_id && bundle.job && (bundle.job.status === "pending_quote" || bundle.job.status === "in_inspection")) {

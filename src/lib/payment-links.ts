@@ -1,4 +1,5 @@
 import "server-only";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { formatDateTime } from "./format";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
 import { createNgeniusOrder, ngeniusConfigured } from "./ngenius";
@@ -140,8 +141,8 @@ export async function openPaymentLink(token: string, siteUrl?: string): Promise<
     if (error) return { error: error.message };
   }
   if (inv.job_id && firstOpen) {
-    const [{ data: job }, { data: appr }] = await Promise.all([admin.from("jobs").select("job_number, gated_in_by").eq("id", inv.job_id).maybeSingle(), admin.from("approval_requests").select("sent_by").eq("job_id", inv.job_id)]);
-    const ids = Array.from(new Set([job?.gated_in_by, cur.added_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+    const { data: job } = await admin.from("jobs").select("job_number, gated_in_by").eq("id", inv.job_id).maybeSingle();
+    const ids = Array.from(new Set([...(await advisorsInCharge(inv.job_id)), cur.added_by].filter((x): x is string => !!x)));
     await notifyStaff(ids, { type: "payment_link_opened", title: `Customer opened the payment link · ${job?.job_number ?? inv.number}`, body: `${inv.number}, opened ${formatDateTime(now)}. Record the payment when it arrives. If they did not complete it, paste a new link.`, jobId: inv.job_id, href: `/invoices/${inv.id}` });
     await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "payment_link", note: `Customer opened the payment link on ${inv.number}` });
   }

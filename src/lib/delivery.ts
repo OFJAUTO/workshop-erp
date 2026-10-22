@@ -1,4 +1,5 @@
 import "server-only";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { randomBytes } from "node:crypto";
 import { closeJob } from "./close-job";
 import { driverMessage, parseCoords } from "./recovery";
@@ -125,8 +126,7 @@ export async function tripCar(trip: TripRow): Promise<{ plate: string; car: stri
   const { data: job } = await admin.from("jobs").select("job_number, gated_in_by, customer:customers(full_name, company_name, phone), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", trip.job_id).maybeSingle();
   const v = job?.vehicle as unknown as (Parameters<typeof formatPlate>[0] & { variant: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null }) | null;
   const c = job?.customer as unknown as { full_name: string; company_name: string | null; phone: string | null } | null;
-  const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", trip.job_id);
-  const advisorIds = Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  const advisorIds = await advisorsInCharge(trip.job_id);
   return {
     plate: v ? formatPlate(v) : job?.job_number ?? "",
     car: v ? [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ") : "",

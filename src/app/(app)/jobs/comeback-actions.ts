@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { COMEBACK_CAUSES, COMEBACK_CAUSE_LABELS, isOurFault, type ComebackCause } from "@/lib/comebacks";
@@ -39,8 +40,7 @@ export async function confirmComeback(jobId: string, formData: FormData) {
   const now = new Date().toISOString();
   await admin.from("jobs").update({ comeback_confirmed_by: staff.id, comeback_confirmed_at: now, comeback_free: free, comeback_claim_status: job!.comeback_cause === "faulty_part" ? "to_claim" : "none" }).eq("id", jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "comeback", note: `Comeback confirmed by ${staff.display_name}: ${COMEBACK_CAUSE_LABELS[job!.comeback_cause as ComebackCause]}, ${free ? "free of charge (warranty repair)" : "the customer pays"}${note ? ` · ${note}` : ""}`, created_by: staff.id });
-  const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
-  const advisors = Array.from(new Set([job!.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  const advisors = await advisorsInCharge(jobId);
   await notifyStaff(advisors, { type: "comeback", title: `Comeback decided · ${job!.job_number}`, body: free ? "Free of charge: build the quotation as normal and send it; it is approved on sending without the customer." : "The customer pays: quote as normal.", jobId, href: `/jobs/${jobId}` });
   if (job!.comeback_cause === "faulty_part") await notifyRoles(["parts"], { type: "comeback", title: `Claim from the supplier · ${job!.job_number}`, body: "A part failed. Record the claim on the job card (supplier, LPO, amount).", jobId, href: `/jobs/${jobId}#comeback` });
   revalidatePath(`/jobs/${jobId}`);

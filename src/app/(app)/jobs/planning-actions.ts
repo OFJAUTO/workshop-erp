@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
@@ -28,8 +29,8 @@ async function jobOf(jobId: string) {
   return (data as JobRow | null) ?? null;
 }
 async function advisorIds(jobId: string, gatedInBy: string | null) {
-  const { data: appr } = await createAdminClient().from("approval_requests").select("sent_by").eq("job_id", jobId);
-  return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  void gatedInBy;
+  return advisorsInCharge(jobId);
 }
 const back = (jobId: string, from: string | null, msg: string, ok: boolean) => redirect(`${from === "parts" ? `/parts/${jobId}` : `/jobs/${jobId}`}?${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
 

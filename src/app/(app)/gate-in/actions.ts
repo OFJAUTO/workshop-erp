@@ -188,7 +188,10 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   if (comebackId && !comebackJob) return { error: "That previous job does not belong to this car.", values };
   // A bodyshop car quoted before it arrived: its booked job opens now instead of a new one (nothing is retyped).
   const booked = await bookedJobOf(blankToNull(formData.get("appointment_id")), vehicleId);
-  const jobFields = { vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null, inspection_fee_aed: inspectionFee, inspection_fee_request_aed: feeRequest, inspection_fee_request_by: feeRequest !== null ? staff.id : null };
+  // Section 4 (21 October): the gate-in person becomes the car's advisor in charge (advisors and the
+  // owner); a booked bodyshop job keeps the estimate's advisor. Changeable any time on the job card.
+  const advisorInCharge = ["service_advisor", "owner"].includes(staff.role_id) ? staff.id : null;
+  const jobFields = { vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null, inspection_fee_aed: inspectionFee, inspection_fee_request_aed: feeRequest, inspection_fee_request_by: feeRequest !== null ? staff.id : null, ...(booked ? {} : { advisor_id: advisorInCharge }) };
   const nowIso = new Date().toISOString();
   const { data: job, error: jobError } = booked
     ? await createAdminClient().from("jobs").update({ ...jobFields, status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", booked.id).select("id, job_number").single()

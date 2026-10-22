@@ -1,6 +1,7 @@
 "use server";
 
 import { isTyreName, tyreSizeIn, type TyreSpec } from "@/lib/tyres";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { syncPartLine } from "@/lib/quote-versions";
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
@@ -48,11 +49,9 @@ export async function syncLineForPart(jobId: string, partId: string, by: string)
 /** When every request on the job is answered and every part has a price, the advisor hears about it. */
 /** Every row Priced or Not available (the one state function in src/lib/parts-rows.ts): the advisor is told with the breakdown. */
 async function tellAdvisorIfComplete(jobId: string) {
-  const admin = createAdminClient();
   const [{ summary }, job] = await Promise.all([loadPricingRows(jobId), jobOf(jobId)]);
   if (summary.open || !summary.total || !job) return;
-  const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
-  const ids = [job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x);
+  const ids = await advisorsInCharge(jobId);
   await notifyStaff(ids, { type: "parts_priced", title: `Parts priced · ${job.job_number}`, body: `Every part on this car is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
 }
 
@@ -253,8 +252,7 @@ export async function markRequestUnavailable(requestId: string, formData: FormDa
   await admin.from("job_events").insert({ job_id: r.job_id, event_type: "parts_unavailable", note: `${r.label}: not available (${staff.display_name})${note ? `: ${note}` : ""}`, created_by: staff.id });
   const job = await jobOf(r.job_id);
   if (job) {
-    const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", r.job_id);
-    const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+    const ids = await advisorsInCharge(r.job_id);
     await notifyStaff(ids, { type: "parts_priced", title: `Part not available · ${job.job_number}`, body: `${r.label}: not available${note ? ` (${note})` : ""}. Offer the customer another way or leave it off the quotation.`, jobId: r.job_id, href: `/jobs/${r.job_id}` });
   }
   await tellAdvisorIfComplete(r.job_id);
@@ -310,8 +308,8 @@ const numOrNull = (v: string | number | undefined | null) => {
 
 /** The job's advisors: the one who gated the car in and anyone who sent an approval for it. */
 async function jobAdvisorIds(jobId: string, gatedInBy: string | null) {
-  const { data: appr } = await createAdminClient().from("approval_requests").select("sent_by").eq("job_id", jobId);
-  return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  void gatedInBy;
+  return advisorsInCharge(jobId);
 }
 
 /** A part changed after the quotation went out (price, quantity or name): the quotation is flagged and the advisor told. */
@@ -556,8 +554,7 @@ export async function pricingDone(jobId: string, formData: FormData) {
   const reopened = !!job.parts_pricing_reopened_at;
   await admin.from("jobs").update({ parts_pricing_done_at: now, parts_pricing_done_by: staff.id, parts_pricing_reopened_at: null, parts_pricing_reopened_by: null, updated_by: staff.id }).eq("id", jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `${reopened ? "Updated prices sent" : "Pricing done"} by ${staff.display_name} (${summary.text})`, created_by: staff.id });
-  const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", jobId);
-  const ids = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  const ids = await advisorsInCharge(jobId);
   if (reopened) {
     const { data: jv } = await admin.from("jobs").select("vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle();
     const veh = (jv?.vehicle as unknown as (Parameters<typeof formatPlate>[0] & { make: { name: string } | null; model: { name: string } | null }) | null) ?? null;

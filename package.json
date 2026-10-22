@@ -70,7 +70,8 @@
     "test:method": "node --env-file=.env.local tests/browser/test-method.mjs",
     "test:commission1": "node --env-file=.env.local tests/browser/test-commission1.mjs",
     "test:commission2": "node --env-file=.env.local tests/browser/test-commission2.mjs",
-    "test:owner3": "node --env-file=.env.local tests/browser/test-owner3.mjs"
+    "test:owner3": "node --env-file=.env.local tests/browser/test-owner3.mjs",
+    "test:advisor4": "node --env-file=.env.local tests/browser/test-advisor4.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

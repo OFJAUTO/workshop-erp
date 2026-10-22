@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { notifyManagers, notifyStaff } from "@/lib/notifications";
+import { jobAdvisorIds, notifyManagers, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /** Records the customer's approval: name, time, and the exact terms shown. Then tells the advisor and the workshop manager. */
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   const v = (job?.vehicle as unknown as V) ?? null;
   const carText = v ? `${[v.make?.name, v.model?.name].filter(Boolean).join(" ")} ${v.has_plate ? [v.plate_code, v.plate_number].filter(Boolean).join(" ") : "no plate"}` : job?.job_number ?? "";
 
-  await notifyStaff([req.sent_by, job?.gated_in_by].filter((x): x is string => !!x), {
+  await notifyStaff(Array.from(new Set([req.sent_by, ...(await jobAdvisorIds(req.job_id))])).filter((x): x is string => !!x), {
     type: "approval_approved",
     title: `${name} approved the job card`,
     body: `${carText} · ${job?.job_number ?? ""}`,

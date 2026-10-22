@@ -132,6 +132,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "parts_exchange", label: "A wrong or faulty part needs exchanging", locked: true },
   { type: "parts_no_home", label: "A part has no home: not needed, wrong, or back with Parts (owner)", locked: true },
   { type: "quote_other_editor", label: "Another advisor changed or sent your quotation", locked: true },
+  { type: "advisor_change", label: "A car was put under your name (advisor in charge)", locked: true },
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */
@@ -139,11 +140,30 @@ export const HANDOVER_TYPES = new Set(["bodyshop_signoff", "bodyshop_due_out", "
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
 
+/**
+ * Section 4 (21 October): the OWNER's bell carries only what matters to him - approvals waiting for him,
+ * red or urgent items, and money. These informational types never ring his bell (the dashboards and
+ * lists still show everything); everyone else receives them as before.
+ */
+export const OWNER_QUIET_TYPES = new Set([
+  "owner_report", "job_summary", "job_gated_in", "approval_opened", "approval_approved", "approval_reminder",
+  "report_opened", "quote_opened", "quote_complete", "proforma_sent", "scan_received", "appointment_booked",
+  "appointment_reminder", "wash", "wash_ready", "parts_arrived", "parts_issued", "work_assigned", "work_ready",
+  "catalog_review", "estimate_followup", "road_test_done", "inspection_open",
+]);
+
 /** Sends a notification to specific people, respecting their preferences. */
 export async function notifyStaff(staffIds: string[], n: NotificationInput) {
-  const ids = Array.from(new Set(staffIds.filter(Boolean)));
+  let ids = Array.from(new Set(staffIds.filter(Boolean)));
   if (ids.length === 0) return;
   const admin = createAdminClient();
+  if (OWNER_QUIET_TYPES.has(n.type)) {
+    // Quiet for the owner's bell only; the rest of the list keeps it.
+    const { data: owners } = await admin.from("staff").select("id").eq("role_id", "owner").in("id", ids);
+    const ownerIds = new Set((owners ?? []).map((o) => o.id));
+    ids = ids.filter((id) => !ownerIds.has(id));
+    if (ids.length === 0) return;
+  }
   const locked = HANDOVER_TYPES.has(n.type) || (NOTIFICATION_TYPES.find((t) => t.type === n.type)?.locked ?? false);
   let recipients = ids;
   if (!locked) {
@@ -173,6 +193,28 @@ export async function notifyRoles(roles: RoleId[], n: NotificationInput) {
   const admin = createAdminClient();
   const { data } = await admin.from("staff").select("id").in("role_id", roles).eq("is_active", true);
   await notifyStaff((data ?? []).map((s) => s.id), n);
+}
+
+/**
+ * Section 4 (21 October): a car's notifications go to its ADVISOR IN CHARGE (jobs.advisor_id, falling
+ * back to whoever gated it in) plus anyone who pressed Follow on the car - never to every advisor.
+ * `except` leaves out the person who did the thing.
+ */
+export async function jobAdvisorIds(jobId: string | null | undefined): Promise<string[]> {
+  if (!jobId) return [];
+  const admin = createAdminClient();
+  const [{ data: job }, { data: follows }] = await Promise.all([
+    admin.from("jobs").select("advisor_id, gated_in_by").eq("id", jobId).maybeSingle(),
+    admin.from("job_followers").select("staff_id").eq("job_id", jobId).eq("is_active", true),
+  ]);
+  if (!job) return [];
+  return Array.from(new Set([job.advisor_id ?? job.gated_in_by, ...(follows ?? []).map((f) => f.staff_id)].filter((x): x is string => !!x)));
+}
+
+export async function notifyJobAdvisors(jobId: string | null | undefined, n: NotificationInput, opts: { except?: string | null } = {}) {
+  if (!jobId) return;
+  const ids = (await jobAdvisorIds(jobId)).filter((x) => x !== opts.except);
+  await notifyStaff(ids, { ...n, jobId });
 }
 
 /** The workshop managers of a department: mechanical, bodyshop (incl. paint and PPF), or all for "both" and unknown. */

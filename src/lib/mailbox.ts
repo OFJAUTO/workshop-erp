@@ -1,4 +1,5 @@
 import "server-only";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { attachmentsOf, getAttachment, getMessage, headerOf, listMessages, scansMailbox, textBodyOf, type GmailMessage } from "./gmail";
 import { mailboxConnection, oauthConfigured } from "./google-mailbox";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
@@ -87,8 +88,7 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
     const plate = job.vehicle ? formatPlate(job.vehicle) : job.job_number;
     const kind = scanKindFor(job.status);
     const n = { type: "scan_received", title: `Scan report received for ${plate}`, body: `${stored} file${stored === 1 ? "" : "s"} from the scanner (${kind === "pre" ? "pre-scan" : "post-scan"}), ${job.job_number}.`, jobId: job.id, href: `/jobs/${job.id}` };
-    const { data: appr } = await admin.from("approval_requests").select("sent_by").eq("job_id", job.id);
-    const advisors = Array.from(new Set([job.gated_in_by, ...(appr ?? []).map((a) => a.sent_by as string | null)].filter((x): x is string => !!x)));
+    const advisors = await advisorsInCharge(job.id);
     await notifyStaff(advisors, n);
     await notifyManagers(job.department, n);
     if (job.assigned_to) await notifyStaff([job.assigned_to], { ...n, href: `/my-jobs/${job.id}` });

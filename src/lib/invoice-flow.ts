@@ -1,4 +1,5 @@
 import "server-only";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type InvoiceRow } from "./invoice-data";
 import { newToken } from "./media";
 import { notifyRoles, notifyStaff } from "./notifications";
@@ -13,8 +14,8 @@ type Actor = { id: string; display_name: string } | null;
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 async function advisorsOf(jobId: string, gatedInBy: string | null) {
-  const { data: appr } = await createAdminClient().from("approval_requests").select("sent_by").eq("job_id", jobId);
-  return Array.from(new Set([gatedInBy, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  void gatedInBy;
+  return advisorsInCharge(jobId);
 }
 
 /**

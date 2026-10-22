@@ -6,7 +6,7 @@ import { companyFromSettings } from "@/lib/company";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { loadJobCard } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, labelOf, feeNotice } from "@/lib/jobs";
-import { notifyStaff } from "@/lib/notifications";
+import { jobAdvisorIds, notifyStaff } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -47,7 +47,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   // the customer opening the link and never rings anyone.
   if (!req.opened_at && preview !== "1") {
     await admin.from("approval_requests").update({ opened_at: new Date().toISOString(), status: req.status === "approved" ? "approved" : "opened" }).eq("id", req.id);
-    await notifyStaff([req.sent_by, job.gated_in_by].filter((x): x is string => !!x), { type: "approval_opened", title: `${req.sent_to_name ?? "The customer"} opened the approval link`, body: `${formatPlate(vehicle)} · ${job.job_number}`, jobId: job.id, href: `/jobs/${job.id}` });
+    await notifyStaff(Array.from(new Set([req.sent_by, ...(await jobAdvisorIds(job.id))])).filter((x): x is string => !!x), { type: "approval_opened", title: `${req.sent_to_name ?? "The customer"} opened the approval link`, body: `${formatPlate(vehicle)} · ${job.job_number}`, jobId: job.id, href: `/jobs/${job.id}` });
   }
 
   // The videos go to their own player: fresh addresses on Play, and a "getting ready" slot for one still on its way.

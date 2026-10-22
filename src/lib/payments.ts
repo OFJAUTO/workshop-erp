@@ -1,4 +1,5 @@
 import "server-only";
+import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
 import { notifyRoles, notifyStaff } from "./notifications";
@@ -17,9 +18,7 @@ export type PaymentResult = { error?: string; ok?: boolean; number?: string; pay
 const money = (n: number) => `AED ${round2(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
 async function advisorsOf(jobId: string) {
-  const admin = createAdminClient();
-  const [{ data: job }, { data: appr }] = await Promise.all([admin.from("jobs").select("gated_in_by").eq("id", jobId).maybeSingle(), admin.from("approval_requests").select("sent_by").eq("job_id", jobId)]);
-  return Array.from(new Set([job?.gated_in_by, ...(appr ?? []).map((a) => a.sent_by)].filter((x): x is string => !!x)));
+  return advisorsInCharge(jobId);
 }
 
 /** After a payment, a void or a cheque change: the job is Ready when the invoice is settled, pending payment otherwise. */

@@ -41,7 +41,21 @@ export type DashRow = {
   notSent: boolean;
   /** Parts pressed Pricing done and the quotation is still being built or waits for the customer. */
   priced: boolean;
+  /** Section 4: the advisor in charge (small badge on the card) and whether the car is the viewer's own. */
+  advisorName: string | null;
+  mine: boolean;
 };
+
+/** The small advisor-in-charge badge: initial circle + name, on every car card. */
+export function AdvisorBadge({ name, compact = false }: { name: string | null; compact?: boolean }) {
+  if (!name) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] font-bold" title={`Advisor in charge: ${name}`} data-advisor-badge={name}>
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-ink text-[9px] font-extrabold text-white">{name.trim().charAt(0).toUpperCase()}</span>
+      {compact ? null : <span className="max-w-24 truncate">{name}</span>}
+    </span>
+  );
+}
 
 const SORTS = [
   { key: "urgent", label: "Most urgent first" },
@@ -121,9 +135,10 @@ const TILES: { key: TileKey; label: string; caption: string; tone: "ink" | "ambe
 
 
 /** Search, sort, the four tiles and the Pending chips, all working together on the same list. */
-export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initialPending?: string }) {
+export function DashboardCars({ rows, initialPending, advisorView = false }: { rows: DashRow[]; initialPending?: string; /** Section 4: an advisor sees My cars first, Other cars folded below, with a Mine/All switch. */ advisorView?: boolean }) {
   const [sort, setSort] = useStoredSort();
   const [tile, setTile] = useState<TileKey>("all");
+  const [scope, setScope] = useState<"mine" | "all">("mine");
   const [pending, setPending] = useState<string | null>(PENDING_GROUPS.some((g) => g.key === initialPending) || initialPending === "not_sent" ? (initialPending as string) : null);
 
   const tileDef = TILES.find((t) => t.key === tile) ?? TILES[0];
@@ -166,6 +181,15 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionLabel>Cars{filtered ? ` · ${visible.length} of ${rows.length}` : ""}</SectionLabel>
           <span className="flex flex-wrap items-center gap-3">
+            {advisorView ? (
+              <span className="inline-flex rounded-control border border-line-strong bg-white p-0.5" data-scope-switch>
+                {(["mine", "all"] as const).map((s) => (
+                  <button key={s} type="button" onClick={() => setScope(s)} aria-pressed={scope === s} data-scope={s} className={`min-h-10 rounded-control px-3 text-sm font-bold ${scope === s ? "bg-ink text-white" : "text-muted"}`}>
+                    {s === "mine" ? `My cars (${searched.filter((r) => r.mine).length})` : `All (${searched.length})`}
+                  </button>
+                ))}
+              </span>
+            ) : null}
             <label className="flex items-center gap-2 text-sm font-semibold text-muted">
               <span>Stage</span>
               <Select value={pending ?? ""} onChange={(e) => setPending(e.target.value || null)} aria-label="Stage filter" className="min-w-44" data-stage-filter>
@@ -200,44 +224,57 @@ export function DashboardCars({ rows, initialPending }: { rows: DashRow[]; initi
               </button>
             ) : null}
           </Empty>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {visible.map((j) => (
-              <Link key={j.id} href={`/jobs/${j.id}`} className="block" data-flash-id={j.id}>
-                <Card className="flex flex-col md:flex-row md:items-center gap-5 hover:border-ink">
-                  <CarPicture url={j.pictureUrl} alt={j.plate} className="w-full md:w-56" />
-                  <div className="flex-1 min-w-0 flex flex-col gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.plate}</span>
-                      {j.vip ? <Badge tone="ink">VIP</Badge> : null}
-                      {j.loose ? <Badge tone="ink">Loose items</Badge> : null}
-                      <PriorityBadge priority={j.priority} />
-                      <TimingBadge timing={j.timing} />
-                      {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
-                    </div>
-                    <span className="text-sm font-semibold">{j.title}</span>
-                    <span className="text-xs text-muted">
-                      {j.assignee ?? j.customer ?? "Not assigned"}
-                      {j.promisedLabel ? ` · ${j.promisedLabel}` : ""}
-                      {j.conditionShort ? ` · ${j.conditionShort}` : ""}
-                      {j.dashCam ? " · Dash cam" : ""}
-                      {j.majorDamage ? " · Major damage" : ""}
-                      {` · ${j.jobNumber}`}
-                    </span>
+        ) : (() => {
+          const card = (j: DashRow, dim = false) => (
+            <Link key={j.id} href={`/jobs/${j.id}`} className={`block ${dim ? "opacity-75" : ""}`} data-flash-id={j.id}>
+              <Card className="flex flex-col md:flex-row md:items-center gap-5 hover:border-ink">
+                <CarPicture url={j.pictureUrl} alt={j.plate} className="w-full md:w-56" />
+                <div className="flex-1 min-w-0 flex flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.plate}</span>
+                    {j.vip ? <Badge tone="ink">VIP</Badge> : null}
+                    {j.loose ? <Badge tone="ink">Loose items</Badge> : null}
+                    <PriorityBadge priority={j.priority} />
+                    <TimingBadge timing={j.timing} />
+                    {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
+                    <AdvisorBadge name={j.advisorName} />
                   </div>
-                  <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
-                      {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
-                      {j.priced ? <Badge tone="green">Priced</Badge> : null}
-                    </span>
-                    <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
-                  </div>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        )}
+                  <span className="text-sm font-semibold">{j.title}</span>
+                  <span className="text-xs text-muted">
+                    {j.assignee ?? j.customer ?? "Not assigned"}
+                    {j.promisedLabel ? ` · ${j.promisedLabel}` : ""}
+                    {j.conditionShort ? ` · ${j.conditionShort}` : ""}
+                    {j.dashCam ? " · Dash cam" : ""}
+                    {j.majorDamage ? " · Major damage" : ""}
+                    {` · ${j.jobNumber}`}
+                  </span>
+                </div>
+                <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
+                    {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
+                    {j.priced ? <Badge tone="green">Priced</Badge> : null}
+                  </span>
+                  <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
+                </div>
+              </Card>
+            </Link>
+          );
+          if (!(advisorView && scope === "mine")) return <div className="flex flex-col gap-3">{visible.map((j) => card(j))}</div>;
+          const mineRows = visible.filter((r) => r.mine);
+          const otherRows = visible.filter((r) => !r.mine);
+          return (
+            <div className="flex flex-col gap-3">
+              {mineRows.length ? mineRows.map((j) => card(j)) : <p className="text-sm text-muted" data-no-mine>No cars under your name right now. The switch above shows all cars.</p>}
+              {otherRows.length ? (
+                <details className="rounded-card border border-line bg-white" data-other-cars>
+                  <summary className="flex min-h-12 cursor-pointer items-center px-4 text-sm font-bold text-muted">Other cars ({otherRows.length})</summary>
+                  <div className="flex flex-col gap-3 p-3 pt-0">{otherRows.map((j) => card(j, true))}</div>
+                </details>
+              ) : null}
+            </div>
+          );
+        })()}
       </section>
     </>
   );

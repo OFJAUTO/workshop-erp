@@ -55,6 +55,8 @@ import { loadPlanning } from "@/lib/planning";
 import { sendToWash, skipWash, washDone } from "../../wash/actions";
 import { WashForms } from "../../wash/WashForms";
 import { DecideMoveForm, RequestMoveForm } from "./MoveForms";
+import { AdvisorBadge } from "../../dashboard/DashboardCars";
+import { setAdvisorInCharge, toggleFollow } from "../advisor-actions";
 import { PlanningCard } from "./PlanningCard";
 import { TechniciansCard } from "./TechniciansCard";
 import { ServiceStickerCard } from "./ServiceStickerCard";
@@ -138,6 +140,14 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // Gate-in details can be corrected until the car leaves (every change is written in the history).
   const canEditGateIn = can(role, "editGateIn") && job.is_open && job.status !== "in_delivery";
   const canSend = can(role, "sendApproval") && job.is_open;
+  // Section 4: the advisor in charge (badge + change control) and whether the viewer follows this car.
+  const [{ data: advisorRows }, { data: followRow }] = await Promise.all([
+    admin.from("staff").select("id, display_name").in("role_id", ["service_advisor", "owner"]).eq("is_active", true).order("display_name"),
+    admin.from("job_followers").select("id, is_active").eq("job_id", id).eq("staff_id", staff.id).maybeSingle(),
+  ]);
+  const advisorChoices = (advisorRows ?? []) as { id: string; display_name: string }[];
+  const inChargeName = advisorChoices.find((a) => a.id === (job.advisor_id ?? job.gated_in_by))?.display_name ?? null;
+  const viewerFollows = !!followRow?.is_active;
   // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
   const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
   const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending" && (gateOutReached || role === "owner");
@@ -212,7 +222,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const avgCount = inspItems.filter((i) => i.status === "average").length;
 
   const stageIndex = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"].indexOf(job.stage);
-  const advisorName = card.gatedInBy ?? null;
+  const advisorName = inChargeName ?? card.gatedInBy ?? null;
   // The advance payment is a real step between Approval and Parts when the quotation asks a deposit.
   const dep = await depositState(id);
   const hasDeposit = dep.required > 0;
@@ -317,6 +327,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
             {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : <Badge tone="outline" data-fee-badge>Inspection fee: AED {Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}{job.first_approval_at ? " · locked" : ""}</Badge>}
+            <AdvisorBadge name={inChargeName} />
             {job.comeback_of ? <Badge tone={job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "outline" : "red"}>{job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "Return visit" : "Comeback"}{comebackOriginal ? ` of ${comebackOriginal.job_number}` : ""}{job.comeback_free ? " · free of charge" : ""}</Badge> : null}
             {comebacksOfThis.length ? <Badge tone="red">Came back: {comebacksOfThis.map((c) => c.job_number).join(", ")}</Badge> : null}
             <TimingBadge timing={timing} />
@@ -351,6 +362,31 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </>
         }
       />
+      {(role === "service_advisor" || role === "owner") && !staff.viewingAs && job.is_open ? (
+        <div className="-mt-3 flex flex-wrap items-center gap-2 text-xs" data-advisor-control>
+          <span className="font-semibold text-muted">Advisor in charge: {inChargeName ?? "not set"}</span>
+          <details className="relative">
+            <summary className="inline-flex min-h-8 cursor-pointer items-center rounded-control px-1 text-[11px] font-bold text-muted underline underline-offset-4" data-advisor-change>{inChargeName ? "change" : "set advisor"}</summary>
+            <div className="absolute left-0 z-30 mt-1 w-72 rounded-card border border-line bg-white p-3 shadow-xl flex flex-col gap-2">
+              <form action={setAdvisorInCharge.bind(null, id)} className="flex flex-wrap items-end gap-2">
+                <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Advisor in charge</span>
+                  <Select name="staff_id" defaultValue={job.advisor_id ?? ""} required>
+                    <option value="" disabled>Pick…</option>
+                    {advisorChoices.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}
+                  </Select>
+                </label>
+                <Button type="submit" size="md" data-advisor-save>Set</Button>
+              </form>
+              <p className="text-xs text-muted">The car&apos;s notifications follow the advisor in charge. Logged on the job&apos;s history.</p>
+              {(job.advisor_id ?? job.gated_in_by) !== staff.id ? (
+                <form action={toggleFollow.bind(null, id)} className="border-t border-line pt-2">
+                  <Button type="submit" tone="secondary" size="md" data-follow-toggle>{viewerFollows ? "Unfollow this car" : "Follow this car (updates come to you too)"}</Button>
+                </form>
+              ) : null}
+            </div>
+          </details>
+        </div>
+      ) : null}
 
       {message ? <Notice tone="success">{message}</Notice> : null}
       {aftercare ? (

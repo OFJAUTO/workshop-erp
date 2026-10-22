@@ -67,12 +67,13 @@ export async function bonusRowsOf(settings: Settings, periodKey?: string): Promi
   const [{ data: bsLines }, { data: clockings }, { data: jobRows }, { data: overrides }, { data: staffRows }] = await Promise.all([
     jobIds.length ? admin.from("quotation_lines").select("line_total, quotation:quotations!inner(job_id, status), service:services(bodyshop_kind)").in("quotation.job_id", jobIds).eq("quotation.status", "approved").eq("is_active", true) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("bodyshop_clockings").select("job_id, minutes, department_id").in("job_id", jobIds) : Promise.resolve({ data: [] }),
-    jobIds.length ? admin.from("jobs").select("id, gated_in_by").in("id", jobIds) : Promise.resolve({ data: [] }),
+    jobIds.length ? admin.from("jobs").select("id, gated_in_by, advisor_id").in("id", jobIds) : Promise.resolve({ data: [] }),
     admin.from("advisor_bonus_overrides").select("invoice_id, rate_percent, reason"),
     admin.from("staff").select("id, display_name"),
   ]);
   const nameOf = new Map(((staffRows ?? []) as { id: string; display_name: string }[]).map((s) => [s.id, s.display_name]));
-  const advisorOf = new Map(((jobRows ?? []) as { id: string; gated_in_by: string | null }[]).map((j) => [j.id, j.gated_in_by]));
+  // Section 4: the bonus follows the ADVISOR IN CHARGE (the owner reassigns it by changing him, or by the per-invoice override).
+  const advisorOf = new Map(((jobRows ?? []) as { id: string; gated_in_by: string | null; advisor_id: string | null }[]).map((j) => [j.id, j.advisor_id ?? j.gated_in_by]));
   const overrideOf = new Map(((overrides ?? []) as { invoice_id: string; rate_percent: number | string; reason: string | null }[]).map((o) => [o.invoice_id, o]));
   const bsRevenue = new Map<string, number>();
   for (const l of (bsLines ?? []) as unknown as { line_total: number | string | null; quotation: { job_id: string } | null; service: { bodyshop_kind: string | null } | null }[]) {
