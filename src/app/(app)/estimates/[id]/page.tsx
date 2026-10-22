@@ -22,11 +22,11 @@ import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
 export const dynamic = "force-dynamic";
 
 /** The estimate builder: the same lines and prices as a quotation, no promised date, sent to a page headed "Estimate". Owner and the advisor who made it only. */
-export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
+export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; packages?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const { message, error } = await searchParams;
+  const { message, error, packages: openPackages } = await searchParams;
   const [bundle, settings, site] = await Promise.all([loadQuotation(id), getSettings(), getSiteUrl()]);
   if (!bundle || bundle.quotation.kind !== "estimate") notFound();
   const { quotation: q, vehicle, customer } = bundle;
@@ -90,6 +90,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         </Card>
       ) : null}
       <QuoteEditor
+        autoOpenPackages={openPackages === "1"}
         quotation={q}
         lines={bundle.lines}
         parts={[]}

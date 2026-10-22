@@ -259,6 +259,7 @@ export function QuoteEditor({
   reviseReasons = [],
   ownerBox = null,
   autoSend = false,
+  autoOpenPackages = false,
   completedAt = null,
   estimatedDays = 0,
   isRevision = false,
@@ -311,6 +312,8 @@ export function QuoteEditor({
   ownerBox?: ReactNode;
   /** Arriving from "send the revised quotation": complete and open the send window by itself. */
   autoSend?: boolean;
+  /** Section 6: a bodyshop estimate lands with the package picker already open. */
+  autoOpenPackages?: boolean;
   completedAt?: string | null;
   estimatedDays?: number;
   isRevision?: boolean;
@@ -374,7 +377,7 @@ export function QuoteEditor({
   // "Merge with another labour line": the picked line's hours join the target, the line itself goes.
   const [mergeFor, setMergeFor] = useState<string | null>(null);
   // "+ Add a package": the bodyshop package chooser, with the only-if ticks (sunroof and friends).
-  const [packageAsk, setPackageAsk] = useState(false);
+  const [packageAsk, setPackageAsk] = useState(autoOpenPackages && (packages?.length ?? 0) > 0);
   const [draft, setDraft] = useState<null | "choose" | "saving">(null);
   /** Where the cursor goes after the next render: a new line's name box, or a filled line's hours or price box. */
   const [focusTarget, setFocusTarget] = useState<null | { id: string; field: "name" | "amount" }>(null);

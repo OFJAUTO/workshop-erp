@@ -27,5 +27,6 @@ export async function createEstimate(_state: FormState, formData: FormData): Pro
   if (error || !created) return { error: error?.message ?? "Could not create the estimate.", values };
   await logQuoteEvent(created.id, null, staff.id, "estimate_started", `Estimate ${created.number} started by ${staff.display_name}`);
   revalidatePath("/estimates");
-  redirect(`/estimates/${created.id}`);
+  // Section 6: started from the bodyshop button - land in the editor with the package picker open.
+  redirect(`/estimates/${created.id}${String(formData.get("bodyshop") ?? "") === "1" ? "?packages=1" : ""}`);
 }

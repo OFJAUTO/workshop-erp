@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 type V = { id: string; customer_id: string; kind: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null };
 
 /** A new estimate before the car arrives: one page, three big choices for the customer and the car, then the lines. */
-export default async function NewEstimatePage({ searchParams }: { searchParams: Promise<{ customer?: string; vehicle?: string }> }) {
+export default async function NewEstimatePage({ searchParams }: { searchParams: Promise<{ customer?: string; vehicle?: string; bodyshop?: string }> }) {
   await requirePermission("viewEstimates");
   const sp = await searchParams;
   const supabase = await createClient();
@@ -24,11 +24,11 @@ export default async function NewEstimatePage({ searchParams }: { searchParams: 
   const cars: ChooserCar[] = ((vehicles ?? []) as unknown as V[]).map((v) => ({ id: v.id, customerId: v.customer_id, label: `${formatPlate(v)} · ${[v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ")}` }));
   return (
     <>
-      <PageHeader title="New estimate" subtitle="Before the car arrives. Pick or add the customer and the car, then add the lines." actions={<LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>} />
+      <PageHeader title={sp.bodyshop === "1" ? "New estimate (bodyshop)" : "New estimate"} subtitle={sp.bodyshop === "1" ? "Before the car arrives: the customer, the car, then the package picker opens by itself." : "Before the car arrives. Pick or add the customer and the car, then add the lines."} actions={<LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>} />
       <Card className="max-w-3xl">
         <CustomerCarStartForm
           action={createEstimate}
-          initialValues={{ mode: "existing", customer_id: sp.customer ?? "", vehicle_id: sp.vehicle ?? "" }}
+          initialValues={{ mode: "existing", customer_id: sp.customer ?? "", vehicle_id: sp.vehicle ?? "", bodyshop: sp.bodyshop === "1" ? "1" : "" }}
           customers={(customers ?? []).map((c) => ({ id: c.id, label: `${c.company_name ? `${c.company_name} · ` : ""}${c.full_name}${c.phone ? ` · ${c.phone}` : ""}` }))}
           cars={cars}
           makes={(makes ?? []) as VehicleMakeRow[]}

@@ -3,7 +3,7 @@ import { workingTimeOf } from "@/lib/jobs";
 import { countedMinutes, type WorkingTime } from "@/lib/working-time";
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { addDaysIso, neededSignoffs, sectionOfDepartment, spreadDueDates, stageDef, stageKeysFor, stageLabelFor, workingDaysBetween, type Section, type SignoffKey, type StageSection } from "./bodyshop-kinds";
+import { STAGE_DEFS, addDaysIso, neededSignoffs, sectionOfDepartment, spreadDueDates, stageDef, stageKeysFor, stageLabelFor, workingDaysBetween, type Section, type SignoffKey, type StageSection } from "./bodyshop-kinds";
 import { formatDate } from "./format";
 import { ensureProforma } from "./invoice-flow";
 import { INVOICE_SELECT, nextDocumentNumber, toInvoice } from "./invoice-data";
@@ -649,13 +649,17 @@ export type BoardCar = {
   pictureUrl: string | null;
   signoff: { needed: SignoffKey[]; signed: SignoffKey[]; waitingOn: SignoffKey[] };
   tone: "red" | "amber" | "normal";
+  /** Section 6: the plain-words status for a car whose bodyshop stages have not started yet. */
+  phase: string | null;
 };
 
 /** Every open bodyshop car with its stages, people and sign-off state, in due order. */
 export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCar[]; today: string; tomorrow: string }> {
   const admin = createAdminClient();
   const wtBoard = workingTimeOf(await getSettings(), "bodyshop");
-  const { data: jobs } = await admin.from("jobs").select(JOB_SELECT).eq("is_open", true).eq("department", "bodyshop").in("status", ["gate_in_pending", "pending_approval", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment"]).order("promised_at", { ascending: true, nullsFirst: false });
+  // Section 6 (21 October): EVERY open job with bodyshop work belongs on the board - mixed ("both")
+  // cars included, and cars still in inspection, quoting or approval, not only the ones already in work.
+  const { data: jobs } = await admin.from("jobs").select(JOB_SELECT).eq("is_open", true).in("department", ["bodyshop", "both"]).order("promised_at", { ascending: true, nullsFirst: false });
   const rows = (jobs ?? []) as unknown as BodyshopJobRow[];
   if (!rows.length) {
     const today = dubaiDate();
@@ -673,9 +677,38 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
   const picOf = new Map((signed ?? []).filter((s) => s.path).map((s) => [s.path as string, s.signedUrl]));
   const today = dubaiDate();
   const tomorrow = addDaysIso(today, 1);
+  // Cars whose stages have not started yet (inspection, quoting, approval, parts): their PLANNED stages
+  // come from the newest quotation's bodyshop lines, so each section sees what is coming to it.
+  const stagelessIds = rows.filter((j) => !((stageRows ?? []) as { job_id: string }[]).some((s) => s.job_id === j.id)).map((j) => j.id);
+  const plannedOf = new Map<string, { key: string; label: string; section: StageSection }[]>();
+  if (stagelessIds.length) {
+    const { data: lineRows } = await admin
+      .from("quotation_lines")
+      .select("id, quotation:quotations!inner(job_id, status, is_active, version), service:services(bodyshop_kind)")
+      .in("quotation.job_id", stagelessIds)
+      .eq("is_active", true)
+      .eq("quotation.is_active", true)
+      .neq("quotation.status", "cancelled");
+    const kindsOf = new Map<string, Set<string>>();
+    for (const l of (lineRows ?? []) as unknown as { quotation: { job_id: string } | null; service: { bodyshop_kind: string | null } | null }[]) {
+      const jid = l.quotation?.job_id;
+      const kind = l.service?.bodyshop_kind;
+      if (!jid || !kind) continue;
+      if (!kindsOf.has(jid)) kindsOf.set(jid, new Set());
+      kindsOf.get(jid)!.add(kind);
+    }
+    for (const [jid, kinds] of kindsOf) {
+      const keys = stageKeysFor(Array.from(kinds));
+      plannedOf.set(jid, STAGE_DEFS.filter((d) => keys.includes(d.key)).map((d) => ({ key: d.key, label: d.label, section: d.section })));
+    }
+  }
   const cars: BoardCar[] = rows.map((job) => {
-    const stages = ((stageRows ?? []) as Record<string, unknown>[]).map(toStage).filter((s) => s.job_id === job.id);
-    const current = currentStage(stages);
+    const real = ((stageRows ?? []) as Record<string, unknown>[]).map(toStage).filter((s) => s.job_id === job.id);
+    const planned = real.length ? [] : (plannedOf.get(job.id) ?? []);
+    const stages = real.length
+      ? real
+      : planned.map((p, i) => toStage({ id: `plan:${job.id}:${p.key}`, job_id: job.id, position: i, key: p.key, label: p.label, section: p.section, est_hours: null, due_date: null, status: "pending", started_at: null, done_at: null, done_by: null, heads_up_sent_at: null, late_notified_at: null } as unknown as Record<string, unknown>));
+    const current = currentStage(real);
     const needed = neededSignoffs(stages.map((s) => s.section));
     const signedKeys = (sig ?? []).filter((s) => s.job_id === job.id).map((s) => s.role_key as SignoffKey);
     const due = current?.due_date ?? job.promised_at;
@@ -689,6 +722,7 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
       pictureUrl: job.vehicle?.photo_path ? (picOf.get(job.vehicle.photo_path) ?? null) : null,
       signoff: { needed, signed: signedKeys, waitingOn: needed.filter((k) => !signedKeys.includes(k)) },
       tone,
+      phase: real.length ? null : (BOARD_PHASE[job.status] ?? job.status.replace(/_/g, " ")),
     };
   });
   const order = (a: BoardCar, b: BoardCar) => ((a.current?.due_date ?? a.job.promised_at ?? "9999") < (b.current?.due_date ?? b.job.promised_at ?? "9999") ? -1 : 1);
@@ -696,6 +730,26 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
   const goingOut = cars.filter((c) => c.job.promised_at && c.job.promised_at <= tomorrow).sort((a, b) => ((a.job.promised_at ?? "") < (b.job.promised_at ?? "") ? -1 : 1));
   return { cars, goingOut, today, tomorrow };
 }
+
+/** The plain-words phase of a bodyshop car before its stages start. */
+const BOARD_PHASE: Record<string, string> = {
+  gate_in_pending: "Gate-in running",
+  pending_approval: "Waiting for the customer's job-card approval",
+  pending_assignment: "Waiting to be assigned",
+  pending_road_test: "Road test",
+  in_inspection: "Inspection running",
+  pending_inspection: "Inspection to start",
+  pending_quote: "Quotation being prepared",
+  pending_customer_approval: "Quotation with the customer",
+  approved: "Approved, parts and planning",
+  waiting_parts: "Waiting for parts",
+  in_work: "In work",
+  pending_qc: "QC",
+  pending_wash: "Wash",
+  ready: "Ready",
+  pending_payment: "Awaiting payment",
+  in_delivery: "Out for delivery",
+};
 
 /** A section's cars in due order: the ones whose current stage is theirs first, then the ones coming to them. */
 export function sectionCars(cars: BoardCar[], section: Section): { now: BoardCar[]; coming: BoardCar[] } {

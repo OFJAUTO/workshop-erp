@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
   if (!owner || !tech1) return NextResponse.json({ error: "Need an owner and a technician." }, { status: 400 });
   const { data: make } = await admin.from("vehicle_makes").select("id").limit(1).maybeSingle();
   const now = new Date().toISOString();
-  await admin.from("customers").upsert({ id: CUST, customer_type: "individual", full_name: "stage test customer", phone: "+971500000003", created_by: owner.id, updated_by: owner.id });
+  await admin.from("customers").upsert({ id: CUST, customer_type: "individual", full_name: "Stage Test Customer", phone: "+971500000003", created_by: owner.id, updated_by: owner.id });
   if (stage === "bodyshop") {
     // A bodyshop car: quoted before arrival (Full PPF, tint, old PPF removal). "at": sent (link open for the customer),
     // approved (booked, not here), in_work (gated in, stages running) or ready (work done, sign-off open).

@@ -21,7 +21,7 @@ function CarLine({ c, section, tv, today }: { c: BoardCar; section: Section | nu
       <div className="flex-1 min-w-0 flex flex-col">
         <span className={`${tv ? "text-xl" : "text-sm"} font-extrabold tracking-[0.03em] truncate`}>{v ? formatPlate(v) : c.job.job_number}<span className={`font-semibold ${tv ? "text-white/80" : "text-muted"}`}> · {[v?.make?.name, v?.model?.name].filter(Boolean).join(" ")}{v?.colour ? ` · ${v.colour}` : ""}</span></span>
         <span className={`${tv ? "text-base" : "text-xs"} ${tv ? "text-white/70" : "text-muted"} truncate`}>
-          {stage ? stage.label : c.job.status === "ready" || c.job.status === "pending_payment" ? "Ready, waiting for the handover" : "Waiting"}
+          {c.phase ? `${stage ? `${stage.label} · ` : ""}${c.phase}` : stage ? stage.label : c.job.status === "ready" || c.job.status === "pending_payment" ? "Ready, waiting for the handover" : "Waiting"}
           {c.people.length ? ` · ${c.people.map((p) => p.name).join(", ")}` : ""}
         </span>
       </div>
@@ -70,6 +70,13 @@ export function BodyshopBoard({ cars, goingOut, today, tomorrow, tv = false }: {
           </div>
         )}
       </section>
+      {/* Section 6: cars with bodyshop work whose sections are not known yet (no stages, no quoted lines). */}
+      {cars.some((c) => c.stages.length === 0) ? (
+        <section className={panel} data-before-bodyshop>
+          {title("Before the bodyshop work", `${cars.filter((c) => c.stages.length === 0).length}`)}
+          {cars.filter((c) => c.stages.length === 0).map((c) => <CarLine key={c.job.id} c={c} section={null} tv={tv} today={today} />)}
+        </section>
+      ) : null}
       <div className={`grid gap-4 ${tv ? "grid-cols-2 2xl:grid-cols-4" : "grid-cols-1 lg:grid-cols-2"}`}>
         {SECTIONS.map((section) => {
           const { now, coming } = sectionCars(cars, section);

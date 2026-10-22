@@ -9,6 +9,7 @@ export function CustomerCarStartForm({ action, initialValues = {}, customers, ca
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-5">
       {(v) => (
         <div className="flex flex-col gap-5" data-start-form={testId}>
+          {v.bodyshop ? <input type="hidden" name="bodyshop" value={v.bodyshop} /> : null}
           <CustomerCarChooser v={v} customers={customers} cars={cars} makes={makes} models={models} />
           <div><SubmitButton>{submitLabel}</SubmitButton></div>
         </div>

@@ -22,7 +22,7 @@ export default async function BodyshopPage({ searchParams }: { searchParams: Pro
         actions={
           <>
             {role === "team_leader" ? <LinkButton href="/bodyshop/mine" size="lg">My section</LinkButton> : null}
-            {can(role, "bodyshopQuote") ? <LinkButton href="/bodyshop/new" size="lg">New bodyshop quotation</LinkButton> : null}
+            {can(role, "bodyshopQuote") ? <LinkButton href="/estimates/new?bodyshop=1" size="lg" data-new-bodyshop-estimate>New estimate (bodyshop)</LinkButton> : null}
           </>
         }
       />
