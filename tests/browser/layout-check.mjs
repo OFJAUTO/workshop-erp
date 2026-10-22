@@ -96,7 +96,7 @@ const roles = [
 ].filter(Boolean).filter((r) => !onlyRole || r.name === onlyRole);
 
 // Pages reached from inside another page (not in the menu) that still need checking.
-const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions"], accounts: ["/commissions"] };
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties"], accounts: ["/commissions"] };
 
 let pagesChecked = 0;
 let shots = 0;
