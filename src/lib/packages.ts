@@ -88,15 +88,31 @@ export function toSnapshot(raw: unknown): PackageSnapshot | null {
   };
 }
 
-/** The customer's words under the package line: every surface (link, proforma, tax invoice, PDFs) uses the same text. */
-export function packageDetailsText(raw: unknown): string | null {
+/**
+ * The package split the way every customer document shows it: the included items (with warranties),
+ * the complimentary extras (an item named "Complimentary …" and the two ticks, never the same thing
+ * twice), and the estimated completion. Pure; the screens, the link and every PDF read it.
+ */
+export function packageParts(raw: unknown): { name: string; items: { label: string; warranty: string | null }[]; complimentary: string[]; completion: string | null } | null {
   const s = toSnapshot(raw);
   if (!s) return null;
-  const lines = s.items.map((i) => `• ${i.label}${i.warranty ? ` — ${warrantyWords(i.warranty)}` : ""}`);
-  if (s.pickup_dropoff) lines.push("• Complimentary pick-up & drop-off");
-  if (s.aftercare_check) lines.push("• Complimentary 10-day after-care check");
+  const isComp = (l: string) => /^complimentary\b/i.test(l.trim());
+  const isPickup = (l: string) => /pick[\s-]?up/i.test(l) && /drop[\s-]?off/i.test(l);
+  const isAftercare = (l: string) => /10[\s-]?day/i.test(l);
+  const complimentary = s.items.filter((i) => isComp(i.label)).map((i) => i.label.trim());
+  if (s.pickup_dropoff && !complimentary.some(isPickup)) complimentary.push("Complimentary pick-up & drop-off");
+  if (s.aftercare_check && !complimentary.some(isAftercare)) complimentary.push("Complimentary 10-day after-care check");
+  return { name: s.name, items: s.items.filter((i) => !isComp(i.label)), complimentary, completion: s.time_in_workshop || null };
+}
+
+/** The customer's words under the package line: every surface (link, proforma, tax invoice, PDFs) uses the same text. */
+export function packageDetailsText(raw: unknown): string | null {
+  const p = packageParts(raw);
+  if (!p) return null;
+  const lines = p.items.map((i) => `• ${i.label}${i.warranty ? ` — ${warrantyWords(i.warranty)}` : ""}`);
+  for (const c of p.complimentary) lines.push(`• ${c}`);
   // Section 8: "Estimated completion" closes the list, on its own line.
-  if (s.time_in_workshop) lines.push(`${ESTIMATED_COMPLETION}: ${s.time_in_workshop}`);
+  if (p.completion) lines.push(`${ESTIMATED_COMPLETION}: ${p.completion}`);
   return lines.join("\n") || null;
 }
 
