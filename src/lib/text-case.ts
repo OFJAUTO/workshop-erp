@@ -1,44 +1,26 @@
 /**
- * Text tidiness, the same rules as the database triggers (erp_title_case, erp_sentence_case,
- * erp_upper_code): names in Title Case, codes in CAPITALS, descriptions in sentence case. Words
- * typed with their own capitals (McLaren) are left alone; known words (BMW, A/C) keep their form.
+ * Text tidiness. Section 5 (21 October 2026): NOTHING changes the capitals a person typed - "OFJ"
+ * stays OFJ, names and notes keep their own form. The old Title Case and sentence case are gone for
+ * good (the database functions erp_title_case / erp_sentence_case were neutered the same day); what
+ * remains is whitespace tidy and CAPITALS for codes (plates, VINs, part numbers), which never destroy
+ * what was meant. Screens and documents still DISPLAY names in capitals by CSS and textTransform.
  */
 export type TextCase = "title" | "sentence" | "upper";
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-
 export function applyKnownWords(text: string, known: string[]): string {
-  let out = text;
-  for (const kw of known) {
-    if (!kw) continue;
-    out = out.replace(new RegExp(`(^|[^A-Za-z0-9])${escape(kw)}($|[^A-Za-z0-9])`, "gi"), (m, a, b) => `${a}${kw}${b}`);
-  }
-  return out;
+  // Kept for compatibility: with no case conversion left, the typed form already wins.
+  void known;
+  return text;
 }
 
 export function titleCase(text: string, known: string[] = []): string {
-  const t = text.trim().replace(/\s+/g, " ");
-  if (!t) return t;
-  const words = t.split(" ").map((w) => {
-    if (w === w.toUpperCase() || w === w.toLowerCase()) return w.toLowerCase().replace(/(^|[^a-z0-9])([a-z])/g, (m, a, b) => a + b.toUpperCase());
-    return w;
-  });
-  return applyKnownWords(words.join(" "), known);
+  void known;
+  return text.trim().replace(/\s+/g, " ");
 }
 
 export function sentenceCase(text: string, known: string[] = []): string {
-  let out = text.trim();
-  if (!out) return out;
-  const letters = out.replace(/[^A-Za-z]/g, "");
-  if (letters && (letters === letters.toUpperCase() || letters === letters.toLowerCase())) {
-    out = out
-      .split(" ")
-      .map((w) => (/[0-9/\-]/.test(w) ? w : w.toLowerCase()))
-      .join(" ");
-  }
-  out = out.replace(/(^|[.!?]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase());
-  out = out.charAt(0).toUpperCase() + out.slice(1);
-  return applyKnownWords(out, known);
+  void known;
+  return text.trim();
 }
 
 export function upperCode(text: string): string {
