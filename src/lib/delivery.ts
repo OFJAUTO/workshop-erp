@@ -11,7 +11,7 @@ import { notifyRoles, notifyStaff } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 
-export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by, road_km, km_source, km_error, recovery_kind, paid_month";
+export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by, road_km, km_source, km_error, recovery_kind, paid_month, original_price_aed, price_history";
 
 export type TripRow = {
   id: string; job_id: string | null; kind: "delivery" | "pickup"; company: string | null; driver_id: string | null;
@@ -23,6 +23,8 @@ export type TripRow = {
   decided_by: string | null; decided_at: string | null; query_note: string | null; marked_by: string | null;
   reminded_at: string | null; is_active: boolean; created_at: string; created_by: string | null;
   road_km: number | null; km_source: "route" | "manual" | null; km_error: string | null; recovery_kind: string | null; paid_month: string | null;
+  /** The driver's own claim when the price was changed; price_aed is always the final price. */
+  original_price_aed: number | string | null; price_history: unknown;
 };
 
 export type DriverRow = { id: string; name: string; phone: string | null; truck_plate: string | null; company: string | null; is_default: boolean };

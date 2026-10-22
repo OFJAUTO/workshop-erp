@@ -4,7 +4,8 @@ import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { formatBytes, storageUsage } from "@/lib/storage-usage";
 import { createClient } from "@/lib/supabase/server";
 import { loadDrivers } from "@/lib/delivery";
-import { removeRecoveryDriver, saveRecoveryDriver } from "@/app/(app)/jobs/delivery-actions";
+import { removeRecoveryDriver, saveRecoveryDriver, saveRecoveryRates } from "@/app/(app)/jobs/delivery-actions";
+import { RATE_KIND_LABELS, recoveryRatesOf, type RateKind } from "@/lib/recovery";
 import { saveSettings } from "./actions";
 import { clearTestDataAction } from "./clear-actions";
 import { ClearTestData } from "./ClearTestData";
@@ -62,7 +63,7 @@ export default async function SettingsPage() {
     else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button" || row.key === "test_mode_enabled" || row.key === "advisor_labour_discount" || row.key === "customer_documents_uppercase") flags[row.key] = row.value === true;
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
-    else if (row.key === "recovery_providers" || row.key === "labour_hours_memory") continue;
+    else if (row.key === "recovery_providers" || row.key === "labour_hours_memory" || row.key === "recovery_rates" || row.key === "recovery_flag_percent") continue;
     else if (row.key === "inbound_scan_token" || row.key === "scans_mailbox_last_check" || row.key === "break_mechanical" || row.key === "break_bodyshop") continue;
     else if (row.key === "break_times") breakTimes = (row.value as Record<string, Record<string, string>>) ?? {};
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");
@@ -70,6 +71,8 @@ export default async function SettingsPage() {
 
   const departments = (Object.keys(DEPARTMENT_LABELS) as DepartmentId[]).map((id) => ({ id, label: DEPARTMENT_LABELS[id] }));
   const recoveryDrivers = await loadDrivers();
+  const recoveryRates = recoveryRatesOf({ recovery_rates: (data ?? []).find((r) => r.key === "recovery_rates")?.value });
+  const recoveryFlag = Number((data ?? []).find((r) => r.key === "recovery_flag_percent")?.value ?? 25);
   const pendingReview = (reviewMakes ?? 0) + (reviewModels ?? 0);
   const totalBytes = usage.reduce((a, b) => a + b.bytes, 0);
 
@@ -154,6 +157,22 @@ export default async function SettingsPage() {
               <Input name="company" placeholder="Company (empty = our truck)" aria-label="Company" />
               <label className="col-span-2 flex items-center gap-2 text-xs font-semibold"><input type="checkbox" name="is_default" className="h-5 w-5 accent-ink" />The regular driver (prefilled at gate-out)</label>
               <div className="col-span-2"><Button type="submit" tone="secondary" size="md" data-driver-save>Add driver</Button></div>
+            </form>
+          </Card>
+          <Card id="recovery-rates" className="flex flex-col gap-3" data-recovery-rates>
+            <SectionLabel>Recovery rates</SectionLabel>
+            <p className="text-xs text-muted">The normal price of a trip: the minimum, or the kilometres one way from the workshop times the rate, whichever is more. A claim more than the flag % above it is marked on the Recovery page with the suggested price.</p>
+            <form action={saveRecoveryRates} className="flex flex-col gap-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center gap-2 text-xs font-bold uppercase tracking-[0.06em] text-muted"><span>Truck</span><span>Min AED</span><span>AED / km</span></div>
+              {(Object.keys(RATE_KIND_LABELS) as RateKind[]).map((k) => (
+                <div key={k} className="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center gap-2" data-rate-row={k}>
+                  <span className="text-sm font-semibold">{RATE_KIND_LABELS[k]}</span>
+                  <Input name={`${k}_min`} defaultValue={String(recoveryRates[k].min)} inputMode="decimal" aria-label={`${RATE_KIND_LABELS[k]} minimum`} />
+                  <Input name={`${k}_per_km`} defaultValue={String(recoveryRates[k].per_km)} inputMode="decimal" aria-label={`${RATE_KIND_LABELS[k]} AED per km`} />
+                </div>
+              ))}
+              <label className="flex items-center gap-2 text-sm font-semibold">Flag a trip above expected by <Input name="flag_percent" defaultValue={String(recoveryFlag)} inputMode="decimal" style={{ width: "4.5rem" }} aria-label="Flag percent" data-rate-flag /> %</label>
+              <div><Button type="submit" tone="secondary" size="md" data-rates-save>Save rates</Button></div>
             </form>
           </Card>
           <Card className="flex flex-col gap-3">

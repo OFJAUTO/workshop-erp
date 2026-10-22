@@ -170,6 +170,11 @@ const DEFAULTS = {
     { key: "closed_box", label: "Closed box", cost: 400, price: 400 },
   ] as { key: string; label: string; cost: number; price: number }[],
   recovery_companies: [] as string[],
+  /** The normal recovery price per kind of truck (see recoveryRatesOf in src/lib/recovery.ts) and the flag percent. */
+  recovery_rates: {} as unknown,
+  recovery_flag_percent: 25,
+  /** The workshop dictionary for the pre-send spelling check (car words the owner adds; see src/lib/spell.ts). */
+  spell_words: [] as string[],
   /** The pay-page domains a pasted payment link may use (one per line in Settings); empty keeps the N-Genius defaults. */
   payment_gateway_domains: ["paypage.ngenius-payments.com", "paypage.sandbox.ngenius-payments.com"] as string[],
   workshop_hours_text: "Monday to Saturday, 8:00–17:00",

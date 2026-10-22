@@ -89,3 +89,69 @@ export function usualRange(km: number, history: { km: number | null; price: numb
   if (near.length < 3) return null;
   return { low: Math.round(near[Math.floor((near.length - 1) * 0.25)]), high: Math.round(near[Math.ceil((near.length - 1) * 0.75)]), n: near.length };
 }
+
+/* ------------------------------------------------------------------------------------------------
+   Recovery prices (23 October 2026): the normal rate per kind of truck, the flag on a claim well
+   above it, and the words when the price of a trip is changed.
+   ------------------------------------------------------------------------------------------------ */
+
+export type RateKind = "ours" | "flatbed" | "closed_box";
+export type RecoveryRate = { min: number; per_km: number };
+export type RecoveryRates = Record<RateKind, RecoveryRate>;
+export const RATE_KIND_LABELS: Record<RateKind, string> = { ours: "Our truck", flatbed: "External flatbed", closed_box: "Closed box" };
+export const DEFAULT_RECOVERY_RATES: RecoveryRates = { ours: { min: 60, per_km: 4 }, flatbed: { min: 80, per_km: 6.5 }, closed_box: { min: 150, per_km: 10 } };
+
+/** The rates from Settings on top of the defaults; a missing or broken figure keeps its default. */
+export function recoveryRatesOf(settings: { recovery_rates?: unknown }): RecoveryRates {
+  const raw = (settings.recovery_rates ?? {}) as Partial<Record<RateKind, Partial<Record<keyof RecoveryRate, unknown>>>>;
+  const out = { ...DEFAULT_RECOVERY_RATES };
+  for (const k of Object.keys(DEFAULT_RECOVERY_RATES) as RateKind[]) {
+    const min = Number(raw[k]?.min);
+    const perKm = Number(raw[k]?.per_km);
+    out[k] = { min: Number.isFinite(min) && min >= 0 ? min : DEFAULT_RECOVERY_RATES[k].min, per_km: Number.isFinite(perKm) && perKm >= 0 ? perKm : DEFAULT_RECOVERY_RATES[k].per_km };
+  }
+  return out;
+}
+
+/** Our own truck when no company is named; an outside company's closed box when it says so; else a flatbed. */
+export function rateKindOf(t: { company: string | null; recovery_kind: string | null }): RateKind {
+  if (!t.company) return "ours";
+  return t.recovery_kind === "closed_box" ? "closed_box" : "flatbed";
+}
+
+/** The expected price: the minimum per trip, or the kilometres (one way) at the rate per km, whichever is more; rounded to AED 5. */
+export function expectedPrice(km: number | null, rate: RecoveryRate): number | null {
+  if (km === null || !Number.isFinite(km) || km <= 0) return null;
+  return Math.round(Math.max(rate.min, km * rate.per_km) / 5) * 5;
+}
+
+/**
+ * "AED 120 vs expected ~AED 85 for 12.7 km": a claimed price more than `percent` % above the expected price is
+ * flagged, with the expected price offered as the suggested new price.
+ */
+export function priceFlagOf(price: number | null, km: number | null, rate: RecoveryRate, percent: number): { expected: number; high: boolean; words: string } | null {
+  const expected = expectedPrice(km, rate);
+  if (expected === null || price === null || !(price > 0)) return null;
+  const high = price > expected * (1 + Math.max(0, percent) / 100);
+  const kmText = (Math.round((km as number) * 10) / 10).toLocaleString("en-GB");
+  return { expected, high, words: `AED ${price.toLocaleString("en-GB")} vs expected ~AED ${expected.toLocaleString("en-GB")} for ${kmText} km` };
+}
+
+export type PriceChange = { from: number; to: number; reason: string; by: string | null; by_name: string | null; at: string };
+
+/** The price changes written on a trip, oldest first; anything malformed is left out. */
+export function priceHistoryOf(raw: unknown): PriceChange[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
+    .map((e) => ({ from: Number(e.from), to: Number(e.to), reason: String(e.reason ?? ""), by: (e.by as string | null) ?? null, by_name: (e.by_name as string | null) ?? null, at: String(e.at ?? "") }))
+    .filter((e) => Number.isFinite(e.from) && Number.isFinite(e.to));
+}
+
+/** "Pick-up 21 Oct Frond C Villa 18: price changed from AED 120 to AED 90 – Price looks high for the distance". */
+export function priceChangeMessage(t: { kind: "delivery" | "pickup"; date: string | null; place: string | null }, from: number, to: number, reason: string): string {
+  const d = t.date ? new Date(t.date.length === 10 ? `${t.date}T12:00:00Z` : t.date) : null;
+  const day = d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Dubai" }) : "";
+  const head = [t.kind === "pickup" ? "Pick-up" : "Delivery", day, (t.place ?? "").trim()].filter(Boolean).join(" ");
+  return `${head}: price changed from AED ${from.toLocaleString("en-GB")} to AED ${to.toLocaleString("en-GB")}${reason.trim() ? ` – ${reason.trim()}` : ""}`;
+}

@@ -8,6 +8,7 @@ import { activeDeliveryTrip, tripCar, recalcTripKm } from "@/lib/delivery";
 import { blankToNull } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DEFAULT_RECOVERY_RATES, priceHistoryOf, type RateKind } from "@/lib/recovery";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -154,6 +155,47 @@ export async function decideTrip(tripId: string, formData: FormData) {
   if (trip.job_id) await admin.from("job_events").insert({ job_id: trip.job_id, event_type: "delivery", note: `Recovery price AED ${Number(trip.price_aed ?? 0).toLocaleString("en-GB")} ${next === "queried" ? `queried by ${staff.display_name}: ${note}` : `${next} by ${staff.display_name}`}`, created_by: staff.id });
   revalidatePath("/recovery");
   redirect(`/recovery?message=${encodeURIComponent(next === "queried" ? "Queried; the note is on the trip." : "Approved.")}`);
+}
+
+/**
+ * "Change price" on a claimed or queried trip (owner and accounts): the new price with a short reason. The driver's
+ * own figure stays (original_price_aed, crossed out on the page) and every change is written in price_history; the
+ * trip keeps its status so it is then approved at the new price. A paid month is locked except for the owner.
+ */
+export async function changeTripPrice(tripId: string, formData: FormData) {
+  const staff = await requirePermission("approveRelease");
+  const price = Number(String(formData.get("price") ?? "").replace(/[^\d.,]/g, "").replace(",", "."));
+  const reason = String(formData.get("reason") ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const back = (q: string) => `/recovery?${q}#trip-${tripId}`;
+  if (!(price > 0)) redirect(back(`error=${encodeURIComponent("Enter the new price in AED.")}`));
+  if (reason.length < 3) redirect(back(`error=${encodeURIComponent("Write a short reason for the change.")}`));
+  const admin = createAdminClient();
+  const { data: trip } = await admin.from("recovery_trips").select("id, job_id, status, price_aed, original_price_aed, price_history, paid_month, kind, location_details, delivered_at, created_at").eq("id", tripId).maybeSingle();
+  if (!trip) redirect(`/recovery?error=${encodeURIComponent("Trip not found.")}`);
+  if (!["claimed", "queried"].includes(String(trip.status))) redirect(back(`error=${encodeURIComponent("Only a claimed or queried trip can have its price changed.")}`));
+  if (trip.paid_month && staff.role_id !== "owner") redirect(back(`error=${encodeURIComponent(`That month (${trip.paid_month}) is already paid and locked. Only the owner can change it.`)}`));
+  const from = Number(trip.price_aed);
+  const to = Math.round(price * 100) / 100;
+  if (Number.isFinite(from) && Math.abs(from - to) < 0.005) redirect(back(`error=${encodeURIComponent("That is the price already on the trip.")}`));
+  const history = [...priceHistoryOf(trip.price_history), { from: Number.isFinite(from) ? from : 0, to, reason, by: staff.id, by_name: staff.display_name, at: new Date().toISOString() }];
+  await admin.from("recovery_trips").update({ price_aed: to, original_price_aed: trip.original_price_aed ?? (Number.isFinite(from) ? from : null), price_history: history, updated_by: staff.id }).eq("id", tripId);
+  if (trip.job_id) await admin.from("job_events").insert({ job_id: trip.job_id, event_type: "delivery", note: `Recovery price changed from AED ${from.toLocaleString("en-GB")} to AED ${to.toLocaleString("en-GB")} by ${staff.display_name}: ${reason}`, created_by: staff.id });
+  revalidatePath("/recovery");
+  redirect(back(`message=${encodeURIComponent(`Price changed to AED ${to.toLocaleString("en-GB")}. Tell the driver with the prepared WhatsApp under the trip, then Approve.`)}&changed=${tripId}`));
+}
+
+/** Settings > Recovery rates (owner): the minimum per trip and AED per km for each kind of truck, and the flag percent. */
+export async function saveRecoveryRates(formData: FormData) {
+  const staff = await requirePermission("manageSettings");
+  const num = (k: string, fallback: number) => { const n = Number(String(formData.get(k) ?? "").replace(",", ".")); return Number.isFinite(n) && n >= 0 && String(formData.get(k) ?? "").trim() !== "" ? Math.round(n * 100) / 100 : fallback; };
+  const value = Object.fromEntries((Object.keys(DEFAULT_RECOVERY_RATES) as RateKind[]).map((k) => [k, { min: num(`${k}_min`, DEFAULT_RECOVERY_RATES[k].min), per_km: num(`${k}_per_km`, DEFAULT_RECOVERY_RATES[k].per_km) }]));
+  const percent = num("flag_percent", 25);
+  const admin = createAdminClient();
+  await admin.from("settings").upsert({ key: "recovery_rates", label: "Recovery normal rates (minimum per trip and AED per km)", value, updated_by: staff.id }, { onConflict: "key" });
+  await admin.from("settings").upsert({ key: "recovery_flag_percent", label: "Recovery: flag a trip this many % above the expected price", value: percent, updated_by: staff.id }, { onConflict: "key" });
+  revalidatePath("/settings");
+  revalidatePath("/recovery");
+  redirect(`/settings?message=${encodeURIComponent("Recovery rates saved.")}#recovery-rates`);
 }
 
 /** Accounts type a price on a trip that has none (the advisor marked it delivered). */

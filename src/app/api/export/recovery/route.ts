@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { TRIP_SELECT, type TripRow } from "@/lib/delivery";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { priceHistoryOf } from "@/lib/recovery";
 import { formatPlate } from "@/lib/types";
 import { buildXlsx, xlsxResponse, type XlsxSheet } from "@/lib/xlsx";
 
@@ -17,6 +18,8 @@ const COLUMNS = [
   { header: "To", key: "to", width: 28 },
   { header: "Road km", key: "km", width: 10, numFmt: "0.0" },
   { header: "Price (AED)", key: "price", width: 12, numFmt: "#,##0.00" },
+  { header: "Claimed (AED)", key: "claimed", width: 13, numFmt: "#,##0.00" },
+  { header: "Price change", key: "change", width: 34 },
   { header: "AED per km", key: "perKm", width: 11, numFmt: "0.0" },
   { header: "Status", key: "status", width: 12 },
 ];
@@ -50,6 +53,9 @@ export async function GET(request: NextRequest) {
       to: t.kind === "pickup" ? "OFJ Automotive" : place,
       km,
       price,
+      // The final price is the one to pay; the driver's own claim and the reason show when it was changed.
+      claimed: t.original_price_aed !== null && t.original_price_aed !== undefined ? Number(t.original_price_aed) : null,
+      change: priceHistoryOf(t.price_history).map((c) => `${c.from} → ${c.to}: ${c.reason}`).join("; "),
       perKm: km && price ? Math.round((price / km) * 10) / 10 : null,
       status: t.status,
     };

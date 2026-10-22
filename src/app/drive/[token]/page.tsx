@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { tripByToken, tripCar } from "@/lib/delivery";
-import { scheduleWords } from "@/lib/recovery";
+import { priceHistoryOf, scheduleWords } from "@/lib/recovery";
 import { DriveClient } from "./DriveClient";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,19 @@ export default async function DrivePage({ params }: { params: Promise<{ token: s
     return <main className="flex min-h-screen items-center justify-center bg-white p-6"><p className="text-center text-2xl font-extrabold">This link is no longer valid.<br /><span className="text-base font-semibold text-[#5F6368]">Ask the workshop for a new one.</span></p></main>;
   }
   if (trip.delivered_at) {
-    return <main className="flex min-h-screen items-center justify-center bg-white p-6"><p className="text-center text-3xl font-extrabold">Done. Thank you!</p></main>;
+    // A price changed by OFJ after the trip shows here too, with the reason (the same words as the WhatsApp).
+    const last = priceHistoryOf(trip.price_history).at(-1) ?? null;
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-white p-6">
+        <p className="text-center text-3xl font-extrabold">Done. Thank you!</p>
+        {last ? (
+          <p className="max-w-md rounded-2xl border-2 border-[#111113] p-4 text-center text-lg font-bold" data-drive-price-change>
+            Price changed from <span className="line-through">AED {last.from.toLocaleString("en-GB")}</span> to AED {last.to.toLocaleString("en-GB")}
+            {last.reason ? <span className="block text-base font-semibold text-[#5F6368]">{last.reason}</span> : null}
+          </p>
+        ) : null}
+      </main>
+    );
   }
   const car = await tripCar(trip);
   return (

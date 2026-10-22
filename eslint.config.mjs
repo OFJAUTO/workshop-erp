@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Browser tests: plain scripts run with node, not part of the app.
     "tests/**",
+    // Other Claude sessions' working copies of the repository (git worktrees), never part of this app.
+    ".claude/**",
   ]),
 ]);
 

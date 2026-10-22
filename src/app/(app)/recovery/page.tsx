@@ -4,14 +4,15 @@ import { Badge, Button, Card, Empty, Input, Notice, PageHeader, SectionLabel, Se
 import { requireStaff } from "@/lib/auth";
 import { driverMessageFor, loadDrivers, tripCar, TRIP_SELECT, type TripRow } from "@/lib/delivery";
 import { formatDate } from "@/lib/format";
-import { haversineKm, onTheWayMessage, parseCoords, scheduleWords, usualRange } from "@/lib/recovery";
+import { haversineKm, onTheWayMessage, parseCoords, priceChangeMessage, priceFlagOf, priceHistoryOf, rateKindOf, recoveryRatesOf, RATE_KIND_LABELS, scheduleWords, usualRange } from "@/lib/recovery";
+import { CopyText } from "@/components/CopyText";
 import { getSettings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { shortFor } from "@/lib/short-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { TripActions } from "@/components/TripActions";
-import { createPickupTrip, decideTrip, markMonthPaid, markTripSentById, recalcDistance, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
+import { changeTripPrice, createPickupTrip, decideTrip, markMonthPaid, markTripSentById, recalcDistance, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
 import { NewTripForm } from "./NewTripForm";
 import { ReasonChips } from "@/components/ReasonChips";
 
@@ -26,7 +27,7 @@ const STATUS_TONES: Record<string, "neutral" | "amber" | "green" | "ink" | "red"
  * workshop so unusual prices stand out; a monthly view per driver or company with an export for accounts.
  * This replaces the WhatsApp group where the driver posted photos and prices.
  */
-export default async function RecoveryPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; month?: string; who?: string; sent?: string }> }) {
+export default async function RecoveryPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; month?: string; who?: string; sent?: string; changed?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id;
   if (!["owner", "service_advisor", "accounts"].includes(role)) {
@@ -40,6 +41,10 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   const admin = createAdminClient();
   const settings = await getSettings();
   const home = parseCoords(String(settings.workshop_location_pin ?? ""));
+  const rates = recoveryRatesOf(settings);
+  const flagPercent = Number(settings.recovery_flag_percent ?? 25);
+  /** A UAE mobile as WhatsApp wants it: digits only, a leading 05 becomes 9715. */
+  const waDigits = (phone: string | null | undefined) => { const d = String(phone ?? "").replace(/\D/g, ""); return /^05/.test(d) ? `971${d.slice(1)}` : d.replace(/^00/, ""); };
   const [{ data: rows }, drivers, { data: companyRows }, { data: payoutRows }] = await Promise.all([
     admin.from("recovery_trips").select(TRIP_SELECT).eq("is_active", true).order("created_at", { ascending: false }).limit(400),
     loadDrivers(),
@@ -137,7 +142,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
               const price = t.price_aed === null ? null : Number(t.price_aed);
               const usual = seesMoney && km !== null && t.status === "claimed" ? usualRange(km, history) : null;
               return (
-                <li key={t.id} className="py-3 flex flex-col gap-1.5" data-trip={t.id} data-trip-status={t.status}>
+                <li key={t.id} id={`trip-${t.id}`} className="py-3 flex flex-col gap-1.5 scroll-mt-24" data-trip={t.id} data-trip-status={t.status}>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-bold">{formatDate(t.delivered_at ?? t.created_at)}</span>
                     <Badge tone="ink">{t.kind === "pickup" ? "Pick-up" : "Delivery"}</Badge>
@@ -175,6 +180,49 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                   ) : null}
                   {usual ? <p className="text-xs font-semibold text-muted" data-trip-usual>Usual for this distance: AED {usual.low.toLocaleString("en-GB")}–{usual.high.toLocaleString("en-GB")} ({usual.n} trips)</p> : null}
                   {seesMoney && t.status === "queried" && t.query_note ? <p className="text-xs font-semibold text-red">Query: {t.query_note}</p> : null}
+                  {(() => {
+                    // Section 3 (23 October 2026): the price changes, the original crossed out; the flag against the normal rate.
+                    if (!seesMoney) return null;
+                    const changes = priceHistoryOf(t.price_history);
+                    const kind = rateKindOf(t);
+                    const flag = ["claimed", "queried"].includes(t.status) ? priceFlagOf(price, km, rates[kind], flagPercent) : null;
+                    const last = changes.at(-1) ?? null;
+                    const phone = t.company ? companies.find((c) => c.name.toLowerCase() === (t.company ?? "").toLowerCase())?.phone ?? t.driver_phone : t.driver_phone;
+                    const msg = last ? priceChangeMessage({ kind: t.kind, date: t.delivered_at ?? t.created_at, place: t.location_details ?? (j ? j.plate : null) }, last.from, last.to, last.reason) : null;
+                    return (
+                      <>
+                        {changes.length ? (
+                          <ul className="flex flex-col gap-0.5 text-xs" data-price-history>
+                            {changes.map((c, i) => (
+                              <li key={i} className="flex flex-wrap items-center gap-1.5"><span className="text-muted line-through" data-price-original>AED {c.from.toLocaleString("en-GB")}</span><span>→</span><span className="font-bold">AED {c.to.toLocaleString("en-GB")}</span><span className="text-muted">· {c.reason} · {c.by_name ?? ""} {c.at ? formatDate(c.at) : ""}</span></li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {flag?.high ? <p className="text-xs font-semibold text-red" data-trip-flag>{flag.words} ({RATE_KIND_LABELS[kind].toLowerCase()} rate)</p> : null}
+                        {msg && t.status !== "paid" && canDecide ? (
+                          <div className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-canvas px-2 py-1.5 text-xs" data-price-change-message>
+                            <span className="font-semibold">Tell the driver:</span>
+                            <span className="min-w-0 flex-1">{msg}</span>
+                            <a href={`https://wa.me/${waDigits(phone)}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center rounded-control bg-ink px-3 font-bold text-white" data-price-change-whatsapp>WhatsApp</a>
+                            <CopyText text={msg} small />
+                          </div>
+                        ) : null}
+                        {canDecide && price !== null && ["claimed", "queried"].includes(t.status) ? (
+                          <details className="text-sm" data-change-price>
+                            <summary className="cursor-pointer min-h-9 inline-flex items-center rounded-control border border-line-strong bg-white px-3 text-xs font-bold">Change price…</summary>
+                            <form action={changeTripPrice.bind(null, t.id)} className="mt-2 flex flex-wrap items-end gap-2">
+                              <label className="flex flex-col gap-1 text-xs font-semibold text-muted">New price (AED)
+                                <Input name="price" inputMode="decimal" defaultValue={flag?.high ? String(flag.expected) : ""} placeholder={flag ? `Expected ~${flag.expected}` : "AED"} className="w-32 min-h-9" data-change-price-box />
+                              </label>
+                              {flag?.high ? <span className="self-center text-xs text-muted" data-change-price-suggested>Suggested: AED {flag.expected.toLocaleString("en-GB")}</span> : null}
+                              <ReasonChips name="reason" label="Why?" rows={1} options={["Price looks high for the distance", "Agreed with the driver", "Normal rate for this trip", "Two trips claimed as one"]} required placeholder="Tap or type" />
+                              <Button type="submit" tone="secondary" size="md" data-change-price-save>Change price</Button>
+                            </form>
+                          </details>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                   {canDecide && price !== null && ["claimed", "queried", "approved"].includes(t.status) ? (
                     <div className="flex flex-wrap items-center gap-2">
                       {t.status !== "approved" ? <form action={decideTrip.bind(null, t.id)}><input type="hidden" name="decision" value="approve" /><Button type="submit" size="md" data-trip-approve>Approve</Button></form> : null}
