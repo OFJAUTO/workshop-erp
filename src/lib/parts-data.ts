@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { PART_SELECT, toPart } from "./quote-data";
 import type { PartItem } from "./quotes";
 import { createAdminClient } from "./supabase/admin";
+import { poCharges, type SupplierCharge } from "./supplier-charges";
 
 export type PoStatus = "pending_approval" | "approved" | "ordered" | "partly_received" | "received" | "cancelled";
 export const PO_STATUS_LABELS: Record<PoStatus, string> = {
@@ -141,18 +142,19 @@ export type JobBrief = { id: string; job_number: string; status: string; is_open
 export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, gated_in_by, assigned_to, department, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))";
 
 export type SupplierRow = { id: string; name: string; trn: string | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null };
-export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[]; supplier: SupplierRow | null };
+export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[]; supplier: SupplierRow | null; /** Courier, freight: "Other charges" on this LPO, already in its total. */ charges: SupplierCharge[] };
 
 export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
   const admin = createAdminClient();
   const { data: raw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", id).maybeSingle();
   if (!raw) return null;
   const po = toPo(raw as Record<string, unknown>);
-  const [{ data: lines }, { data: job }, { data: parts }, { data: supplier }] = await Promise.all([
+  const [{ data: lines }, { data: job }, { data: parts }, { data: supplier }, charges] = await Promise.all([
     admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", id).eq("is_active", true).order("position"),
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", po.job_id).maybeSingle(),
     admin.from("part_items").select(PART_FULL_SELECT).eq("po_id", id).eq("is_active", true),
     po.supplier_id ? admin.from("suppliers").select("id, name, trn, phone, email, address, payment_terms").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
+    poCharges(id),
   ]);
   const ids = [po.created_by, po.approved_by, po.ordered_by, po.supplier_invoice_by, po.deposit_override_by, po.sent_by].filter((x): x is string => !!x);
   const { data: people } = ids.length ? await admin.from("staff").select("id, display_name").in("id", ids) : { data: [] as { id: string; display_name: string }[] };
@@ -163,6 +165,7 @@ export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
     names: new Map((people ?? []).map((p) => [p.id, p.display_name])),
     parts: ((parts ?? []) as unknown as Record<string, unknown>[]).map(toPartFull),
     supplier: (supplier as SupplierRow | null) ?? null,
+    charges,
   };
 }
 

@@ -81,7 +81,8 @@
     "test:tint11": "node --env-file=.env.local tests/browser/test-tint11.mjs",
     "test:warranty12": "node --env-file=.env.local tests/browser/test-warranty12.mjs",
     "test:doc13": "node --env-file=.env.local tests/browser/test-doc13.mjs",
-    "test:markup": "node --env-file=.env.local tests/browser/test-markup.mjs"
+    "test:markup": "node --env-file=.env.local tests/browser/test-markup.mjs",
+    "test:importlock": "node --env-file=.env.local tests/browser/test-import-lock.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

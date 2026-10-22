@@ -18,6 +18,7 @@ import { formatDayTime } from "@/lib/format";
 import { type PartRequest } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { chargesByPo } from "@/lib/supplier-charges";
 import { formatPlate } from "@/lib/types";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { PartsSteps } from "@/components/PartsSteps";
@@ -67,6 +68,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     const l = toPoLine(r);
     onLines.set(l.po_id, [...(onLines.get(l.po_id) ?? []), l]);
   }
+  const onCharges = await chargesByPo(onIds);
   const approverIds = Array.from(new Set(orderNowPos.map((p) => p.approved_by).filter((x): x is string => !!x)));
   const { data: approverRows } = approverIds.length ? await admin.from("staff").select("id, display_name").in("id", approverIds) : { data: [] as { id: string; display_name: string }[] };
   const approverName = new Map((approverRows ?? []).map((x) => [x.id, x.display_name]));
@@ -182,7 +184,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                   <span className="text-muted">· {po.supplier_name} · {lines.length} part{lines.length === 1 ? "" : "s"} · AED {po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
                   <span className={`ml-auto text-xs font-bold ${mins >= redMin ? "text-red" : mins >= amberMin ? "text-amber-bar" : "text-muted"}`} data-order-wait>Approved{po.approved_by ? ` by ${approverName.get(po.approved_by) ?? ""}` : ""}{po.approved_at ? ` ${formatDayTime(po.approved_at)}` : ""} · waiting {formatWait(mins, wt)}</span>
                 </span>
-                <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })) }} vin={j?.vehicle?.vin ?? null} canManage={!staff.viewingAs} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={po.supplier_id ? (supplierEmail.get(po.supplier_id) ?? null) : null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
+                <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: onCharges.get(po.id) ?? [] }} vin={j?.vehicle?.vin ?? null} canManage={!staff.viewingAs} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={po.supplier_id ? (supplierEmail.get(po.supplier_id) ?? null) : null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
               </Card>
             );
           })}

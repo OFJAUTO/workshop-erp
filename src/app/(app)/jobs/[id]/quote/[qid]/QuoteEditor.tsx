@@ -131,6 +131,8 @@ export type EditorSettings = {
   technicianCostRate: number | null;
   /** The bodyshop labour rate (AED/h): installer-hour estimates cost this in the internal box. */
   bodyshopRate?: number;
+  /** The suppliers' own charges on this car (courier, freight) from the Parts page: an internal cost. */
+  supplierCharges?: { total: number; words: string };
   /** What installers really took on this model before (closed jobs): the hint beside the estimate. */
   installerHistory?: { jobs: number; avgHours: number } | null;
   bankChargePercent: number;
@@ -601,7 +603,7 @@ export function QuoteEditor({
   // The estimated bank charge follows how the customer is expected to pay: card or "not sure" at the card rate, the payment link at its rate, cash, cheque and bank transfer at nothing.
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0 });
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0 });
   const countedForDiscount = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off);
   const discountBases = {
     labour: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour" }).base,
@@ -1600,6 +1602,7 @@ export function QuoteEditor({
                 {totals.ownServiceCost ? <><dt className="text-muted">Our services&apos; cost (film, materials)</dt><dd className="text-right" data-own-service-cost>{aed(totals.ownServiceCost)}</dd></> : null}
                 {totals.installerHours > 0 ? <><dt className="text-muted" data-installer-row>Estimated installer hours: {hoursText(totals.installerHours)} × AED {settings.bodyshopRate ?? 0}{settings.installerHistory ? <span className="block text-[11px]" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}</dt><dd className="text-right">{aed(totals.bodyshopLabourCost)}</dd></> : null}
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
+                {totals.supplierCharges ? <><dt className="text-muted" data-supplier-charges-label>Supplier charges ({settings.supplierCharges?.words || "courier, freight"})</dt><dd className="text-right" data-supplier-charges-cost>{aed(totals.supplierCharges)}</dd></> : null}
                 {commissionLine}
                 {department === "bodyshop" || Number(header.materials_cost_aed) > 0 ? <><dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd></> : null}
                 {(() => {

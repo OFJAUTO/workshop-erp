@@ -16,6 +16,7 @@ import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 import { ensureWorkLines } from "@/lib/work-data";
 
@@ -111,6 +112,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
   if (decision === "refuse") {
     await admin.from("purchase_orders").update({ status: "cancelled", notes: [po.notes, note ? `Refused: ${note}` : "Refused"].filter(Boolean).join("\n"), updated_by: staff.id }).eq("id", poId);
     await admin.from("part_items").update({ po_id: null, po_line_id: null, updated_by: staff.id }).eq("po_id", poId);
+    await releaseCharges(poId, staff.id);
     if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_refused", note: `${po.number} refused by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} refused by ${staff.display_name}`, body: `${note ? `Reason: ${note}. ` : ""}The parts are back under To order: fix the list and send a new LPO for approval.`, jobId: po.job_id, href: po.job_id ? `/parts/${po.job_id}#lpo` : "/parts" });
     refresh(po.job_id, poId);

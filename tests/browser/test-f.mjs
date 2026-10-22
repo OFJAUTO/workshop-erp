@@ -274,7 +274,7 @@ await section("D import prices", async () => {
   const lines = await until(async () => { const n = await page.locator("[data-import-line]").count(); return n ? n : null; }, 60, 500);
   check("D-a: the Mercedes file is recognised and its 98 lines read", lines === 98 && /Mercedes B2BConnect/.test((await page.locator("[data-check-screen]").textContent()) ?? ""), `${lines} lines`);
   const firstLine = (await page.locator("[data-import-line]").first().textContent()) ?? "";
-  check("D-a: part numbers normalised to single spaces, net and 55% read", /N910105 012018/.test(firstLine) && /55%/.test(firstLine) && /Net 32\.85/.test(firstLine), firstLine.slice(0, 160));
+  check("D-a: part numbers normalised to single spaces, net and 55% read", /N910105 012018/.test(firstLine) && /55%/.test(firstLine) && /1 × 32\.85 = 32\.85/.test(firstLine), firstLine.slice(0, 160));
   check("D-a: the file's VIN is compared with the car and a warning shown", (await page.locator("[data-vin-warning]").count()) === 1 && /WDDHF7HB3BA429944/.test((await page.locator("[data-vin-warning]").textContent()) ?? ""));
   check("D-a: no total in the file to check against", /No total in the file/.test((await page.locator("[data-totals-check]").textContent()) ?? ""));
   check("D-a: Apply is off until the lines are confirmed", await page.locator("[data-apply]").isDisabled());
@@ -308,18 +308,22 @@ await section("D import prices", async () => {
   check("D-b: 'BRAKE DISC FRONT' (1 day) landed with Next day and genuine", !!disc && Number(disc.cost_aed) === 1250.5 && disc.availability === "to_order" && !!disc.delivery_date && disc.part_type === "genuine", JSON.stringify(disc));
   const sensor = (await sql("select part_number, cost_aed, availability from public.part_items where job_id = $1 and part_number = 'LR555111'", [jobId]))[0];
   check("D-b: 'will update' leaves the availability open (Supplier to confirm)", !!sensor && sensor.availability === null, JSON.stringify(sensor));
-  // Totals mismatch: Apply is blocked until each price is confirmed; no Confirm all.
+  // Totals mismatch (22 October 2026 safety lock): Apply stays locked even with every price confirmed, until Parts types why.
   await go(page, `${base}/parts/${jobId}/import`);
   await page.locator("[data-way='paste']").click();
   await page.locator("[data-paste-box]").fill(fs.readFileSync(path.join(projectRoot, "docs", "landrover-paste-sample-tabs.txt"), "utf8").replace("11,853.00", "11,000.00"));
   await page.locator("[data-read-text]").click();
   await until(async () => ((await page.locator("[data-import-line]").count()) ? 1 : null), 40, 500);
   check("D-tabs: the tab-separated paste reads 3 lines", (await page.locator("[data-import-line]").count()) === 3);
-  check("D: 'Totals don't match, check the prices' in red, no Confirm all, Apply off", /Totals don't match, check the prices/.test((await page.locator("[data-totals-check]").textContent()) ?? "") && /text-red/.test((await page.locator("[data-totals-check]").getAttribute("class")) ?? "") && (await page.locator("[data-confirm-all]").count()) === 0 && (await page.locator("[data-apply]").isDisabled()));
+  check("D: 'Lines add up to … but the pasted text total is …' in red, no Confirm all, Apply locked", /Lines add up to AED 11,853 but the pasted text total is AED 11,000/.test((await page.locator("[data-totals-check]").textContent()) ?? "") && /text-red/.test((await page.locator("[data-totals-check]").getAttribute("class")) ?? "") && (await page.locator("[data-confirm-all]").count()) === 0 && (await page.locator("[data-apply]").isDisabled()), (await page.locator("[data-totals-check]").textContent()) ?? "");
   for (const b of await page.locator("[data-confirm-line]").all()) await b.click();
   await page.locator("[data-import-supplier]").selectOption(supVal);
   await sleep(200);
-  check("D: confirming each price by hand frees Apply", !(await page.locator("[data-apply]").isDisabled()));
+  check("D: confirming each price by hand still leaves Apply locked", await page.locator("[data-apply]").isDisabled());
+  await page.locator("[data-totals-override-open]").click();
+  await page.locator("[data-totals-override]").fill("E2e: the supplier's total leaves out one line");
+  await sleep(200);
+  check("D: the typed reason frees Apply", !(await page.locator("[data-apply]").isDisabled()));
   // d) Unknown format: the mapping step, saved for the supplier and reused.
   await page.getByRole("button", { name: "Start again" }).click();
   await page.locator("[data-paste-box]").fill("Ref#\tStuff\tPcs\tCharge\nX9\tE2e widget\t2\t10.00\nX8\tE2e gadget\t1\t5.50");
@@ -333,7 +337,7 @@ await section("D import prices", async () => {
   await page.locator("[data-apply-mapping]").click();
   await until(async () => ((await page.locator("[data-import-line]").count()) ? 1 : null), 40, 500);
   const mapped = await page.locator("[data-import-line]").allTextContents();
-  check("D-d: Import reads the lines with the chosen meanings", mapped.length === 2 && /E2e widget/.test(mapped[0]) && /Net 10\.00/.test(mapped[0]), mapped.join(" || ").slice(0, 200));
+  check("D-d: Import reads the lines with the chosen meanings", mapped.length === 2 && /E2e widget/.test(mapped[0]) && /2 × 10\.00 = 20\.00/.test(mapped[0]), mapped.join(" || ").slice(0, 200));
   // Applying with a supplier chosen remembers the mapping for that supplier.
   await page.locator("[data-import-supplier]").selectOption(supVal);
   await page.locator("[data-confirm-all]").click();

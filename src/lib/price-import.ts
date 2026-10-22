@@ -5,7 +5,7 @@
  * touches the database or the screen. Anything that cannot be read clearly is left blank, never guessed.
  */
 
-export type ImportField = "partNumber" | "description" | "qty" | "list" | "net" | "total" | "availability" | "vin" | "ignore";
+export type ImportField = "partNumber" | "description" | "qty" | "list" | "net" | "total" | "availability" | "vin" | "serial" | "ignore";
 export type ColumnMapping = Partial<Record<ImportField, number>>;
 export type ImportFormat = "b2bconnect" | "landrover" | "dealer" | "generic" | "mapped" | "unknown";
 
@@ -32,6 +32,14 @@ export type ImportLine = {
   raw: string[];
   /** An amber note on the line (the sum does not divide back to the net each). */
   flag?: string | null;
+  /** The supplier's own line number ("Sl No."), when the table has one. Never a part number. */
+  serial?: string | null;
+  /** "charge": a supplier charge that is not a part (courier, freight): kept on the supplier's LPO, never a parts line. */
+  kind?: "part" | "charge";
+  /** Red: the line does not add up (qty × price ≠ total, or no quantity). Never applied unless Parts ticks it as checked. */
+  problem?: string | null;
+  /** Amber: an unusual figure (qty over 50, a line over AED 500,000). Applied only when Parts confirms it. */
+  ask?: string | null;
 };
 
 export type ImportTotals = {
@@ -71,9 +79,60 @@ const SYNONYMS: Record<Exclude<ImportField, "ignore">, string[]> = {
   total: ["total price", "total", "amount", "line total", "ext price", "extended", "total aed", "value"],
   availability: ["availability", "avail", "stock", "eta", "delivery", "lead time", "status", "available"],
   vin: ["vin", "chassis", "chassis no", "vin number"],
+  // The supplier's line number column. Matched only as a whole heading ("Sl No.", "#"), never inside another one.
+  serial: ["sl no", "sl", "s no", "sno", "slno", "sr no", "sr", "srl no", "serial", "serial no", "s n", "#", "no", "line", "line no", "pos", "position", "s l"],
 };
 
-const TOTAL_LABELS = /^(gross amount|gross|sub ?total|subtotal|net aed|net amount|net total|total( aed)?|vat(\s*\d+(\.\d+)?\s*%)?|tax(\s*\d+(\.\d+)?\s*%)?|grand total|amount due|total due|total before vat|total incl\.? vat|total excl\.? vat)\s*:?$/i;
+const TOTAL_LABELS = /^(gross amount|gross total|gross|sub ?total|subtotal|net aed|net amount|net total|total amount|total value|total( aed| \(aed\))?|vat(\s*\d+(\.\d+)?\s*%)?|vat amount|tax(\s*\d+(\.\d+)?\s*%)?|grand total|amount due|total due|total before vat|total incl\.? vat|total excl\.? vat)\s*:?$/i;
+
+/* ------------------------------------------------------------------------------------------------
+   The line checks (22 October 2026, after the Autovivo PDF read qty 4,350 × 4,350): every imported
+   line must add up, and unusual figures are asked about before anything is applied.
+   ------------------------------------------------------------------------------------------------ */
+
+/** A quantity above this is asked about before Apply ("usually 1 to 20"). */
+export const IMPORT_MAX_QTY = 50;
+/** A line worth more than this (AED, before VAT) is asked about before Apply. */
+export const IMPORT_MAX_LINE_AED = 500_000;
+
+/** "AED 6.8 bn", "AED 1.2 m", "AED 255,394", "AED 12,769.70": short enough for a warning, exact below a million. */
+export function shortAed(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "AED ?";
+  const a = Math.abs(n);
+  if (a >= 1e9) return `AED ${(n / 1e9).toFixed(1)} bn`;
+  if (a >= 1e6) return `AED ${(n / 1e6).toFixed(1)} m`;
+  return `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;
+}
+
+const fig = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
+
+/** The value a line adds to the total: its own total when the source has one, else qty × price. */
+export function lineValue(l: Pick<ImportLine, "qty" | "net" | "total">): number | null {
+  return l.total !== null ? l.total : l.net !== null ? Math.round(l.net * (l.qty ?? 1) * 100) / 100 : null;
+}
+
+/**
+ * The checks on one line, the same in the check screen and in the server's Apply: red when it does not add up
+ * (qty × price ≠ total by more than 0.01, or no usable quantity), amber when a figure is unusual (qty over 50,
+ * a line over AED 500,000). The import never applies a red or amber line unless Parts ticked it.
+ */
+export function lineChecks(l: Pick<ImportLine, "qty" | "net" | "total"> & { kind?: "part" | "charge" }): { problem: string | null; ask: string | null } {
+  let problem: string | null = null;
+  if (l.qty !== null && l.qty <= 0) problem = "The quantity is not a number above 0";
+  else if (l.qty !== null && l.net !== null && l.total !== null && Math.abs(l.qty * l.net - l.total) > 0.01) problem = `Qty ${fig(l.qty)} × price ${fig(l.net)} = ${fig(Math.round(l.qty * l.net * 100) / 100)}, but the line total says ${fig(l.total)}`;
+  else if (l.qty === null && l.net !== null && l.total !== null && Math.abs(l.net - l.total) > 0.01) problem = "No quantity, and the price and the line total differ";
+  const asks: string[] = [];
+  if (l.qty !== null && l.qty > IMPORT_MAX_QTY) asks.push(`Qty ${fig(l.qty)} is unusual (over ${IMPORT_MAX_QTY})`);
+  const v = lineValue(l);
+  if (v !== null && v > IMPORT_MAX_LINE_AED) asks.push(`The line is ${shortAed(v)} (over ${shortAed(IMPORT_MAX_LINE_AED)})`);
+  return { problem, ask: asks.length ? asks.join(" · ") : null };
+}
+
+/** Words that make a line a supplier charge rather than a part. */
+const CHARGE_RE = /\b(courier|freight|shipping|shipment|delivery charges?|transport(ation)?( charges?)?|handling|customs|duty|duties|packing|postage|cargo|clearance|dhl|aramex|fedex|logistics)\b/i;
+export function isChargeText(s: string | null | undefined): boolean {
+  return CHARGE_RE.test(String(s ?? ""));
+}
 
 export function normaliseHeading(h: string): string {
   return h.replace(/\*/g, "").replace(/[_\-:.]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
@@ -197,6 +256,7 @@ export function mapHeadings(headings: string[]): ColumnMapping {
       if (!h || Object.values(mapping).includes(i)) return;
       for (const field of Object.keys(SYNONYMS) as (keyof typeof SYNONYMS)[]) {
         if (taken.has(field)) continue;
+        if (field === "serial" && pass !== "exact") continue;
         const hit = SYNONYMS[field].some((syn) => (pass === "exact" ? h === syn : new RegExp(`(^|\\s)${syn.replace(/[()]/g, "\\$&").replace(/'/g, "'")}(\\s|$|\\()`).test(h)));
         if (hit) {
           mapping[field] = i;
@@ -225,11 +285,22 @@ function cell(row: string[], i: number | undefined): string {
 /** A row that is a labelled total ("Gross Amount  11,853.00") rather than a part. */
 function totalOfRow(row: string[]): { label: string; value: number } | null {
   const cells = row.map((c) => String(c ?? "").trim()).filter((c) => c !== "");
-  if (cells.length < 2 || cells.length > 3) return null;
-  const label = cells.find((c) => TOTAL_LABELS.test(c));
-  if (!label) return null;
-  const value = cells.filter((c) => c !== label).map(parseNumber).find((n) => n !== null);
-  return value === undefined || value === null ? null : { label: label.replace(/:$/, ""), value };
+  // "Net Amount: 2,518.00" written as one piece of text: the label and the value in one cell.
+  if (cells.length >= 1 && cells.length <= 3) {
+    for (const c of cells) {
+      const m = c.match(/^(.{2,40}?):\s*(?:AED\s*)?(-?\d[\d.,]*)$/i);
+      if (m && TOTAL_LABELS.test(m[1].trim())) {
+        const v = parseNumber(m[2]);
+        if (v !== null) return { label: m[1].trim(), value: v };
+      }
+    }
+  }
+  if (cells.length < 2 || cells.length > 5) return null;
+  const at = cells.findIndex((c) => TOTAL_LABELS.test(c));
+  if (at < 0) return null;
+  // The amount sits after its label ("Total  255,394.00"); words before it (the amount in words) do not matter.
+  const value = cells.slice(at + 1).map(parseNumber).find((n) => n !== null);
+  return value === undefined || value === null ? null : { label: cells[at].replace(/:$/, ""), value };
 }
 
 /** Rows into lines through a mapping. Rows with no part number and no description are skipped; totals rows are collected. */
@@ -250,13 +321,19 @@ export function linesFromRows(rows: string[][], mapping: ColumnMapping, keyPrefi
     if (mapping.partNumber !== undefined && normaliseHeading(cell(row, mapping.partNumber)) === "part") return;
     const list = parseNumber(cell(row, mapping.list));
     const net = parseNumber(cell(row, mapping.net));
-    const qty = parseQty(cell(row, mapping.qty));
+    let qty = parseQty(cell(row, mapping.qty));
     const total = parseNumber(cell(row, mapping.total));
     const rowVin = cell(row, mapping.vin).replace(/\s+/g, "").toUpperCase() || null;
     if (rowVin && rowVin.length >= 11) vin = vin ?? rowVin;
     // A page footer, a title or a stray word has no quantity and no price: not a part line.
     if (qty === null && list === null && net === null && total === null && !(partNumber && description)) return;
+    // No quantity printed but a price and a line total that divide into a whole number: that number is the quantity.
+    if (qty === null && net !== null && net > 0 && total !== null) {
+      const q = total / net;
+      if (q >= 1 && Math.abs(q - Math.round(q)) < 0.0005) qty = Math.round(q);
+    }
     const discount = list && net !== null && list > 0 ? Math.round((1 - net / list) * 10000) / 100 : null;
+    const serial = mapping.serial !== undefined ? cell(row, mapping.serial) || null : null;
     lines.push({
       key: `${keyPrefix}${idx}`,
       partNumber,
@@ -269,25 +346,63 @@ export function linesFromRows(rows: string[][], mapping: ColumnMapping, keyPrefi
       availability: parseAvailability(cell(row, mapping.availability)),
       vin: rowVin,
       raw: row.map((c) => String(c ?? "")),
+      serial,
     });
   });
-  return { lines, found, vin };
+  return { lines: finishLines(lines, { hasSerial: mapping.serial !== undefined }), found, vin };
+}
+
+/**
+ * The last pass over freshly read lines: a "part number" column holding nothing but the line numbers 1, 2, 3…
+ * is the supplier's Sl No. (cleared, never a part number); a line that is a supplier charge (courier, freight,
+ * or a priced line without a line number in a numbered table) is marked as a charge; every line gets its checks.
+ */
+export function finishLines(lines: ImportLine[], opts: { hasSerial?: boolean } = {}): ImportLine[] {
+  const pns = lines.map((l) => l.partNumber).filter((p): p is string => !!p);
+  if (pns.length >= 3 && pns.every((p) => /^\d{1,3}$/.test(p))) {
+    const nums = pns.map(Number);
+    const ascending = nums.every((n, i) => i === 0 || n > nums[i - 1]);
+    if (ascending && nums[0] <= 2) for (const l of lines) if (l.partNumber && /^\d{1,3}$/.test(l.partNumber)) { l.serial = l.serial ?? l.partNumber; l.partNumber = null; }
+  }
+  const numbered = opts.hasSerial && lines.filter((l) => l.serial).length >= Math.max(2, lines.length / 2);
+  for (const l of lines) {
+    const words = `${l.description ?? ""}`;
+    l.kind = !l.partNumber && (isChargeText(words) || (numbered && !l.serial && lineValue(l) !== null)) ? "charge" : "part";
+    const c = lineChecks(l);
+    l.problem = l.problem ?? c.problem;
+    l.ask = c.ask;
+  }
+  return lines;
 }
 
 /** The cross-check: the lines added up against the total before VAT the source states. */
 export function checkTotals(lines: ImportLine[], found: { label: string; value: number }[]): ImportTotals {
-  const lineValue = (l: ImportLine) => (l.total !== null ? l.total : l.net !== null ? l.net * (l.qty ?? 1) : null);
   const values = lines.map(lineValue);
-  const sumLines = values.length && values.every((v) => v !== null) ? Math.round(values.reduce((a, b) => a + (b ?? 0), 0) * 100) / 100 : null;
+  const allKnown = values.length > 0 && values.every((v) => v !== null);
+  const known = Math.round(values.reduce<number>((a, b) => a + (b ?? 0), 0) * 100) / 100;
+  let sumLines = allKnown ? known : null;
   // The total before VAT: "Gross Amount" (Land Rover), "Subtotal", "Total before VAT", "Net amount"; else a plain "Total" when there is no VAT line.
   const pick = (re: RegExp) => found.find((f) => re.test(f.label))?.value ?? null;
-  const vat = pick(/^(vat|tax)(\s*\d+(\.\d+)?\s*%)?$/i);
-  let expected = pick(/^(gross amount|gross|sub ?total|subtotal|total before vat|total excl\.? vat|net amount|net total)$/i);
+  const isVat = (label: string) => /^(vat|tax)(\s*\d+(\.\d+)?\s*%)?$|^vat amount$/i.test(label);
+  const vat = found.find((f) => isVat(f.label))?.value ?? null;
+  // Arithmetic first, whatever the labels say: when one total plus the VAT gives another ("Total 255,394.00 +
+  // VAT 12,769.70 = Net Total 268,163.70"), the smaller one is the total before VAT.
+  let expected: number | null = null;
+  if (vat !== null) {
+    const others = found.filter((f) => !isVat(f.label)).map((f) => f.value);
+    for (const a of others) if (expected === null && others.some((b) => Math.abs(a + vat - b) <= 0.05)) expected = a;
+  }
+  if (expected === null) expected = pick(/^(gross amount|gross total|gross|sub ?total|subtotal|total before vat|total excl\.? vat|net amount)$/i);
+  if (expected === null && vat === null) expected = pick(/^net total$/i);
   if (expected === null) {
-    const total = pick(/^(total( aed)?|grand total|amount due|total due|net aed)$/i);
+    const total = pick(/^(total( aed| \(aed\))?|total amount|total value|grand total|amount due|total due|net aed|net total|total incl\.? vat)$/i);
     if (total !== null) expected = vat !== null ? Math.round((total - vat) * 100) / 100 : total;
   }
-  const match = sumLines === null || expected === null ? null : Math.abs(sumLines - expected) <= Math.max(0.05, 0.01 * lines.length);
+  const tolerance = Math.max(0.05, 0.01 * lines.length);
+  // Some lines without a price: the sum cannot match yet, but if the priced lines alone are already above the
+  // supplier's total, something was read wrong for certain.
+  if (sumLines === null && expected !== null && known > expected + tolerance) sumLines = known;
+  const match = sumLines === null || expected === null ? null : Math.abs(sumLines - expected) <= tolerance;
   return { found, sumLines, expected, match };
 }
 
@@ -462,6 +577,8 @@ export const MAPPING_CHOICES: { field: ImportField; label: string }[] = [
   { field: "qty", label: "Qty" },
   { field: "net", label: "Price" },
   { field: "availability", label: "Availability" },
+  { field: "total", label: "Line total" },
+  { field: "serial", label: "Line no." },
   { field: "ignore", label: "Ignore" },
 ];
 
@@ -547,6 +664,12 @@ export type ApplyLine = {
   discount: number | null;
   net: number | null;
   availability: ImportAvailability | null;
+  /** The line's total as the source printed it, so the server can check qty × price = total again. */
+  total?: number | null;
+  /** A supplier charge (courier): saved on the supplier's LPO, never as a part. */
+  kind?: "part" | "charge";
+  /** Parts ticked "Checked" on a red or amber line. */
+  checked?: boolean;
 };
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
@@ -558,6 +681,7 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   total: "Line total",
   availability: "Availability",
   vin: "VIN",
+  serial: "Line no.",
   ignore: "Ignore",
 };
 
@@ -645,5 +769,228 @@ export function parseDealerBlocks(pages: PosLine[][]): ImportResult | null {
     }
   }
   if (!lines.length) return null;
+  finishLines(lines);
   return { format: "dealer", supplierHint, customerId, headings: ["Pos", "Part", "Part number", "Qty", "List", "Net each"], rows: lines.map((l) => l.raw), mapping: {}, lines, totals: checkTotals(lines, found), vin, warnings };
+}
+
+/* ------------------------------------------------------------------------------------------------
+   PDF tables read by their HEADINGS (22 October 2026). The Autovivo quotation prints
+   "Sl No. | Part No. | Description | Qty | Price | Total" with the Part No. column empty on every
+   line; reading the cells left to right slid every value one column over (qty into the name, the
+   price into the qty, the total into the net). Here each cell goes to the column whose heading it
+   sits under, so an empty column stays empty, whatever the supplier.
+   ------------------------------------------------------------------------------------------------ */
+
+/** One cell of a PDF line with its left and right edge (points). */
+export type PosCell = { x: number; x2: number; text: string };
+
+function headingRowOf(rows: PosCell[][]): number {
+  return rows.findIndex((r) => {
+    const m = mapHeadings(r.map((c) => c.text));
+    const known = Object.keys(m).filter((k) => k !== "serial").length;
+    return known >= 3 && (m.net !== undefined || m.total !== undefined || m.list !== undefined) && (m.description !== undefined || m.partNumber !== undefined);
+  });
+}
+
+const looksNumber = (s: string) => parseNumber(s) !== null;
+const looksWords = (s: string) => /[a-z]{3,}/i.test(s) && !/\d{3,}/.test(s);
+
+type Cols = { x: number; x2: number }[];
+/** Where the data says each column really is: the left edge text lines up on, the right edge numbers line up on. */
+type Anchors = { left: Map<number, number>; right: Map<number, number> };
+
+/** The column whose heading span (stretched to halfway to its neighbours) overlaps the cell most. */
+function bandColumn(cell: PosCell, cols: Cols): number {
+  const n = cols.length;
+  const bounds = cols.slice(0, -1).map((c, i) => (c.x2 + cols[i + 1].x) / 2);
+  let best = -1;
+  let bestOverlap = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const lo = i === 0 ? -Infinity : bounds[i - 1];
+    const hi = i === n - 1 ? Infinity : bounds[i];
+    const overlap = Math.min(cell.x2, hi) - Math.max(cell.x, lo);
+    if (overlap > bestOverlap) { bestOverlap = overlap; best = i; }
+  }
+  return best;
+}
+
+/**
+ * Learnt from every line of the table: the edges that many cells share, and the column most of them were placed
+ * in. A short word ("PROTECTION") that starts on the same left edge as every other description is a description,
+ * even if its span sits closer to the empty Part No. heading.
+ */
+function learnAnchors(rows: PosCell[][], cols: Cols): Anchors {
+  const count = (key: (c: PosCell) => number, filter: (c: PosCell) => boolean) => {
+    const byEdge = new Map<number, Map<number, number>>();
+    for (const row of rows) for (const c of row) {
+      if (!filter(c)) continue;
+      const edge = Math.round(key(c));
+      const col = bandColumn(c, cols);
+      const m = byEdge.get(edge) ?? new Map<number, number>();
+      m.set(col, (m.get(col) ?? 0) + 1);
+      byEdge.set(edge, m);
+    }
+    const out = new Map<number, number>();
+    for (const [edge, m] of byEdge) {
+      const [col, n] = [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (n >= 3) out.set(edge, col);
+    }
+    return out;
+  };
+  return { left: count((c) => c.x, (c) => !looksNumber(c.text)), right: count((c) => c.x2, (c) => looksNumber(c.text)) };
+}
+
+function columnOf(cell: PosCell, cols: Cols, anchors: Anchors | null): number {
+  if (anchors) {
+    const near = (m: Map<number, number>, v: number) => { for (const d of [0, -1, 1, -2, 2]) { const c = m.get(Math.round(v) + d); if (c !== undefined) return c; } return undefined; };
+    const byEdge = looksNumber(cell.text) ? near(anchors.right, cell.x2) : near(anchors.left, cell.x);
+    if (byEdge !== undefined) return byEdge;
+  }
+  return bandColumn(cell, cols);
+}
+
+/** One data line's cells placed under the headings: by the learnt column edges, else by the heading spans. */
+function placeRow(row: PosCell[], cols: Cols, mapping: ColumnMapping, anchors: Anchors | null = null): string[] {
+  const n = cols.length;
+  const out: string[] = Array(n).fill("");
+  const placed: { col: number; cell: PosCell }[] = [];
+  for (const cell of [...row].sort((a, b) => a.x - b.x)) {
+    const best = columnOf(cell, cols, anchors);
+    if (best < 0) continue;
+    out[best] = out[best] ? `${out[best]} ${cell.text}` : cell.text;
+    placed.push({ col: best, cell });
+  }
+  // Words that landed in the line-number or part-number column while the description is empty are the description.
+  if (mapping.description !== undefined && !out[mapping.description]) {
+    for (const k of [mapping.serial, mapping.partNumber]) {
+      if (k === undefined || !out[k]) continue;
+      if ((k === mapping.serial && !/^\d{1,4}\.?$/.test(out[k]) && looksWords(out[k])) || (k === mapping.partNumber && looksWords(out[k]) && !/\d/.test(out[k]))) {
+        out[mapping.description] = out[k];
+        out[k] = "";
+      }
+    }
+  }
+  // The figures must add up. If qty × price ≠ total as placed, the figures are read again from the right: the
+  // last number on the line is the last number column (Total), the one before it the one before (Price), and so on.
+  const q = mapping.qty;
+  const p = mapping.net ?? mapping.list;
+  const t = mapping.total;
+  const adds = (o: string[]) => q !== undefined && p !== undefined && t !== undefined && parseNumber(o[q]) !== null && parseNumber(o[p]) !== null && parseNumber(o[t]) !== null && Math.abs((parseNumber(o[q]) ?? 0) * (parseNumber(o[p]) ?? 0) - (parseNumber(o[t]) ?? 0)) <= 0.01;
+  if (q !== undefined && p !== undefined && t !== undefined && !adds(out)) {
+    const numCols = (["qty", "list", "net", "total"] as const).map((f) => mapping[f]).filter((i): i is number => i !== undefined).sort((a, b) => cols[a].x - cols[b].x);
+    const nums = placed.filter((pl) => pl.col !== mapping.serial && looksNumber(pl.cell.text)).map((pl) => pl.cell.text);
+    if (nums.length >= 2) {
+      const trial = [...out];
+      for (const i of numCols) trial[i] = "";
+      const k = Math.min(nums.length, numCols.length);
+      for (let j = 1; j <= k; j++) trial[numCols[numCols.length - j]] = nums[nums.length - j];
+      if (adds(trial)) return trial;
+    }
+  }
+  return out;
+}
+
+/**
+ * A PDF's lines of positioned cells (page by page) into a table: the heading row first, then every line below it
+ * with one cell per heading, an empty column left empty. Each page may repeat the headings; a page without them
+ * uses the columns of the page before. Null when no heading row is found.
+ */
+export function alignRowsToHeadings(pages: PosCell[][][]): string[][] | null {
+  let cols: Cols | null = null;
+  let headings: string[] | null = null;
+  let mapping: ColumnMapping = {};
+  // First every table line with the columns of its page, then the edges learnt from all of them, then the placing.
+  const body: { row: PosCell[]; cols: Cols }[] = [];
+  for (const page of pages) {
+    const hi = headingRowOf(page);
+    let start = 0;
+    if (hi >= 0) {
+      const head = [...page[hi]].sort((a, b) => a.x - b.x);
+      if (!headings) {
+        headings = head.map((c) => c.text);
+        mapping = mapHeadings(headings);
+      }
+      if (head.length === headings.length) cols = head.map((c) => ({ x: c.x, x2: c.x2 }));
+      start = hi + 1;
+    }
+    if (!cols) continue;
+    for (const row of page.slice(start)) if (row.length) body.push({ row, cols });
+  }
+  if (!headings || !body.length) return headings ? [headings] : null;
+  const anchors = learnAnchors(body.map((b) => b.row), body[0].cols);
+  return [headings, ...body.map((b) => placeRow(b.row, b.cols, mapping, anchors))];
+}
+
+/**
+ * The safety lock on Apply, the same rule on the screen and on the server. Blocked when the lines do not add up
+ * to the supplier's own total (unless Parts typed why it is still right), or when a line that will be applied is
+ * red (does not add up) or amber (qty over 50, over AED 500,000) and Parts did not tick it as checked.
+ */
+export function importLock(lines: ImportLine[], totals: ImportTotals, opts: { included: (l: ImportLine) => boolean; checked: (l: ImportLine) => boolean; totalsOverride?: string | null; sourceWord?: string }): { blocked: boolean; message: string | null; redKeys: string[]; askKeys: string[]; totalsBad: boolean } {
+  const used = lines.filter(opts.included);
+  const redKeys = used.filter((l) => l.problem && !opts.checked(l)).map((l) => l.key);
+  const askKeys = used.filter((l) => !l.problem && l.ask && !opts.checked(l)).map((l) => l.key);
+  const totalsBad = totals.match === false && !(opts.totalsOverride && opts.totalsOverride.trim().length >= 5);
+  const word = opts.sourceWord ?? "file";
+  const msgs: string[] = [];
+  if (totalsBad) msgs.push(`Lines add up to ${shortAed(totals.sumLines)} but the ${word} total is ${shortAed(totals.expected)} – check the red lines`);
+  if (redKeys.length) msgs.push(`${redKeys.length} line${redKeys.length === 1 ? " does" : "s do"} not add up (qty × price ≠ total): skip ${redKeys.length === 1 ? "it" : "them"}, or tick "Checked" after comparing with the ${word}`);
+  if (askKeys.length) msgs.push(`${askKeys.length} line${askKeys.length === 1 ? " has" : "s have"} an unusual figure (qty over ${IMPORT_MAX_QTY} or over ${shortAed(IMPORT_MAX_LINE_AED)}): confirm ${askKeys.length === 1 ? "it" : "each"} with "Checked", or skip`);
+  return { blocked: msgs.length > 0, message: msgs.length ? msgs.join(". ") + "." : null, redKeys, askKeys, totalsBad };
+}
+
+/**
+ * A text PDF into an import: the dealer block layout first (Mercedes), then the table read by its headings, then
+ * the cells as laid out, then the plain lines. `withSaved` reads rows with any saved supplier mapping.
+ */
+export function pdfImport(read: { cellPages: PosCell[][][]; rowPages: string[][][]; text: string; vin: string | null }, positioned: PosLine[][], withSaved: (rows: string[][]) => ImportResult = (rows) => readTable(rows)): ImportResult {
+  const dealer = parseDealerBlocks(positioned);
+  if (dealer && dealer.lines.length) return { ...dealer, vin: dealer.vin ?? read.vin };
+  const hint = companyInText(read.text);
+  const aligned = alignRowsToHeadings(read.cellPages);
+  if (aligned) {
+    const r = withSaved(aligned);
+    if (r.lines.length) return { ...r, vin: r.vin ?? read.vin, supplierHint: r.supplierHint ?? hint };
+  }
+  const byCells = withSaved(read.rowPages.flat());
+  const r = byCells.lines.length ? byCells : withSaved(parsePaste(read.text, null));
+  return { ...r, vin: r.vin ?? read.vin, supplierHint: r.supplierHint ?? hint };
+}
+
+/** The supplier's company name written in a PDF ("AUTOVIVO SPARE PARTS LLC"): the first line naming a company that is not us. */
+export function companyInText(text: string): string | null {
+  const lines = text.split("\n").map((l) => l.replace(/\t/g, " · "));
+  // A registered company name first ("… LLC", "… FZE", "… Trading"), then a "… Spare Parts" style name.
+  for (const re of [/([A-Z][A-Z0-9&.' -]{2,60}?\b(?:L\.?L\.?C|FZE|FZCO|FZ-LLC|TRADING)\b\.?)/i, /([A-Z][A-Z0-9&.' -]{2,60}?\b(?:SPARE PARTS|AUTO PARTS|CAR PARTS)\b)/i]) {
+    for (const line of lines) {
+      const m = line.match(re);
+      if (!m) continue;
+      const name = m[1].replace(/\s+/g, " ").replace(/^[^A-Za-z]+/, "").trim();
+      if (/\bofj\b/i.test(name) || /^(address|attn|customer|to)\b/i.test(name)) continue;
+      return name;
+    }
+  }
+  return null;
+}
+
+/** The words that say nothing about which supplier it is. */
+const GENERIC_COMPANY = /\b(l\.?l\.?c|fze|fzco|fz|trading|spare|spares|parts?|auto|car|cars|luxury|italian|german|general|company|co|est|establishment|the|and|&|motors?|dubai|uae)\b/gi;
+
+/** Whether a name written on a supplier's paper is the supplier on our list ("AUTOVIVO SPARE PARTS LLC" = "Auto Vivo Italian Luxury Car Parts"). */
+export function supplierMatches(hint: string | null | undefined, name: string): boolean {
+  if (!hint) return false;
+  const h = hint.toLowerCase();
+  const n = name.toLowerCase();
+  if (n.includes(h) || h.includes(n)) return true;
+  const core = (s: string) => s.replace(GENERIC_COMPANY, " ").replace(/[^a-z0-9]/g, "");
+  const full = (s: string) => s.replace(/[^a-z0-9]/g, "");
+  const ch = core(h);
+  const cn = core(n);
+  if (ch.length >= 4 && cn.length >= 4 && (ch.startsWith(cn) || cn.startsWith(ch))) return true;
+  // "Autovivo" written as one word against "Auto Vivo": the full names start the same for 8 letters or more.
+  const fh = full(h);
+  const fn = full(n);
+  let k = 0;
+  while (k < fh.length && k < fn.length && fh[k] === fn[k]) k++;
+  return k >= 8;
 }

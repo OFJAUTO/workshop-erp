@@ -253,6 +253,11 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
     const vat = round2(net * (vatPercent / 100));
     return { partNumber: l.part_number, name: l.description, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
   });
+  // The supplier's own charges on this order (courier, freight): one row each, after the parts.
+  for (const c of bundle.charges ?? []) {
+    const vatC = round2(c.amount_aed * (vatPercent / 100));
+    rows.push({ partNumber: null, name: c.description, qty: "1", list: c.amount_aed, disc: 0, net: c.amount_aed, vat: vatC, total: round2(c.amount_aed + vatC) });
+  }
   const gross = round2(rows.reduce((a, r) => a + r.net, 0));
   const vat = round2(gross * (vatPercent / 100));
   const total = round2(gross + vat);

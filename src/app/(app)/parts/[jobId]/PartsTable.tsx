@@ -77,7 +77,7 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, showCost = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" } }: { /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** The cost bar and line totals: Parts, advisors and the owner only - never anything a customer sees. */ showCost?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, showCost = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" }, extraCosts = [] }: { /** Supplier charges (courier, freight): internal costs counted in "Our cost", per supplier. */ extraCosts?: { supplier: string; amount: number }[]; /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; onPricingDone?: Action | null; showBar?: boolean; /** The cost bar and line totals: Parts, advisors and the owner only - never anything a customer sees. */ showCost?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null }) {
   const router = useRouter();
   const [rows, setRows] = useState<TableRow[]>(initialRows);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
@@ -192,7 +192,8 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   // "Our cost": every line that still counts (declined, not needed and returned lines do not), qty × net each.
   const countedRows = rows.filter((r) => { const s = stateOf(r); return s !== "removed" && s !== "not_available"; });
   const rowCost = (r: TableRow) => num(r.values.qty || "1") * num(r.values.cost_aed);
-  const costTotal = countedRows.reduce((a, r) => a + rowCost(r), 0);
+  const chargesCost = extraCosts.reduce((a, c) => a + c.amount, 0);
+  const costTotal = countedRows.reduce((a, r) => a + rowCost(r), 0) + chargesCost;
   const costVat = Math.round(costTotal * 5) / 100;
   const selectedCost = countedRows.filter((r) => selected.has(r.key)).reduce((a, r) => a + rowCost(r), 0);
   const bySupplier = new Map<string, number>();
@@ -202,10 +203,12 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     const s = r.values.supplier.trim() || "No supplier yet";
     bySupplier.set(s, (bySupplier.get(s) ?? 0) + c);
   }
+  for (const c of extraCosts) bySupplier.set(c.supplier, (bySupplier.get(c.supplier) ?? 0) + c.amount);
   const supplierPairs = [...bySupplier.entries()].sort((a, b) => b[1] - a[1]);
   const costLine = showCost ? (
     <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-0.5" data-cost-bar>
       <span className="text-sm font-bold">Our cost: AED {aed(costTotal)} + VAT 5% AED {aed(costVat)} = <span data-cost-grand>AED {aed(costTotal + costVat)}</span></span>
+      {chargesCost ? <span className="text-xs text-muted" data-cost-charges>incl. supplier charges AED {aed(chargesCost)}</span> : null}
       {selectedCost ? <span className="text-sm font-semibold text-green" data-cost-selected>Selected: AED {aed(selectedCost)}</span> : null}
       {supplierPairs.length > 1 ? <span className="text-xs text-muted" data-cost-suppliers>{supplierPairs.map(([s, v]) => `${s} AED ${aed(v)}`).join(" · ")}</span> : null}
     </div>

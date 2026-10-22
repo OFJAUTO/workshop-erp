@@ -6,15 +6,17 @@ import { round2 } from "./money";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, toPartFull, toPo, toPoLine, type PartFull, type PoLineRow, type PurchaseOrderRow } from "./parts-data";
 import { createAdminClient } from "./supabase/admin";
+import { attachChargesToPo, chargesByPo, moveChargesToSupplierPo, type SupplierCharge } from "./supplier-charges";
 
 type Actor = { id: string; display_name: string };
 
 /** One supplier's LPO with its lines, as the cards and the LPO page show it. */
-export type SupplierLpoView = { po: PurchaseOrderRow; lines: PoLineRow[] };
+export type SupplierLpoView = { po: PurchaseOrderRow; lines: PoLineRow[]; /** Courier, freight: "Other charges" rows, already in the LPO total. */ charges: SupplierCharge[] };
 export type JobLpos = {
   /** The one LPO per job with every supplier, approved by the owner or the head accountant. */
   main: PurchaseOrderRow | null;
   mainLines: PoLineRow[];
+  mainCharges: SupplierCharge[];
   /** One per supplier, made from the main one at approval (LPO-00012-1, -2, -3). */
   suppliers: SupplierLpoView[];
   /** Approved parts still to order that are on no LPO yet (a new approval after the main LPO, or nothing sent yet). */
@@ -35,10 +37,12 @@ export async function loadJobLpos(jobId: string): Promise<JobLpos> {
   const { data: lineRows } = pos.length ? await admin.from("purchase_order_lines").select(PO_LINE_SELECT).in("po_id", pos.map((p) => p.id)).eq("is_active", true).order("position") : { data: [] };
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
   const main = [...pos].reverse().find((p) => p.kind === "main") ?? null;
-  const suppliers = pos.filter((p) => p.kind === "supplier" && (!main || p.parent_id === main.id || !p.parent_id)).map((po) => ({ po, lines: lines.filter((l) => l.po_id === po.id) }));
+  const charges = await chargesByPo(pos.map((p) => p.id));
+  const suppliers = pos.filter((p) => p.kind === "supplier" && (!main || p.parent_id === main.id || !p.parent_id)).map((po) => ({ po, lines: lines.filter((l) => l.po_id === po.id), charges: charges.get(po.id) ?? [] }));
   return {
     main,
     mainLines: main ? lines.filter((l) => l.po_id === main.id) : [],
+    mainCharges: main ? charges.get(main.id) ?? [] : [],
     suppliers,
     toOrder: parts.filter((p) => p.order_status === "to_order" && !p.po_id),
     fromStock: parts.filter((p) => p.availability === "in_stock"),
@@ -83,9 +87,13 @@ export async function createMainLpo(jobId: string, by: Actor): Promise<{ error?:
   if (error || !po) return { error: error?.message ?? "Could not raise the LPO." };
   const { data: created } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
   for (const l of created ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);
+  // The suppliers' charges (courier, freight) ride on the LPO as "Other charges": the total includes them.
+  const extra = await attachChargesToPo(jobId, po.id, supplierNames, by.id);
+  const grand = round2(total + extra);
+  if (extra) await admin.from("purchase_orders").update({ total_cost_aed: grand, updated_by: by.id }).eq("id", po.id);
   await admin.from("jobs").update({ parts_state: "ordering" }).eq("id", jobId).eq("parts_state", "none");
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "po_raised", note: `${po.number} sent for approval by ${by.display_name}: ${lines.length} part${lines.length === 1 ? "" : "s"} from ${supplierNames.join(", ")}, AED ${total.toLocaleString("en-GB")}`, created_by: by.id });
-  const n = { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${job.job_number} · ${supplierNames.join(", ")} · AED ${total.toLocaleString("en-GB")} · from ${by.display_name}. One tap to approve.`, jobId, href: `/parts/orders/${po.id}` };
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "po_raised", note: `${po.number} sent for approval by ${by.display_name}: ${lines.length} part${lines.length === 1 ? "" : "s"} from ${supplierNames.join(", ")}${extra ? ` + supplier charges AED ${extra.toLocaleString("en-GB")}` : ""}, AED ${grand.toLocaleString("en-GB")}`, created_by: by.id });
+  const n = { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${job.job_number} · ${supplierNames.join(", ")} · AED ${grand.toLocaleString("en-GB")} · from ${by.display_name}. One tap to approve.`, jobId, href: `/parts/orders/${po.id}` };
   const { data: heads } = await admin.from("staff").select("id").eq("role_id", "accounts").eq("is_head_accountant", true).eq("is_active", true);
   await notifyRoles(["owner"], n);
   await notifyStaff((heads ?? []).map((h) => h.id), n);
@@ -125,6 +133,8 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
     if (!po) continue;
     const { data: made } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
     for (const l of made ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);
+    const extra = await moveChargesToSupplierPo(mainId, supplierName, po.id, by.id);
+    if (extra) await admin.from("purchase_orders").update({ total_cost_aed: round2(total + extra), updated_by: by.id }).eq("id", po.id);
     created.push({ id: po.id, number: po.number, supplier: supplierName });
   }
   return { created };

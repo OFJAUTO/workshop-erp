@@ -545,6 +545,8 @@ export type QuoteTotals = {
   estimateTotalSuspect: boolean;
   /** Bodyshop materials (film, paint, consumables) from the internal box. */
   materialsCost: number;
+  /** The suppliers' own charges on the job's parts (courier, freight): an internal cost from the Parts page. */
+  supplierCharges: number;
   /** The hours labour at cost is worked out from: the clocked hours once the work is done, else the estimate. */
   labourCostHours: number;
   labourCostBasis: "estimate" | "clocked";
@@ -635,7 +637,7 @@ export function labourDiscountOf(counted: QuoteLine[], q: QuoteHeaderForTotals):
 export function quoteTotals(
   lines: QuoteLine[],
   q: QuoteHeaderForTotals,
-  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null; /** The bodyshop labour rate (AED/h): installer-hour estimates cost this. Leave unset where real clockings are counted instead (profit.ts). */ bodyshopRate?: number | null } = {},
+  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null; /** The bodyshop labour rate (AED/h): installer-hour estimates cost this. Leave unset where real clockings are counted instead (profit.ts). */ bodyshopRate?: number | null; /** The job's supplier charges (courier, freight) from the Parts page: an internal cost. */ supplierCharges?: number } = {},
 ): QuoteTotals {
   const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
@@ -694,7 +696,8 @@ export function quoteTotals(
   const commissionPending = commissionAsked > 0 && q.commission_status === "pending";
   const commission = q.commission_status === "declined" ? 0 : commissionAsked;
   const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
-  const totalCost = round2(partsCost + labourCost + outsideCost + ownServiceCost + bodyshopLabourCost + otherCost + bankCharge + commission + materialsCost);
+  const supplierCharges = round2(Math.max(0, Number(opts.supplierCharges) || 0));
+  const totalCost = round2(partsCost + labourCost + outsideCost + ownServiceCost + bodyshopLabourCost + otherCost + bankCharge + commission + materialsCost + supplierCharges);
   const profit = round2(net - totalCost);
   // The deposit is the advisor's choice on the quotation; the old rule (a share of the parts above a threshold) only suggests.
   const threshold = opts.depositThreshold ?? 0;
@@ -706,7 +709,7 @@ export function quoteTotals(
     subtotal, lineDiscounts, discountBase, discount, rounding, net, vat, total,
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
-    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, ownServiceCost, installerHours, bodyshopLabourCost, totalCost, profit,
+    otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, supplierCharges, ownServiceCost, installerHours, bodyshopLabourCost, totalCost, profit,
     labourMargin: round2(labourSell - discount - labourCost - outsideCost - ownServiceCost - bodyshopLabourCost),
     deposit,
     depositSuggested,

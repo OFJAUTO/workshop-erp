@@ -6,7 +6,7 @@ import { Button } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
 
 export type SupplierLpoLine = { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number };
-export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null };
+export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null };
 
 /**
  * One supplier's LPO as a card: its number (LPO-00012-1), the parts with part number, name, quantity and our agreed
@@ -26,6 +26,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
     vin ? `VIN: ${vin}` : "",
     "",
     ...po.lines.map((l) => `• ${l.part_number ? `${l.part_number} · ` : ""}${l.description} × ${l.quantity}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}` : ""}`),
+    ...(po.charges ?? []).map((c) => `• ${c.description} · AED ${c.amount_aed.toFixed(2)}`),
     "",
     `Total before VAT: AED ${po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`,
   ].filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
@@ -61,6 +62,13 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
                 </button>
               )
             ) : null}
+          </li>
+        ))}
+        {(po.charges ?? []).map((c) => (
+          <li key={c.id} className="py-1.5 flex flex-wrap items-center gap-2" data-lpo-charge>
+            <span className="inline-flex h-5 items-center rounded-full bg-chip px-2 text-[10px] font-bold text-muted">Other charge</span>
+            <span className="font-semibold">{c.description}</span>
+            <span className="text-muted">AED {c.amount_aed.toFixed(2)}</span>
           </li>
         ))}
       </ul>

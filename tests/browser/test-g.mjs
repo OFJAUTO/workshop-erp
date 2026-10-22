@@ -60,7 +60,7 @@ if (!CLEAR_ONLY) await section("B import fixes", async () => {
   await page.locator("[data-read-text]").click();
   const n2 = await linesRead(page);
   const t2 = await page.locator("[data-import-line]").allTextContents();
-  check("B1: the tab-separated Land Rover order reads 3 parts with the price from Unit Price, not Total", n2 === 3 && /Net 7,849\.00/.test(t2[0] ?? "") && /Net 1,250\.50/.test(t2[1] ?? ""), t2.map((t) => t.slice(0, 70)).join(" || "));
+  check("B1: the tab-separated Land Rover order reads 3 parts with the price from Unit Price, not Total", n2 === 3 && /1 × 7,849\.00/.test(t2[0] ?? "") && /2 × 1,250\.50/.test(t2[1] ?? ""), t2.map((t) => t.slice(0, 70)).join(" || "));
   check("B7: 'available' = Same day and 'back order' = Back order", /Same day/.test(t2[0] ?? "") && /Back order/.test(t2[2] ?? ""));
   check("B3: WipNo and LineNo are ignored (no 45512 or line numbers in the lines)", !t2.some((t) => /45512/.test(t)));
   await page.getByRole("button", { name: "Start again" }).click();
@@ -78,7 +78,7 @@ if (!CLEAR_ONLY) await section("B import fixes", async () => {
   check("B4: one Import button", (await page.locator("[data-apply-mapping]").count()) === 1 && (await page.locator("[data-apply-mapping]").textContent())?.trim() === "Import");
   await page.locator("[data-apply-mapping]").click();
   const n3 = await linesRead(page);
-  check("B4: Import reads the 6 lines with the chosen meanings", n3 === 6 && /E2e widget/.test((await page.locator("[data-import-line]").first().textContent()) ?? "") && /Net 10\.00/.test((await page.locator("[data-import-line]").first().textContent()) ?? ""));
+  check("B4: Import reads the 6 lines with the chosen meanings", n3 === 6 && /E2e widget/.test((await page.locator("[data-import-line]").first().textContent()) ?? "") && /× 10\.00/.test((await page.locator("[data-import-line]").first().textContent()) ?? ""));
   await page.getByRole("button", { name: "Start again" }).click();
 
   // 5. B2BConnect: the net is the cost, the list is kept, a part number with spaces matches one without.
@@ -87,7 +87,7 @@ if (!CLEAR_ONLY) await section("B import fixes", async () => {
   const n4 = await linesRead(page);
   check("B5: the Mercedes file reads 98 lines", n4 === 98);
   const pulley = page.locator("[data-import-line]", { hasText: "A 156 202 08 19" }).first();
-  check("B5: list price kept for reference next to the net", /List 170\.00/.test((await pulley.textContent()) ?? "") && /Net 76\.50/.test((await pulley.textContent()) ?? ""));
+  check("B5: list price kept for reference next to the net", /List 170\.00/.test((await pulley.textContent()) ?? "") && /× 76\.50/.test((await pulley.textContent()) ?? ""));
   const bolt = page.locator("[data-import-line]", { hasText: "N910105 012018" }).first();
   void bolt;
   // A line whose number is "A 167 330 68 00" (spaces) must find the seed part saved as A1673306800.

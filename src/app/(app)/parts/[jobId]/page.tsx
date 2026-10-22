@@ -11,6 +11,8 @@ import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
 import { loadJobLpos } from "@/lib/lpo";
+import { jobCharges } from "@/lib/supplier-charges";
+import { SupplierChargesStrip } from "./SupplierChargesStrip";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { dubaiDate } from "@/lib/jobs";
 import { valuesOfPart, valuesOfRequest } from "@/lib/parts-pricing";
@@ -62,6 +64,9 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     loadJobLpos(jobId),
   ]);
   if (!job) notFound();
+  const charges = await jobCharges(jobId);
+  const poNumber = new Map<string, string>([...(lpos.main ? [[lpos.main.id, lpos.main.number] as [string, string]] : []), ...lpos.suppliers.map((s) => [s.po.id, s.po.number] as [string, string])]);
+  const chargeRows = charges.map((c) => ({ id: c.id, description: c.description, supplier: c.supplier_name, amount: c.amount_aed, lpo: c.po_id ? poNumber.get(c.po_id) ?? "an LPO" : null }));
   const lastImport = lastImportRow ? { id: lastImportRow.id as string, count: Number(lastImportRow.applied_count) || 0, at: lastImportRow.created_at as string } : null;
   type V = { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; tyre_size_front?: string | null; tyre_size_rear?: string | null; make: { name: string } | null; model: { name: string } | null };
   const v = job.vehicle as unknown as V;
@@ -127,7 +132,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })) });
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [] });
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
@@ -212,7 +217,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       <Card id="pricing" className="flex flex-col gap-2 overflow-visible">
-        <PartsTable tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} />
+        <PartsTable tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} extraCosts={["owner", "service_advisor", "parts"].includes(role) ? chargeRows.map((c) => ({ supplier: c.supplier, amount: c.amount })) : []} />
+        {["owner", "service_advisor", "parts", "accounts"].includes(role) ? <SupplierChargesStrip jobId={jobId} charges={chargeRows} canEdit={canPrice} /> : null}
       </Card>
       {canPrice && !inPlanning ? <div className="h-20" /> : null}
     </>

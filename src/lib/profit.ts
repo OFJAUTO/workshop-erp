@@ -4,6 +4,7 @@ import { round2 } from "./money";
 import { isHidden, isUnchosen, lineCost, type LineType } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { chargeTotalsByJob } from "./supplier-charges";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { LINE_SELECT, toLine, toQuote } from "./quote-data";
 import { quoteTotals } from "./quotes";
@@ -81,6 +82,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, materials_cost_aed, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).eq("status", "approved") : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
+  const chargeTotals = await chargeTotalsByJob(jobIds);
   // The comebacks of these jobs (our fault), to take their losses off the original job.
   const { data: cbJobs } = jobIds.length && !filter.noComebacks ? await admin.from("jobs").select("id, comeback_of").in("comeback_of", jobIds).in("comeback_cause", ["workmanship", "faulty_part"]) : { data: [] as { id: string; comeback_of: string }[] };
   const cbProfits = (cbJobs ?? []).length ? await jobProfits(settings, { jobIds: (cbJobs ?? []).map((c) => c.id), noComebacks: true }) : [];
@@ -94,7 +96,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       .map((l) => ({ line_type: l.line_type as LineType, fee_kind: l.fee_kind, quantity: Number(l.quantity) || 1, unit_cost: l.unit_cost === null ? null : Number(l.unit_cost) }));
     const hiddenCost = round2(hidden.filter((l) => !l.fee_kind && l.line_type !== "recovery").reduce((a, l) => a + lineCost(l), 0));
     const feeEstimate = round2(hidden.filter((l) => l.fee_kind === "bank_charge").reduce((a, l) => a + lineCost(l), 0));
-    const otherCost = round2(ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0) + hiddenCost);
+    // The suppliers' own charges on the job's parts (courier, freight) are an internal cost too.
+    const otherCost = round2(ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0));
     // The recovery cost: the drivers' real prices once any trip carries one; the quotation's hidden recovery lines until then.
     const jobTrips = ((trips ?? []) as { job_id: string; price_aed: number | string | null; delivered_at: string | null; status: string }[]).filter((t) => t.job_id === invoice.job_id);
     const tripCost = round2(jobTrips.reduce((a, t) => a + (Number(t.price_aed) || 0), 0));
@@ -236,10 +239,11 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
   const open = rows.filter((r) => !taxedSet.has(r.job.id));
   if (!open.length) return 0;
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", open.map((r) => String(r.id))).eq("is_active", true);
+  const charges = await chargeTotalsByJob(Array.from(new Set(open.map((r) => r.job.id))));
   let total = 0;
   for (const r of open) {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department) });
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges: charges.get(r.job.id) ?? 0 });
     total += totals.profit;
   }
   return round2(total);
@@ -269,9 +273,10 @@ async function approvedQuoteProfits(settings: Settings, fromIso: string): Promis
   const rows = ((qs ?? []) as unknown as (Record<string, unknown> & { job: { id: string; department: string | null } | null })[]);
   if (!rows.length) return [];
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", rows.map((r) => String(r.id))).eq("is_active", true);
+  const charges = await chargeTotalsByJob(Array.from(new Set(rows.map((r) => r.job?.id).filter((x): x is string => !!x))));
   return rows.map((r) => {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department) });
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges: r.job?.id ? charges.get(r.job.id) ?? 0 : 0 });
     return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: totals.profit, net: totals.net };
   });
 }

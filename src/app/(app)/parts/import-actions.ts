@@ -7,7 +7,7 @@ import { ocrEnabled, ocrTable } from "@/lib/import-ocr";
 import { readPdfPositionedLines, readPdfRows, renderPdfPages } from "@/lib/pdf-read";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type RowValues, type SupplierOption } from "@/lib/parts-rows";
-import { parseDealerBlocks, parsePaste, readTable, type ApplyLine, type ColumnMapping, type ImportResult, importAvailabilityNote } from "@/lib/price-import";
+import { importLock, lineChecks, parsePaste, pdfImport, readTable, shortAed, type ApplyLine, type ColumnMapping, type ImportLine, type ImportResult, type ImportTotals, importAvailabilityNote } from "@/lib/price-import";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -66,21 +66,14 @@ export async function parseImportUpload(jobId: string, formData: FormData): Prom
         return { error: `${file.name} could not be opened as a PDF.` };
       }
       if (!read.scanned) {
-        // A dealer block layout (name and part number stacked, List/Discount/Net rows) reads by position first.
-        const dealer = parseDealerBlocks(await readPdfPositionedLines(buf));
-        if (dealer && dealer.lines.length) {
-          if (dealer.customerId) {
-            const memory = ((await getSettings()).import_supplier_memory ?? {}) as Record<string, string>;
-            if (memory[dealer.customerId]) dealer.supplierHint = memory[dealer.customerId];
-          }
-          results.push({ ...dealer, vin: dealer.vin ?? read.vin });
-          names.push(`${file.name} (${read.pageCount} page${read.pageCount === 1 ? "" : "s"})`);
-          continue;
+        // The dealer block layout (Mercedes) by position; otherwise the table read by its HEADINGS (every cell under
+        // the heading it sits beneath, an empty column stays empty); the plain cells and lines only as a last resort.
+        const r = pdfImport({ cellPages: read.cellPages, rowPages: read.pages, text: read.text, vin: read.vin }, await readPdfPositionedLines(buf), (rows) => withSaved(rows, mappings));
+        if (r.format === "dealer" && r.customerId) {
+          const memory = ((await getSettings()).import_supplier_memory ?? {}) as Record<string, string>;
+          if (memory[r.customerId]) r.supplierHint = memory[r.customerId];
         }
-        // The cells as the PDF laid them out; the plain lines when the cells did not line up.
-        const byCells = withSaved(read.pages.flat(), mappings);
-        const r = byCells.lines.length ? byCells : withSaved(parsePaste(read.text, null), mappings);
-        results.push({ ...r, vin: r.vin ?? read.vin });
+        results.push(r);
         names.push(`${file.name} (${read.pageCount} page${read.pageCount === 1 ? "" : "s"})`);
         continue;
       }
@@ -158,7 +151,25 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /** The part columns an import may change; saved before and after so Undo can put them back. */
 const SNAPSHOT = "id, description, part_number, part_type, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, confirmed_quantity, availability_note, is_active";
 
-export type ApplyResult = { error?: string; applied?: number; failed?: { name: string; error: string }[]; importId?: string };
+export type ApplyResult = { error?: string; applied?: number; charges?: number; failed?: { name: string; error: string }[]; importId?: string };
+
+/**
+ * The safety lock again on the server, whatever the screen did: every line that will be applied must add up
+ * (qty × price = total) or carry Parts' "Checked" tick, unusual figures (qty over 50, a line over AED 500,000)
+ * need the tick too, and lines that do not add up to the supplier's own total need a typed reason.
+ */
+function serverLock(lines: ApplyLine[], totals: ImportTotals | null | undefined, override: string | null | undefined): string | null {
+  const used = lines.filter((l) => l.target !== "skip");
+  const asLines: ImportLine[] = used.map((l) => {
+    const c = lineChecks({ qty: l.qty, net: l.net, total: l.total ?? null });
+    return { key: l.key, partNumber: l.partNumber, description: l.name, qty: l.qty, list: l.list, net: l.net, discount: l.discount, total: l.total ?? null, availability: l.availability, vin: null, raw: [], problem: c.problem, ask: c.ask };
+  });
+  const t: ImportTotals = totals ?? { found: [], sumLines: null, expected: null, match: null };
+  // The match is worked out here from the two figures, never taken from the screen.
+  const match = t.sumLines !== null && t.expected !== null ? Math.abs(t.sumLines - t.expected) <= Math.max(0.05, 0.01 * lines.length) : t.match === false ? false : null;
+  const lock = importLock(asLines, { ...t, match }, { included: () => true, checked: (l) => !!used.find((u) => u.key === l.key)?.checked, totalsOverride: override, sourceWord: "supplier's" });
+  return lock.blocked ? lock.message : null;
+}
 
 /**
  * Apply: every confirmed line goes through the same save as a hand-typed row (autoSavePartRow), so the supplier's
@@ -167,9 +178,13 @@ export type ApplyResult = { error?: string; applied?: number; failed?: { name: s
  * or a note ("Back order", "Supplier to confirm") that never touches the price. Everything the import added or
  * changed is written down under one import, so "Undo last import" can take exactly that back.
  */
-export async function applyImport(jobId: string, payload: { supplierId: string | null; defaultType: string | null; source: string; format?: string | null; customerId?: string | null; lines: ApplyLine[]; mapping?: { headings: string[]; mapping: ColumnMapping } | null }): Promise<ApplyResult> {
+export async function applyImport(jobId: string, payload: { supplierId: string | null; defaultType: string | null; source: string; format?: string | null; customerId?: string | null; lines: ApplyLine[]; mapping?: { headings: string[]; mapping: ColumnMapping } | null; totals?: ImportTotals | null; totalsOverride?: string | null }): Promise<ApplyResult> {
   const staff = await partsStaff();
   if (!staff) return { error: "Not allowed." };
+  const locked = serverLock(payload.lines, payload.totals, payload.totalsOverride);
+  if (locked) return { error: `Not applied: ${locked}` };
+  const chargeLines = payload.lines.filter((l) => l.kind === "charge" && l.target !== "skip");
+  if (chargeLines.length && !payload.supplierId) return { error: "Choose the supplier first: the courier or freight charge goes on that supplier's LPO." };
   const admin = createAdminClient();
   const settings = await getSettings();
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
@@ -189,15 +204,31 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       }
     }
   }
-  const { data: imp } = await admin.from("price_imports").insert({ job_id: jobId, supplier_id: supplier?.id ?? null, source: payload.source.slice(0, 200), format: payload.format ?? null, line_count: payload.lines.length, created_by: staff.id, updated_by: staff.id }).select("id").single();
+  const failed: { name: string; error: string }[] = [];
+  const override = payload.totals?.match === false || (payload.totals?.sumLines !== null && payload.totals?.expected !== null && payload.totals?.sumLines !== undefined && payload.totals?.expected !== undefined && Math.abs(payload.totals.sumLines - payload.totals.expected) > 0.05) ? (payload.totalsOverride ?? "").trim().slice(0, 300) || null : null;
+  const { data: imp } = await admin.from("price_imports").insert({ job_id: jobId, supplier_id: supplier?.id ?? null, source: payload.source.slice(0, 200), format: payload.format ?? null, line_count: payload.lines.length, totals_sum_aed: payload.totals?.sumLines ?? null, totals_expected_aed: payload.totals?.expected ?? null, totals_override: override, created_by: staff.id, updated_by: staff.id }).select("id").single();
   const importId = (imp?.id as string | undefined) ?? null;
+  // Supplier charges (courier, freight): an internal cost on the supplier's LPO, never a parts line. The same
+  // charge imported twice (same supplier, words and amount) is kept once.
+  let charges = 0;
+  if (supplier && chargeLines.length) {
+    const { data: existingCharges } = await admin.from("supplier_charges").select("description, amount_aed, supplier_name").eq("job_id", jobId).eq("is_active", true);
+    for (const c of chargeLines) {
+      const amount = r2(c.total ?? (c.net ?? 0) * (c.qty ?? 1));
+      const description = (c.name || "Supplier charge").trim().slice(0, 200);
+      const dup = (existingCharges ?? []).some((e) => Number(e.amount_aed) === amount && String(e.description).toLowerCase() === description.toLowerCase() && String(e.supplier_name).toLowerCase() === supplier!.name.toLowerCase());
+      if (dup) continue;
+      const { error } = await admin.from("supplier_charges").insert({ job_id: jobId, supplier_id: supplier.id, supplier_name: supplier.name, description, amount_aed: amount, import_id: importId, created_by: staff.id, updated_by: staff.id });
+      if (error) failed.push({ name: description, error: error.message });
+      else charges++;
+    }
+  }
   const empty: RowValues = { part_number: "", part_type: types[0] ?? "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
   let applied = 0;
-  const failed: { name: string; error: string }[] = [];
   const stamp = Date.now();
   const snapshot = async (partId: string) => (await admin.from("part_items").select(SNAPSHOT).eq("id", partId).maybeSingle()).data ?? null;
   for (const line of payload.lines) {
-    if (line.target === "skip") continue;
+    if (line.target === "skip" || line.kind === "charge") continue;
     const existing = line.target === "new" ? null : pricing.rows.find((r) => (line.target !== "new" && line.target !== "skip" && line.target.partId ? r.partId === line.target.partId : line.target !== "new" && line.target !== "skip" && !!line.target.requestId && r.requestId === line.target.requestId && !r.partId)) ?? null;
     if (line.target !== "new" && !existing) {
       failed.push({ name: line.name, error: "The row it was matched to is no longer on the list." });
@@ -224,7 +255,9 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       partId: existing?.partId ?? null,
       clientKey: existing ? undefined : `import:${stamp}:${line.key}`.slice(0, 80),
       name: (line.name || existing?.name || "").trim(),
-      part_number: line.partNumber ?? base.part_number,
+      // A "part number" that is only a line number (1, 2, 19: an earlier screenshot read the Sl No. there) is cleared
+      // when the supplier's paper leaves the part number blank; a real one is kept.
+      part_number: line.partNumber ?? (/^\d{1,3}$/.test((base.part_number ?? "").trim()) ? "" : base.part_number),
       part_type: partType,
       brand: base.brand,
       list_price: list !== null ? String(list) : base.list_price,
@@ -246,10 +279,12 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       await admin.from("price_import_lines").insert({ import_id: importId, part_id: res.partId, request_id: existing?.requestId ?? null, created: !existing?.partId, before, after });
     }
   }
-  if (importId) await admin.from("price_imports").update({ applied_count: applied, updated_by: staff.id }).eq("id", importId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_imported", note: `${applied} price${applied === 1 ? "" : "s"} imported from ${payload.source || "a supplier file"}${supplier ? ` (${supplier.name})` : ""} by ${staff.display_name}${failed.length ? `; ${failed.length} failed` : ""}`, created_by: staff.id });
+  if (importId) await admin.from("price_imports").update({ applied_count: applied + charges, updated_by: staff.id }).eq("id", importId);
+  const chargeWords = charges ? `; ${charges} supplier charge${charges === 1 ? "" : "s"} (internal cost, on the supplier's LPO)` : "";
+  const overrideWords = override ? `; the totals did not match the supplier's (${shortAed(payload.totals?.sumLines ?? null)} against ${shortAed(payload.totals?.expected ?? null)}), applied with the reason: ${override}` : "";
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_imported", note: `${applied} price${applied === 1 ? "" : "s"} imported from ${payload.source || "a supplier file"}${supplier ? ` (${supplier.name})` : ""} by ${staff.display_name}${chargeWords}${overrideWords}${failed.length ? `; ${failed.length} failed` : ""}`, created_by: staff.id });
   revalidatePath(`/parts/${jobId}`);
-  return { applied, failed, importId: importId ?? undefined };
+  return { applied, charges, failed, importId: importId ?? undefined };
 }
 
 /**
@@ -283,6 +318,9 @@ export async function undoImport(jobId: string, importId: string): Promise<{ err
     }
     await syncLineForPart(jobId, l.part_id, staff.id);
   }
+  // The supplier charges that import made go too (unless an LPO already carries them).
+  const { data: gone } = await admin.from("supplier_charges").update({ is_active: false, removed_at: now, removed_by: staff.id, updated_by: staff.id }).eq("import_id", importId).eq("is_active", true).is("po_id", null).select("id");
+  removed += (gone ?? []).length;
   await admin.from("price_imports").update({ undone_at: now, undone_by: staff.id, updated_by: staff.id }).eq("id", importId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_import_undone", note: `Import undone by ${staff.display_name}: ${removed} added part${removed === 1 ? "" : "s"} removed, ${restored} changed part${restored === 1 ? "" : "s"} put back`, created_by: staff.id });
   revalidatePath(`/parts/${jobId}`);
