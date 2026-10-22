@@ -15,7 +15,7 @@ import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, isUnchosen, marginToneOf, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, effectiveMarkupPercent, isUnchosen, marginToneOf, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -526,7 +526,7 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
   // The parts markup never moved off the minimum: asked once (Set markup / Continue anyway); "Continue anyway" is logged for the owner's summary.
   const minMarkup = Number(settings.parts_min_markup_percent) || 5;
   const partLines = active.filter((l) => l.line_type === "part" && !isUnchosen(l) && !l.left_off);
-  const markupUntouched = partLines.length > 0 && partLines.every((l) => Math.abs((Number(l.markup_percent) || 0) - minMarkup) < 0.001);
+  const markupUntouched = partLines.length > 0 && partLines.every((l) => Math.abs(effectiveMarkupPercent(l) - minMarkup) < 0.001);
   if (markupUntouched && !q.markup_skipped_at) {
     if (!opts.skipMarkup) return { ask: "markup", message: `Parts markup is still at the minimum ${minMarkup}%. Set it now?` };
     await admin.from("quotations").update({ markup_skipped_at: new Date().toISOString(), markup_skipped_by: staff.id, updated_by: staff.id }).eq("id", q.id);

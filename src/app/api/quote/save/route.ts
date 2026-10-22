@@ -3,7 +3,7 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { LINE_TYPES, aed, floorProblem, isHidden, lineTotal, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
+import { LINE_TYPES, effectiveMarkupPercent, floorProblem, isHidden, lineTotal, minimumMarkupAed, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
 import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
@@ -21,6 +21,9 @@ type LinePatch = {
   quantity?: number | string;
   unit_cost?: number | string | null;
   markup_percent?: number | string | null;
+  /** A part's markup kept as a percentage of the cost ("percent") or as a fixed AED amount per unit ("aed"). */
+  markup_mode?: string | null;
+  markup_aed?: number | string | null;
   unit_price?: number | string | null;
   hours?: number | string | null;
   /** Labour lines: the workshop's estimate of the hours (labour at cost), beside the quoted hours. */
@@ -144,7 +147,6 @@ export async function POST(request: NextRequest) {
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
   const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;
   const minMarkup = minMarkupFor(settings, makeName);
-  const confirmAt = Number(settings.markup_confirm_percent) || 100;
   const { data: job } = q.job_id ? await admin.from("jobs").select("department, job_number").eq("id", q.job_id).maybeSingle() : { data: null };
   const labourRate = labourRateFor(settings, job?.department ?? null, makeName);
   const recoveryTypes = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
@@ -194,25 +196,27 @@ export async function POST(request: NextRequest) {
       if (!isOwner && rate + 0.005 < labourRate) return `The rate cannot be below the standard rate of AED ${labourRate} per hour for this car. Only the owner can go lower.`;
       out.labour_rate = rate;
     }
-    if (p.markup_percent !== undefined) {
-      const m = n(p.markup_percent);
+    if (p.markup_percent !== undefined || p.markup_aed !== undefined || p.markup_mode !== undefined) {
       if (type === "part") {
-        // Every part starts at the minimum (5%). An advisor can raise it to anything, never lower it; a figure below goes back to the minimum.
-        // Only the owner can go below (kept as confirmed, so the floor check lets it through). Above the confirmation level it is asked about once.
-        let mk = m ?? minMarkup;
+        // A part's markup is a percentage of the cost or a fixed AED amount per unit (22 October 2026). No upper limit
+        // for now: nothing is asked however high it goes. The minimum stays: an advisor's figure below it goes back to
+        // the minimum (in the line's own mode); only the owner can go below (kept as confirmed for the floor check).
+        const mode = p.markup_mode === "aed" || p.markup_mode === "percent" ? p.markup_mode : current?.markup_mode === "aed" ? "aed" : "percent";
+        const cost = Number(current?.unit_cost ?? 0) || 0;
+        let pct = p.markup_percent !== undefined ? (n(p.markup_percent) ?? minMarkup) : Number(current?.markup_percent ?? minMarkup);
+        let amt: number | null = p.markup_aed !== undefined ? n(p.markup_aed) : current?.markup_aed ?? null;
+        if (mode === "aed" && (amt === null || amt === undefined)) amt = round2((cost * pct) / 100);
         let belowByOwner = false;
-        if (mk < minMarkup) {
+        if (effectiveMarkupPercent({ unit_cost: cost, markup_percent: pct, markup_mode: mode, markup_aed: amt }) < minMarkup - 1e-9) {
           if (isOwner) belowByOwner = true;
-          else mk = minMarkup;
+          else if (mode === "aed") amt = minimumMarkupAed(cost, minMarkup);
+          else pct = minMarkup;
         }
-        if (mk >= confirmAt && !p.markup_confirmed) {
-          const qty = current?.quantity || 1;
-          const sell = round2((current?.unit_cost ?? 0) * (1 + mk / 100) * qty);
-          return { confirm: `Markup is ${mk}%. This part will sell for ${aed(sell)}. Is that right?` };
-        }
-        out.markup_confirmed = mk >= confirmAt || belowByOwner;
-        out.markup_percent = mk;
-      } else out.markup_percent = m;
+        out.markup_mode = mode;
+        out.markup_percent = Math.round(pct * 1e6) / 1e6;
+        out.markup_aed = amt === null || amt === undefined ? null : round2(amt);
+        out.markup_confirmed = belowByOwner;
+      } else if (p.markup_percent !== undefined) out.markup_percent = n(p.markup_percent);
     }
     if (p.discount_percent !== undefined) {
       const d = Math.min(100, Math.max(0, n(p.discount_percent) ?? 0));
@@ -437,8 +441,8 @@ export async function POST(request: NextRequest) {
     if ("discount_percent" in patch && Number(patch.discount_percent) > 0 && Number(patch.discount_percent) !== Number(cur.discount_percent ?? 0)) {
       await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "part_discount", note: `${staff.display_name} gave a ${patch.discount_percent}% discount on ${cur.title}${merged.discount_reason ? `: ${merged.discount_reason}` : ""}`, created_by: staff.id });
     }
-    if (patch.markup_confirmed === true && (cur.markup_percent ?? 0) < confirmAt) {
-      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "high_markup", note: `${staff.display_name} confirmed a markup of ${patch.markup_percent}% on ${cur.title}`, created_by: staff.id });
+    if (patch.markup_confirmed === true && cur.line_type === "part") {
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "markup_below_minimum", note: `${staff.display_name} set the markup on ${cur.title} below the minimum of ${minMarkup}%`, created_by: staff.id });
     }
     if ("dangerous" in patch && !patch.dangerous && cur.dangerous) {
       await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "danger_off", note: `${staff.display_name} switched the safety warning off on ${cur.title}`, created_by: staff.id });

@@ -19,7 +19,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { INTERNAL_ONLY_LABEL, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { INTERNAL_ONLY_LABEL, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -339,6 +339,8 @@ export function QuoteEditor({
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, commission_status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null, film_rolls_est: quotation.film_rolls_est ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
+  /** "Markup for every part … Apply to all": as a percentage of the cost, or a fixed AED per part. */
+  const [allMode, setAllMode] = useState<"percent" | "aed">("percent");
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
   const [lowAsk, setLowAsk] = useState<string | null>(null);
@@ -1322,8 +1324,27 @@ export function QuoteEditor({
           <SectionLabel right={wait?.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} priced` : undefined}>Parts</SectionLabel>
           {partLines.length && !disabled ? (
             <div className="flex flex-wrap items-end gap-2">
-              <label className={boxLabel}>Markup for every part (min {settings.minMarkup}%)<Input id="markup-all" defaultValue={String(settings.minMarkup)} inputMode="decimal" className="w-28 min-h-9" /></label>
-              <Button type="button" tone="secondary" size="md" onClick={() => { const v = Number((document.getElementById("markup-all") as HTMLInputElement | null)?.value); if (!Number.isFinite(v)) return; for (const l of partLines) if (!isUnchosen(l)) patch(l.id, { markup_percent: Math.max(settings.minMarkup, v) }, true); }}>Apply to all</Button>
+              <span className={boxLabel} data-markup-all>
+                Markup for every part (min {settings.minMarkup}%)
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-flex overflow-hidden rounded-control border border-line-strong">
+                    {(["percent", "aed"] as const).map((m) => (
+                      <button key={m} type="button" aria-pressed={allMode === m} onClick={() => setAllMode(m)} className={`min-h-9 min-w-11 px-2.5 text-xs font-bold ${allMode === m ? "bg-ink text-white" : "bg-white"}`} data-markup-all-mode={m}>{m === "percent" ? "%" : "AED"}</button>
+                    ))}
+                  </span>
+                  <Input key={allMode} id="markup-all" defaultValue={allMode === "percent" ? String(settings.minMarkup) : ""} placeholder={allMode === "percent" ? "%" : "AED per part"} inputMode="decimal" className="min-h-9" style={{ width: "7rem" }} aria-label={allMode === "percent" ? "Markup percent for every part" : "Markup in AED for every part"} data-markup-all-value />
+                </span>
+              </span>
+              <Button type="button" tone="secondary" size="md" data-markup-apply-all onClick={() => {
+                const raw = (document.getElementById("markup-all") as HTMLInputElement | null)?.value ?? "";
+                const v = Number(raw.replace(",", "."));
+                if (!raw.trim() || !Number.isFinite(v)) return;
+                for (const l of partLines) {
+                  if (isUnchosen(l)) continue;
+                  if (allMode === "percent") patch(l.id, { markup_mode: "percent", markup_percent: isOwner ? Math.max(0, v) : Math.max(settings.minMarkup, v) }, true);
+                  else patch(l.id, { markup_mode: "aed", markup_aed: isOwner ? Math.max(0, v) : Math.max(minimumMarkupAed(l.unit_cost, settings.minMarkup), v) }, true);
+                }
+              }}>Apply to all</Button>
             </div>
           ) : null}
           {partLines.length === 0 ? <p className="text-sm text-muted">{wait?.openRequests ? `${wait.openRequests} request${wait.openRequests === 1 ? "" : "s"} with Parts. The parts appear here on their own once priced.` : "No parts on this quotation."}</p> : (
@@ -1336,7 +1357,7 @@ export function QuoteEditor({
                     <th className="py-1 pr-2">Availability</th>
                     <th className="py-1 pr-2 text-right">Qty</th>
                     <th className="py-1 pr-2 text-right">Cost</th>
-                    <th className="py-1 pr-2 text-right">Markup %</th>
+                    <th className="py-1 pr-2 text-right">Markup (% or AED)</th>
                     <th className="py-1 pr-2 text-right">Selling</th>
                     <th className="py-1 pr-2 text-right">Total</th>
                     <th className="py-1" />
@@ -1352,10 +1373,22 @@ export function QuoteEditor({
                     const floor = floorPrice(l, settings.minMarkup);
                     const belowFloor = !unchosen && total + 0.005 < floor;
                     const blocked = attempted && blockers.some((b) => b.key === `line-${l.id}`);
-                    const markup = l.markup_percent ?? 0;
-                    const veryHigh = markup >= settings.markupConfirm;
+                    // The markup in both forms, whatever the mode: % of the cost, AED per unit, and the selling price.
+                    const mb = markupBoth(l);
+                    const mode = l.markup_mode === "aed" ? "aed" : "percent";
+                    const belowMin = !isOwner && effectiveMarkupPercent(l) < settings.minMarkup - 1e-9;
+                    // An advisor's figure below the minimum goes back to it, in the line's own mode, with the red note.
+                    const setMarkup = (fields: { markup_mode?: "percent" | "aed"; markup_percent?: number; markup_aed?: number }) => {
+                      const next = { ...l, ...fields };
+                      if (!isOwner && effectiveMarkupPercent(next) < settings.minMarkup - 1e-9) {
+                        patch(l.id, next.markup_mode === "aed" ? { markup_mode: "aed", markup_aed: minimumMarkupAed(l.unit_cost, settings.minMarkup) } : { markup_mode: "percent", markup_percent: settings.minMarkup }, true);
+                        flagMin(l.id);
+                        return;
+                      }
+                      patch(l.id, fields, true);
+                    };
                     return (
-                      <tr key={l.id} id={`item-line-${l.id}`} className={`${unchosen ? "opacity-50" : ""} ${!unchosen && veryHigh ? "bg-amber-soft/40" : ""}`} data-part-line>
+                      <tr key={l.id} id={`item-line-${l.id}`} className={unchosen ? "opacity-50" : ""} data-part-line>
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{idx + 1}</td>
                         <td className="py-2 pr-2 align-top min-w-0">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
@@ -1382,7 +1415,6 @@ export function QuoteEditor({
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
                             {part?.cost_aed === null && !leftOff ? <Badge tone="amber">Waiting for the price</Badge> : null}
-                            {veryHigh && !unchosen ? <Badge tone="amber">{l.markup_confirmed ? `Markup ${markup}%, confirmed` : "Confirm the markup"}</Badge> : null}
                             {optionOff ? <span>Option, not used</span> : null}
                             {part && isBatteryPart(part) && !unchosen ? (
                               <span className="inline-flex items-center gap-1" data-warranty={part.id}>
@@ -1402,11 +1434,30 @@ export function QuoteEditor({
                         <td className="py-2 pr-2 align-top text-xs text-muted whitespace-nowrap">{customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? ""}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.unit_cost === null ? "" : aed(l.unit_cost)}</td>
-                        <td className="py-2 pr-2 align-top text-right">
-                          <Input value={num(l.markup_percent)} onChange={(e) => patch(l.id, { markup_percent: e.target.value === "" ? null : Number(e.target.value) })} onBlur={(e) => { const v = Number(e.target.value.replace(",", ".")); if (!Number.isFinite(v) || v < settings.minMarkup) { if (isOwner && Number.isFinite(v) && v >= 0 && e.target.value !== "") { patch(l.id, { markup_percent: v }, true); return; } patch(l.id, { markup_percent: settings.minMarkup }, true); flagMin(l.id); } }} inputMode="decimal" disabled={disabled || unchosen} className={`w-20 text-right min-h-9 ${(markup < settings.minMarkup && !isOwner) || belowFloor || blocked ? "border-red-bar" : veryHigh ? "border-amber-bar" : ""}`} aria-label="Markup percent" />
-                          <span className={`block text-[11px] font-bold text-red ${minFlags.has(l.id) ? "" : "hidden"}`} data-min-markup>Minimum {settings.minMarkup}%</span>
+                        <td className="py-2 pr-2 align-top" data-markup-cell>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* % or AED: switching keeps the selling price, only the way the markup is kept changes */}
+                            <span className="inline-flex shrink-0 overflow-hidden rounded-control border border-line-strong" data-markup-mode={mode}>
+                              {(["percent", "aed"] as const).map((m) => (
+                                <button key={m} type="button" disabled={disabled || unchosen} aria-pressed={mode === m} onClick={() => { if (mode === m) return; patch(l.id, m === "aed" ? { markup_mode: "aed", markup_aed: mb.aed } : { markup_mode: "percent", ...markupFromSell({ ...l, markup_mode: "percent" }, mb.sell) }, true); }} className={`min-h-9 min-w-10 px-2 text-xs font-bold disabled:opacity-50 ${mode === m ? "bg-ink text-white" : "bg-white"}`} data-markup-mode-chip={m}>{m === "percent" ? "%" : "AED"}</button>
+                              ))}
+                            </span>
+                            {mode === "percent" ? (
+                              <Input value={num(l.markup_percent === null ? null : Math.round(l.markup_percent * 100) / 100)} onChange={(e) => { if (e.target.value === "") return; const v = Number(e.target.value); if (Number.isFinite(v)) setMarkup({ markup_mode: "percent", markup_percent: v }); }} inputMode="decimal" disabled={disabled || unchosen} className={`text-right min-h-9 ${belowMin || belowFloor || blocked ? "border-red-bar" : ""}`} style={{ width: "5rem" }} aria-label="Markup percent" data-markup-percent-input />
+                            ) : (
+                              <Input value={num(l.markup_aed)} onChange={(e) => { if (e.target.value === "") return; const v = Number(e.target.value); if (Number.isFinite(v)) setMarkup({ markup_mode: "aed", markup_aed: Math.round(v * 100) / 100 }); }} inputMode="decimal" disabled={disabled || unchosen} className={`text-right min-h-9 ${belowMin || belowFloor || blocked ? "border-red-bar" : ""}`} style={{ width: "6rem" }} aria-label="Markup in AED per unit" data-markup-aed-input />
+                            )}
+                          </div>
+                          {/* Whatever the mode, both forms of the markup show under it */}
+                          <span className="mt-1 block whitespace-nowrap text-right text-[11px] text-muted" data-markup-both>
+                            <span data-markup-percent>{mb.percent === null ? "—" : `${mb.percent.toFixed(2)}%`}</span> · <span data-markup-aed>{aed(mb.aed)}</span>{(l.quantity || 1) > 1 ? " each" : ""}
+                          </span>
+                          <span className={`block text-right text-[11px] font-bold text-red ${minFlags.has(l.id) ? "" : "hidden"}`} data-min-markup>Minimum {settings.minMarkup}%</span>
                         </td>
-                        <td className="py-2 pr-2 align-top text-right">{aed(lineUnitPrice(l))}</td>
+                        <td className="py-2 pr-2 align-top text-right" data-selling-cell>
+                          {/* Type the selling price: the markup (% and AED) is worked out from it */}
+                          <Input value={num(lineUnitPrice(l))} onChange={(e) => { if (e.target.value === "") return; const v = Number(e.target.value); if (Number.isFinite(v)) setMarkup({ markup_mode: mode, ...markupFromSell(l, v) }); }} inputMode="decimal" disabled={disabled || unchosen || l.unit_cost === null} className="text-right min-h-9" style={{ width: "6.5rem" }} aria-label="Selling price per unit" data-selling-input />
+                        </td>
                         <td className="py-2 pr-2 align-top text-right font-bold">
                           {aed(total)}
                           {isOwner && !disabled && !unchosen ? (

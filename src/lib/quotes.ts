@@ -49,6 +49,10 @@ export type QuoteLine = {
   quantity: number;
   unit_cost: number | null;
   markup_percent: number | null;
+  /** 22 October 2026: a part's markup as a percentage of the cost ("percent", the default) or a fixed AED amount per unit ("aed"). */
+  markup_mode?: MarkupMode | null;
+  /** The fixed markup per unit when the mode is "aed": cost 955.80 + AED 300 = selling 1,255.80. */
+  markup_aed?: number | null;
   unit_price: number | null;
   hours: number | null;
   labour_rate: number | null;
@@ -80,7 +84,7 @@ export type QuoteLine = {
   /** A part belongs to the labour line of the finding it came from. */
   parent_line_id: string | null;
   recovery_provider_kind: "ours" | "external" | "customer" | null;
-  /** A markup at or above the confirmation level was confirmed by the advisor, with the selling price spelled out. */
+  /** The owner set this markup below the minimum on purpose (the floor check lets it through). */
   markup_confirmed: boolean;
   /** "Front", "Rear", "Front left"...: one job on several positions is one row, with the quantity to match. */
   positions?: string[] | null;
@@ -407,7 +411,7 @@ export function cleanDocTitle(t: string | null | undefined) {
   return String(t ?? "").replace(/[\s\-–—·,;:]+$/g, "").trim();
 }
 /** The line's own discount in dirhams (the green "Discount 22%: −AED 4,840.00" under the line). */
-export function lineDiscountAmount(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer"> & { price_display?: string | null }) {
+export function lineDiscountAmount(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer"> & { price_display?: string | null; markup_mode?: MarkupMode | string | null; markup_aed?: number | null }) {
   return round2(linePrice(l) * ((l.discount_percent ?? 0) / 100));
 }
 /** An option the advisor did not pick: it counts for nothing and the customer never sees it. */
@@ -419,15 +423,57 @@ export function takesTotalDiscount(l: Pick<QuoteLine, "line_type" | "unit_cost" 
   return !isHidden(l) && (l.line_type === "labour" || l.line_type === "package" || l.line_type === "fee" || (l.line_type === "other" && (l.unit_cost === null || l.unit_cost === undefined)));
 }
 
+export type MarkupMode = "percent" | "aed";
+type MarkupFields = Pick<QuoteLine, "unit_cost" | "markup_percent"> & { markup_mode?: MarkupMode | string | null; markup_aed?: number | null };
+
+/** The markup of a line with a cost, for the quantity: a percentage of the cost, or the fixed AED per unit × quantity. */
+function costPlusMarkup(l: MarkupFields, qty: number): number {
+  const cost = l.unit_cost ?? 0;
+  if (l.markup_mode === "aed") return round2((cost + (l.markup_aed ?? 0)) * qty);
+  return round2(cost * (1 + (l.markup_percent ?? 0) / 100) * qty);
+}
+
+/**
+ * The markup of a part in both forms, whatever mode it is kept in: the AED added per unit and the percentage of the
+ * cost (null when the cost is 0). The parts list shows both on every line.
+ */
+export function markupBoth(l: MarkupFields): { percent: number | null; aed: number; sell: number } {
+  const cost = l.unit_cost ?? 0;
+  const sell = costPlusMarkup(l, 1);
+  const aedPart = round2(sell - cost);
+  return { percent: cost > 0 ? Math.round((aedPart / cost) * 10000) / 100 : null, aed: aedPart, sell };
+}
+
+/** The markup as a percentage of the cost, from either mode (the minimum and the reminders read this). */
+export function effectiveMarkupPercent(l: MarkupFields): number {
+  const cost = l.unit_cost ?? 0;
+  if (!(cost > 0)) return l.markup_mode === "aed" ? ((l.markup_aed ?? 0) > 0 ? Number.POSITIVE_INFINITY : 0) : (l.markup_percent ?? 0);
+  if (l.markup_mode === "aed") return ((l.markup_aed ?? 0) / cost) * 100;
+  return l.markup_percent ?? 0;
+}
+
+/** A typed SELLING price per unit, turned into the markup in the line's own mode (the percent keeps six decimals so it lands exactly). */
+export function markupFromSell(l: MarkupFields, sell: number): { markup_percent?: number; markup_aed?: number } {
+  const cost = l.unit_cost ?? 0;
+  if (l.markup_mode === "aed") return { markup_aed: round2(sell - cost) };
+  if (!(cost > 0)) return {};
+  return { markup_percent: Math.round(((sell / cost - 1) * 100) * 1e6) / 1e6 };
+}
+
+/** The smallest AED markup per unit that still meets the minimum percentage (rounded up to the fils). */
+export function minimumMarkupAed(cost: number | null | undefined, minMarkup: number): number {
+  return Math.ceil(Math.max(0, (cost ?? 0) * minMarkup) - 1e-9) / 100;
+}
+
 /** The selling price of one line before its own discount. Hidden and complimentary lines sell for nothing. */
-export function linePrice(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "visible_to_customer"> & { price_display?: string | null }): number {
+export function linePrice(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "visible_to_customer"> & { price_display?: string | null; markup_mode?: MarkupMode | string | null; markup_aed?: number | null }): number {
   if (isHidden(l)) return 0;
   if (isComplimentary(l)) return 0;
   switch (l.line_type) {
     case "part":
-      return round2((l.unit_cost ?? 0) * (1 + (l.markup_percent ?? 0) / 100) * (l.quantity || 1));
+      return costPlusMarkup(l, l.quantity || 1);
     case "other":
-      return hasCostFloor(l) ? round2((l.unit_cost ?? 0) * (1 + (l.markup_percent ?? 0) / 100) * (l.quantity || 1)) : round2((l.unit_price ?? 0) * (l.quantity || 1));
+      return hasCostFloor(l) ? costPlusMarkup(l, l.quantity || 1) : round2((l.unit_price ?? 0) * (l.quantity || 1));
     case "labour":
       return round2((l.hours ?? 0) * (l.labour_rate ?? 0));
     default:
@@ -436,7 +482,7 @@ export function linePrice(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_co
 }
 
 /** After the line's own discount, before VAT. */
-export function lineTotal(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer"> & { price_display?: string | null }): number {
+export function lineTotal(l: Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer"> & { price_display?: string | null; markup_mode?: MarkupMode | string | null; markup_aed?: number | null }): number {
   return round2(linePrice(l) * (1 - (l.discount_percent ?? 0) / 100));
 }
 
@@ -462,7 +508,7 @@ export function floorPrice(l: Pick<QuoteLine, "unit_cost" | "quantity">, minMark
 /** Why a line with a cost breaks the floor, or null. A markup the owner set below the minimum (confirmed) is allowed. */
 export function floorProblem(l: QuoteLine, minMarkup: number): string | null {
   if (!hasCostFloor(l) || isHidden(l) || isComplimentary(l)) return null;
-  if (l.markup_confirmed && (l.markup_percent ?? 0) < minMarkup) return null;
+  if (l.markup_confirmed && effectiveMarkupPercent(l) < minMarkup) return null;
   const net = lineTotal(l);
   const floor = floorPrice(l, minMarkup);
   if (net + 0.005 < floor) return `net price ${aed(net)} is below cost plus the minimum markup of ${minMarkup}% (${aed(floor)})`;
@@ -693,7 +739,6 @@ export function sendBlockers(
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "+ Add a part"` });
       else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
-      if (settings.confirmPercent && !isHidden(l) && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
     }
     const comp = isComplimentary(l);
     if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });
@@ -856,9 +901,9 @@ export function partAvailabilityText(p: { availability: "in_stock" | "to_order" 
 export const CONFIRM_LABELS = { pending: "Waiting for the technician", confirmed: "Confirmed by the technician", rejected: "Rejected by the technician" } as const;
 
 /** The price of one unit as the customer sees it: a part's cost plus markup, labour's hourly rate, or the typed price. */
-export function lineUnitPrice(l: Pick<QuoteLine, "line_type" | "unit_cost" | "markup_percent" | "unit_price" | "labour_rate" | "visible_to_customer">): number {
+export function lineUnitPrice(l: Pick<QuoteLine, "line_type" | "unit_cost" | "markup_percent" | "unit_price" | "labour_rate" | "visible_to_customer"> & { markup_mode?: MarkupMode | string | null; markup_aed?: number | null }): number {
   if (isHidden(l)) return 0;
-  if (hasCostFloor(l)) return round2((l.unit_cost ?? 0) * (1 + (l.markup_percent ?? 0) / 100));
+  if (hasCostFloor(l)) return costPlusMarkup(l, 1);
   if (l.line_type === "labour") return round2(l.labour_rate ?? 0);
   return round2(l.unit_price ?? 0);
 }

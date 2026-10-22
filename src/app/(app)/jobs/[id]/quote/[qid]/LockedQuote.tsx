@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Badge, Card, SectionLabel } from "@/components/ui";
 import type { QuoteLock } from "@/lib/quote-lock";
-import { aed, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals , hasPackageLine } from "@/lib/quotes";
+import { aed, markupBoth, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals , hasPackageLine } from "@/lib/quotes";
 
 /**
  * A locked quotation (approved by the customer, replaced, or invoiced): every figure as plain text, no boxes, no
@@ -65,7 +65,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
-                    <th className="py-1 pr-2">#</th><th className="py-1 pr-2">Part</th><th className="py-1 pr-2 text-right">Qty</th>{showProfit ? <th className="py-1 pr-2 text-right">Cost</th> : null}<th className="py-1 pr-2 text-right">Selling</th><th className="py-1 text-right">Total</th>
+                    <th className="py-1 pr-2">#</th><th className="py-1 pr-2">Part</th><th className="py-1 pr-2 text-right">Qty</th>{showProfit ? <><th className="py-1 pr-2 text-right">Cost</th><th className="py-1 pr-2 text-right">Markup %</th><th className="py-1 pr-2 text-right">Markup AED</th></> : null}<th className="py-1 pr-2 text-right">Selling</th><th className="py-1 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -76,7 +76,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{i + 1}</td>
                         <td className="py-2 pr-2 align-top"><span className="font-semibold uppercase">{l.title}</span>{l.positions?.length ? <span className="ml-2 text-xs text-muted">{l.positions.join(", ")}</span> : null}{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
-                        {showProfit ? <td className="py-2 pr-2 align-top text-right text-muted">{aed(l.unit_cost)}</td> : null}
+                        {showProfit ? <><td className="py-2 pr-2 align-top text-right text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right text-muted">{aed(markupBoth(l).aed)}</td></> : null}
                         <td className="py-2 pr-2 align-top text-right">{off ? "" : aed(lineUnitPrice(l))}</td>
                         <td className="py-2 align-top text-right font-bold">{off ? aed(0) : aed(lineTotal(l))}</td>
                       </tr>

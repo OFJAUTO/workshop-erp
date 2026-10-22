@@ -158,21 +158,16 @@ await section("A pricing table and PDF import", async () => {
   check("13: the commission saves (E2e Agent, AED 100) and counts as cost", !!com, JSON.stringify(com));
   const people = (await sql("select value from public.settings where key = 'commission_people'"))[0]?.value;
   check("13: the name joined the Settings list", Array.isArray(people) && people.includes("E2e Agent"), JSON.stringify(people));
-  // 12. Markup: 500% asks once; the owner may go below 5%.
+  // 12. Markup: no upper limit and no question any more (22 October 2026); the owner may go below 5%.
   // The first part row on the screen and the same line in the database (several part lines exist after the import).
   const firstPartRow = op.locator("[data-part-line]").first();
   const firstLineId = ((await firstPartRow.getAttribute("id").catch(() => "")) ?? "").replace(/^item-line-/, "");
-  const markupBox = firstPartRow.locator("input[aria-label*='arkup']").first();
+  const markupBox = firstPartRow.locator("[data-markup-percent-input]").first();
   if (await markupBox.count()) {
     await markupBox.fill("500");
     await op.keyboard.press("Tab");
-    const dlg = await until(async () => ((await op.locator("[data-confirm-markup]").count()) ? 1 : null), 30, 500);
-    check("12: a markup of 500% is asked about once ('Yes, keep it' / 'Change')", !!dlg);
-    if (dlg) {
-      await op.locator("[data-confirm-markup]").click();
-      const kept = await until(async () => { const r = (await sql("select markup_percent, markup_confirmed from public.quotation_lines where id = $1", [firstLineId]))[0]; return Number(r?.markup_percent) === 500 && r?.markup_confirmed ? r : null; }, 30, 500);
-      check("12: 'Yes, keep it' keeps 500% and never asks again", !!kept, JSON.stringify(kept));
-    }
+    const kept = await until(async () => { const r = (await sql("select markup_percent from public.quotation_lines where id = $1", [firstLineId]))[0]; return Number(r?.markup_percent) === 500 ? r : null; }, 30, 500);
+    check("12: a markup of 500% saves at once, nothing is asked", !!kept && (await op.locator("[data-confirm-markup]").count()) === 0, JSON.stringify(kept));
     await markupBox.fill("2");
     await op.keyboard.press("Tab");
     const low = await until(async () => { const r = (await sql("select markup_percent from public.quotation_lines where id = $1", [firstLineId]))[0]; return Number(r?.markup_percent) === 2 ? r : null; }, 30, 500);
@@ -224,7 +219,8 @@ await section("C LPO flow", async () => {
   check("17: one Approve makes the supplier LPO numbered from the main one (LPO-xxxxx-1)", !!sub && sub.number === `${main.number}-1` && sub.status === "approved" && sub.parent_id === main.id && sub.supplier_name === "E2e Supplier", JSON.stringify(sub));
   const pa2 = (await sql("select po_id from public.part_items where id = $1", [PA]))[0];
   check("17: the part now points at its supplier LPO", pa2?.po_id === sub?.id);
-  check("17: Parts are told the LPO is approved", ((await sql("select count(*)::int as n from public.notifications where job_id = $1 and title like '%approved%supplier LPO%'", [jobId]))[0]?.n ?? 0) >= 1);
+  // Since the order-now wording, Parts are told "ORDER NOW · <job> · <suppliers>".
+  check("17: Parts are told the LPO is approved", ((await sql("select count(*)::int as n from public.notifications where job_id = $1 and title like 'ORDER NOW%'", [jobId]))[0]?.n ?? 0) >= 1);
   // The supplier copy: part number, name, quantity, our price and the VIN; never the customer.
   const lpoPdf = await fetchPdf(`/api/pdf/lpo/${sub.verify_token}`, "parts");
   check("17: the supplier PDF opens", lpoPdf.status === 200 && !!lpoPdf.buf, `${lpoPdf.status}`);
@@ -273,8 +269,9 @@ await section("C LPO flow", async () => {
   if (await crow.count()) {
     await crow.locator("[data-mark-paid]").click();
     await afterSubmit(op);
-    const paid = await until(async () => { const r = (await sql("select commission_paid_at, commission_paid_by from public.quotations where id = $1", [approvedQid]))[0]; return r?.commission_paid_at ? r : null; }, 20, 500);
-    check("13: Mark paid is one tap and is written down", !!paid?.commission_paid_at && !!paid?.commission_paid_by && /Marked paid/.test(urlText(op)), `${JSON.stringify(paid)} · ${urlText(op).slice(-80)}`);
+    // Since 21 October (evening, section 2) a commission is paid with a voucher or slip: Mark paid opens the Commissions page.
+    const stillUnpaid = (await sql("select commission_paid_at from public.quotations where id = $1", [approvedQid]))[0];
+    check("13: Mark paid leads to the Commissions page, where the payment needs its voucher or slip", /\/commissions/.test(op.url()) && !stillUnpaid?.commission_paid_at, `${op.url().slice(-120)} · ${JSON.stringify(stillUnpaid)}`);
   }
   // 18. The sidebar logo: centred and a quarter bigger.
   const logo = op.locator("aside img[alt='OFJ Automotive']").first();
