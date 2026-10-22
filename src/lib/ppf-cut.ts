@@ -39,10 +39,16 @@ export function lineIsPpf(l: { title?: string | null; package_items?: unknown },
   if (serviceKind === "ppf" || serviceKind === "coloured_ppf") return true;
   const items = (l.package_items && typeof l.package_items === "object" && Array.isArray((l.package_items as { items?: unknown }).items) ? ((l.package_items as { items: { label?: string }[] }).items) : []) as { label?: string }[];
   if (items.some((i) => isPpfFilmItem(i.label))) return true;
-  return !l.package_items && isPpfText(l.title);
+  // A plain line counts only when it IS film being fitted: "Ceramic coating for PPF" names PPF but is a coating.
+  return !l.package_items && isPpfFilmItem(l.title);
 }
 
 /** A package item that IS film being fitted: PPF words, but never a coating, a tint or taking old film off. */
 export function isPpfFilmItem(label: string | null | undefined): boolean {
   return isPpfText(label) && !/ceramic|coating|remov|tint/i.test(label ?? "");
+}
+
+/** The film's finish for the warranty: Matte (matte, stealth, satin) or Gloss (gloss, clear), else the film colour. */
+export function ppfFinishOf(words: string, filmColour?: string | null): string {
+  return /\bmatte?\b|\bstealth\b|\bsatin\b/i.test(words) ? "Matte" : /\bgloss(y)?\b|\bclear\b/i.test(words) ? "Gloss" : filmColour ? filmColour : "Gloss";
 }

@@ -387,7 +387,7 @@ export async function GET(request: NextRequest) {
     report.kmFound = found;
   }
 
-  // 23. The 10-day after-care checks: the day-8 reminder with the message ready, and one "not done" notice.
+  // 23. The 10-day after-care checks activate the warranty: reminders on day 8, 12 and 20 after the handover.
   {
     const a = await aftercareHourly();
     report.aftercareReminded = a.reminded;

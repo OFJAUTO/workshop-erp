@@ -2,6 +2,10 @@ import { VinCopy } from "@/components/VinCopy";
 import { AFTERCARE_POINTS, aftercareOf } from "@/lib/aftercare";
 import { AftercareMessage, AftercareSignoff } from "./AftercareCard";
 import { signOffAftercare } from "../aftercare-actions";
+import { activateWarrantyByHand } from "../warranty-card-actions";
+import { WarrantyCardSend } from "./WarrantyCardSend";
+import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
+import { daysBetween, dubaiDay } from "@/lib/warranty";
 import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from "@/lib/stage-style";
 import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
@@ -155,6 +159,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // Section 11: the tint choice per window, as approved (or as quoted until then).
   const tintWords = tintSummary(await tintSpecForJob(id), tintLimitOf(settings));
   const viewerFollows = !!followRow?.is_active;
+  // Section 12: the OFJ warranty card - status, the link, and after gate-out the short WhatsApp.
+  const wCard = await warrantyCardOf(id, settings);
+  const hasWarranty = !!wCard?.rows.length;
+  const wToken = hasWarranty && job.gated_out_at ? await ensureWarrantyToken(id) : (wCard?.token ?? null);
+  const wShort = wToken && job.gated_out_at ? await shortFor(`${PRODUCTION_SITE_URL}/warranty/${wToken}`) : null;
+  const carWords = [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ");
+  const fillWarranty = (tpl: string) => tpl.replaceAll("[name]", greetName).replaceAll("[make model]", carWords).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[link]", wShort ?? "");
+  const wMessage = wShort ? fillWarranty(String(settings.whatsapp_warranty_card_template ?? "")) : null;
+  const sinceHandover = job.gated_out_at ? daysBetween(dubaiDay(job.gated_out_at), dubaiDay(new Date().toISOString())) : 0;
+  const aftercareReminder = wShort && sinceHandover >= 12 ? fillWarranty(String(settings.whatsapp_aftercare_reminder_template ?? "")) : null;
   // Gate-out belongs after QC, the wash and the invoice. Earlier it is greyed out with the reason; the owner may still go through (logged as an override).
   const gateOutReached = ["ready", "pending_payment", "in_delivery"].includes(job.status);
   const canGateOut = can(role, "gateOut") && job.is_open && job.status !== "gate_in_pending" && (gateOutReached || role === "owner");
@@ -405,10 +419,35 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {aftercare.done_at ? <Badge tone="green">Done ✓ {formatDate(aftercare.done_at)}</Badge> : aftercare.overdue ? <Badge tone="red" data-aftercare-overdue>10-day check not done</Badge> : <Badge tone="neutral">Due {formatDate(aftercare.due_date)}</Badge>}
           </div>
           {!aftercare.done_at && (role === "owner" || role === "service_advisor") ? (
-            <AftercareMessage template={String(settings.whatsapp_aftercare_template ?? "")} date={formatDate(aftercare.due_date)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} />
+            <AftercareMessage template={aftercareReminder ?? String(settings.whatsapp_aftercare_template ?? "")} date={formatDate(aftercare.due_date)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} />
           ) : null}
           {!aftercare.done_at && (role === "owner" || role === "workshop_manager" || role === "team_leader") && !staff.viewingAs ? (
-            <AftercareSignoff action={signOffAftercare.bind(null, id)} points={[...AFTERCARE_POINTS]} />
+            <AftercareSignoff action={signOffAftercare.bind(null, id)} points={[...AFTERCARE_POINTS]} jobId={id} />
+          ) : null}
+        </Card>
+      ) : null}
+      {hasWarranty && wCard ? (
+        <Card id="warranty-card" className="flex flex-col gap-2" data-warranty-job-card>
+          <div className="flex flex-wrap items-center gap-2">
+            <SectionLabel>OFJ warranty card</SectionLabel>
+            <span data-warranty-status={wCard.status.kind}><Badge tone={wCard.status.kind === "active" ? "green" : wCard.status.kind === "not_activated" ? "red" : wCard.status.kind === "pending" ? "amber" : "neutral"}>{wCard.status.title}</Badge></span>
+            {wToken ? <a href={`/warranty/${wToken}`} target="_blank" rel="noreferrer" className="ml-auto text-sm font-semibold underline underline-offset-4" data-warranty-open>Open the warranty card</a> : null}
+          </div>
+          <p className="text-sm">{wCard.rows.map((r) => `${r.name}: ${r.coverage} (${r.period})`).join(" · ")}</p>
+          {wCard.missing.length ? <p className="text-xs font-semibold text-red">Details still missing: {wCard.missing.join(", ")} (bodyshop page).</p> : null}
+          {wMessage && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? (
+            <WarrantyCardSend jobId={id} message={wMessage} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={wCard.sentAt} />
+          ) : !job.gated_out_at ? (
+            <p className="text-xs text-muted">The warranty card goes to the customer after gate-out: its dates start on the handover day.</p>
+          ) : null}
+          {role === "owner" && !staff.viewingAs && wCard.check && !wCard.check.done_at && !wCard.check.activated_at && job.gated_out_at ? (
+            <details className="text-sm" data-warranty-activate>
+              <summary className="flex min-h-11 cursor-pointer items-center font-semibold underline underline-offset-4">Activate by hand (owner)</summary>
+              <form action={activateWarrantyByHand.bind(null, id)} className="mt-2 flex flex-col gap-2">
+                <Textarea name="note" rows={2} required placeholder="Why it is activated without the 10-day check" textCase="sentence" data-warranty-activate-note />
+                <div><Button type="submit" size="md" data-warranty-activate-confirm>Activate the warranty</Button></div>
+              </form>
+            </details>
           ) : null}
         </Card>
       ) : null}

@@ -650,10 +650,10 @@ export function SettingsForm({
             <SectionLabel>Bodyshop</SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="PPF brand name"><Input name="ppf_brand_name" defaultValue={v.ppf_brand_name} /></Field>
-              <Field label="PPF warranty (years)"><Input name="ppf_warranty_years" defaultValue={v.ppf_warranty_years} inputMode="numeric" /></Field>
+              <Field label="PPF warranty" hint="Set with the other warranty terms."><input type="hidden" name="ppf_warranty_years" value={v.ppf_warranty_years} /><a href="/settings/warranty" className="flex min-h-11 items-center text-sm font-semibold underline underline-offset-4">{v.ppf_warranty_years} years · Warranty terms</a></Field>
               <Field label="Final check: days after handover" hint="7 to 14; the gate-out picks this day by default."><Input name="bodyshop_final_check_days" defaultValue={v.bodyshop_final_check_days} inputMode="numeric" /></Field>
             </div>
-            <Field label="Warranty wording (on the certificate)"><Textarea name="ppf_warranty_text" defaultValue={v.ppf_warranty_text} rows={4} /></Field>
+            <input type="hidden" name="ppf_warranty_text" value={v.ppf_warranty_text} />
             <Field label="Care instructions (handover page and certificate)"><Textarea name="ppf_care_text" defaultValue={v.ppf_care_text} rows={4} /></Field>
             <Field label="Old PPF removal note (quotation)"><Textarea name="ppf_removal_note" defaultValue={v.ppf_removal_note} rows={2} /></Field>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

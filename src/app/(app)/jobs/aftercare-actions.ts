@@ -31,5 +31,6 @@ export async function signOffAftercare(jobId: string, formData: FormData) {
   await admin.from("job_events").insert({ job_id: jobId, event_type: "aftercare_done", note: `10-day after-care check signed off by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
   if (job?.gated_in_by) await notifyStaff([job.gated_in_by], { type: "aftercare_due", title: `10-day check done · ${job.job_number}`, body: `${staff.display_name} signed it off${note ? `: ${note}` : "."}`, jobId, href: back });
   revalidatePath(back);
-  redirect(`${back}?message=${encodeURIComponent("After-care check signed off. The warranty record is complete.")}`);
+  revalidatePath("/warranties");
+  redirect(`${back}?message=${encodeURIComponent("After-care check signed off. The customer's OFJ warranty is now active.")}`);
 }

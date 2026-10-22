@@ -41,6 +41,7 @@ begin
   delete from public.film_usage where roll_id in (select id from public.film_rolls where name ilike 'e2e %');
   delete from public.film_rolls where name ilike 'e2e %';
   update public.settings set value = coalesce((select jsonb_agg(x) from jsonb_array_elements(value) x where coalesce(x->>'name', '') not ilike 'e2e %'), '[]'::jsonb) where key = 'tint_presets' and jsonb_typeof(value) = 'array';
+  update public.settings set value = coalesce((select jsonb_agg(x) from jsonb_array_elements_text(value) x where x not ilike 'e2e %'), '[]'::jsonb) where key = 'ceramic_products_used' and jsonb_typeof(value) = 'array';
   update public.quotations set commission_payment_id = null where commission_payment_id in (select id from public.commission_payments where recipient ilike 'e2e %');
   delete from public.commission_payments where recipient ilike 'e2e %';
   delete from public.notifications where job_id = any(job_ids);

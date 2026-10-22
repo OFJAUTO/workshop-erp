@@ -38,6 +38,12 @@ const DEFAULTS = {
   /** Bodyshop costing: the fallback installer hours for a bodyshop service with no figure of its own. */
   bodyshop_default_installer_hours: 8 as string | number,
   whatsapp_aftercare_template: "Good day! Your car is due for its complimentary 10-day after-care check on [date]. It takes about half an hour - we check the film edges and polish anything that needs it. When would suit you?",
+  /** Section 12: the warranty terms per product (src/lib/warranty.ts reads them; the owner edits them in Settings). */
+  warranty_terms: {} as unknown,
+  whatsapp_warranty_card_template: "Hello [name], your OFJ warranty card for the [make model] ([plate]): [link]. It shows what is covered and until when. Please book your 10-day after-care check to activate it. OFJ Automotive",
+  whatsapp_aftercare_reminder_template: "Hello [name], a reminder to book the complimentary after-care check for your [make model] ([plate]). It activates your OFJ warranty: [link]. OFJ Automotive",
+  /** Ceramic products the detailing leader typed before, offered as one-tap chips. */
+  ceramic_products_used: [] as unknown,
   /** Real cost history per package (rolling average), for the advisor's low-price warning. */
   package_cost_history: {} as Record<string, { n: number; avg_cost: number }>,
   /** Dealer customer id -> supplier name, learned when a dealer PDF import is applied. */

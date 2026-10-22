@@ -94,7 +94,8 @@ await op.context().clearCookies({ name: "erp_device" });
 const hv = (await sql("select bodyshop_handover_token as t from public.jobs where id = $1", [bsJob]))[0]?.t;
 if (hv) {
   const w = await pdfText(`/api/pdf/warranty/${hv}`);
-  check("4: the warranty card names finish, cutting method and coverage", w.status === 200 && /OFJ PPF – \w+ · Bespoke hand-cut · Full body/i.test(w.text), w.text.match(/OFJ PPF – .{0,60}/i)?.[0] ?? `${w.status}`);
+  // Section 12: the certificate is the warranty card - finish, coverage and cutting method sit in their own columns.
+  check("4: the warranty card names finish, cutting method and coverage", w.status === 200 && /OFJ PPF – Gloss/i.test(w.text) && /Bespoke hand-cut/i.test(w.text) && /Full body/i.test(w.text), w.text.match(/OFJ PPF – .{0,80}/i)?.[0] ?? `${w.status}`);
 } else check("4: the warranty card names finish, cutting method and coverage", false, "no handover token on the seed");
 
 /* ---------------- 5. The month's report: hand-cut against pre-cut ---------------- */

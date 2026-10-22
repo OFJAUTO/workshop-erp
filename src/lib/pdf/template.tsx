@@ -802,3 +802,76 @@ export function PackageSection({ doc, price, subtotal, discount = null }: { doc:
     </View>
   );
 }
+
+/* ------------------------------------------------------------------------------------------------
+   Section 12 (21 October): the WARRANTY table and the framed "YOUR OFJ WARRANTY" panel, ONE pair for
+   the tax invoice and the warranty certificate. Read from warrantyCardOf (src/lib/warranty-data.ts),
+   the same model the customer's pages use.
+   ------------------------------------------------------------------------------------------------ */
+export type WarrantyDocRow = { product: string; coverage: string; rollBatch: string; cut: string; darkness: string; period: string; validUntil: string };
+
+const war = StyleSheet.create({
+  head: { flexDirection: "row", paddingVertical: px(5), paddingHorizontal: px(10), borderBottomWidth: 1, borderBottomColor: LINE, fontSize: px(8.5), fontWeight: 700, color: GREY, textTransform: "uppercase", letterSpacing: 0.5 },
+  row: { flexDirection: "row", paddingVertical: px(6), paddingHorizontal: px(10), borderBottomWidth: 1, borderBottomColor: LINE, fontSize: px(9.5) },
+  product: { width: "17%", paddingRight: px(5), fontWeight: 700 },
+  coverage: { width: "19%", paddingRight: px(5) },
+  roll: { width: "12%", paddingRight: px(5) },
+  cut: { width: "13%", paddingRight: px(5) },
+  dark: { width: "17%", paddingRight: px(5) },
+  period: { width: "9%", paddingRight: px(5) },
+  until: { width: "13%", textAlign: "right" },
+});
+
+export function WarrantySection({ rows, vehicle, startNote }: { rows: WarrantyDocRow[]; vehicle: string; startNote: string }) {
+  // A few rows only: the table keeps together, moving to the next page whole rather than losing its heading.
+  return (
+    <View style={[sec.box, { marginTop: px(14) }]} wrap={false}>
+      <View style={sec.bar} wrap={false}>
+        <Text style={sec.barTitle}>Warranty</Text>
+        <Text style={sec.barCount}>{startNote}</Text>
+      </View>
+      <Text style={{ fontSize: px(9.5), color: INK, paddingHorizontal: px(10), paddingTop: px(6), paddingBottom: px(4) }}>{vehicle}</Text>
+      <View style={war.head} wrap={false}>
+        <Text style={war.product}>Product</Text>
+        <Text style={war.coverage}>Coverage</Text>
+        <Text style={war.roll}>Roll / batch</Text>
+        <Text style={war.cut}>Cutting method</Text>
+        <Text style={war.dark}>Darkness (tint)</Text>
+        <Text style={war.period}>Warranty</Text>
+        <Text style={war.until}>Valid until</Text>
+      </View>
+      {rows.map((r, i) => (
+        <View key={i} style={war.row} wrap={false}>
+          <Text style={war.product}>{r.product}</Text>
+          <Text style={war.coverage}>{r.coverage}</Text>
+          <Text style={war.roll}>{r.rollBatch}</Text>
+          <Text style={war.cut}>{r.cut}</Text>
+          <Text style={war.dark}>{r.darkness}</Text>
+          <Text style={war.period}>{r.period}</Text>
+          <Text style={war.until}>{r.validUntil}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** The certificate-like framed panel: the OFJ logo, YOUR OFJ WARRANTY, a large QR to the warranty page. */
+export function WarrantyPanel({ logo, qr, certificateNo, car, status }: { logo: Buffer | null; qr: Buffer | null; certificateNo: string; car: string; status: string }) {
+  return (
+    <View wrap={false} style={{ marginTop: px(14), borderWidth: 2, borderColor: INK, borderRadius: px(10), padding: px(4) }}>
+      <View style={{ borderWidth: 0.75, borderColor: GREY, borderRadius: px(7), paddingVertical: px(16), paddingHorizontal: px(20), flexDirection: "row", alignItems: "center", gap: px(18) }}>
+        <View style={{ flex: 1 }}>
+          {logo ? <Image src={{ data: logo, format: "png" }} style={{ height: px(46), width: px(110), objectFit: "contain", objectPosition: "left" }} /> : null}
+          <Text style={{ fontSize: px(22), fontWeight: 800, color: INK, letterSpacing: 2.4, marginTop: px(10) }}>YOUR OFJ WARRANTY</Text>
+          <Text style={{ fontSize: px(11), color: GREY, marginTop: px(3) }}>Scan to view and verify your warranty</Text>
+          <View style={{ borderTopWidth: 0.75, borderTopColor: RULE, marginTop: px(10), paddingTop: px(7) }}>
+            <Text style={{ fontSize: px(10), color: INK }}>Certificate no. {certificateNo}</Text>
+            <Text style={{ fontSize: px(10), color: INK, marginTop: px(1.5) }}>{car}</Text>
+            <Text style={{ fontSize: px(10), fontWeight: 800, color: INK, marginTop: px(3) }}>{status}</Text>
+          </View>
+        </View>
+        {qr ? <Image src={{ data: qr, format: "png" }} style={{ width: px(150), height: px(150) }} /> : null}
+      </View>
+    </View>
+  );
+}

@@ -29,6 +29,10 @@ import { RemovedItemForm } from "./RemovedItemForm";
 import { SignoffPanel } from "./SignoffPanel";
 import { UpdatesPanel, type UpdateState } from "./UpdatesPanel";
 import { TintFittedPhotos } from "@/components/TintFittedPhotos";
+import { WarrantyFields } from "@/components/WarrantyFields";
+import { periodWords } from "@/lib/warranty";
+import { rowMissing, stageAsks, warrantyCardOf, type WarrantyRow } from "@/lib/warranty-data";
+import { saveWarrantyDetailsAction, stageDoneWarrantyAction } from "../warranty-actions";
 import { aboveLimit, tintSummary } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 
@@ -105,6 +109,16 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const tintWords = tintSummary(tintSpec, tintLimit);
   const tintOver = aboveLimit(tintSpec, tintLimit);
   const tintPhotos = photoFiles.filter((p) => p.caption === "Tint fitted");
+  // Section 12: the warranty details the team leaders write at the end of their stage, and QC's confirmation.
+  const warranty = await warrantyCardOf(jobId, settings);
+  const wRows = warranty?.rows ?? [];
+  const stageKeys = stages.map((s) => s.key);
+  const mayWriteWarranty = !staff.viewingAs && (isOwner || isBodyshopManager || role === "team_leader");
+  const openRollNames = wRows.length ? (await rollsWithUse()).filter((r) => !r.finished_at) : [];
+  const rollsFor = (r: WarrantyRow) => openRollNames.filter((x) => x.kind === (r.product === "tint" ? "tint" : "film")).map((x) => x.name);
+  const ceramicProducts = Array.isArray(settings.ceramic_products_used) ? (settings.ceramic_products_used as unknown[]).map(String) : [];
+  const fieldRow = (r: WarrantyRow) => ({ product: r.product, itemKey: r.itemKey, label: r.label, rollBatch: r.rollBatch, productName: r.productName, areas: r.areas, suggestedAreas: r.suggestedAreas });
+  const productWord = (r: WarrantyRow) => (r.product === "ppf" ? "PPF" : r.product === "tint" ? "Tint" : "Ceramic");
   return (
     <>
       <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} />
@@ -207,7 +221,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                     ) : (
                       <span className={`text-xs ${tone === "red" ? "font-bold text-red" : tone === "amber" ? "font-bold text-amber" : "text-muted"}`} data-stage-due-text>{s.due_date ? (tone === "red" && s.status !== "done" ? `Late · due ${formatDate(s.due_date)}` : tone === "amber" && s.status !== "done" ? "Due today" : `Due ${formatDate(s.due_date)}`) : ""}</span>
                     )}
-                    {mayDone && s.key !== "handover" ? <form action={stageDoneAction.bind(null, jobId, s.id)}><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></form> : null}
+                    {mayDone && s.key !== "handover" && !(s.key === "qc" && wRows.length) && !stageAsks(s, stageKeys, wRows).length ? <form action={stageDoneAction.bind(null, jobId, s.id)}><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></form> : null}
                     {canManage && s.status === "done" && s.key !== "handover" ? <form action={reopenStageAction.bind(null, jobId, s.id)}><Button type="submit" tone="ghost" size="md">Reopen</Button></form> : null}
                     {canManage && s.status !== "done" && s.key !== "handover" ? (
                       <>
@@ -217,6 +231,34 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                       </>
                     ) : null}
                   </span>
+                  {mayDone && s.key !== "qc" && stageAsks(s, stageKeys, wRows).length ? (
+                    <form action={stageDoneWarrantyAction.bind(null, jobId, s.id)} className="flex w-full flex-col gap-2 rounded-control bg-chip p-3" data-stage-warranty-form={s.key}>
+                      <span className="text-sm font-bold">For the warranty card, before {s.label} is done:</span>
+                      {stageAsks(s, stageKeys, wRows).map((r) => <WarrantyFields key={`${r.product}:${r.itemKey}`} row={fieldRow(r)} rolls={rollsFor(r)} products={ceramicProducts} />)}
+                      <div><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></div>
+                    </form>
+                  ) : null}
+                  {mayDone && s.key === "qc" && wRows.length ? (
+                    <form action={stageDoneWarrantyAction.bind(null, jobId, s.id)} className="flex w-full flex-col gap-2 rounded-control bg-chip p-3" data-qc-warranty-form>
+                      <span className="text-sm font-bold">Warranty details (check them against the car):</span>
+                      <ul className="flex flex-col gap-1 text-sm">
+                        {wRows.map((r) => (
+                          <li key={`${r.product}:${r.itemKey}`} className={rowMissing(r).length ? "font-semibold text-red" : ""}>
+                            {productWord(r)}: {r.name} · {r.coverage}{r.rollBatch ? ` · roll/batch ${r.rollBatch}` : ""}{rowMissing(r).length ? ` · missing ${rowMissing(r).join(", ")}` : " ✓"}
+                          </li>
+                        ))}
+                      </ul>
+                      {warranty?.missing.length ? (
+                        <p className="text-xs font-semibold text-red" data-qc-warranty-missing>Missing: {warranty.missing.join(", ")}. Add them in Warranty details below first.</p>
+                      ) : (
+                        <label className="flex min-h-11 items-center gap-2 text-sm font-semibold">
+                          <input type="checkbox" name="warranty_complete" required className="h-5 w-5 accent-ink" data-warranty-complete />
+                          Warranty details complete
+                        </label>
+                      )}
+                      <div><Button type="submit" size="md" disabled={!!warranty?.missing.length} data-stage-done="qc">Done</Button></div>
+                    </form>
+                  ) : null}
                 </li>
               );
             })}
@@ -228,6 +270,34 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Team</span><Select name="section" defaultValue="detailing" className="w-40">{(["strip_refit", "ppf", "paint", "detailing", "electrical"] as StageSection[]).map((s) => <option key={s} value={s}>{SECTION_LABELS[s]}</option>)}</Select></label>
               <Button type="submit" tone="secondary" size="md">Add</Button>
             </form>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {wRows.length ? (
+        <Card id="warranty" className="flex flex-col gap-3" data-warranty-card>
+          <SectionLabel right={warranty?.confirmedAt ? "Confirmed at QC" : warranty?.missing.length ? `${warranty.missing.length} missing` : "Complete"}>Warranty details</SectionLabel>
+          <ul className="divide-y divide-line text-sm">
+            {wRows.map((r) => (
+              <li key={`${r.product}:${r.itemKey}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2" data-warranty-row={`${r.product}:${r.itemKey}`}>
+                <span className="font-bold">{r.name}</span>
+                <span>{r.coverage}</span>
+                {r.cut ? <span className="text-muted">{r.cut}</span> : null}
+                {r.darkness ? <span className="text-muted">{r.darkness}</span> : null}
+                <span className={r.rollBatch ? "" : "font-semibold text-red"}>{r.rollBatch ? `Roll/batch ${r.rollBatch}` : `Missing: ${rowMissing(r).join(", ")}`}</span>
+                <span className="ml-auto text-xs text-muted">{periodWords(r.months)}</span>
+              </li>
+            ))}
+          </ul>
+          {mayWriteWarranty ? (
+            <details className="text-sm" data-warranty-edit>
+              <summary className="flex min-h-11 cursor-pointer items-center font-semibold underline underline-offset-4">Write or correct the details</summary>
+              <form action={saveWarrantyDetailsAction.bind(null, jobId)} className="mt-2 flex flex-col gap-2">
+                {wRows.map((r) => <WarrantyFields key={`${r.product}:${r.itemKey}`} row={fieldRow(r)} rolls={rollsFor(r)} products={ceramicProducts} />)}
+                <div><Button type="submit" size="md" data-warranty-save>Save the details</Button></div>
+                <p className="text-xs text-muted">A change after QC needs QC to confirm the details again.</p>
+              </form>
+            </details>
           ) : null}
         </Card>
       ) : null}

@@ -5,6 +5,10 @@ import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
+import { WarrantyCardPanel } from "@/components/WarrantyCardPanel";
+import { qrDataUrl } from "@/lib/pdf/qr";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
+import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +33,10 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
       </div>
     );
   }
+  // Section 12: the warranty card (status, products, dates) is the one place the warranty lives.
+  const wCard = await warrantyCardOf(data.job.id, settings);
+  const wToken = wCard?.rows.length ? await ensureWarrantyToken(data.job.id) : null;
+  const wQr = wToken ? await qrDataUrl(`${PRODUCTION_SITE_URL}/warranty/${wToken}`, 320) : null;
   const brand = String(settings.ppf_brand_name || "OFJ PPF");
   const years = Number(settings.ppf_warranty_years) || 10;
   const meta = [
@@ -66,7 +74,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
             </figure>
           </div>
         ) : null}
-        {data.warranty ? (
+        {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={wCard.status} /> : data.warranty ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-4 flex flex-col gap-1" data-warranty>
             <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{brand} · {years}-year warranty</span>
             <span className="text-sm">{data.filmText}. Installed {formatDate(data.warranty.installDate)}, valid until {formatDate(data.warranty.validUntil)}. Certificate {data.warranty.certificateNo}.</span>

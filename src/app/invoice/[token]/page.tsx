@@ -4,6 +4,11 @@ import { PackageCard } from "@/components/PackageCard";
 import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { TintCard } from "@/components/TintCard";
+import { WarrantyCardPanel } from "@/components/WarrantyCardPanel";
+import { qrDataUrl } from "@/lib/pdf/qr";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
+import { addMonthsIso, dubaiDay } from "@/lib/warranty";
+import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
 import { decorateTint, lineIsTint, tintSummary } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { PayNowButton } from "@/components/PayNowButton";
@@ -62,6 +67,11 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   const tintLimit = tintLimitOf(settings);
   const tintOutsidePackage = bundle.lines.some((l) => !l.package_items && lineIsTint(l));
   const tintWords = tintSummary(tintSpec, tintLimit);
+  // Section 12: the tax invoice is the warranty card - the framed panel with its QR, and the workmanship line.
+  const wCard = isTax && invoice.job_id ? await warrantyCardOf(invoice.job_id, settings) : null;
+  const wToken = wCard?.rows.length ? await ensureWarrantyToken(wCard.jobId) : null;
+  const wQr = wToken ? await qrDataUrl(`${PRODUCTION_SITE_URL}/warranty/${wToken}`, 320) : null;
+  const workmanship = wCard?.mechanical ? { period: wCard.mechanical.period, until: wCard.mechanical.validUntil ?? addMonthsIso(dubaiDay(invoice.issued_at), wCard.mechanical.months) } : null;
   const snapshot = invoice.customer_snapshot;
   const boxes = customerBoxes(
     { full_name: snapshot?.full_name ?? customer?.full_name ?? null, company_name: snapshot?.company_name ?? customer?.company_name ?? null, phone: snapshot?.phone ?? customer?.phone ?? null },
@@ -134,6 +144,8 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
           </div>
         )}
         {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
+        {workmanship ? <p className="rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-workmanship><span className="font-bold">Workmanship warranty: {workmanship.period}, valid until {formatDate(workmanship.until)}</span></p> : null}
+        {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={wCard.status} /> : null}
         {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}
         {bundle.lines.filter((l) => l.section === "services" && !!l.package_items).map((l) => {
           const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null), decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });

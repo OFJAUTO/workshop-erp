@@ -211,13 +211,8 @@ await section("11-12 sign-off and going out", async () => {
   check("12: the Going out strip shows the car due out tomorrow with its sign-off chips", (await going.count()) === 1 && (await going.locator("[data-signoff-chip]").count()) === 3, `${await going.count()} · ${await going.locator("[data-signoff-chip]").count()} chips`);
   check("11: PPF + detailing + manager are needed, paint is not (no paint stage)", (await going.locator("[data-signoff-chip='paint']").count()) === 0 && (await going.locator("[data-signoff-chip='ppf']").count()) === 1);
   await shot(op, "01-bodyshop-board-going-out");
-  // The TV board on a registered device.
-  const devToken = randomBytes(16).toString("hex");
-  await sql("insert into public.devices (name, location, kind, token_hash) values ('E2e TV', 'bodyshop', 'board', $1)", [createHash("sha256").update(devToken).digest("hex")]);
-  await op.context().addCookies([{ name: "erp_device", value: devToken, domain: "localhost", path: "/" }]);
-  await go(op, `${base}/board/bodyshop`);
-  check("5: the TV board opens on a registered device with the Going out strip", (await op.locator("[data-going-out]").count()) === 1 && (await op.locator(`[data-going-out-car='${jobId}']`).count()) === 1);
-  await shot(op, "01b-bodyshop-tv-board");
+  // The TV boards were removed on 16 October (bf77037): the Going out strip lives on the in-app board.
+  check("5: the bodyshop board carries the Going out strip", (await op.locator("[data-going-out]").count()) === 1 && (await op.locator(`[data-going-out-car='${jobId}']`).count()) === 1);
   // Gate-out is locked before the sign-off.
   await go(op, `${base}/jobs/${jobId}/gate-out`);
   check("11: the gate-out page says the sign-off is still needed", /Release sign-off still needed/.test((await op.textContent("body")) ?? ""));
@@ -236,6 +231,11 @@ await section("11-12 sign-off and going out", async () => {
   check("12: everyone involved is told it was sent back", ((await sql("select count(*)::int as n from public.notifications where job_id = $1 and type = 'bodyshop_not_ready'", [jobId]))[0]?.n ?? 0) >= 2);
   // Finish the PPF stage again (leader), then the rest (owner), so the sign-off opens.
   await go(lp, `${base}/bodyshop/${jobId}`);
+  // Section 12: the PPF stage (with the tint merged in) writes the roll numbers for the warranty card before Done.
+  for (const [sel, val] of [['[data-warranty-roll="ppf:"]', "E2E-PPF-ROLL"], ['[data-warranty-roll="tint:"]', "E2E-TINT-ROLL"]]) {
+    const box = lp.locator(`[data-stage-warranty-form] ${sel}`);
+    if (await box.count()) { await box.click({ clickCount: 3 }); await box.pressSequentially(val); }
+  }
   await lp.locator("[data-stage-done='ppf']").click();
   await afterSubmit(lp);
   await lb.close();

@@ -1,5 +1,5 @@
 import "server-only";
-import { cutOf, isPpfFilmItem, lineIsPpf } from "./ppf-cut";
+import { cutOf, isPpfFilmItem, lineIsPpf, ppfFinishOf } from "./ppf-cut";
 import { createAdminClient } from "./supabase/admin";
 
 export type JobCut = { key: "hand" | "machine" | "mixed"; badge: string; long: string; note: string | null };
@@ -54,7 +54,7 @@ export async function ppfWarrantyWords(jobId: string, brand: string, film: { col
   if (!best) return null;
   const snap = best.package_items && typeof best.package_items === "object" ? (best.package_items as { name?: string; items?: { label?: string }[] }) : null;
   const words = [snap?.name ?? best.title, ...(snap?.items ?? []).map((i) => i.label ?? ""), film?.colour ?? ""].join(" ");
-  const finish = /\bmatte?\b|\bstealth\b|\bsatin\b/i.test(words) ? "Matte" : /\bgloss(y)?\b|\bclear\b/i.test(words) ? "Gloss" : film?.colour ? film.colour : "Gloss";
+  const finish = ppfFinishOf(words, film?.colour ?? null);
   const ppfLabel = (snap?.items ?? []).map((i) => i.label ?? "").find((l) => isPpfFilmItem(l)) ?? best.title;
   let coverage = ppfLabel.replace(/\bppf\b|paint protection film/gi, "").replace(/[-–—,·]+/g, " ").replace(/\s+/g, " ").trim();
   if (/^full$/i.test(coverage) || !coverage) coverage = "Full body";

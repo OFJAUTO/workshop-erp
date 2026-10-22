@@ -16,6 +16,7 @@ import { isUnchosen, round2, type QuoteLine } from "./quotes";
 import { bankChargePercentFor, type Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { rowMissing, stageAsks, warrantyCardOf } from "./warranty-data";
 
 export type Actor = { id: string; display_name: string; role_id?: string; department_id?: string | null };
 
@@ -316,6 +317,20 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
   if (stage.key === "refit") {
     const { data: items } = await admin.from("bodyshop_removed_items").select("id, label").eq("job_id", job.id).eq("is_active", true).is("refitted_at", null);
     if ((items ?? []).length) return { error: `${(items ?? []).length} removed item${(items ?? []).length === 1 ? " is" : "s are"} not ticked back on yet: ${(items ?? []).map((i) => i.label).join(", ")}.` };
+  }
+  // Section 12: the warranty details are written at the end of the stage that fitted them; QC confirms the set.
+  if (["ppf", "tint", "detail", "clean", "qc"].includes(stage.key)) {
+    const card = await warrantyCardOf(job.id, settings);
+    if (card?.rows.length) {
+      if (stage.key === "qc") {
+        if (card.missing.length) return { error: `Warranty details missing: ${card.missing.join(", ")}.` };
+        if (!card.confirmedAt) return { error: 'QC ticks "Warranty details complete" before QC is done.' };
+      } else {
+        const all = await loadStages(job.id);
+        const miss = stageAsks(stage, all.map((s) => s.key), card.rows).flatMap((r) => rowMissing(r).map((m) => `${r.product === "ppf" ? "PPF" : r.product === "tint" ? "tint" : "ceramic"} ${m}`));
+        if (miss.length) return { error: `Before ${stage.label} is done, write down the warranty details: ${miss.join(", ")}.` };
+      }
+    }
   }
   const now = new Date().toISOString();
   await admin.from("bodyshop_stages").update({ status: "done", done_at: now, done_by: actor.id, updated_by: actor.id }).eq("id", stageId);

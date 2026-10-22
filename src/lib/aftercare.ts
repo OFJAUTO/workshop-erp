@@ -1,7 +1,8 @@
 import "server-only";
 import { addWorkingDays } from "./planning";
 import { formatDate } from "./format";
-import { notifyStaff } from "./notifications";
+import { jobAdvisorIds, notifyStaff } from "./notifications";
+import { daysBetween, dubaiDay } from "./warranty";
 import { dubaiDate, workingTimeOf } from "./jobs";
 import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
@@ -54,26 +55,30 @@ export async function aftercareOf(jobId: string): Promise<{ due_date: string; do
   return { due_date: data.due_date as string, done_at: (data.done_at as string | null) ?? null, overdue: !data.done_at && String(data.due_date) < dubaiDate() };
 }
 
-/** Cron: day-8 reminders with the message ready, and one "not done" reminder after the date. */
-export async function aftercareHourly(): Promise<{ reminded: number; overdue: number }> {
+/**
+ * Cron (section 12): the 10-day check activates the warranty, so its reminders are counted from the handover
+ * day - day 8 (the booking message ready for the advisor), day 12 and day 20 (the reminder with the warranty
+ * link) - each sent once to the advisors in charge and its date written down; the warranty page lists them. After
+ * 30 days without the check the card reads "Not activated" by itself. Done or activated by the owner: no more.
+ */
+export async function aftercareHourly(opts: { jobIds?: string[] } = {}): Promise<{ reminded: number; overdue: number }> {
   const admin = createAdminClient();
   const today = dubaiDate();
-  const soon = new Date(Date.parse(`${today}T12:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
   let reminded = 0;
   let overdue = 0;
-  const { data: rows } = await admin.from("aftercare_checks").select("id, job_id, due_date, reminded_at, overdue_notified_at, done_at, job:jobs(job_number, gated_in_by, customer:customers(phone), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number))").eq("is_active", true).is("done_at", null);
+  let query = admin.from("aftercare_checks").select("id, job_id, due_date, reminded_at, reminded_12_at, reminded_20_at, done_at, activated_at, job:jobs(job_number, gated_out_at)").eq("is_active", true).is("done_at", null).is("activated_at", null);
+  if (opts.jobIds) query = query.in("job_id", opts.jobIds);
+  const { data: rows } = await query;
   for (const r of rows ?? []) {
-    const job = r.job as unknown as { job_number: string; gated_in_by: string | null; customer: { phone: string | null } | null; vehicle: Record<string, unknown> | null } | null;
-    if (!job?.gated_in_by) continue;
-    if (!r.reminded_at && String(r.due_date) <= soon && String(r.due_date) >= today) {
-      await notifyStaff([job.gated_in_by], { type: "aftercare_due", title: `10-day after-care check due ${formatDate(String(r.due_date))} · ${job.job_number}`, body: `Send the customer the message (ready on the job card) and confirm the visit.`, jobId: r.job_id as string, href: `/jobs/${r.job_id}` });
-      await admin.from("aftercare_checks").update({ reminded_at: new Date().toISOString() }).eq("id", r.id);
-      reminded++;
-    } else if (!r.overdue_notified_at && String(r.due_date) < today) {
-      await notifyStaff([job.gated_in_by], { type: "aftercare_due", title: `10-day check NOT done · ${job.job_number}`, body: "The after-care check date has passed. The job card shows it as not done - that matters for warranty claims.", jobId: r.job_id as string, href: `/jobs/${r.job_id}` });
-      await admin.from("aftercare_checks").update({ overdue_notified_at: new Date().toISOString() }).eq("id", r.id);
-      overdue++;
-    }
+    const job = r.job as unknown as { job_number: string; gated_out_at: string | null } | null;
+    if (!job?.gated_out_at) continue;
+    const day = daysBetween(dubaiDay(job.gated_out_at), today);
+    const step = day >= 20 && !r.reminded_20_at ? { col: "reminded_20_at", title: `Third reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder (ready on the job card). After 30 days the warranty shows Not activated." } : day >= 12 && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_12_at", title: `Second reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder with the warranty link (ready on the job card)." } : day >= 8 && !r.reminded_at && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_at", title: `10-day after-care check due ${formatDate(String(r.due_date))} · ${job.job_number}`, body: "Send the customer the message (ready on the job card) and confirm the visit. The check activates the warranty." } : null;
+    if (!step) continue;
+    await notifyStaff(await jobAdvisorIds(r.job_id as string), { type: "aftercare_due", title: step.title, body: step.body, jobId: r.job_id as string, href: `/jobs/${r.job_id}#warranty-card` });
+    await admin.from("aftercare_checks").update({ [step.col]: new Date().toISOString() }).eq("id", r.id);
+    if (step.col === "reminded_at") reminded++;
+    else overdue++;
   }
   return { reminded, overdue };
 }

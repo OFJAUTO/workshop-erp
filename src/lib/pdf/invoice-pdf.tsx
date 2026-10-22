@@ -14,7 +14,9 @@ import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
-import { DocumentTail, InfoBoxes, LinesTable, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
+import { DocumentTail, InfoBoxes, LinesTable, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
+import { addMonthsIso, dubaiDay } from "@/lib/warranty";
+import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
 const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", credit_note: "Credit note no." } as const;
@@ -102,6 +104,12 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const [logo, qr] = await Promise.all([loadLogo(), invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/${invoice.kind === "proforma" ? "proforma" : "invoice"}/${invoice.token}`) : Promise.resolve(null)]);
   const isCredit = invoice.kind === "credit_note";
   const rounding = round2(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)));
+  // Section 12: the tax invoice is the warranty card - the WARRANTY table per product, the framed panel with its QR,
+  // and on mechanical work the workmanship line. Dates run from the handover (gate-out) day.
+  const card = invoice.kind === "tax_invoice" && invoice.job_id ? await warrantyCardOf(invoice.job_id, settings) : null;
+  const warrantyToken = card?.rows.length ? await ensureWarrantyToken(card.jobId) : null;
+  const warrantyQr = warrantyToken ? await qrPng(`${PRODUCTION_SITE_URL}/warranty/${warrantyToken}`, 420) : null;
+  const workmanship = card?.mechanical ? { period: card.mechanical.period, until: card.mechanical.validUntil ?? addMonthsIso(dubaiDay(invoice.issued_at), card.mechanical.months) } : null;
   const doc = (
     <PdfDocument title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthis invoice online"} footerLines={[]} computerGenerated={invoice.kind === "tax_invoice"}>
       <TitleRow
@@ -164,6 +172,22 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
               <View style={styles.note} wrap={false}>
                 <Text>This credit note corrects an earlier tax invoice.</Text>
               </View>
+            ) : null}
+            {workmanship ? (
+              <View style={styles.note} wrap={false}>
+                <Text style={{ fontWeight: 700 }}>Workmanship warranty: {workmanship.period}, valid until {formatDate(workmanship.until)}</Text>
+                <Text style={{ color: "#5F6368", marginTop: px(2) }}>{card?.terms.mechanical.short}</Text>
+              </View>
+            ) : null}
+            {card?.rows.length ? (
+              <>
+                <WarrantySection
+                  vehicle={[card.car, card.plate, card.vin ? `VIN ${card.vin}` : null].filter(Boolean).join(" · ")}
+                  startNote={card.handoverDay ? `From the handover on ${formatDate(card.handoverDay)}` : "Starts on the handover day"}
+                  rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: r.rollBatch ?? "—", cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
+                />
+                <WarrantyPanel logo={logo} qr={warrantyQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={card.status.title} />
+              </>
             ) : null}
           </>
         }
