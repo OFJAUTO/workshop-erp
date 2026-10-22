@@ -104,6 +104,8 @@ export type QuoteLine = {
   revised_from_line_id?: string | null;
   /** Bodyshop lines: the film colour and code (coloured PPF), or the tint shade. */
   /** Section 10: the PPF cutting method (hand / machine / mixed) and the note for Mixed. */
+  /** Section 7 (23 October 2026): a bodyshop line on a mixed job (from the inspection's bodyshop findings). */
+  side?: "mechanical" | "bodyshop" | null;
   cut_method?: "hand" | "machine" | "mixed" | null;
   cut_note?: string | null;
   film_colour?: string | null;

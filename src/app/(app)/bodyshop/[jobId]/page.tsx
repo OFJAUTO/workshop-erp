@@ -6,6 +6,9 @@ import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Avatar, Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
+import { PanelMarker } from "@/components/PanelMarker";
+import { cleanPanelMarks } from "@/lib/car-outline";
+import { markPreworkChecked, savePreworkCheck } from "@/app/(app)/jobs/damage-actions";
 import { loadBodyshopJob, type StageRow } from "@/lib/bodyshop";
 import { BODYSHOP_KIND_LABELS, SECTION_LABELS, SECTIONS, STAGE_DEFS, sectionOfDepartment, signoffKeyOf, type BodyshopKind, type StageSection } from "@/lib/bodyshop-kinds";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -62,6 +65,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const isBodyshopManager = role === "workshop_manager" && BODYSHOP_DEPTS.includes(staff.department_id ?? "");
   const canManage = !staff.viewingAs && (isOwner || isBodyshopManager);
   const canLead = !staff.viewingAs && (isOwner || isBodyshopManager || role === "team_leader");
+  const { data: prework } = await createAdminClient().from("jobs").select("prework_panels, prework_checked_at").eq("id", jobId).maybeSingle();
   const canQuote = !staff.viewingAs && can(role, "bodyshopQuote");
   const seesMoney = isOwner || role === "accounts" || role === "service_advisor";
   const mySection = sectionOfDepartment(staff.department_id);
@@ -197,6 +201,9 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <TintFittedPhotos jobId={jobId} files={tintPhotos} canAdd={!staff.viewingAs && (canLead || canQuote)} />
         </Card>
       ) : null}
+
+      {/* Section 7 (23 October 2026): the pre-work check before PPF on the same car outline as the inspection. */}
+      <PanelMarker hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />
 
       {stages.length ? (
         <Card id="stages" className="flex flex-col gap-3" data-stages-card>

@@ -22,6 +22,7 @@ import { formatPlate } from "@/lib/types";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { chargeTotalsByJob } from "@/lib/supplier-charges";
 
 function refresh(jobId: string | null, quotationId?: string) {
@@ -175,6 +176,23 @@ export async function startQuotation(jobId: string) {
       const rate = labourRateFor(settings, job!.department ?? null, makeName);
       for (const it of withHours) {
         await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: hpos++, line_type: "labour", title: it.item_label, hours: Number(it.labour_hours), labour_rate: rate, quantity: 1, urgency: it.status === "bad" ? "urgent" : null, source_type: "item", source_key: it.item_key, created_by: staff!.id, updated_by: staff!.id });
+      }
+    }
+  }
+  // Section 7 (23 October 2026): every bodyshop finding arrives as a BODYSHOP line (the bodyshop side, the bodyshop
+  // rate, its internal hours), and a mechanical job with body work becomes "Both", so each manager assigns his own side.
+  if (bundle && !job!.estimate_id) {
+    const bodyState = await loadBodyState(bundle.inspection.id);
+    if (bodyState.findings.length) {
+      const { count } = await admin.from("quotation_lines").select("id", { count: "exact", head: true }).eq("quotation_id", created!.id);
+      let bpos = (count ?? 0) + 1;
+      const bodyRate = labourRateFor(settings, "bodyshop", null);
+      for (const f of bodyState.findings) {
+        await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: bpos++, line_type: "labour", side: "bodyshop", title: bodyLineTitle(f), details: [bodyFindingWords(f), f.remark].filter(Boolean).join(" · ") || null, hours: f.labour_hours, labour_rate: bodyRate, quantity: 1, urgency: f.severity === "severe" ? "urgent" : null, source_type: "item", source_key: `body.${f.panel}`, created_by: staff!.id, updated_by: staff!.id });
+      }
+      if (job!.department !== "both" && job!.department !== "bodyshop") {
+        await admin.from("jobs").update({ department: "both", updated_by: staff!.id }).eq("id", jobId);
+        await admin.from("job_events").insert({ job_id: jobId, event_type: "department_changed", note: `The job is now Both (mechanical and bodyshop): ${bodyState.findings.length} bodyshop finding${bodyState.findings.length === 1 ? "" : "s"} on the inspection`, created_by: staff!.id });
       }
     }
   }

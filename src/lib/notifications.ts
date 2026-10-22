@@ -5,6 +5,7 @@ import type { RoleId } from "./roles";
 /** Every kind of notification the system can send. Later phases add their own. */
 export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean }[] = [
   { type: "clock_overnight", label: "Clock left running overnight" },
+  { type: "bodyshop_assessment", label: "Bodyshop findings in an inspection: a bodyshop assessment is needed (bodyshop managers)" },
   { type: "proforma_sent", label: "A proforma was sent: awaiting payment (accounts)", locked: true },
   { type: "customer_says_paid", label: "The customer says they have paid: check the bank (accounts)", locked: true },
   { type: "invoice_paid", label: "Paid in full: the tax invoice is created and ready to send", locked: true },

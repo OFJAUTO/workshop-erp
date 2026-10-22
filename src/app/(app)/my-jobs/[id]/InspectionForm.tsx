@@ -5,6 +5,8 @@ import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
 import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, acPartFor, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
 import { PartPicker } from "@/components/PartPicker";
+import { BodyshopFindings, type BodyStateProps } from "./BodyshopFindings";
+import { panelLabel } from "@/lib/car-outline";
 import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
 import { JumpButton, ProblemsBar, SubmitOutcome, jumpTo } from "@/components/FormAssist";
@@ -250,7 +252,10 @@ export function InspectionForm({
   estimateReason: initialEstimateReason = "",
   scan = null,
   thisYear = new Date().getFullYear(),
+  body = null,
 }: {
+  /** The bodyshop findings at the bottom (section 7, 23 October 2026): their state and who may change or check them. */
+  body?: { initial: BodyStateProps; canEdit: boolean; canCheck: boolean } | null;
   inspectionId: string;
   jobId: string;
   checklist: ChecklistSection[];
@@ -1103,6 +1108,29 @@ export function InspectionForm({
         <Textarea value={notes} onChange={(e) => setNotesText(e.target.value)} rows={4} disabled={locked} placeholder="Anything the workshop manager and advisor should know." />
       </Card>
 
+      {body ? (
+        <BodyshopFindings
+          inspectionId={inspectionId}
+          initial={body.initial}
+          canEdit={body.canEdit}
+          canCheck={body.canCheck}
+          photos={(panel) => {
+            const where = { itemKey: `body.${panel}` };
+            return { count: filesFor(where).length, node: <InspectionMedia inspectionId={inspectionId} files={filesFor(where)} where={where} disabled={!body.canEdit} onAdded={addFile(where)} onRemoved={removeFile} /> };
+          }}
+          parts={(panel) => (
+            <div className="flex flex-wrap items-center gap-1.5" data-body-parts={panel}>
+              {partsList.filter((e) => e.item_key === `body.${panel}`).map((e) => (
+                <span key={e.id} className="inline-flex items-center gap-1 rounded-control border border-line-strong bg-white px-2 py-1 text-xs font-semibold">
+                  {partsListLine(e)}
+                  {body.canEdit ? <button type="button" aria-label={`Remove ${e.name}`} onClick={() => removeEntry(e.id)} className="min-h-6 px-1 font-bold text-red">×</button> : null}
+                </span>
+              ))}
+              {body.canEdit ? <button type="button" onClick={() => setPickerFor({ itemKey: `body.${panel}`, label: panelLabel(panel) })} className="min-h-9 rounded-control border border-dashed border-line-strong px-3 text-xs font-bold" data-body-add-part>+ Parts</button> : null}
+            </div>
+          )}
+        />
+      ) : null}
       {pickerFor ? (
         <PartPicker
           title={pickerFor.itemKey ? `Parts · ${pickerFor.label}` : "Add a part"}

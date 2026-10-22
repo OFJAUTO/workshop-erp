@@ -4,6 +4,9 @@ import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { VinCopy } from "@/components/VinCopy";
 import { Badge, Card, DescriptionList, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { PanelMarker } from "@/components/PanelMarker";
+import { cleanPanelMarks } from "@/lib/car-outline";
+import { saveGateInDamage } from "@/app/(app)/jobs/damage-actions";
 import { formatDateTime, formatDayTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, labelOf } from "@/lib/jobs";
@@ -212,6 +215,7 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
           </Card>
         ) : null}
 
+        <PanelMarker hook="gate-in" title="Damage on the car at gate-in" hint="The panels that had damage when the car came in. Editable until the car leaves." initial={cleanPanelMarks((await createAdminClient().from("gate_ins").select("damage_panels").eq("job_id", id).maybeSingle()).data?.damage_panels)} save={saveGateInDamage.bind(null, id)} canEdit={!staff.viewingAs && can(staff.role_id as RoleId, "editGateIn") && !card.job.gated_out_at} />
         <Card className="flex flex-col gap-3" data-gate-in-media>
           <SectionLabel right={`${media.length}`}>Photos and videos</SectionLabel>
           <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} canRemove={canRemoveMedia} />

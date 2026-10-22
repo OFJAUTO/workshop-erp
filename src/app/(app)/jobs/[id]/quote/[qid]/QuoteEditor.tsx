@@ -866,6 +866,7 @@ export function QuoteEditor({
                 {isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id] ? <span data-last-price>Last time {aed(settings.lastPrices[svc.id])}</span> : null}
               </span>
             ) : null}
+            {l.side === "bodyshop" ? <span className="self-start rounded-full bg-chip px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em]" data-side-badge="bodyshop">Bodyshop · bodyshop rate{l.details ? ` · ${l.details}` : ""}</span> : null}
             {l.package_items ? <span className="whitespace-pre-line px-1 text-[11px] leading-relaxed text-muted" data-package-items>{packageDetailsText(l.package_items)}</span> : null}
             {lineIsPpf(l, svc?.bodyshop_kind ?? null) ? (
               // Section 10: the PPF cutting method, approved with the quotation and printed under the PPF item.

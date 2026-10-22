@@ -8,6 +8,10 @@ import { FinishGateInButton } from "@/components/FinishGateInButton";
 import { MediaChecklist } from "@/components/MediaChecklist";
 import { Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { PanelMarker } from "@/components/PanelMarker";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { cleanPanelMarks } from "@/lib/car-outline";
+import { saveGateInDamage } from "@/app/(app)/jobs/damage-actions";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { mediaChecklist } from "@/lib/media";
 import { getSiteUrl } from "@/lib/site";
@@ -28,6 +32,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
   if (!card) notFound();
   const check = mediaChecklist(card.media, { majorDamage: card.gateIn?.major_damage ?? false, wheelsRequired: card.gateIn?.wheels_required ?? false, damageNote: card.gateIn?.damage_note ?? "", hasCarPicture: !!card.vehicle.photo_path });
   const damageChips = ((await getSettings()).damage_note_chips ?? []) as string[];
+  const { data: giPanels } = await createAdminClient().from("gate_ins").select("damage_panels").eq("job_id", id).maybeSingle();
 
   const token = await createUploadLinkToken(id);
   const site = await getSiteUrl();
@@ -56,6 +61,9 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2">
           <MediaChecklist jobId={id} check={check} carPictureUrl={card.vehiclePhotoUrl} damageChips={damageChips} />
+          <div className="mt-6">
+            <PanelMarker hook="gate-in" title="Damage on the car at gate-in" hint="Tap each panel that already has damage as the car comes in: scratches, dents, broken parts. It goes with the gate-in record and the photos." initial={cleanPanelMarks(giPanels?.damage_panels)} save={saveGateInDamage.bind(null, id)} canEdit={!staff.viewingAs} />
+          </div>
         </div>
 
         <div className="flex flex-col gap-6">

@@ -5,6 +5,8 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
+import { canEditBody, isBodyshopStaff, loadBodyState } from "@/lib/bodyshop-findings";
+import { BodyshopFindingsPanel } from "@/app/(app)/my-jobs/[id]/BodyshopFindingsPanel";
 import { formatDateTime } from "@/lib/format";
 import { INSPECTION_STATUS_LABELS, MEASUREMENTS, TYRE_REPLACE_REASONS, itemStatusLabel, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, formatMinutes, sideOfDepartment, type ChecklistSection, type ItemStatus, DISC_ACTIONS, DISC_CONDITIONS, LEAK_REPAIRS, LEAK_SEVERITIES, cleanPartsRows, inspectionLimitsOf, toItemState } from "@/lib/inspection";
 import { inspectionLocked, inspectionWorkingMinutes, loadInspection, tyreSizeSuggestionFor, type InspectionMediaRow, inspectionDangerous, type InspectionItemRow } from "@/lib/inspection-data";
@@ -135,7 +137,9 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const approvedForAdvisor = role === "service_advisor" && bundle?.inspection.status === "approved";
   // The QC inspector reads approved reports only.
   const approvedForQc = role === "qc_inspector" && bundle?.inspection.status === "approved";
-  const allowed = role === "owner" || isTech || isManager || approvedForAdvisor || approvedForQc || role === "accounts" || role === "parts";
+  // Section 7: the bodyshop managers and team leaders open a report that has bodyshop findings, to complete and check them.
+  const bodyshopReader = isBodyshopStaff(staff) && !!bundle && (!!(await createAdminClient().from("inspections").select("bodyshop_opened_at").eq("id", bundle.inspection.id).maybeSingle()).data?.bodyshop_opened_at || job.department === "bodyshop" || job.department === "both");
+  const allowed = role === "owner" || isTech || isManager || approvedForAdvisor || approvedForQc || role === "accounts" || role === "parts" || bodyshopReader;
   if (!allowed) redirect(role === "technician" ? "/my-jobs" : role === "service_advisor" ? `/jobs/${id}?error=${encodeURIComponent("The report opens for you once the workshop manager has approved it.")}` : role === "qc_inspector" ? "/road-tests" : "/home");
 
   if (!bundle) {
@@ -171,6 +175,8 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const partsList = cleanPartsList(insp.parts_list);
   const partLines = mergePartsList(partsList);
 
+  const bodyChecked = (await createAdminClient().from("inspections").select("bodyshop_checked_at").eq("id", insp.id).maybeSingle()).data?.bodyshop_checked_at as string | null | undefined;
+  const body = { initial: await loadBodyState(insp.id), canEdit: await canEditBody(staff, { job_id: id, status: insp.status, bodyshop_checked_at: bodyChecked ?? null }), canCheck: isBodyshopStaff(staff) && !staff.viewingAs };
   const formProps = {
     checklist: insp.checklist as ChecklistSection[],
     items: bundle.items.map(toItemState),
@@ -256,9 +262,12 @@ export default async function InspectionReportPage({ params }: { params: Promise
           </Card>
 
           {reviewing ? (
-            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} partsListFooter={<PartsListTick action={confirmPartsList.bind(null, id)} confirmedAt={insp.parts_list_confirmed_at} confirmedByName={tickName} count={partLines.length} canTick={canApprove && insp.status === "submitted"} />} />
+            <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} body={body} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} partsListFooter={<PartsListTick action={confirmPartsList.bind(null, id)} confirmedAt={insp.parts_list_confirmed_at} confirmedByName={tickName} count={partLines.length} canTick={canApprove && insp.status === "submitted"} />} />
           ) : (
             <>
+              {body.initial.openedAt || body.initial.findings.length || (body.canEdit && bodyshopReader) ? (
+                <BodyshopFindingsPanel inspectionId={insp.id} initial={body.initial} canEdit={body.canEdit} canCheck={body.canCheck} files={bundle.media.filter((x) => x.item_key?.startsWith("body.")).map((x) => ({ id: x.id, kind: x.kind, url: bundle.mediaUrls[x.storage_path] ?? null, caption: x.caption, itemKey: x.item_key }))} partsList={partsList} catalogue={catalogue} />
+              ) : null}
               <Card className="flex flex-col gap-2">
                 <SectionLabel right={partLines.length ? `${partLines.length} line${partLines.length === 1 ? "" : "s"}` : "none"}>Parts list</SectionLabel>
                 {partLines.length ? (

@@ -15,6 +15,7 @@ import { ROAD_TEST_SELECT, roadTestWaiting, type RoadTestRow } from "@/lib/road-
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { bodyProblems } from "@/lib/bodyshop-findings";
 import { workingHoursBetween } from "@/lib/working-time";
 
 function refresh(jobId: string) {
@@ -80,7 +81,7 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
   const admin = createAdminClient();
   const { data: requests } = await admin.from("job_requests").select("id, text").eq("job_id", jobId).eq("is_active", true);
   const settings = await getSettings();
-  const problems = reportProblems(bundle, (requests ?? []) as { id: string; text: string }[], { limits: inspectionLimitsOf(settings), prescanGate: !!settings.prescan_gate_enabled });
+  const problems = [...reportProblems(bundle, (requests ?? []) as { id: string; text: string }[], { limits: inspectionLimitsOf(settings), prescanGate: !!settings.prescan_gate_enabled }), ...(await bodyProblems(insp.id))];
   if (problems.length) return { error: problems.slice(0, 4).join(" "), values };
 
   const wt = workingTimeOf(settings);

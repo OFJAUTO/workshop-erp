@@ -35,6 +35,7 @@ import { additionalWorkLabel, latestQc, loadWork, sessionMinutes } from "@/lib/w
 import { activeTechnicians } from "@/lib/work-flow";
 import { reasonsFor } from "@/lib/reasons";
 import { InspectionForm, type Suggestions } from "./InspectionForm";
+import { canEditBody, isBodyshopStaff, loadBodyState } from "@/lib/bodyshop-findings";
 import { WorkClock, WorkJobs, type PanelLine, type PanelPart, type RunningSession } from "./WorkPanel";
 
 export const dynamic = "force-dynamic";
@@ -93,6 +94,9 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const ownerDirect = role === "owner" && !staff.viewingAs;
   const canFill = (!inWork && !!insp && ((mine && insp.technician_id === staff.id) || manager) && (insp.status === "in_progress" || insp.status === "returned" || (insp.status === "approved" && !locked))) || (ownerDirect && !!insp);
   const canAddPrescan = !!insp && mine && insp.technician_id === staff.id && insp.status === "submitted";
+  // Section 7: the bodyshop findings at the bottom of the inspection.
+  const bodyRow = insp ? (await createAdminClient().from("inspections").select("bodyshop_checked_at").eq("id", insp.id).maybeSingle()).data : null;
+  const body = insp ? { initial: await loadBodyState(insp.id), canEdit: await canEditBody(staff, { job_id: id, status: insp.status, bodyshop_checked_at: (bodyRow?.bodyshop_checked_at as string | null) ?? null }), canCheck: isBodyshopStaff(staff) && !staff.viewingAs } : null;
   const condition = gateIn ? labelOf(CONDITIONS, gateIn.condition) : "";
   const statusText = insp?.status === "submitted" ? "Submitted, waiting for manager" : waitingRoadTest ? "Waiting for road test" : job.work_done_at && inWork ? "Job finished, waiting for the manager" : STATUS_LABELS[job.status];
 
@@ -377,7 +381,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
       {(!inWork || ownerDirect) && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved" || ownerDirect) ? (
         <>
-          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: insp.status !== "approved" && !ownerDirect, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
+          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} body={body} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: insp.status !== "approved" && !ownerDirect, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>

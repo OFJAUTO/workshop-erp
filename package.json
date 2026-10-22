@@ -86,7 +86,8 @@
     "test:recovery3": "node --env-file=.env.local tests/browser/test-recovery3.mjs",
     "test:estimates4": "node --env-file=.env.local tests/browser/test-estimates4.mjs",
     "test:spell5": "node --env-file=.env.local tests/browser/test-spell5.mjs",
-    "test:inspection6": "node --env-file=.env.local tests/browser/test-inspection6.mjs"
+    "test:inspection6": "node --env-file=.env.local tests/browser/test-inspection6.mjs",
+    "test:body7": "node --env-file=.env.local tests/browser/test-body7.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

@@ -11,6 +11,9 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { fetchPhoto, loadLogo } from "./images";
 import { qrPng } from "./qr";
+import { CarOutlinePdf } from "./car-outline-pdf";
+import { loadBodyState } from "@/lib/bodyshop-findings";
+import { actionLabel, damageWords, panelLabel, severityLabel, toneOf } from "@/lib/car-outline";
 import { AMBER, GREEN, GREY, InfoBoxes, PdfDocument, Photos, RED, Tag, TitleRow, companyOf, styles } from "./template";
 
 const COLOR: Record<ItemStatus, string> = { good: GREEN, average: AMBER, bad: RED, na: GREY };
@@ -55,6 +58,9 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   for (const p of [...TYRE_POSITIONS, { key: "spare", label: "Spare" }]) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === `tyre.${p.key}`)));
   wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.vent")));
   wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === "measure.pad_front" || x.item_key === "measure.pad_rear")));
+  // Section 7: the bodyshop findings and their photos (the Body section).
+  const body = await loadBodyState(insp.id);
+  for (const f of body.findings) wanted.push(...photosFor(bundle.media.filter((x) => x.item_key === `body.${f.panel}`)));
   const buffers = new Map<string, Buffer>();
   await Promise.all(
     Array.from(new Set(wanted.map((w) => w.storage_path))).map(async (p) => {
@@ -154,6 +160,32 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
           </View>
         ) : null}
       </View>
+
+      {body.findings.length ? (
+        <View>
+          <Text style={styles.sectionTitle}>Body   ·   {body.findings.length} panel{body.findings.length === 1 ? "" : "s"}</Text>
+          <View style={{ flexDirection: "row", gap: 14 }} wrap={false}>
+            <CarOutlinePdf tones={Object.fromEntries(body.findings.map((f) => [f.panel, toneOf(f)]))} width={92} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.small}>Seen from above, front at the top. Amber: minor. Red: moderate or severe.</Text>
+              {body.airbags ? <Text style={{ fontWeight: 600, color: RED }}>Airbags deployed</Text> : null}
+              {body.structural ? <Text style={{ fontWeight: 600, color: RED }}>Structural / chassis damage suspected: chassis measurement needed</Text> : null}
+            </View>
+          </View>
+          {body.findings.map((f) => (
+            <View key={f.id} style={[styles.item, { borderColor: toneOf(f) === "red" ? RED : AMBER }]} wrap={false}>
+              <View style={styles.itemHead}>
+                <Tag text={severityLabel(f.severity) || "Damage"} color={toneOf(f) === "red" ? RED : AMBER} />
+                <Text style={styles.lineTitle}>{panelLabel(f.panel)}</Text>
+                {f.action ? <Text style={styles.small}>{actionLabel(f.action)}</Text> : null}
+              </View>
+              {f.damage.length ? <Text>{damageWords(f.damage)}</Text> : null}
+              {f.remark ? <Text>{f.remark}</Text> : null}
+              <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === `body.${f.panel}`))} />
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       <View>
         <Text style={styles.sectionTitle}>Checked and passed   ·   {passed.length}</Text>

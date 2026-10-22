@@ -11,6 +11,7 @@ import { getSettings } from "@/lib/settings";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { ROAD_TEST_SELECT, roadTestSummary, type RoadTestRow } from "@/lib/road-test";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadBodyState } from "@/lib/bodyshop-findings";
 import { formatPlate } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,8 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
     ...tyres.filter((t) => t.danger).map((t) => ({ key: `tyre-${t.key}`, label: `${t.label} tyre`, reason: t.dangerReason || null })),
   ];
   const attentionCount = attention.length + tyres.length + (batteryReplace ? 1 : 0);
+  // Section 7: the bodyshop findings appear as their own Body section in the full report.
+  const bodyCount = (await loadBodyState(insp.id)).findings.length;
   const { vehicle } = card;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
   const customerName = card.customer?.full_name ?? "Customer";
@@ -103,6 +106,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
           {dangers.length ? `${dangers.length} item${dangers.length === 1 ? "" : "s"} dangerous to drive · ` : ""}
           {attentionCount === 0 ? "Nothing needs attention." : `${attentionCount} item${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} attention`}
         </p>
+        {bodyCount ? <p className="text-base font-bold" data-report-body>Body: {bodyCount} damaged panel{bodyCount === 1 ? "" : "s"} (with photos in the full report)</p> : null}
       </CustomerFront>
     );
   }

@@ -28,6 +28,8 @@ import { quoteReferenceOf } from "@/lib/quote-reference";
 import { ROAD_TEST_SELECT, type RoadTestRow } from "@/lib/road-test";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { jobCharges } from "@/lib/supplier-charges";
+import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
+import { severityLabel } from "@/lib/car-outline";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +103,11 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const lastPrices: Record<string, number> = {};
   for (const r of lastRows ?? []) if (r.service_id && lastPrices[r.service_id] === undefined) lastPrices[r.service_id] = Number(r.unit_price);
   const reference = bundle.inspection ? quoteReferenceOf(bundle.inspection, (jobRequests ?? []).map((r) => r.text as string), (roadRow as RoadTestRow | null) ?? null) : null;
+  // Section 7: the bodyshop findings join the reference strip (one per damaged panel).
+  if (reference && bundle.inspection) {
+    const bodyState = await loadBodyState(bundle.inspection.inspection.id);
+    for (const f of bodyState.findings) reference.findings.push({ sourceType: "item", sourceKey: `body.${f.panel}`, keys: [`body.${f.panel}`], label: `Body · ${bodyLineTitle(f)}`, status: f.severity === "minor" ? "average" : "bad", statusLabel: severityLabel(f.severity) || "Damage", remark: [bodyFindingWords(f), f.remark].filter(Boolean).join(" · ") || null, dangerous: false });
+  }
 
   // Who approved (for "Approved by Omar, 11:45") and who asked for a revision.
   const nameIds = [q.owner_approved_by, q.revision_requested_by].filter((x): x is string => !!x);
