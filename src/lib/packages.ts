@@ -123,3 +123,42 @@ export const ESTIMATED_COMPLETION = "Estimated completion";
 export function warrantyWords(w: string): string {
   return w.toLowerCase().includes("warrant") ? w : `${w} warranty`;
 }
+
+/**
+ * Section 9 (21 October): the ONE package model behind every customer document - the PDF section
+ * (PackageSection in src/lib/pdf/template.tsx) and the web card (src/components/PackageCard.tsx) both
+ * read it. Title large, subtitle "finish · car", the included items with their warranties, the
+ * complimentary extras as badges, and the estimated completion on its own line. `decorate` lets the
+ * tint items carry the job's shade (section 11) without the package ever storing one.
+ */
+export type PackageDoc = {
+  title: string;
+  subtitle: string;
+  items: { label: string; warranty: string | null }[];
+  complimentary: string[];
+  completion: string | null;
+};
+
+const FINISHES: [RegExp, string][] = [
+  [/\bmatte?\b/i, "Matte finish"],
+  [/\bstealth\b/i, "Stealth finish"],
+  [/\bsatin\b/i, "Satin finish"],
+  [/\bgloss(y)?\b/i, "Gloss finish"],
+];
+
+export function packageDocOf(raw: unknown, opts: { car?: string | null; decorate?: (label: string) => string } = {}): PackageDoc | null {
+  const p = packageParts(raw);
+  if (!p) return null;
+  // "OFJ Full Protection Package - Matte Finish": the part before the dash is the title, the part after
+  // it is the owner's own finish wording; a name without a dash gets the finish found inside it.
+  const [head, ...rest] = p.name.split(/\s+[-–—]\s+/);
+  const tail = rest.join(" – ").trim();
+  const finish = tail || (FINISHES.find(([re]) => re.test(p.name))?.[1] ?? "");
+  return {
+    title: (head || p.name).trim(),
+    subtitle: [finish, opts.car ?? null].filter((x): x is string => !!x && !!x.trim()).join(" · "),
+    items: p.items.map((i) => ({ label: opts.decorate ? opts.decorate(i.label) : i.label, warranty: i.warranty ? warrantyWords(i.warranty) : null })),
+    complimentary: p.complimentary,
+    completion: p.completion,
+  };
+}

@@ -69,6 +69,8 @@ export type InvoiceLineRow = {
   /** Complimentary/Included word and the line's own discount, copied from the quotation line. */
   price_display?: string | null;
   discount_percent?: number | null;
+  /** Section 9: the package snapshot this line was billed from (PROTECTION PACKAGE section). */
+  package_items?: unknown;
 };
 
 export type PaymentRow = {
@@ -111,7 +113,7 @@ export type PaymentRow = {
 };
 
 export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, converted_from, converted_to, issue_reason, deposit_for_quotation_id, created_at";
-export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id, price_display, discount_percent";
+export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id, price_display, discount_percent, package_items";
 export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, deposit_quotation_id, deposit_invoice_number, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at, proof_path, client_key";
 
 export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque", transfer: "Bank transfer" };
@@ -187,7 +189,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
   };
 }
 
-export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number };
+export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number; /** Section 9: the package snapshot, so the invoice shows the PROTECTION PACKAGE section too. */ package_items?: unknown };
 export type DraftTotals = {
   gross: number;
   services: number;
@@ -303,6 +305,7 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
     takesDiscount: takesTotalDiscount(l),
     price_display: l.price_display ?? "normal",
     discount_percent: l.discount_percent ?? 0,
+    package_items: l.package_items ?? null,
   };
 }
 

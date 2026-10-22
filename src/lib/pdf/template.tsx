@@ -688,3 +688,97 @@ export function TotalsBox({ sections, green = [], net, vatPercent, vat, total, t
     </View>
   );
 }
+
+/* ------------------------------------------------------------------------------------------------
+   Section 9 (21 October): the PROTECTION PACKAGE section, ONE component for the estimate, the
+   quotation, the proforma and the tax invoice. Read from packageDocOf (src/lib/packages.ts), the same
+   model the web card uses. A green tick is drawn (the document font has no tick glyph).
+   ------------------------------------------------------------------------------------------------ */
+const GREEN_SOFT = "#E8F5EC";
+
+function Tick({ size = 9, color = GREEN }: { size?: number; color?: string }) {
+  return (
+    <Svg width={px(size)} height={px(size)} viewBox="0 0 12 12">
+      <Path d="M2 6.5 L4.8 9.2 L10 3.2" stroke={color} strokeWidth={1.8} fill="none" />
+    </Svg>
+  );
+}
+
+const pkg = StyleSheet.create({
+  box: { borderWidth: 1.5, borderColor: INK, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
+  bar: { backgroundColor: INK, paddingVertical: px(7), paddingHorizontal: px(12) },
+  barTitle: { fontSize: px(9.5), fontWeight: 800, color: "#FFFFFF", letterSpacing: 1.2, textTransform: "uppercase" },
+  head: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingTop: px(12), paddingBottom: px(10), paddingHorizontal: px(14), gap: px(12) },
+  title: { fontSize: px(17), fontWeight: 800, color: INK },
+  subtitle: { fontSize: px(10.5), color: GREY, marginTop: px(3) },
+  priceLabel: { fontSize: px(8.5), fontWeight: 700, color: GREY, letterSpacing: 0.8, textTransform: "uppercase", textAlign: "right" },
+  price: { fontSize: px(15), fontWeight: 800, color: INK, textAlign: "right", marginTop: px(2) },
+  listHead: { flexDirection: "row", justifyContent: "space-between", marginHorizontal: px(14), paddingBottom: px(4), borderBottomWidth: 1, borderBottomColor: INK },
+  listHeadText: { fontSize: px(8.5), fontWeight: 700, color: GREY, letterSpacing: 0.8, textTransform: "uppercase" },
+  item: { flexDirection: "row", alignItems: "center", marginHorizontal: px(14), paddingVertical: px(6.5), borderBottomWidth: 0.75, borderBottomColor: LINE, gap: px(8) },
+  itemText: { flex: 1, fontSize: px(11), color: INK },
+  warranty: { width: px(150), fontSize: px(10), color: GREY, textAlign: "right" },
+  badges: { flexDirection: "row", flexWrap: "wrap", gap: px(6), paddingHorizontal: px(14), paddingTop: px(10) },
+  badge: { flexDirection: "row", alignItems: "center", gap: px(4), backgroundColor: GREEN_SOFT, borderRadius: px(10), paddingVertical: px(4), paddingHorizontal: px(9) },
+  badgeText: { fontSize: px(9.5), fontWeight: 700, color: GREEN },
+  completion: { fontSize: px(10.5), fontWeight: 700, color: INK, paddingHorizontal: px(14), paddingTop: px(10), paddingBottom: px(10) },
+  sub: { flexDirection: "row", justifyContent: "space-between", backgroundColor: PALE, paddingVertical: px(8), paddingHorizontal: px(14) },
+  subText: { fontSize: px(11), fontWeight: 800, color: INK },
+});
+
+export type PackageSectionDoc = { title: string; subtitle: string; items: { label: string; warranty: string | null }[]; complimentary: string[]; completion: string | null };
+
+export function PackageSection({ doc, price, subtotal, discount = null }: { doc: PackageSectionDoc; price: number; subtotal: number; /** The line's own discount, in bold green under the price. */ discount?: { percent: number | null; amount: number } | null }) {
+  return (
+    <View style={pkg.box}>
+      <View style={pkg.bar} wrap={false}>
+        <Text style={pkg.barTitle}>Protection package</Text>
+      </View>
+      <View style={pkg.head} wrap={false}>
+        <View style={{ flex: 1 }}>
+          <Text style={pkg.title}>{doc.title}</Text>
+          {doc.subtitle ? <Text style={pkg.subtitle}>{doc.subtitle}</Text> : null}
+        </View>
+        <View>
+          <Text style={pkg.priceLabel}>Package price</Text>
+          <Text style={pkg.price}>AED {moneyDigits(price)}</Text>
+          {discount && discount.amount > 0.004 ? (
+            <Text style={{ fontSize: px(10), fontWeight: 800, color: GREEN, textAlign: "right", marginTop: px(2) }}>
+              Discount{discount.percent ? ` ${moneyDigits(discount.percent).replace(/\.00$/, "")}%` : ""}: −AED {moneyDigits(discount.amount)}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      {doc.items.length ? (
+        <>
+          <View style={pkg.listHead} wrap={false}>
+            <Text style={pkg.listHeadText}>What&apos;s included</Text>
+            <Text style={pkg.listHeadText}>Warranty</Text>
+          </View>
+          {doc.items.map((i, k) => (
+            <View key={k} style={pkg.item} wrap={false}>
+              <Tick />
+              <Text style={pkg.itemText}>{i.label}</Text>
+              <Text style={pkg.warranty}>{i.warranty ?? ""}</Text>
+            </View>
+          ))}
+        </>
+      ) : null}
+      {doc.complimentary.length ? (
+        <View style={pkg.badges} wrap={false}>
+          {doc.complimentary.map((c, k) => (
+            <View key={k} style={pkg.badge}>
+              <Tick size={8} />
+              <Text style={pkg.badgeText}>{c}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {doc.completion ? <Text style={pkg.completion}>Estimated completion: {doc.completion}</Text> : <View style={{ height: px(10) }} />}
+      <View style={pkg.sub} wrap={false}>
+        <Text style={pkg.subText}>Package subtotal</Text>
+        <Text style={pkg.subText}>AED {moneyDigits(subtotal)}</Text>
+      </View>
+    </View>
+  );
+}

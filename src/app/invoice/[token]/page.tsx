@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { CustomerFront, customerBoxes } from "@/components/CustomerFront";
+import { PackageCard } from "@/components/PackageCard";
+import { packageDocOf } from "@/lib/packages";
 import { PayNowButton } from "@/components/PayNowButton";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -111,7 +113,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
           <div className={`rounded-lg px-4 py-4 flex flex-col gap-1 ${paid ? "bg-green-soft" : "bg-[#F4F4F5]"}`}>
             <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{paid ? "Paid, thank you" : bal.state === "cheque_pending" ? "Cheque pending" : "Amount due"}</span>
             <span className="text-3xl font-extrabold">{paid ? aed(invoice.total_aed) : aed(bal.balance)}</span>
-            {invoice.discount_aed ? <span className="text-sm font-bold text-green" data-labour-discount>Labour discount: − {aed(invoice.discount_aed)}</span> : null}
+            {invoice.discount_aed ? <span className="text-sm font-bold text-green" data-labour-discount>{bundle.lines.some((l) => !!l.package_items) ? "Package discount" : "Labour discount"}: − {aed(invoice.discount_aed)}</span> : null}
             {invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)) < -0.004 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))))}</span> : null}
             {paid && bal.paidAt ? <span className="text-xs text-[#5F6368]">Final payment received {formatDate(bal.paidAt)}</span> : null}
             {!paid && bal.paid ? <span className="text-xs text-[#5F6368]">Received so far {aed(bal.paid)} of {aed(invoice.total_aed)}</span> : null}
@@ -122,6 +124,12 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
             <span className="text-3xl font-extrabold">{aed(invoice.total_aed)}</span>
           </div>
         )}
+        {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}
+        {bundle.lines.filter((l) => l.section === "services" && !!l.package_items).map((l) => {
+          const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null) });
+          const disc = Number(l.discount_percent) || 0;
+          return docModel ? <PackageCard key={l.id} doc={docModel} price={Math.round(l.unit_price * l.quantity * 100) / 100} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: Math.round((l.unit_price * l.quantity - l.amount_aed) * 100) / 100 } : null} /> : null;
+        })}
       </CustomerFront>
     );
   }

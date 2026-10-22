@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { PackageCard } from "@/components/PackageCard";
+import { packageDocOf } from "@/lib/packages";
 import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -6,7 +8,7 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { discountLabelOf,aed, isHidden, isUnchosen, quoteTotals , hasPackageLine } from "@/lib/quotes";
+import { aed, discountLabelOf, hasPackageLine, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, quoteTotals } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -127,6 +129,10 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
           {totals.deposit ? <span className="text-sm font-bold" data-deposit-required>Deposit required: {aed(totals.deposit)}</span> : null}
         </div>
+        {lines.filter((l) => !!l.package_key).map((l) => {
+          const docModel = packageDocOf(l.package_items, { car: carName || null });
+          return docModel ? <PackageCard key={l.id} doc={docModel} price={linePrice(l)} subtotal={lineTotal(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
+        })}
         {hasPpf ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-3 flex flex-col gap-0.5" data-ppf-warranty>
             <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{String(settings.ppf_brand_name || "OFJ PPF")} · {Number(settings.ppf_warranty_years) || 10}-year warranty</span>

@@ -11,8 +11,8 @@ import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { packageDetailsText } from "../packages";
-import { DocumentTail, GREY, InfoBoxes, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
+import { packageDetailsText, packageDocOf } from "../packages";
+import { DocumentTail, GREY, InfoBoxes, PackageSection, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
 
 /**
  * The customer's quotation or estimate on the document template: the header, two grey boxes, three bordered boxes
@@ -54,7 +54,9 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       tag: l.urgency === "urgent" && !isEstimate ? "Urgent" : null,
     };
   };
-  const services = lines.filter((l) => blockOf(l) === "labour").map(toDoc);
+  // Section 9: a bodyshop package has its own PROTECTION PACKAGE section; the rest of the work stays in Labour and services.
+  const pkgLines = lines.filter((l) => blockOf(l) === "labour" && !!l.package_key);
+  const services = lines.filter((l) => blockOf(l) === "labour" && !l.package_key).map(toDoc);
   const parts = lines.filter((l) => blockOf(l) === "parts").map(toDoc);
   const others = lines.filter((l) => blockOf(l) === "other").map(toDoc);
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
@@ -81,7 +83,11 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items" } : { title: "Vehicle", strong: [carName || "Vehicle", vehicle ? formatPlate(vehicle) : null].filter(Boolean).join(" · "), lines: [vehicle?.variant ?? null, vehicle?.vin ? `VIN ${vehicle.vin}` : null] },
         ]}
       />
-      <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" />
+      {pkgLines.map((l) => {
+        const docModel = packageDocOf(l.package_items, { car: carName || null });
+        return docModel ? <PackageSection key={l.id} doc={docModel} price={linePrice(l)} subtotal={lineTotal(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
+      })}
+      {services.length || !pkgLines.length ? <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" /> : null}
       {bodyshopNotes.map((note) => <Text key={note} style={{ fontSize: px(9.5), color: GREY, marginTop: px(-4), marginBottom: px(8) }}>{note}</Text>)}
       {parts.length ? <SectionBox title="Parts" lines={parts} subtotalLabel="Parts subtotal" /> : null}
       {others.length ? <SectionBox title="Other charges" lines={others} subtotalLabel="Other charges subtotal" /> : null}
@@ -93,8 +99,9 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
             currency={currency}
             sections={[
               // Before any discount: the green rows underneath then take the discounts off, so the story reads top to bottom.
-              { label: totals.lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(lines.filter((l) => blockOf(l) === "labour").reduce((a, l) => a + linePrice(l), 0)) },
-              { label: "Parts", value: round2(lines.filter((l) => blockOf(l) === "parts").reduce((a, l) => a + linePrice(l), 0)) },
+              ...(pkgLines.length ? [{ label: totals.lineDiscounts > 0 ? "Protection package (before discount)" : "Protection package", value: round2(pkgLines.reduce((a, l) => a + linePrice(l), 0)) }] : []),
+              ...(services.length || !pkgLines.length ? [{ label: totals.lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(lines.filter((l) => blockOf(l) === "labour" && !l.package_key).reduce((a, l) => a + linePrice(l), 0)) }] : []),
+              ...(parts.length || !pkgLines.length ? [{ label: "Parts", value: round2(lines.filter((l) => blockOf(l) === "parts").reduce((a, l) => a + linePrice(l), 0)) }] : []),
               ...(others.length ? [{ label: "Other charges", value: round2(lines.filter((l) => blockOf(l) === "other").reduce((a, l) => a + linePrice(l), 0)) }] : []),
             ]}
             green={[

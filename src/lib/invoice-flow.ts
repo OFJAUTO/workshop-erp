@@ -74,7 +74,7 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
     .single();
   if (error || !inv) throw new Error(error?.message ?? "Could not prepare the proforma.");
   await admin.from("invoice_lines").insert(
-    draft.lines.map((l, i) => ({ invoice_id: inv.id, position: i, section: l.section, description: l.description, details: l.details, part_number: l.part_number, quantity: l.quantity, unit_price: l.unit_price, amount_aed: l.amount_aed, vat_aed: round2(l.amount_aed * (draft.vatPercent / 100)), total_aed: round2(l.amount_aed * (1 + draft.vatPercent / 100)), cost_aed: l.cost_aed, quotation_line_id: l.quotation_line_id, part_item_id: l.part_item_id, price_display: l.price_display ?? "normal", discount_percent: l.discount_percent ?? 0, created_by: by, updated_by: by })),
+    draft.lines.map((l, i) => ({ invoice_id: inv.id, position: i, section: l.section, description: l.description, details: l.details, part_number: l.part_number, quantity: l.quantity, unit_price: l.unit_price, amount_aed: l.amount_aed, vat_aed: round2(l.amount_aed * (draft.vatPercent / 100)), total_aed: round2(l.amount_aed * (1 + draft.vatPercent / 100)), cost_aed: l.cost_aed, quotation_line_id: l.quotation_line_id, part_item_id: l.part_item_id, price_display: l.price_display ?? "normal", discount_percent: l.discount_percent ?? 0, package_items: l.package_items ?? null, created_by: by, updated_by: by })),
   );
   // Deposits recorded before the proforma count against it.
   await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);

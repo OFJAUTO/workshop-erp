@@ -10,7 +10,8 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
-import { DocumentTail, InfoBoxes, LinesTable, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
+import { packageDocOf } from "@/lib/packages";
+import { DocumentTail, InfoBoxes, LinesTable, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
 const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", credit_note: "Credit note no." } as const;
@@ -68,7 +69,9 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const { invoice, lines, payments, job } = bundle;
   const currency = currencyOf(settings);
   const vatPercent = invoice.taxable_aed ? round2((invoice.vat_aed / invoice.taxable_aed) * 100) || 5 : 5;
-  const serviceRows = lines.filter((l) => l.section === "services");
+  // Section 9: a line billed from a bodyshop package gets the PROTECTION PACKAGE section; the rest stays in Labour and services.
+  const pkgRows = lines.filter((l) => l.section === "services" && !!l.package_items);
+  const serviceRows = lines.filter((l) => l.section === "services" && !l.package_items);
   const services = serviceRows.map(docLine);
   const fees = lines.filter((l) => l.section === "fees").map(docLine);
   const parts = lines.filter((l) => l.section === "parts").map(docLine);
@@ -76,9 +79,13 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   // The lines' own discounts (line 1's 22%): the sections show the pre-discount figure, the green row takes it off.
   const lineDiscounts = lineDiscountsOf(lines);
   // The labour discount as a percentage when it divides cleanly, else the amount alone.
+  const pkgSum = round2(pkgRows.reduce((a, l) => a + l.amount_aed, 0));
   const labourSum = sum(services);
-  const pct = invoice.discount_aed && labourSum ? round2((invoice.discount_aed / labourSum) * 100) : 0;
-  const discountLabel = pct && Math.abs(pct - Math.round(pct)) < 0.011 ? `Labour discount (${Math.round(pct)}%)` : "Labour discount";
+  const discountBase = round2(labourSum + pkgSum);
+  const pct = invoice.discount_aed && discountBase ? round2((invoice.discount_aed / discountBase) * 100) : 0;
+  const discountWords = pkgRows.length ? "Package discount" : "Labour discount";
+  const discountLabel = pct && Math.abs(pct - Math.round(pct)) < 0.011 ? `${discountWords} (${Math.round(pct)}%)` : discountWords;
+  const carTitle = (invoice.vehicle_snapshot?.title ?? [bundle.vehicle?.make?.name, bundle.vehicle?.model?.name, bundle.vehicle?.model_year].filter(Boolean).join(" ")) || null;
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
   const company = companyOf(settings);
@@ -96,7 +103,12 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         ]}
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
-      <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" />
+      {pkgRows.map((l) => {
+        const docModel = packageDocOf(l.package_items, { car: carTitle });
+        const disc = Number(l.discount_percent) || 0;
+        return docModel ? <PackageSection key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: round2(l.unit_price * l.quantity - l.amount_aed) } : null} /> : null;
+      })}
+      {services.length || !pkgRows.length ? <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" /> : null}
       {parts.length ? <SectionBox title="Parts" lines={parts} subtotalLabel="Parts subtotal" /> : null}
       {fees.length ? <SectionBox title="Other charges" lines={fees} subtotalLabel="Other charges subtotal" /> : null}
       <DocumentTail
@@ -107,8 +119,9 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
           <TotalsBox
             currency={currency}
             sections={[
-              { label: lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(labourSum + lineDiscountsOf(serviceRows)) },
-              { label: "Parts", value: round2(sum(parts) + lineDiscountsOf(lines.filter((l) => l.section === "parts"))) },
+              ...(pkgRows.length ? [{ label: lineDiscounts > 0 ? "Protection package (before discount)" : "Protection package", value: round2(pkgSum + lineDiscountsOf(pkgRows)) }] : []),
+              ...(services.length || !pkgRows.length ? [{ label: lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(labourSum + lineDiscountsOf(serviceRows)) }] : []),
+              ...(parts.length || !pkgRows.length ? [{ label: "Parts", value: round2(sum(parts) + lineDiscountsOf(lines.filter((l) => l.section === "parts"))) }] : []),
               ...(fees.length ? [{ label: "Other charges", value: round2(sum(fees) + lineDiscountsOf(lines.filter((l) => l.section === "fees"))) }] : []),
             ]}
             green={[
