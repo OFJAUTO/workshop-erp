@@ -18,8 +18,16 @@ const DEFAULTS = {
   bodyshop_waste_percent: 10,
   /** Alcohol, blades, cutting software… shared over the bodyshop cars finished each month. */
   bodyshop_consumables_monthly_aed: 1500,
+  // Section 7 (21 October): the package cost estimate, filled in by itself on package quotes.
+  tint_cars_per_roll: 10,
+  ceramic_bottle_price_aed: 300,
+  ceramic_cars_exterior_per_bottle: 4,
+  ceramic_cars_interior_per_bottle: 5.5,
+  package_installer_hours: 80,
+  big_car_film_rolls: 1.5,
+  big_car_models: ["G-Class", "Cullinan", "Urus", "Escalade", "Range Rover LWB", "GLS", "Phantom"],
   /** The bodyshop labour cost rate per hour; blank uses the workshop rate. */
-  bodyshop_cost_rate_aed: "" as string | number,
+  bodyshop_cost_rate_aed: 50 as string | number,
   /** Bodyshop costing: the fallback installer hours for a bodyshop service with no figure of its own. */
   bodyshop_default_installer_hours: 8 as string | number,
   whatsapp_aftercare_template: "Good day! Your car is due for its complimentary 10-day after-care check on [date]. It takes about half an hour - we check the film edges and polish anything that needs it. When would suit you?",

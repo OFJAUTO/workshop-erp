@@ -6,7 +6,7 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } fro
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadQuotation, loadServices, minMarkupFor } from "@/lib/quote-data";
+import { labourRateFor, loadQuotation, loadServices, minMarkupFor, packageCostingOf } from "@/lib/quote-data";
 import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
@@ -108,6 +108,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
           technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
           bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
+    // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
+    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "), q.film_rolls_est),
           installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
           goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),

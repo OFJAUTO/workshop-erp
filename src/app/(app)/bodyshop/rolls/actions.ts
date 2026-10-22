@@ -81,6 +81,14 @@ export async function saveBodyshopCosting(formData: FormData) {
   await upsert("bodyshop_consumables_monthly_aed", "Bodyshop consumables per month (AED)", Number(formData.get("consumables")) || 0);
   await upsert("bodyshop_cost_rate_aed", "Bodyshop labour cost rate (AED/h)", String(formData.get("bodyshop_rate") ?? "").trim());
   await upsert("bodyshop_default_installer_hours", "Default installer hours for other bodyshop services", Number(formData.get("default_installer_hours")) || 8);
+  // Section 7: the package cost estimate's own numbers.
+  await upsert("package_installer_hours", "Full package installer hours", Number(formData.get("package_hours")) || 80);
+  await upsert("tint_cars_per_roll", "Tint: cars per roll", Number(formData.get("tint_cars")) || 10);
+  await upsert("ceramic_bottle_price_aed", "Ceramic bottle price (AED)", Number(formData.get("ceramic_bottle")) || 300);
+  await upsert("ceramic_cars_exterior_per_bottle", "Ceramic: cars per bottle (exterior)", Number(formData.get("ceramic_cars_ext")) || 4);
+  await upsert("ceramic_cars_interior_per_bottle", "Ceramic: cars per bottle (interior)", Number(formData.get("ceramic_cars_int")) || 5.5);
+  await upsert("big_car_film_rolls", "Big cars: film rolls", Number(formData.get("big_rolls")) || 1.5);
+  await upsert("big_car_models", "Big cars (1.5 film rolls)", String(formData.get("big_models") ?? "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 60));
   revalidatePath("/settings/packages");
   redirect(`/settings/packages?message=${encodeURIComponent("Costing saved.")}`);
 }

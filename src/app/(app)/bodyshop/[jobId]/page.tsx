@@ -349,6 +349,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             {sections.length ? (
               <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted" data-section-hours>
                 {sections.map((s) => <span key={s.section}>{(SECTION_LABELS as Record<string, string>)[s.section] ?? s.section}: {s.people} {s.people === 1 ? "person" : "people"} · {s.hours} h</span>)}
+                <span className="font-bold text-ink" data-hours-total>Total {Math.round(sections.reduce((a, s) => a + s.hours, 0) * 10) / 10} h × AED {Number(settings.bodyshop_cost_rate_aed) || 50}</span>
               </div>
             ) : null}
             <p className="text-xs text-muted"><Link href={`/jobs/${jobId}/quote/${approvedQuote.id}`} className="underline underline-offset-4">Open the internal box</Link> for materials and commission.</p>

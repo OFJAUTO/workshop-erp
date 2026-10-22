@@ -9,6 +9,7 @@ import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
 import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
+import { packageCostEstimate } from "@/lib/package-cost";
 import { packageDetailsText, packageSnapshot, type BodyshopPackage } from "@/lib/packages";
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
@@ -160,6 +161,8 @@ export type EditorSettings = {
   packageCost?: Record<string, number>;
   /** The usual battery warranty (Settings), shown as the ticked choice until the advisor picks another. */
   batteryWarrantyMonths?: number;
+  /** Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate). */
+  costing?: import("@/lib/quote-data").PackageCosting;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -326,7 +329,7 @@ export function QuoteEditor({
   const [dirty, setDirty] = useState<Set<string>>(() => new Set());
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, commission_status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null });
+  const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, commission_status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null, film_rolls_est: quotation.film_rolls_est ?? null });
   const [discountOpen, setDiscountOpen] = useState(false);
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
@@ -881,7 +884,7 @@ export function QuoteEditor({
                 <Input id={`amount-${l.id}`} data-amount value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const raw = e.target.value.trim(); if (raw !== "" && Number(raw.replace(",", ".")) === 0 && !isComplimentary(l) && l.fee_kind !== "bank_charge") setCompAsk(l.id); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label={perUnit ? `Price per ${l.price_per}` : "Price"} placeholder="0" className={`w-24 text-right min-h-10 px-1 ${blocked && !(l.unit_price && l.unit_price > 0) && !isComplimentary(l) ? "border-red-bar" : ""}`} />
                 <span className="text-[11px] font-semibold text-muted">AED</span>
               </span>
-              {isService && (showProfit || l.outside_work) ? (
+              {isService && !l.package_key && (showProfit || l.outside_work) ? (
                 <label className="inline-flex items-center gap-1" title={l.outside_work ? "What this outside work costs us: never shown to the customer, counted against profit" : "Our own cost on this service (film, materials, consumables): never shown to the customer, counted against profit"} data-our-cost>
                   <span className="text-[10px] font-semibold text-muted">our cost</span>
                   <Input value={num(l.unit_cost)} placeholder="0" onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our cost" className="w-16 text-right min-h-10 px-1 text-xs" data-our-cost />
@@ -1505,6 +1508,42 @@ export function QuoteEditor({
                 <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
                 {commissionLine}
                 {department === "bodyshop" || Number(header.materials_cost_aed) > 0 ? <><dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd></> : null}
+                {(() => {
+                  // Section 7: a package line fills its own internal cost estimate from Settings.
+                  const pkg = lines.find((l) => l.is_active && l.package_key && !isUnchosen(l));
+                  const c = settings.costing;
+                  if (!pkg || !c) return null;
+                  const rolls = header.film_rolls_est !== null && header.film_rolls_est !== undefined ? Number(header.film_rolls_est) : (c.rollsEst ?? (c.bigCar ? c.bigRolls : 1));
+                  const est = packageCostEstimate({
+                    packagePrice: (pkg.unit_price ?? 0) * (pkg.quantity || 1),
+                    title: pkg.title,
+                    itemLabels: ((pkg.package_items ?? []) as { label?: string }[]).map((x) => String(x?.label ?? "")),
+                    rolls,
+                    filmRollPriceGloss: c.filmRollPriceGloss,
+                    filmRollPriceMatte: c.filmRollPriceMatte,
+                    tintPerCar: c.tintPerCar,
+                    ceramicExteriorPerCar: c.ceramicExteriorPerCar,
+                    ceramicInteriorPerCar: c.ceramicInteriorPerCar,
+                    consumablesPerCar: c.consumablesPerCar,
+                    hours: pkg.installer_hours ?? c.packageHours,
+                    ratePerHour: c.ratePerHour,
+                    recoveryCost: totals.recoveryCost ?? 0,
+                  });
+                  return (
+                    <>
+                      <dt className="col-span-2 pt-1 text-[11px] leading-relaxed" data-package-cost>
+                        {est.words}
+                        {c.bigCar && header.film_rolls_est === null ? <span className="text-muted"> · big car: {c.bigRolls} rolls by Settings</span> : null}
+                      </dt>
+                      {isOwner ? (
+                        <dd className="col-span-2 flex items-center justify-end gap-1 text-[11px]" data-film-rolls-box>
+                          <span className="text-muted">Film rolls this job</span>
+                          <Input value={header.film_rolls_est === null || header.film_rolls_est === undefined ? "" : String(header.film_rolls_est)} onChange={(e) => { const v = e.target.value.replace(",", "."); setHeaderField({ film_rolls_est: v === "" ? null : Number(v) }, true); }} inputMode="decimal" placeholder={String(c.bigCar ? c.bigRolls : 1)} disabled={disabled} aria-label="Film rolls for this job" className="w-16 text-right min-h-8 text-xs" data-film-rolls />
+                        </dd>
+                      ) : null}
+                    </>
+                  );
+                })()}
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
                 <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
                 <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totals.totalCost)}</dd>

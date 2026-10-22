@@ -70,7 +70,7 @@ type Body = {
   /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
   removeLine?: { id: string; keepParts?: boolean; withParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null };
+  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null; /** Section 7: the owner's per-job film rolls for the package cost estimate. */ film_rolls_est?: number | string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -509,6 +509,12 @@ export async function POST(request: NextRequest) {
     if (h.customer_note !== undefined) patch.customer_note = h.customer_note ? String(h.customer_note).trim().slice(0, 2000) : null;
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;
+    if (h.film_rolls_est !== undefined) {
+      // Section 7: the film rolls for THIS job's package estimate - the owner's call.
+      if (!isOwner) return NextResponse.json({ error: "Only the owner changes the film rolls for a job." }, { status: 403 });
+      const rolls = h.film_rolls_est === null || h.film_rolls_est === "" ? null : Math.min(9, Math.max(0.5, Number(h.film_rolls_est) || 0));
+      patch.film_rolls_est = rolls;
+    }
     if (h.expected_payment_method !== undefined) {
       const m = String(h.expected_payment_method);
       if (!["card", "link", "cash", "cheque", "transfer", "not_sure"].includes(m)) return NextResponse.json({ error: "Choose how the customer will pay." }, { status: 400 });

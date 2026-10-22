@@ -1,4 +1,4 @@
-import { Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { filmTypesOf } from "@/lib/film";
 import { saveBodyshopCosting } from "@/app/(app)/bodyshop/rolls/actions";
 import { requirePermission } from "@/lib/auth";
@@ -45,7 +45,14 @@ export default async function PackagesSettingsPage({ searchParams }: { searchPar
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Consumables per month (AED)<Input name="consumables" defaultValue={String(settings.bodyshop_consumables_monthly_aed ?? 1500)} inputMode="decimal" /></label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Bodyshop labour rate (AED/h, blank = workshop rate)<Input name="bodyshop_rate" defaultValue={String(settings.bodyshop_cost_rate_aed ?? "")} inputMode="decimal" /></label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Default installer hours (other bodyshop services)<Input name="default_installer_hours" defaultValue={String(settings.bodyshop_default_installer_hours ?? 8)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Full package installer hours<Input name="package_hours" defaultValue={String(settings.package_installer_hours ?? 80)} inputMode="decimal" data-package-hours /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Tint: cars per roll<Input name="tint_cars" defaultValue={String(settings.tint_cars_per_roll ?? 10)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Ceramic bottle price (AED)<Input name="ceramic_bottle" defaultValue={String(settings.ceramic_bottle_price_aed ?? 300)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Ceramic: cars per bottle (exterior)<Input name="ceramic_cars_ext" defaultValue={String(settings.ceramic_cars_exterior_per_bottle ?? 4)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Ceramic: cars per bottle (interior)<Input name="ceramic_cars_int" defaultValue={String(settings.ceramic_cars_interior_per_bottle ?? 5.5)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Big cars: film rolls<Input name="big_rolls" defaultValue={String(settings.big_car_film_rolls ?? 1.5)} inputMode="decimal" /></label>
           </div>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Big cars (1.5 rolls), one per line<Textarea name="big_models" rows={3} defaultValue={((settings.big_car_models ?? []) as string[]).join("\n")} data-big-models /></label>
           <div><Button type="submit" size="md" data-save-costing>Save the costing</Button></div>
         </form>
       </Card>

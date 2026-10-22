@@ -210,6 +210,8 @@ export type QuoteRow = {
   /** Every commission needs the owner's approval (his own are approved at once); a pending one already counts as a cost and only a decline removes it. */
   commission_status?: "pending" | "approved" | "declined" | null;
   commission_decision_note?: string | null;
+  /** Section 7: the owner per-job film rolls for the package cost estimate (1 or 1.5 usually). */
+  film_rolls_est?: number | null;
   commission_set_by?: string | null;
   commission_set_at?: string | null;
   commission_decided_by?: string | null;
