@@ -60,7 +60,10 @@ type Action = (formData: FormData) => void | Promise<void>;
  * never changes height whatever its state.
  */
 // Written out in full (no string building) so Tailwind sees every class. The one-line layout starts at 110rem (1760 px).
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(11rem,14rem)_6rem_4.25rem_3.25rem_5.25rem_13rem_11rem_5rem_2.5rem] min-[110rem]:grid-cols-[minmax(12rem,16rem)_6rem_16rem_11.5rem_4.25rem_3.25rem_5.25rem_13rem_11rem_5rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
+// Supplier is 14rem so a name like "Al Futtaim Auto Centre" shows whole, the part number 17.5rem for 22 characters
+// beside Copy; on two lines the Availability column (9.5rem) and the Part minimum (10rem) give that room back, so the
+// whole table still fits a 1366 px laptop without scrolling sideways.
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(10rem,14rem)_6rem_4.25rem_3.25rem_5.25rem_14rem_9.5rem_5rem_2.5rem] min-[110rem]:grid-cols-[minmax(12rem,16rem)_6rem_17.5rem_11.5rem_4.25rem_3.25rem_5.25rem_14rem_11rem_5rem_2.5rem] gap-x-1.5 gap-y-1 items-center";
 const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
 const STATUS_LINE = "col-span-2 md:col-span-9 min-[110rem]:col-span-11 md:order-3";
 /** Money for the cost bar and the line totals. */

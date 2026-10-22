@@ -194,17 +194,26 @@ await section("C parts widths and picker", async () => {
     check(`C@${width}: the supplier dropdown shows 'E2e Al Futtaim Auto Centre' in full`, fs2.ok && fs2.text === "E2e Al Futtaim Auto Centre", JSON.stringify(fs2));
     if (width === 1920) {
       const oneLine = await row.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
-      check("C@1920: everything on one line (ten columns)", oneLine === 10, `${oneLine} columns`);
+      // Part, Qty, Part number, Type, List, Disc %, Net each, Supplier, Availability, Line total, menu
+      check("C@1920: everything on one line (eleven columns)", oneLine === 11, `${oneLine} columns`);
     } else {
       const twoLines = await row.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
-      check("C@1366: the part number and type take a second line (eight columns)", twoLines === 8, `${twoLines} columns`);
+      // The same without Part number and Type, which take the second line
+      check("C@1366: the part number and type take a second line (nine columns)", twoLines === 9, `${twoLines} columns`);
     }
     const fa = await fits(page, `[data-row-key="req:${PR1}"] select[aria-label='Availability']`);
     check(`C@${width}: the availability dropdown shows its text in full`, fa.ok, JSON.stringify(fa));
     const heights = await page.locator("[data-row-key]").evaluateAll((els) => els.map((e) => e.offsetHeight));
     check(`C@${width}: every row has the same height`, heights.length >= 2 && heights.every((h) => h === heights[0]), heights.join(","));
+    // The Part column's own cap is 14 rem (224 px) on two lines and 16 rem (256 px) on one line; the name button sits
+    // inside it after the tick box and the ✓, so it stays below the cap and never stretches across the table.
     const partCol = await row.locator("[data-part-name]").evaluate((el) => el.getBoundingClientRect().width);
-    check(`C@${width}: the Part column is capped near the width of 'Upper control arm' (under 180 px)`, partCol < 180, `${Math.round(partCol)} px`);
+    const partCap = width === 1920 ? 256 : 224;
+    check(`C@${width}: the Part column stays within its cap (under ${partCap} px)`, partCol < partCap, `${Math.round(partCol)} px`);
+    const strip = await row.evaluate((el) => { const s = el.closest(".overflow-x-auto"); return s ? { scroll: s.scrollWidth, client: s.clientWidth } : null; });
+    check(`C@${width}: the whole table fits without scrolling sideways`, !!strip && strip.scroll <= strip.client, JSON.stringify(strip));
+    await row.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(projectRoot, "tests", "browser", "shots", `test-f-parts-${width}.png`), fullPage: false });
     await browser.close();
   }
   // The picker: rename with one tap, add several, custom names.
