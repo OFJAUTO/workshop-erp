@@ -1,5 +1,6 @@
 import "server-only";
 import { packageDetailsText } from "./packages";
+import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
 import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
@@ -71,6 +72,9 @@ export type InvoiceLineRow = {
   discount_percent?: number | null;
   /** Section 9: the package snapshot this line was billed from (PROTECTION PACKAGE section). */
   package_items?: unknown;
+  /** Section 10: the PPF cutting method, as approved on the quotation. */
+  cut_method?: string | null;
+  cut_note?: string | null;
 };
 
 export type PaymentRow = {
@@ -113,7 +117,7 @@ export type PaymentRow = {
 };
 
 export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, converted_from, converted_to, issue_reason, deposit_for_quotation_id, created_at";
-export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id, price_display, discount_percent, package_items";
+export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id, price_display, discount_percent, package_items, cut_method, cut_note";
 export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, deposit_quotation_id, deposit_invoice_number, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at, proof_path, client_key";
 
 export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque", transfer: "Bank transfer" };
@@ -189,7 +193,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
   };
 }
 
-export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number; /** Section 9: the package snapshot, so the invoice shows the PROTECTION PACKAGE section too. */ package_items?: unknown };
+export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number; /** Section 9: the package snapshot, so the invoice shows the PROTECTION PACKAGE section too. */ package_items?: unknown; /** Section 10: the PPF cutting method. */ cut_method?: string | null; cut_note?: string | null };
 export type DraftTotals = {
   gross: number;
   services: number;
@@ -293,7 +297,7 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   return {
     section: isPart ? "parts" : "services",
     description: withPositions(title, l.positions),
-    details: l.package_items ? packageDetailsText(l.package_items) : l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : l.details,
+    details: l.package_items ? packageDetailsText(l.package_items) : l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : lineIsPpf(l) ? [l.details, cutWords(l.cut_method, l.cut_note)].filter(Boolean).join(" · ") : l.details,
     part_number: number,
     quantity: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : l.quantity || 1,
     hours: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : null,
@@ -306,6 +310,8 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
     price_display: l.price_display ?? "normal",
     discount_percent: l.discount_percent ?? 0,
     package_items: l.package_items ?? null,
+    cut_method: l.cut_method ?? null,
+    cut_note: l.cut_note ?? null,
   };
 }
 

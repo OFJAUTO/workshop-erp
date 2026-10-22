@@ -1,3 +1,4 @@
+import { isPpfFilmItem } from "./ppf-cut";
 /**
  * Bodyshop packages (20 October 2026): the owner builds them in Settings, the advisor picks one and
  * types ONE price, the customer sees the package price with everything included and no individual
@@ -134,9 +135,12 @@ export function warrantyWords(w: string): string {
 export type PackageDoc = {
   title: string;
   subtitle: string;
-  items: { label: string; warranty: string | null }[];
+  /** note: the PPF cutting method under a PPF item (section 10). */
+  items: { label: string; warranty: string | null; note?: string | null }[];
   complimentary: string[];
   completion: string | null;
+  /** The one sentence behind the ⓘ, when a PPF item carries a cutting method. */
+  explain?: string | null;
 };
 
 const FINISHES: [RegExp, string][] = [
@@ -146,7 +150,7 @@ const FINISHES: [RegExp, string][] = [
   [/\bgloss(y)?\b/i, "Gloss finish"],
 ];
 
-export function packageDocOf(raw: unknown, opts: { car?: string | null; decorate?: (label: string) => string } = {}): PackageDoc | null {
+export function packageDocOf(raw: unknown, opts: { car?: string | null; decorate?: (label: string) => string; /** Section 10: the cutting method words shown under every PPF item, and the ⓘ sentence. */ ppfNote?: string | null; ppfExplain?: string | null } = {}): PackageDoc | null {
   const p = packageParts(raw);
   if (!p) return null;
   // "OFJ Full Protection Package - Matte Finish": the part before the dash is the title, the part after
@@ -157,8 +161,9 @@ export function packageDocOf(raw: unknown, opts: { car?: string | null; decorate
   return {
     title: (head || p.name).trim(),
     subtitle: [finish, opts.car ?? null].filter((x): x is string => !!x && !!x.trim()).join(" · "),
-    items: p.items.map((i) => ({ label: opts.decorate ? opts.decorate(i.label) : i.label, warranty: i.warranty ? warrantyWords(i.warranty) : null })),
+    items: p.items.map((i) => ({ label: opts.decorate ? opts.decorate(i.label) : i.label, warranty: i.warranty ? warrantyWords(i.warranty) : null, note: opts.ppfNote && isPpfFilmItem(i.label) ? opts.ppfNote : null })),
     complimentary: p.complimentary,
     completion: p.completion,
+    explain: opts.ppfNote ? (opts.ppfExplain ?? null) : null,
   };
 }

@@ -11,6 +11,7 @@ import { formatPlate } from "@/lib/types";
 import { loadLogo } from "./images";
 import { qrPng } from "./qr";
 import { packageDocOf } from "@/lib/packages";
+import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { DocumentTail, InfoBoxes, LinesTable, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
@@ -104,7 +105,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
       {pkgRows.map((l) => {
-        const docModel = packageDocOf(l.package_items, { car: carTitle });
+        const docModel = packageDocOf(l.package_items, { car: carTitle, ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
         const disc = Number(l.discount_percent) || 0;
         return docModel ? <PackageSection key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: round2(l.unit_price * l.quantity - l.amount_aed) } : null} /> : null;
       })}

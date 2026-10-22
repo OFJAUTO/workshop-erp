@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui";
 
-export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[] };
+export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[]; /** Section 10: the PPF cutting method badge (HAND-CUT / PRE-CUT / MIXED). */ cut?: { badge: string; note: string | null } | null };
 export type TabletPerson = { id: string; name: string; photoUrl: string | null; clockedOn: string | null };
 
 /**
@@ -75,6 +75,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               ) : <span className="h-16 w-24 shrink-0 rounded-control bg-chip" />}
               <span className="flex-1 min-w-0 flex flex-col">
                 <span className="text-xl font-extrabold tracking-[0.03em]">{c.plate} <span className="text-base font-semibold text-muted">· {c.title}{c.colour ? ` · ${c.colour}` : ""}</span></span>
+                {c.cut ? <span className="inline-flex w-fit items-center rounded-control bg-ink px-3 py-1 text-base font-extrabold tracking-[0.08em] text-white" data-cut-badge={c.cut.badge}>{c.cut.badge}{c.cut.note ? ` · ${c.cut.note}` : ""}</span> : null}
                 <span className="text-base text-muted">{c.coming ? `Coming: ${c.stage}` : c.stage}{c.onCar.length ? ` · ${c.onCar.map((p) => `${p.name}${p.clocked ? " ●" : ""}`).join(", ")}` : ""}</span>
               </span>
               <span className={`text-base font-bold ${c.tone === "red" ? "text-red" : c.tone === "amber" ? "text-amber" : "text-muted"}`}>{c.tone === "red" ? "Late" : c.tone === "amber" ? "Due today" : c.due ?? ""}</span>

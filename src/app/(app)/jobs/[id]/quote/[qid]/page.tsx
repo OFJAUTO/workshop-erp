@@ -158,6 +158,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     batteryWarrantyMonths: Number(settings.battery_warranty_months) || 12,
     technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
     bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
+    handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
     costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est),
     installerHistory: await installerHistoryFor(q.vehicle_id ?? null),

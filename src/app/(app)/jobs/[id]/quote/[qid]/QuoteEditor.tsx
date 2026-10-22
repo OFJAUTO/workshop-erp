@@ -10,6 +10,7 @@ import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry 
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
 import { packageCostEstimate } from "@/lib/package-cost";
+import { CUT_METHODS, lineIsPpf } from "@/lib/ppf-cut";
 import { ESTIMATED_COMPLETION, packageDetailsText, packageSnapshot, toSnapshot, type BodyshopPackage } from "@/lib/packages";
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
@@ -163,6 +164,8 @@ export type EditorSettings = {
   batteryWarrantyMonths?: number;
   /** Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate). */
   costing?: import("@/lib/quote-data").PackageCosting;
+  /** Section 10: the optional bespoke hand-cut surcharge (Settings, 0 = none). */
+  handcutSurcharge?: number;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -172,6 +175,7 @@ export type PartsWait = { unavailable?: { label: string; note: string | null }[]
 
 type Suggestion = { id: string; title: string; hint: string; service: Service | null };
 
+const HANDCUT_SURCHARGE_TITLE = "Bespoke hand-cut surcharge";
 const num = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 const finishedLine = (l: QuoteLine) => (isComplimentary(l) ? !!l.title.trim() : l.line_type === "labour" ? !!l.title.trim() && (l.hours ?? 0) > 0 : l.line_type === "package" ? !!l.title.trim() && (l.unit_price ?? 0) > 0 : !!l.title.trim());
 const chip = (on: boolean, extra = "") => `min-h-9 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${extra}`;
@@ -548,6 +552,14 @@ export function QuoteEditor({
     save({ addLine: { id, ...fields } });
   };
   /** Removing a job with parts under it asks once ("Also remove its parts?", default Yes); on its own, the parts stay on the quotation. */
+  /** Section 10: choosing the cut; Hand-cut adds the optional surcharge line (Settings), the others take it off. */
+  const chooseCut = (l: QuoteLine, key: "hand" | "machine" | "mixed") => {
+    patch(l.id, { cut_method: key, ...(key === "mixed" ? {} : { cut_note: null }) }, true);
+    const surcharge = settings.handcutSurcharge ?? 0;
+    const existing = lines.find((x) => x.is_active && x.title === HANDCUT_SURCHARGE_TITLE);
+    if (key === "hand" && surcharge > 0 && !existing) addLine({ line_type: "package", title: HANDCUT_SURCHARGE_TITLE, unit_price: surcharge, quantity: 1, price_per: "job" } as Partial<QuoteLine>);
+    if (key !== "hand" && existing) removeLine(existing.id);
+  };
   const removeLine = (id: string) => {
     const kids = lines.filter((l) => l.is_active && l.parent_line_id === id && blockOf(l) === "parts" && !l.left_off);
     if (kids.length) { setRemoveAsk({ id, parts: kids.length }); return; }
@@ -845,6 +857,22 @@ export function QuoteEditor({
               </span>
             ) : null}
             {l.package_items ? <span className="whitespace-pre-line px-1 text-[11px] leading-relaxed text-muted" data-package-items>{packageDetailsText(l.package_items)}</span> : null}
+            {lineIsPpf(l, svc?.bodyshop_kind ?? null) ? (
+              // Section 10: the PPF cutting method, approved with the quotation and printed under the PPF item.
+              <span className="flex flex-wrap items-center gap-1.5 px-1 pt-0.5" data-cut-method={l.cut_method ?? "hand"}>
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted">PPF cut</span>
+                {CUT_METHODS.map((c) => {
+                  const on = (l.cut_method ?? "hand") === c.key;
+                  return (
+                    <button key={c.key} type="button" disabled={disabled} aria-pressed={on} onClick={() => chooseCut(l, c.key)} className={chip(on, "min-h-8")} data-cut-chip={c.key}>
+                      {c.chip}{c.recommended ? " · Recommended" : ""}
+                    </button>
+                  );
+                })}
+                {(l.cut_method ?? "hand") === "mixed" ? <Input value={l.cut_note ?? ""} onChange={(e) => patch(l.id, { cut_note: e.target.value })} placeholder="Which panels are pre-cut?" disabled={disabled} className="min-h-8 text-xs" style={{ width: "14rem" }} aria-label="Mixed cut note" data-cut-note-box /> : null}
+                {(settings.handcutSurcharge ?? 0) > 0 && (l.cut_method ?? "hand") === "hand" && !lines.some((x) => x.is_active && x.title === HANDCUT_SURCHARGE_TITLE) ? <span className="text-[11px] text-amber">Hand-cut surcharge AED {settings.handcutSurcharge} not on the quotation yet: tap Hand-cut to add it.</span> : null}
+              </span>
+            ) : null}
             {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
                 {positions.length ? <span>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}

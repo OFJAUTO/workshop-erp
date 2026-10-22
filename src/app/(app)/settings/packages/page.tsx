@@ -51,6 +51,7 @@ export default async function PackagesSettingsPage({ searchParams }: { searchPar
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Ceramic: cars per bottle (exterior)<Input name="ceramic_cars_ext" defaultValue={String(settings.ceramic_cars_exterior_per_bottle ?? 4)} inputMode="decimal" /></label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Ceramic: cars per bottle (interior)<Input name="ceramic_cars_int" defaultValue={String(settings.ceramic_cars_interior_per_bottle ?? 5.5)} inputMode="decimal" /></label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Big cars: film rolls<Input name="big_rolls" defaultValue={String(settings.big_car_film_rolls ?? 1.5)} inputMode="decimal" /></label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-muted">PPF hand-cut surcharge (AED, 0 = none)<Input name="handcut_surcharge" defaultValue={String(settings.ppf_handcut_surcharge_aed ?? 0)} inputMode="decimal" data-handcut-surcharge /></label>
           </div>
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Big cars (1.5 rolls), one per line<Textarea name="big_models" rows={3} defaultValue={((settings.big_car_models ?? []) as string[]).join("\n")} data-big-models /></label>
           <div><Button type="submit" size="md" data-save-costing>Save the costing</Button></div>

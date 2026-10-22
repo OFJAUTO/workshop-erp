@@ -8,6 +8,7 @@ import { getCurrentDevice } from "@/lib/devices";
 import { formatDate } from "@/lib/format";
 import { formatPlate } from "@/lib/types";
 import { SectionTablet, type TabletCar, type TabletPerson } from "./SectionTablet";
+import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,9 @@ export default async function BodyshopTabletPage({ searchParams }: { searchParam
   const { data: readyRows } = jobIds.length ? await createAdminClient().from("part_items").select("id, job_id, description, received_qty, confirmed_quantity, quantity").in("job_id", jobIds).eq("is_active", true).not("ready_for_handover_at", "is", null).neq("issue_status", "confirmed") : { data: [] as { id: string; job_id: string; description: string; received_qty: number | null; confirmed_quantity: number | null; quantity: number | null }[] };
   const readyList = (readyRows ?? []) as { id: string; job_id: string; description: string; received_qty: number | null; confirmed_quantity: number | null; quantity: number | null }[];
   for (const car of cars) car.readyParts = readyList.filter((r) => r.job_id === car.jobId).map((r) => ({ id: r.id, description: r.description, quantity: Number(r.received_qty) || Number(r.confirmed_quantity ?? r.quantity) || 1 }));
+  // Section 10: the PPF team sees HOW to cut, big, on every car.
+  const cuts = await cutMethodsForJobs(jobIds);
+  for (const car of cars) { const c = cuts.get(car.jobId); car.cut = c ? { badge: c.badge, note: c.note } : null; }
   return (
     <PublicShell note={`${SECTION_LABELS[section]} tablet`}>
       <div className="flex-1 flex flex-col gap-4 p-4 sm:p-6">

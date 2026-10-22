@@ -38,6 +38,8 @@ begin
   delete from public.recovery_drivers where name like 'E2e %';
   delete from public.inbound_scans where storage_path like 'e2e/%' or from_email like '%@e2e.test';
   update public.settings set value = coalesce((select jsonb_agg(x) from jsonb_array_elements_text(value) x where x not ilike 'e2e %'), '[]'::jsonb) where key = 'commission_people';
+  delete from public.film_usage where roll_id in (select id from public.film_rolls where name ilike 'e2e %');
+  delete from public.film_rolls where name ilike 'e2e %';
   update public.quotations set commission_payment_id = null where commission_payment_id in (select id from public.commission_payments where recipient ilike 'e2e %');
   delete from public.commission_payments where recipient ilike 'e2e %';
   delete from public.notifications where job_id = any(job_ids);

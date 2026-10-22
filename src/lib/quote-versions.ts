@@ -19,6 +19,7 @@ export const COPY_FIELDS = (l: QuoteLine) => ({
   urgency: l.urgency, advisor_added: l.advisor_added, part_type: l.part_type, brand: l.brand, option_group: l.option_group, chosen: l.chosen, recovery_trips: l.recovery_trips,
   recovery_provider: l.recovery_provider, dangerous: l.dangerous, recovery_provider_kind: l.recovery_provider_kind, markup_confirmed: l.markup_confirmed,
   price_per: l.price_per ?? null, left_off: l.left_off ?? false, outside_work: l.outside_work ?? false, recovery_type: l.recovery_type ?? null, hours_estimate: l.hours_estimate ?? null,
+  cut_method: l.cut_method ?? null, cut_note: l.cut_note ?? null,
   film_colour: l.film_colour ?? null, film_code: l.film_code ?? null, tint_percent: l.tint_percent ?? null, recovery_paid_by: l.recovery_paid_by ?? null, recovery_mention_free: l.recovery_mention_free ?? false,
 });
 

@@ -49,6 +49,21 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
           <div><span className="block text-xs text-muted">Profit</span><span className="text-xl font-extrabold">{aedText(s.bodyshop.profit)}</span></div>
           <div><span className="block text-xs text-muted">Materials vs price</span><span className="text-xl font-extrabold">{s.bodyshop.materialsPercent !== null ? `${s.bodyshop.materialsPercent}%` : "–"}</span></div>
         </div>
+        {s.bodyshop.byCut?.length ? (
+          <div className="flex flex-col gap-1" data-ppf-by-cut>
+            <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">PPF by cutting method</span>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Method</th><th className="py-1 pr-3 text-right">Jobs</th><th className="py-1 pr-3 text-right">PPF hours</th><th className="py-1 pr-3 text-right">Film (m)</th><th className="py-1 pr-3 text-right">Hours per job</th><th className="py-1 text-right">Film per job (m)</th></tr></thead>
+                <tbody>
+                  {s.bodyshop.byCut.map((r) => (
+                    <tr key={r.key} className="border-t border-line"><td className="py-1.5 pr-3 font-bold">{r.label}</td><td className="py-1.5 pr-3 text-right">{r.jobs}</td><td className="py-1.5 pr-3 text-right">{r.hours}</td><td className="py-1.5 pr-3 text-right">{r.metres}</td><td className="py-1.5 pr-3 text-right">{r.hoursPerJob ?? "–"}</td><td className="py-1.5 text-right">{r.metresPerJob ?? "–"}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
         {s.bodyshop.cars.length ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

@@ -726,7 +726,18 @@ const pkg = StyleSheet.create({
   subText: { fontSize: px(11), fontWeight: 800, color: INK },
 });
 
-export type PackageSectionDoc = { title: string; subtitle: string; items: { label: string; warranty: string | null }[]; complimentary: string[]; completion: string | null };
+export type PackageSectionDoc = { title: string; subtitle: string; items: { label: string; warranty: string | null; note?: string | null }[]; complimentary: string[]; completion: string | null; explain?: string | null };
+
+/** A small drawn ⓘ (the document font has no such glyph). */
+function InfoMark({ size = 9 }: { size?: number }) {
+  return (
+    <Svg width={px(size)} height={px(size)} viewBox="0 0 12 12">
+      <Path d="M6 1.2 A4.8 4.8 0 1 1 5.99 1.2 Z" stroke={GREY} strokeWidth={1} fill="none" />
+      <Path d="M6 5.3 L6 9" stroke={GREY} strokeWidth={1.3} />
+      <Path d="M6 3.2 L6 3.9" stroke={GREY} strokeWidth={1.4} />
+    </Svg>
+  );
+}
 
 export function PackageSection({ doc, price, subtotal, discount = null }: { doc: PackageSectionDoc; price: number; subtotal: number; /** The line's own discount, in bold green under the price. */ discount?: { percent: number | null; amount: number } | null }) {
   return (
@@ -758,7 +769,16 @@ export function PackageSection({ doc, price, subtotal, discount = null }: { doc:
           {doc.items.map((i, k) => (
             <View key={k} style={pkg.item} wrap={false}>
               <Tick />
-              <Text style={pkg.itemText}>{i.label}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={pkg.itemText}>{i.label}</Text>
+                {i.note ? <Text style={{ fontSize: px(9.5), fontWeight: 700, color: INK, marginTop: px(1.5) }}>{i.note}</Text> : null}
+                {i.note && doc.explain && doc.items.findIndex((x) => !!x.note) === k ? (
+                  <View style={{ flexDirection: "row", alignItems: "flex-start", gap: px(4), marginTop: px(2) }}>
+                    <InfoMark />
+                    <Text style={{ flex: 1, fontSize: px(8.5), color: GREY }}>{doc.explain}</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text style={pkg.warranty}>{i.warranty ?? ""}</Text>
             </View>
           ))}

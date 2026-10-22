@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound } from "next/navigation";
@@ -93,6 +94,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const stageTone = (s: StageRow) => (s.status === "done" ? "done" : s.due_date && s.due_date < today ? "red" : s.due_date === today ? "amber" : "normal");
   const kindWords = kinds.map((k) => BODYSHOP_KIND_LABELS[k as BodyshopKind] ?? k);
 
+  // Section 10: the PPF cutting method, big, for the PPF team.
+  const jobCut = (await cutMethodsForJobs([jobId])).get(jobId) ?? null;
   return (
     <>
       <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} />
@@ -103,6 +106,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <span className="flex flex-wrap items-center gap-2">
             <span>{job.job_number}{v?.colour ? ` · ${v.colour}` : ""}{seesMoney ? ` · ${customerName}` : ""}</span>
             <VinCopy vin={vinRow?.vin ?? null} />
+            {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-white" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
             <Badge tone={job.status === "closed" ? "neutral" : job.status === "ready" ? "green" : "ink"}>{statusLabel}</Badge>
             {job.promised_at ? <Badge tone={job.promised_at < today && job.is_open ? "red" : job.promised_at === today ? "amber" : "neutral"}>Handover {formatDate(job.promised_at)}</Badge> : null}
             {kindWords.length ? <span className="text-sm text-muted">{kindWords.join(", ")}{film?.colour || film?.code ? ` · film ${[film.colour, film.code].filter(Boolean).join(" ")}` : ""}{tintPercent ? ` · tint ${tintPercent}%` : ""}</span> : null}

@@ -99,6 +99,9 @@ export type QuoteLine = {
   /** On a revised quotation: the line of the earlier version this one was copied from (work lines follow it). */
   revised_from_line_id?: string | null;
   /** Bodyshop lines: the film colour and code (coloured PPF), or the tint shade. */
+  /** Section 10: the PPF cutting method (hand / machine / mixed) and the note for Mixed. */
+  cut_method?: "hand" | "machine" | "mixed" | null;
+  cut_note?: string | null;
   film_colour?: string | null;
   film_code?: string | null;
   tint_percent?: number | null;

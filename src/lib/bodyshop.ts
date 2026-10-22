@@ -1,4 +1,5 @@
 import { getSettings } from "@/lib/settings";
+import { ppfByCutMethod } from "./ppf-cut-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { countedMinutes, type WorkingTime } from "@/lib/working-time";
 import "server-only";
@@ -820,7 +821,7 @@ export async function bodyshopHourly(settings: Settings): Promise<{ late: number
 /* The owner's monthly block                                                                                       */
 /* ------------------------------------------------------------------------------------------------------------ */
 
-export type BodyshopMonth = { inProgress: number; late: number; avgDays: number | null; profit: number; materialsPercent: number | null; cars: { jobId: string; jobNumber: string; plate: string; price: number; materials: number; labour: number; commission: number; bank: number; profit: number }[] };
+export type BodyshopMonth = { inProgress: number; late: number; avgDays: number | null; profit: number; materialsPercent: number | null; cars: { jobId: string; jobNumber: string; plate: string; price: number; materials: number; labour: number; commission: number; bank: number; profit: number }[]; /** Section 10: PPF hours and film by cutting method. */ byCut?: { key: string; label: string; jobs: number; hours: number; metres: number; hoursPerJob: number | null; metresPerJob: number | null }[] };
 
 /** Cars in progress and late today, and for the cars handed over in the month: days, price, materials, clocked labour, profit. */
 export async function bodyshopMonth(settings: Settings, fromIso: string, toIso: string): Promise<BodyshopMonth> {
@@ -847,7 +848,9 @@ export async function bodyshopMonth(settings: Settings, fromIso: string, toIso: 
   const days = rows.filter((j) => j.gated_out_at).map((j) => (Date.parse(j.gated_out_at!) - Date.parse(j.gated_in_at)) / 86400000);
   const price = cars.reduce((a, c) => a + c.price, 0);
   const materials = cars.reduce((a, c) => a + c.materials, 0);
-  return { inProgress, late, avgDays: days.length ? Math.round((days.reduce((a, b) => a + b, 0) / days.length) * 10) / 10 : null, profit: round2(cars.reduce((a, c) => a + c.profit, 0)), materialsPercent: price > 0 ? Math.round((materials / price) * 1000) / 10 : null, cars };
+  // Section 10: PPF hours and film by cutting method (hand-cut against pre-cut).
+  const byCut = await ppfByCutMethod(fromIso, toIso);
+  return { inProgress, late, avgDays: days.length ? Math.round((days.reduce((a, b) => a + b, 0) / days.length) * 10) / 10 : null, profit: round2(cars.reduce((a, c) => a + c.profit, 0)), materialsPercent: price > 0 ? Math.round((materials / price) * 1000) / 10 : null, cars, byCut };
 }
 
 /** Clocked labour per SECTION on one job: "PPF: 4 people · 96 h · AED x" for the owner's summary. */

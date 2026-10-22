@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PackageCard } from "@/components/PackageCard";
 import { packageDocOf } from "@/lib/packages";
+import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -130,7 +131,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
           {totals.deposit ? <span className="text-sm font-bold" data-deposit-required>Deposit required: {aed(totals.deposit)}</span> : null}
         </div>
         {lines.filter((l) => !!l.package_key).map((l) => {
-          const docModel = packageDocOf(l.package_items, { car: carName || null });
+          const docModel = packageDocOf(l.package_items, { car: carName || null, ppfNote: lineIsPpf(l) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
           return docModel ? <PackageCard key={l.id} doc={docModel} price={linePrice(l)} subtotal={lineTotal(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
         })}
         {hasPpf ? (

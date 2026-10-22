@@ -24,6 +24,8 @@ const DEFAULTS = {
   ceramic_cars_exterior_per_bottle: 4,
   ceramic_cars_interior_per_bottle: 5.5,
   package_installer_hours: 80,
+  // Section 10: an optional surcharge for bespoke hand-cut PPF (0 = none).
+  ppf_handcut_surcharge_aed: 0,
   big_car_film_rolls: 1.5,
   big_car_models: ["G-Class", "Cullinan", "Urus", "Escalade", "Range Rover LWB", "GLS", "Phantom"],
   /** The bodyshop labour cost rate per hour; blank uses the workshop rate. */

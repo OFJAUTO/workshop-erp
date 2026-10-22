@@ -27,6 +27,9 @@ type LinePatch = {
   hours_estimate?: number | string | null;
   /** A service done outside: its cost is typed, never in the labour discount. */
   outside_work?: boolean;
+  /** Section 10: the PPF cutting method and its note. */
+  cut_method?: string | null;
+  cut_note?: string | null;
   /** Bodyshop lines: film colour and code, or the tint shade. */
   film_colour?: string | null;
   film_code?: string | null;
@@ -179,6 +182,8 @@ export async function POST(request: NextRequest) {
     if (p.outside_work !== undefined) out.outside_work = !!p.outside_work;
     if (p.package_key !== undefined) out.package_key = p.package_key ? String(p.package_key).slice(0, 60) : null;
     if (p.package_items !== undefined) out.package_items = p.package_items ? toSnapshot(p.package_items) : null;
+    if (p.cut_method !== undefined) out.cut_method = p.cut_method === "hand" || p.cut_method === "machine" || p.cut_method === "mixed" ? p.cut_method : null;
+    if (p.cut_note !== undefined) out.cut_note = p.cut_note ? String(p.cut_note).trim().slice(0, 120) || null : null;
     if (p.film_colour !== undefined) out.film_colour = p.film_colour ? String(p.film_colour).trim().slice(0, 60) || null : null;
     if (p.film_code !== undefined) out.film_code = p.film_code ? String(p.film_code).trim().slice(0, 40) || null : null;
     if (p.tint_percent !== undefined) { const tp = n(p.tint_percent); out.tint_percent = tp === null ? null : Math.min(100, Math.max(1, Math.round(tp))); }

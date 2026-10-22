@@ -34,7 +34,20 @@ export function PackageCard({ doc, price, subtotal, discount = null }: { doc: Pa
               <li key={i.label} className="flex items-start justify-between gap-3 border-b border-[#E4E4E7] py-2.5 text-[15px]" data-package-item-doc>
                 <span className="flex min-w-0 items-start gap-2">
                   <span className="font-extrabold text-green" aria-hidden>✓</span>
-                  <span>{i.label}</span>
+                  <span className="flex min-w-0 flex-col">
+                    <span>{i.label}</span>
+                    {i.note ? (
+                      <span className="text-xs font-bold" data-cut-note>
+                        {i.note}
+                        {doc.explain ? (
+                          <details className="inline">
+                            <summary className="ml-1 inline cursor-pointer list-none text-[#5F6368]" aria-label="What does this mean?" data-cut-info>ⓘ</summary>
+                            <span className="mt-1 block text-xs font-normal text-[#5F6368]" data-cut-explain>{doc.explain}</span>
+                          </details>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </span>
                 </span>
                 <span className="shrink-0 text-right text-sm text-[#5F6368]">{i.warranty ?? ""}</span>
               </li>

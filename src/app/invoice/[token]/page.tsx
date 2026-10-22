@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { PackageCard } from "@/components/PackageCard";
 import { packageDocOf } from "@/lib/packages";
+import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { PayNowButton } from "@/components/PayNowButton";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
@@ -126,7 +127,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         )}
         {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}
         {bundle.lines.filter((l) => l.section === "services" && !!l.package_items).map((l) => {
-          const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null) });
+          const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
           const disc = Number(l.discount_percent) || 0;
           return docModel ? <PackageCard key={l.id} doc={docModel} price={Math.round(l.unit_price * l.quantity * 100) / 100} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: Math.round((l.unit_price * l.quantity - l.amount_aed) * 100) / 100 } : null} /> : null;
         })}
