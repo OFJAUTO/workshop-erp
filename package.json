@@ -79,7 +79,8 @@
     "test:pkgdisplay9": "node --env-file=.env.local tests/browser/test-pkgdisplay9.mjs",
     "test:ppfcut10": "node --env-file=.env.local tests/browser/test-ppfcut10.mjs",
     "test:tint11": "node --env-file=.env.local tests/browser/test-tint11.mjs",
-    "test:warranty12": "node --env-file=.env.local tests/browser/test-warranty12.mjs"
+    "test:warranty12": "node --env-file=.env.local tests/browser/test-warranty12.mjs",
+    "test:doc13": "node --env-file=.env.local tests/browser/test-doc13.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

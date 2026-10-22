@@ -420,8 +420,8 @@ export function DiscountLine({ amount, currency, label = "Discount on labour and
   if (!amount) return null;
   return (
     <View style={styles.discountLine} wrap={false}>
-      <Text>{label}</Text>
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
+      <Text style={[LABEL_CELL, { fontWeight: 800, color: GREEN }]}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}>
         <Text style={{ fontWeight: 800 }}>− </Text>
         <Amount value={amount} currency={currency} weight={800} />
       </View>
@@ -430,14 +430,20 @@ export function DiscountLine({ amount, currency, label = "Discount on labour and
 }
 
 export type TotalRow = { label: string; value: number; bold?: boolean; negative?: boolean };
+/**
+ * Section 13 (21 October): a totals row never lets a long label run over its amount. The label takes the room left
+ * and wraps onto a second line ("Labour and services discount (10%)"); the amount keeps its own space on the right.
+ */
+const LABEL_CELL = { flex: 1, paddingRight: px(8) } as const;
+const AMOUNT_CELL = { flexShrink: 0, textAlign: "right" as const } as const;
 export type StatusBox = { title: string; value?: number | null; note?: string | null };
 
 /** The totals on the right: gross, discount in bold, taxable, VAT, "Total AED" on a thick rule, paid, then the outlined Balance due box. */
 export function TotalsBlock({ rows, total, after = [], status, currency }: { rows: TotalRow[]; total: { label: string; value: number }; after?: TotalRow[]; status?: StatusBox | null; currency: Currency }) {
   const row = (r: TotalRow) => (
     <View key={r.label} style={styles.tRow}>
-      <Text style={r.bold ? styles.tBold : styles.tLabel}>{r.label}</Text>
-      <Text style={r.bold ? styles.tBold : {}}>{r.negative ? "−" : ""}{moneyDigits(r.value)}</Text>
+      <Text style={[r.bold ? styles.tBold : styles.tLabel, LABEL_CELL]}>{r.label}</Text>
+      <Text style={[r.bold ? styles.tBold : {}, AMOUNT_CELL]}>{r.negative ? "−" : ""}{moneyDigits(r.value)}</Text>
     </View>
   );
   return (
@@ -646,24 +652,24 @@ export function TotalsBox({ sections, green = [], net, vatPercent, vat, total, t
       <View style={sec.totals}>
         {sections.map((r) => (
           <View key={r.label} style={sec.tRow}>
-            <Text style={[sec.tLabel, { flex: 1, paddingRight: px(8) }]}>{r.label}</Text>
-            <Text>{moneyDigits(r.value)}</Text>
+            <Text style={[sec.tLabel, LABEL_CELL]}>{r.label}</Text>
+            <Text style={AMOUNT_CELL}>{moneyDigits(r.value)}</Text>
           </View>
         ))}
         {green.filter((r) => r.value).map((r) => (
           <View key={r.label} style={sec.tRow}>
-            <Text style={sec.tGreen}>{r.label}</Text>
-            <Text style={sec.tGreen}>− {currency === "aed" ? "AED " : ""}{moneyDigits(r.value)}</Text>
+            <Text style={[sec.tGreen, LABEL_CELL]}>{r.label}</Text>
+            <Text style={[sec.tGreen, AMOUNT_CELL]}>− {currency === "aed" ? "AED " : ""}{moneyDigits(r.value)}</Text>
           </View>
         ))}
         <View style={sec.tRule} />
         <View style={sec.tRow}>
-          <Text style={sec.tLabel}>Subtotal before VAT</Text>
-          <Text>{moneyDigits(net)}</Text>
+          <Text style={[sec.tLabel, LABEL_CELL]}>Subtotal before VAT</Text>
+          <Text style={AMOUNT_CELL}>{moneyDigits(net)}</Text>
         </View>
         <View style={sec.tRow}>
-          <Text style={sec.tLabel}>VAT {vatPercent}%</Text>
-          <Text>{moneyDigits(vat)}</Text>
+          <Text style={[sec.tLabel, LABEL_CELL]}>VAT {vatPercent}%</Text>
+          <Text style={AMOUNT_CELL}>{moneyDigits(vat)}</Text>
         </View>
         <View style={sec.tGrand}>
           <Text>{totalLabel}{currency === "aed" ? " AED" : ""}</Text>
@@ -671,8 +677,8 @@ export function TotalsBox({ sections, green = [], net, vatPercent, vat, total, t
         </View>
         {after.map((r) => (
           <View key={r.label} style={sec.tRow}>
-            <Text style={r.bold ? styles.tBold : sec.tLabel}>{r.label}</Text>
-            <Text style={r.bold ? styles.tBold : {}}>{r.negative ? "−" : ""}{moneyDigits(r.value)}</Text>
+            <Text style={[r.bold ? styles.tBold : sec.tLabel, LABEL_CELL]}>{r.label}</Text>
+            <Text style={[r.bold ? styles.tBold : {}, AMOUNT_CELL]}>{r.negative ? "−" : ""}{moneyDigits(r.value)}</Text>
           </View>
         ))}
       </View>

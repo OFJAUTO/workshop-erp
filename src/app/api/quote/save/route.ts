@@ -223,7 +223,9 @@ export async function POST(request: NextRequest) {
     }
     if (p.discount_reason !== undefined) out.discount_reason = p.discount_reason ? String(p.discount_reason).trim().slice(0, 300) : null;
     if (p.visible_to_customer !== undefined) {
-      if (type !== "recovery" && type !== "other") return "Only Recovery and Other lines can be hidden from the customer.";
+      // Section 13: any line can be an internal cost only (film, consumables) - never a system fee, never a safety finding.
+      if (type === "fee") return "This line is set by the system.";
+      if (p.visible_to_customer === false && current?.dangerous) return "A dangerous finding is always shown to the customer.";
       out.visible_to_customer = !!p.visible_to_customer;
     }
     if (p.urgency !== undefined) {

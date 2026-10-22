@@ -47,7 +47,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                   <li key={l.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2" data-locked-line data-line-id={l.id}>
                     <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted">{i + 1}</span>
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="flex flex-wrap items-center gap-2"><span className="font-semibold uppercase">{l.title || "(no name)"}</span>{l.urgency === "urgent" ? <Badge tone="red">Urgent</Badge> : null}{l.dangerous ? <Badge tone="red">Dangerous</Badge> : null}{l.positions?.length ? <span className="text-xs text-muted">{l.positions.join(", ")}</span> : null}</span>
+                      <span className="flex flex-wrap items-center gap-2"><span className="font-semibold uppercase">{l.title || "(no name)"}</span>{l.urgency === "urgent" ? <Badge tone="red">Urgent</Badge> : null}{l.dangerous ? <Badge tone="red">Dangerous</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.positions?.length ? <span className="text-xs text-muted">{l.positions.join(", ")}</span> : null}</span>
                       {detailOf(l) ? <span className="text-xs text-muted">{detailOf(l)}</span> : null}
                       {l.details ? <span className="text-xs text-muted">Note: {l.details}</span> : null}
                       {showProfit && l.outside_work ? <span className="text-xs text-muted">Outside work, our cost {aed(lineCost(l))}</span> : null}
@@ -74,7 +74,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                     return (
                       <tr key={l.id} className={off ? "opacity-50" : ""} data-locked-line data-line-id={l.id}>
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{i + 1}</td>
-                        <td className="py-2 pr-2 align-top"><span className="font-semibold uppercase">{l.title}</span>{l.positions?.length ? <span className="ml-2 text-xs text-muted">{l.positions.join(", ")}</span> : null}{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
+                        <td className="py-2 pr-2 align-top"><span className="font-semibold uppercase">{l.title}</span>{l.positions?.length ? <span className="ml-2 text-xs text-muted">{l.positions.join(", ")}</span> : null}{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
                         {showProfit ? <td className="py-2 pr-2 align-top text-right text-muted">{aed(l.unit_cost)}</td> : null}
                         <td className="py-2 pr-2 align-top text-right">{off ? "" : aed(lineUnitPrice(l))}</td>
@@ -96,7 +96,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                     <li key={l.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2" data-locked-line data-line-id={l.id}>
                       <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted">{i + 1}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{l.title}</span>{hidden ? <Badge tone="neutral">Internal only</Badge> : null}</span>
+                        <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{l.title}</span>{hidden ? <Badge tone="neutral">Internal cost only</Badge> : null}</span>
                         {(l.quantity || 1) > 1 ? <span className="text-xs text-muted">{l.quantity} × {aed(l.unit_price)}</span> : null}
                         {hidden && showProfit ? <span className="text-xs text-muted">Costs us {aed(lineCost(l))}</span> : null}
                         {l.details ? <span className="text-xs text-muted">Note: {l.details}</span> : null}

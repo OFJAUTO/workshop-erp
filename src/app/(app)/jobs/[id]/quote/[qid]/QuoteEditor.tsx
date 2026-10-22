@@ -19,7 +19,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { INTERNAL_ONLY_LABEL, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -822,6 +822,8 @@ export function QuoteEditor({
     const discOpen = openRows.has(`disc-${l.id}`);
     // An Est. h over 50 is not hours (the rate was typed there once): amber on the line, the quoted hours stand in.
     const estSuspect = showProfit && estimateLineSuspect(l);
+    // Section 13: an internal cost only (film, consumables): never on a customer document, its cost still counted.
+    const internal = l.visible_to_customer === false;
     const amountBox = (extra: string) => `w-16 text-right min-h-10 px-1 ${extra}`;
     return (
       <div key={l.id} id={`item-line-${l.id}`} className="flex flex-col">
@@ -877,8 +879,9 @@ export function QuoteEditor({
                 {(settings.handcutSurcharge ?? 0) > 0 && (l.cut_method ?? "hand") === "hand" && !lines.some((x) => x.is_active && x.title === HANDCUT_SURCHARGE_TITLE) ? <span className="text-[11px] text-amber">Hand-cut surcharge AED {settings.handcutSurcharge} not on the quotation yet: tap Hand-cut to add it.</span> : null}
               </span>
             ) : null}
-            {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect ? (
+            {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect || internal ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
+                {internal ? <span data-internal-badge><Badge tone="neutral">Internal cost only · not on the customer&apos;s documents</Badge></span> : null}
                 {positions.length ? <span>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}
                 {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
                 {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
@@ -937,7 +940,7 @@ export function QuoteEditor({
               ) : null}
             </>
           )}
-          {isComplimentary(l) ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-green" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
+          {internal ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-muted" data-internal-line={l.id}>Internal</span> : isComplimentary(l) ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-green" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
           {!disabled && labourLines.length > 1 ? (
             <span className="inline-flex flex-col" aria-label="Move this line">
               <button type="button" disabled={index === 0} onClick={() => moveLine(l, "up")} aria-label="Move up" data-move-up={l.id} className="h-5 w-7 rounded-t-control border border-line text-[10px] font-bold leading-none text-muted disabled:opacity-30">▲</button>
@@ -972,6 +975,7 @@ export function QuoteEditor({
                       </>
                     )
                   ) : null}
+                  {!l.dangerous ? <MenuItem label={internal ? "Show to the customer" : INTERNAL_ONLY_LABEL} onClick={() => { setMenuFor(null); patch(l.id, { visible_to_customer: internal }, true); }} /> : null}
                   <MenuItem label="Remove" red onClick={() => { setMenuFor(null); removeLine(l.id); }} />
                 </FloatingMenu>
               ) : null}
@@ -1091,14 +1095,14 @@ export function QuoteEditor({
           <label className={boxLabel}>Qty<Input value={num(l.quantity)} onChange={(e) => patch(l.id, { quantity: Math.max(1, Math.round(Number(e.target.value) || 1)) })} inputMode="numeric" disabled={disabled} aria-label="Quantity" className="w-14 text-right min-h-9" /></label>
           <span className={boxLabel}>Customer<span className="flex gap-1">
             <button type="button" disabled={disabled} onClick={() => patch(l.id, { visible_to_customer: true }, true)} className={chip(!hidden)}>Show</button>
-            <button type="button" disabled={disabled} onClick={() => patch(l.id, { visible_to_customer: false }, true)} className={chip(hidden)}>Hide</button>
+            <button type="button" disabled={disabled} onClick={() => patch(l.id, { visible_to_customer: false }, true)} className={chip(hidden)} title={INTERNAL_ONLY_LABEL} data-internal-chip>Internal cost only</button>
           </span></span>
           <span className="ml-auto w-28 text-right font-bold self-center">{aed(total)}</span>
           {!disabled ? <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 px-2 text-xs font-bold text-red self-center" aria-label="Remove">×</button> : null}
         </div>
         {!disabled ? <button type="button" onClick={() => setOpenRows((s) => { const n = new Set(s); const k = `details-${l.id}`; if (n.has(k)) n.delete(k); else n.add(k); return n; })} className="self-start text-[11px] font-semibold text-muted underline underline-offset-4">{l.details ? "Note shown to the customer" : "Add a note for the customer"}</button> : null}
         {openRows.has(`details-${l.id}`) ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} aria-label="Note for the customer" className="min-h-16" /> : null}
-        {hidden ? <span className="text-xs text-muted">Hidden. Internal cost only, {aed(lineCost(l))}.</span> : null}
+        {hidden ? <span className="text-xs text-muted">Internal cost only: never on the customer&apos;s documents; costs us {aed(lineCost(l))}, counted in the profit.</span> : null}
       </div>
     );
   };
@@ -1376,6 +1380,7 @@ export function QuoteEditor({
                           </div>
                           <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-[11px] text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
+                            {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
                             {part?.cost_aed === null && !leftOff ? <Badge tone="amber">Waiting for the price</Badge> : null}
                             {veryHigh && !unchosen ? <Badge tone="amber">{l.markup_confirmed ? `Markup ${markup}%, confirmed` : "Confirm the markup"}</Badge> : null}
                             {optionOff ? <span>Option, not used</span> : null}
@@ -1420,6 +1425,7 @@ export function QuoteEditor({
                               <button type="button" onClick={() => patch(l.id, { left_off: true }, true)} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-muted whitespace-nowrap">Leave off</button>
                             )
                           ) : null}
+                          {!disabled && !leftOff ? <button type="button" onClick={() => patch(l.id, { visible_to_customer: l.visible_to_customer === false }, true)} title={INTERNAL_ONLY_LABEL} className="mt-1 block min-h-9 w-full text-right text-[11px] font-semibold text-muted underline underline-offset-4 whitespace-nowrap" data-internal-toggle={l.id}>{l.visible_to_customer === false ? "Show to customer" : "Internal only"}</button> : null}
                         </td>
                       </tr>
                     );
@@ -1467,6 +1473,7 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               {!otherLines.some((l) => l.line_type === "recovery") ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "recovery" })}>+ Recovery</Button> : null}
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "" })}>+ Other charge</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "", visible_to_customer: false, quantity: 1 })} title={INTERNAL_ONLY_LABEL} data-add-internal>+ Internal cost</Button>
               {!otherLines.some((l) => /consumables/i.test(l.title)) ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "Consumables", unit_price: settings.consumablesDefault || null })}>+ Consumables</Button> : null}
               {settings.inspectionFee > 0 && !otherLines.some((l) => /inspection fee/i.test(l.title)) ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "Inspection fee", unit_price: settings.inspectionFee, quantity: 1, visible_to_customer: true })}>+ Inspection fee ({aed(settings.inspectionFee)})</Button> : null}
             </div>

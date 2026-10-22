@@ -375,10 +375,23 @@ export function parseHours(text: string | number | null | undefined): number | n
 export function hasCostFloor(l: Pick<QuoteLine, "line_type" | "unit_cost">) {
   return (l.line_type === "part" || l.line_type === "other") && l.unit_cost !== null && l.unit_cost !== undefined;
 }
-/** A line the customer pays nothing for (hidden recovery or other): its cost still counts against profit. */
+/**
+ * A line the customer never sees and pays nothing for - "Internal cost only – hide from customer" (section 13): any
+ * labour, service, part, other or recovery line, and the automatic bank-charge fee. Its cost still counts against
+ * profit; it never appears on a customer document.
+ */
 export function isHidden(l: Pick<QuoteLine, "line_type" | "visible_to_customer"> & { fee_kind?: string | null }) {
   if (l.fee_kind === "bank_charge") return true;
-  return (l.line_type === "recovery" || l.line_type === "other") && l.visible_to_customer === false;
+  return l.line_type !== "fee" && l.visible_to_customer === false;
+}
+
+/** The one name for the option, on the line menus and the Other charges row. */
+export const INTERNAL_ONLY_LABEL = "Internal cost only – hide from customer";
+
+/** A name that says nothing: blank, or just "PART" / "PARTS" (section 13, flagged in Before sending). */
+export function isNamelessTitle(title: string | null | undefined): boolean {
+  const t = String(title ?? "").trim();
+  return !t || /^parts?$/i.test(t);
 }
 /** A line given free on purpose (one priced package line + its included items): sells for nothing,
  *  passes "Before sending", keeps its internal cost, and prints the word instead of a price. */
@@ -671,6 +684,8 @@ export function sendBlockers(
   if (q.kind === "quotation" && settings.unquotedFindings) out.push({ key: "findings", label: `${settings.unquotedFindings} finding${settings.unquotedFindings === 1 ? "" : "s"} not quoted: add the labour or mark "Not quoting this"` });
   for (const l of active) {
     const short = (l.title || "Line without a description").length > 30 ? (l.title || "Line without a description").slice(0, 28) + "…" : l.title || "Line without a description";
+    // Section 13: a line the customer sees must say what it is - never blank, never just "PART".
+    if (!isHidden(l) && isNamelessTitle(l.title) && !(!(l.title ?? "").trim() && (l.line_type === "labour" || l.line_type === "other"))) out.push({ key: `line-${l.id}`, label: (l.title ?? "").trim() ? `A line is named just "${l.title.trim()}": write what it is` : "A line has no name: write what it is" });
     if (l.line_type === "part") {
       const p = l.part_item_id ? parts.find((x) => x.id === l.part_item_id) ?? null : null;
       if (p) {
@@ -678,12 +693,12 @@ export function sendBlockers(
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "+ Add a part"` });
       else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
-      if (settings.confirmPercent && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
+      if (settings.confirmPercent && !isHidden(l) && (l.markup_percent ?? 0) >= settings.confirmPercent && !l.markup_confirmed) out.push({ key: `line-${l.id}`, label: `${short}: confirm the markup of ${l.markup_percent}%` });
     }
     const comp = isComplimentary(l);
     if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });
     if (l.line_type === "labour" && !comp && !(l.hours && l.hours > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the hours` });
-    if ((l.line_type === "package" || l.line_type === "fee") && !comp && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
+    if ((l.line_type === "package" || l.line_type === "fee") && !comp && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
     if (l.line_type === "other" && !(l.title ?? "").trim()) out.push({ key: `line-${l.id}`, label: "An Other charge has no description" });
     if (l.line_type === "other" && !comp && !hasCostFloor(l) && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price` });
     if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && (l.unit_cost === null || l.unit_cost === undefined)) out.push({ key: `line-${l.id}`, label: `${short}: enter the cost per trip` });
