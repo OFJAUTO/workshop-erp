@@ -49,12 +49,24 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** "3 reminders · 1 quotation expired", or "Nothing due". */
+/** "3 approval reminders · 1 quotation expired", or "Nothing due". */
 function housekeepingWords(report: Record<string, number>): string {
-  const words: Record<string, string> = { videosDeleted: "video removed", remindersSent: "approval reminder", appointmentReminders: "booking reminder", inspectionWarnings: "inspection warning", assignmentWarnings: "assignment warning", quotesExpired: "quotation expired", estimateFollowUps: "estimate follow-up" };
+  // Plain words for every count the run reports: [one, more than one].
+  const words: Record<string, [string, string]> = {
+    videosDeleted: ["old video removed", "old videos removed"], remindersSent: ["approval reminder", "approval reminders"], appointmentReminders: ["booking reminder", "booking reminders"],
+    inspectionWarnings: ["inspection warning", "inspection warnings"], assignmentWarnings: ["assignment warning", "assignment warnings"], quotesExpired: ["quotation expired", "quotations expired"],
+    estimateFollowUps: ["estimate follow-up", "estimate follow-ups"], followUps: ["gate-out follow-up", "gate-out follow-ups"], partsLate: ["late part", "late parts"], partsDelayed: ["delayed part", "delayed parts"],
+    partsNoHome: ["part with no home", "parts with no home"], clocksPaused: ["clock paused at end of shift", "clocks paused at end of shift"], clocksOvernight: ["clock left overnight", "clocks left overnight"],
+    breaksPaused: ["clock paused for a break", "clocks paused for a break"], planningReminders: ["planning reminder", "planning reminders"], docReminders: ["document-not-sent reminder", "document-not-sent reminders"],
+    paymentWaiting: ["proforma waiting for payment", "proformas waiting for payment"], depositOverdue: ["deposit overdue", "deposits overdue"], deliveryWaiting: ["delivery reminder", "delivery reminders"],
+    kmRecalc: ["trip distance checked", "trip distances checked"], kmFound: ["trip distance found", "trip distances found"], aftercareReminded: ["after-care reminder", "after-care reminders"],
+    aftercareOverdue: ["after-care check overdue", "after-care checks overdue"], redTaskBells: ["red task bell", "red task bells"], orderNowOverdue: ["LPO to order", "LPOs to order"],
+    invoiceMissingReminders: ["missing supplier invoice reminder", "missing supplier invoice reminders"], stockLow: ["low stock alert", "low stock alerts"], stockCount: ["monthly stock count request", "monthly stock count requests"],
+    bodyshopLate: ["late bodyshop stage", "late bodyshop stages"], bodyshopDueOut: ["bodyshop car due out tomorrow", "bodyshop cars due out tomorrow"], monthlySummary: ["monthly summary sent", "monthly summaries sent"],
+  };
   const parts = Object.entries(report)
     .filter(([, n]) => n > 0)
-    .map(([k, n]) => (words[k] ? `${n} ${words[k]}${n === 1 ? "" : "s"}` : `${k} ${n}`));
+    .map(([k, n]) => `${n} ${words[k] ? words[k][n === 1 ? 0 : 1] : k}`);
   return parts.length ? parts.slice(0, 6).join(" · ") : "Nothing due";
 }
 
