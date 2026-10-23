@@ -5,7 +5,7 @@ import { authoriseInspectionUpload } from "../prepare/route";
 
 /** Step 2 of an upload: once the file is stored, record it against the inspection. */
 export async function POST(request: NextRequest) {
-  let body: { inspectionId?: string; path?: string; kind?: string; itemKey?: string | null; requestId?: string | null; isPrescan?: boolean; duration?: number; caption?: string };
+  let body: { inspectionId?: string; path?: string; kind?: string; itemKey?: string | null; requestId?: string | null; isPrescan?: boolean; duration?: number; caption?: string; posterPath?: string | null };
   try {
     body = await request.json();
   } catch {
@@ -23,6 +23,14 @@ export async function POST(request: NextRequest) {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const { data: listed } = await admin.storage.from(INSPECTION_BUCKET).list(folder, { search: name, limit: 1 });
   if (!listed?.some((f) => f.name === name)) return NextResponse.json({ error: "The file did not arrive. Try again." }, { status: 400 });
+  // A video's picture (a frame taken on the device): kept only when it really arrived in the same folder.
+  let posterPath: string | null = null;
+  const poster = kind === "video" && body.posterPath ? String(body.posterPath) : "";
+  if (poster.startsWith(`${inspectionId}/`) && poster.endsWith(".jpg")) {
+    const pName = poster.slice(poster.lastIndexOf("/") + 1);
+    const { data: pListed } = await admin.storage.from(INSPECTION_BUCKET).list(folder, { search: pName, limit: 1 });
+    if (pListed?.some((f) => f.name === pName)) posterPath = poster;
+  }
 
   const { data: row, error } = await admin
     .from("inspection_media")
@@ -35,6 +43,7 @@ export async function POST(request: NextRequest) {
       storage_path: path,
       caption: body.caption ? String(body.caption).slice(0, 200) : null,
       duration_s: body.duration ? Math.round(Number(body.duration)) : null,
+      poster_path: posterPath,
       uploaded_by: who.staffId,
       created_by: who.staffId,
       updated_by: who.staffId,

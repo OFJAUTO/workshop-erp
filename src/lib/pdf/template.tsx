@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ReactNode } from "react";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
-import { Document, Font, Image, Page, Path, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
+import { Document, Font, Image, Link, Page, Path, Polygon, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
 import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
 import { cleanDocTitle } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
@@ -537,6 +537,40 @@ export function Photos({ photos }: { photos: Buffer[] }) {
       {photos.map((p, i) => (
         <Image key={i} src={{ data: p, format: "jpg" }} style={styles.photo} />
       ))}
+    </View>
+  );
+}
+
+/** A video on a document (23 October 2026): its picture (or a dark card) with a play sign, the label and "Watch video", all one link to the video on the customer's page. */
+export type PdfVideo = { id: string; label: string; poster: Buffer | null; url: string | null; duration_s: number | null };
+
+export function VideoCards({ videos }: { videos: PdfVideo[] }) {
+  if (!videos.length) return null;
+  const card = (v: PdfVideo) => (
+    <View style={{ width: 118 }}>
+      <View style={{ width: 118, height: 88, borderRadius: 3, backgroundColor: "#111111", overflow: "hidden", position: "relative" }}>
+        {v.poster ? <Image src={{ data: v.poster, format: "jpg" }} style={{ width: 118, height: 88, objectFit: "cover" }} /> : null}
+        <View style={{ position: "absolute", top: 29, left: 44, width: 30, height: 30, borderRadius: 15, backgroundColor: "#FFFFFF", opacity: 0.92, alignItems: "center", justifyContent: "center" }}>
+          <Svg width={12} height={12} viewBox="0 0 12 12">
+            <Polygon points="3,1 11,6 3,11" fill="#111111" />
+          </Svg>
+        </View>
+      </View>
+      <Text style={{ fontSize: 8, fontWeight: 700, marginTop: 3, textDecoration: v.url ? "underline" : "none" }}>Watch video{v.duration_s ? ` · ${v.duration_s}s` : ""}</Text>
+      <Text style={{ fontSize: 7, color: "#5F6368" }}>{v.label}</Text>
+    </View>
+  );
+  return (
+    <View style={styles.photoRow}>
+      {videos.map((v) =>
+        v.url ? (
+          <Link key={v.id} src={v.url} style={{ textDecoration: "none", color: "#111111" }}>
+            {card(v)}
+          </Link>
+        ) : (
+          <View key={v.id}>{card(v)}</View>
+        ),
+      )}
     </View>
   );
 }

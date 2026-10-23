@@ -61,7 +61,7 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
         return (
           <figure key={kind} className="flex flex-col gap-1" data-video-slot={kind} data-video-state={v ? "ready" : "waiting"}>
             {v ? (
-              <Player video={v} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.kind === kind)?.url ?? null} />
+              <VideoPlayer video={v} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.kind === kind)?.url ?? null} />
             ) : (
               <div className="aspect-video w-full rounded-card bg-chip flex flex-col items-center justify-center gap-1 text-center px-4">
                 <span className="text-sm font-bold">Video getting ready…</span>
@@ -77,7 +77,7 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
       })}
       {extra.map((v) => (
         <figure key={v.id} className="flex flex-col gap-1" data-video-slot={v.kind} data-video-state="ready">
-          <Player video={v} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.id === v.id)?.url ?? null} />
+          <VideoPlayer video={v} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.id === v.id)?.url ?? null} />
           <figcaption className="text-xs font-semibold">{LABELS[v.kind] ?? "Video"}{v.duration_s ? ` · ${v.duration_s}s` : ""}</figcaption>
         </figure>
       ))}
@@ -85,15 +85,19 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
   );
 }
 
-/** One player: a poster with a Play button first; the address is renewed when it is old; errors show a message with a retry. */
-function Player({ video, signedAt, freshen }: { video: CustomerVideo; signedAt: number; freshen: () => Promise<string | null> }) {
+/**
+ * The ONE customer video player (check-in videos on the approval page, inspection videos on the report link): a
+ * poster with a Play button first; the address is renewed when it is old; errors show a message with a retry.
+ * `poster` is a stored picture of the video; without it a frame is drawn from the video itself.
+ */
+export function VideoPlayer({ video, signedAt, freshen, poster: storedPoster = null }: { video: Pick<CustomerVideo, "id" | "url">; signedAt: number; freshen: () => Promise<string | null>; poster?: string | null }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [src, setSrc] = useState(video.url);
   const [signed, setSigned] = useState(signedAt);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState<number>(0);
-  const [poster, setPoster] = useState<string | null>(null);
+  const [poster, setPoster] = useState<string | null>(storedPoster);
 
   // A new address from the feed (after a refresh) replaces the old one while the video is not playing.
   const [seenUrl, setSeenUrl] = useState(video.url);
@@ -107,6 +111,7 @@ function Player({ video, signedAt, freshen }: { video: CustomerVideo; signedAt: 
 
   // A real frame as the poster, drawn half a second in (when the browser lets the page read the pixels).
   useEffect(() => {
+    if (storedPoster) return;
     let cancelled = false;
     const probe = document.createElement("video");
     probe.crossOrigin = "anonymous";

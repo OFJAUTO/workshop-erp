@@ -32,6 +32,55 @@ function readDuration(file: File): Promise<number | null> {
 }
 
 /**
+ * A frame of the video, half a second in, as a small JPEG: the video's picture on the customer's PDF (23 October
+ * 2026). Null when the device cannot draw one; the video then goes up without a picture.
+ */
+function videoPoster(file: File): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    const url = URL.createObjectURL(file);
+    let settled = false;
+    const finish = (b: Blob | null) => {
+      if (settled) return;
+      settled = true;
+      v.removeAttribute("src");
+      v.load();
+      URL.revokeObjectURL(url);
+      resolve(b);
+    };
+    v.onloadeddata = () => {
+      v.pause();
+      try {
+        v.currentTime = Math.min(0.5, (Number.isFinite(v.duration) ? v.duration : 1) / 10);
+      } catch {
+        finish(null);
+      }
+    };
+    v.onseeked = () => {
+      if (!v.videoWidth || !v.videoHeight) return finish(null);
+      const scale = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(v.videoWidth * scale);
+      canvas.height = Math.round(v.videoHeight * scale);
+      try {
+        canvas.getContext("2d")?.drawImage(v, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((b) => finish(b), "image/jpeg", 0.8);
+      } catch {
+        finish(null);
+      }
+    };
+    v.onerror = () => finish(null);
+    setTimeout(() => finish(null), 8000);
+    v.src = url;
+    // Phones load a video's pictures only once it starts; muted and inline it may start (it is paused at once).
+    void v.play().catch(() => null);
+  });
+}
+
+/**
  * Phone photos arrive as 4 to 8 MB files, and iPhones may hand over HEIC files that other browsers
  * cannot show. Both are redrawn as a JPEG of at most 2000 px on the longer side before the upload:
  * a few hundred KB, shown everywhere. If the browser cannot decode the file, it goes up as it is.
@@ -74,9 +123,11 @@ async function uploadOne(inspectionId: string, file: File, where: { itemKey?: st
   try {
     let duration: number | null = null;
     let body: Blob = file;
+    let poster: Blob | null = null;
     if (kind === "video") {
       duration = await readDuration(file);
       if (duration !== null && duration > MAX_VIDEO_SECONDS + 1) throw new Error(`That video is ${Math.round(duration)} seconds. The limit is ${MAX_VIDEO_SECONDS} seconds. Please record a shorter one.`);
+      poster = await videoPoster(file);
     } else if (kind === "photo") {
       const re = await toJpeg(file);
       body = re.blob;
@@ -88,11 +139,25 @@ async function uploadOne(inspectionId: string, file: File, where: { itemKey?: st
     if (!prep.ok || !p.path || !p.url) throw new Error(p.error ?? "Could not prepare the upload.");
     step = "upload";
     await putWithProgress(p.url, body, type, onProgress);
+    // The video's picture goes up next to it; a picture that fails never stops the video itself.
+    let posterPath: string | null = null;
+    if (poster) {
+      try {
+        const pp = await fetch("/api/inspection-media/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ inspectionId, contentType: "image/jpeg" }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+        const pj = (await pp.json().catch(() => ({}))) as { path?: string; url?: string };
+        if (pp.ok && pj.path && pj.url) {
+          await putWithProgress(pj.url, poster, "image/jpeg", () => undefined);
+          posterPath = pj.path;
+        }
+      } catch {
+        posterPath = null;
+      }
+    }
     step = "register";
     const reg = await fetch("/api/inspection-media/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inspectionId, path: p.path, kind, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan, duration: duration ?? undefined, caption: kind === "pdf" ? file.name : undefined }),
+      body: JSON.stringify({ inspectionId, path: p.path, kind, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan, duration: duration ?? undefined, caption: kind === "pdf" ? file.name : undefined, posterPath }),
       signal: AbortSignal.timeout(STEP_TIMEOUT_MS),
     });
     const r = (await reg.json().catch(() => ({}))) as { ok?: boolean; id?: string; url?: string | null; error?: string };
@@ -251,7 +316,7 @@ export function InspectionMedia({
 
   if (iconOnly) {
     return (
-      <span className="inline-flex flex-wrap items-center gap-2" data-inspection-media data-icon-media>
+      <span className="inline-flex flex-wrap items-center gap-2" data-inspection-media data-icon-media data-media-where={where.itemKey ?? (where.isPrescan ? "prescan" : undefined)}>
         {!disabled ? (
           <PhotoButton source="camera" multiple disabled={busy} className={`inline-flex h-11 w-11 items-center justify-center rounded-control border border-line-strong bg-white text-ink ${busy ? "opacity-50" : "hover:border-ink"}`} title={label ?? "Photo"} onFiles={(f) => void handleFiles(f)} onProblem={logProblem}>
             <CameraIcon />
@@ -267,7 +332,7 @@ export function InspectionMedia({
   }
 
   return (
-    <div className="flex flex-col gap-2" data-inspection-media>
+    <div className="flex flex-col gap-2" data-inspection-media data-media-where={where.itemKey ?? (where.isPrescan ? "prescan" : undefined)}>
       {thumbs}
       {!disabled ? (
         <div className="flex flex-wrap items-center gap-2">

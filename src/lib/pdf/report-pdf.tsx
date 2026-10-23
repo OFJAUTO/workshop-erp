@@ -14,7 +14,8 @@ import { qrPng } from "./qr";
 import { CarOutlinePdf } from "./car-outline-pdf";
 import { loadBodyState } from "@/lib/bodyshop-findings";
 import { actionLabel, damageWords, panelLabel, severityLabel, toneOf } from "@/lib/car-outline";
-import { AMBER, GREEN, GREY, InfoBoxes, PdfDocument, Photos, RED, Tag, TitleRow, companyOf, styles } from "./template";
+import { AMBER, GREEN, GREY, InfoBoxes, PdfDocument, Photos, RED, Tag, TitleRow, VideoCards, companyOf, styles, type PdfVideo } from "./template";
+import { reportVideos, type ReportVideo } from "@/lib/report-videos";
 
 const COLOR: Record<ItemStatus, string> = { good: GREEN, average: AMBER, bad: RED, na: GREY };
 const PHOTOS_PER_ITEM = 3;
@@ -69,6 +70,21 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
     }),
   );
   const photoBuffers = (rows: InspectionMediaRow[]) => photosFor(rows).map((x) => buffers.get(x.storage_path)).filter((b): b is Buffer => !!b);
+
+  // The videos (23 October 2026): each with its picture, a play sign and "Watch video", a link to that video on the
+  // customer's report page; shown with its item, and the rest in a Videos block at the end.
+  const allVideos = reportVideos(bundle);
+  const posters = new Map<string, Buffer>();
+  await Promise.all(
+    allVideos.filter((v) => v.posterPath).map(async (v) => {
+      const b = await fetchPhoto(bundle.mediaUrls[v.posterPath as string]);
+      if (b) posters.set(v.id, b);
+    }),
+  );
+  const pdfVideo = (v: ReportVideo): PdfVideo => ({ id: v.id, label: v.label, poster: posters.get(v.id) ?? null, url: token ? `${PRODUCTION_SITE_URL}/report/${token}#v-${v.id}` : null, duration_s: v.duration_s });
+  const videosAt = (key: string) => allVideos.filter((v) => v.itemKey === key).map(pdfVideo);
+  const placed = new Set<string>([...attention.map((i) => i.item_key), ...tyres.map((t) => `tyre.${t.key}`), ...(batteryReplace ? ["measure.battery"] : []), ...body.findings.map((f) => `body.${f.panel}`)]);
+  const moreVideos = allVideos.filter((v) => !v.itemKey || !placed.has(v.itemKey)).map(pdfVideo);
 
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), token ? qrPng(`${PRODUCTION_SITE_URL}/report/${token}`) : Promise.resolve(null)]);
@@ -134,6 +150,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
             {i.remarks ? <Text>{i.remarks}</Text> : null}
             {itemExtraWords(i).filter((w) => !(w === "Service due" && i.status === "good")).map((w) => <Text key={w} style={{ fontWeight: 600 }}>{w}</Text>)}
             <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === i.item_key))} />
+            <VideoCards videos={videosAt(i.item_key)} />
           </View>
         ))}
         {tyres.map((t) => (
@@ -146,6 +163,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
             </View>
             <Text>{[t.tread ? `${t.tread} mm tread` : "", t.year ? `year ${t.year}` : "", t.reason ? `reason: ${t.reason.toLowerCase()}` : ""].filter(Boolean).join("   ·   ")}</Text>
             <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === `tyre.${t.key}`))} />
+            <VideoCards videos={videosAt(`tyre.${t.key}`)} />
           </View>
         ))}
         {batteryReplace ? (
@@ -157,6 +175,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
             </View>
             {m.battery_voltage ? <Text>{text(m.battery_voltage)} V measured.</Text> : null}
             <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === "measure.battery"))} />
+            <VideoCards videos={videosAt("measure.battery")} />
           </View>
         ) : null}
       </View>
@@ -182,6 +201,7 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
               {f.damage.length ? <Text>{damageWords(f.damage)}</Text> : null}
               {f.remark ? <Text>{f.remark}</Text> : null}
               <Photos photos={photoBuffers(bundle.media.filter((x) => x.item_key === `body.${f.panel}`))} />
+              <VideoCards videos={videosAt(`body.${f.panel}`)} />
             </View>
           ))}
         </View>
@@ -240,6 +260,13 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
               {(x.key === "pad_front" || x.key === "pad_rear") && photoBuffers(bundle.media.filter((y) => y.item_key === `measure.${x.key}`)).length ? <View style={{ width: "100%" }}><Photos photos={photoBuffers(bundle.media.filter((y) => y.item_key === `measure.${x.key}`))} /></View> : null}
             </View>
           ))}
+        </View>
+      ) : null}
+
+      {moreVideos.length ? (
+        <View wrap={false}>
+          <Text style={styles.sectionTitle}>Videos   ·   {moreVideos.length}</Text>
+          <VideoCards videos={moreVideos} />
         </View>
       ) : null}
 

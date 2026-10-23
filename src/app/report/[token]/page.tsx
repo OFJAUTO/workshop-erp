@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
+import { CustomerVideoList } from "@/components/CustomerVideoList";
 import { Notice } from "@/components/ui";
 import { companyFromSettings } from "@/lib/company";
 import { formatDate } from "@/lib/format";
@@ -12,6 +13,7 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { ROAD_TEST_SELECT, roadTestSummary, type RoadTestRow } from "@/lib/road-test";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadBodyState } from "@/lib/bodyshop-findings";
+import { reportVideos } from "@/lib/report-videos";
 import { formatPlate } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +68,12 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
   const { vehicle } = card;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
   const customerName = card.customer?.full_name ?? "Customer";
+  // The inspection videos, playing inside the page (23 October 2026): the PDF links to each one by its anchor.
+  const videos = reportVideos(bundle)
+    .map((v) => ({ id: v.id, label: v.label, url: bundle.mediaUrls[v.storagePath] ?? "", poster: v.posterPath ? (bundle.mediaUrls[v.posterPath] ?? null) : null, duration_s: v.duration_s }))
+    .filter((v) => v.url);
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const signedAt = Date.now();
 
 
   const frontBoxes = customerBoxes({ full_name: customerName, company_name: card.customer?.company_name ?? null, phone: card.customer?.phone ?? null }, { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: car || vehicleTitle(vehicle) });
@@ -107,6 +115,12 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
           {attentionCount === 0 ? "Nothing needs attention." : `${attentionCount} item${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} attention`}
         </p>
         {bodyCount ? <p className="text-base font-bold" data-report-body>Body: {bodyCount} damaged panel{bodyCount === 1 ? "" : "s"} (with photos in the full report)</p> : null}
+        {videos.length ? (
+          <div className="flex flex-col gap-2" data-report-videos>
+            <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Videos ({videos.length})</span>
+            <CustomerVideoList videos={videos} signedAt={signedAt} refreshUrl={`/api/customer/videos?t=${encodeURIComponent(token)}`} />
+          </div>
+        ) : null}
       </CustomerFront>
     );
   }
