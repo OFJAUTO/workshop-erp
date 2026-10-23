@@ -26,6 +26,10 @@ import { depositsWaiting } from "@/lib/deposits";
  * 3. From 8:00 Dubai time, tell advisors about tomorrow's appointments so they send the WhatsApp reminder.
  * Protected by CRON_SECRET, which Vercel sends automatically.
  */
+export const dynamic = "force-dynamic";
+// The first run after 23 October 2026 catches up on everything due since the scheduler's calls stopped bouncing.
+export const maxDuration = 300;
+
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {

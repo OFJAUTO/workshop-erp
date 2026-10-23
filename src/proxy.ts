@@ -36,6 +36,11 @@ function redirectTo(request: NextRequest, pathname: string, search = "") {
  * have passed their allowed time, and sends strangers to the login page.
  */
 export async function proxy(request: NextRequest) {
+  // Vercel's scheduler calls the jobs on the deployment's own vercel.app address and does not follow redirects, so
+  // /api/cron/* is answered directly on any host, before the address redirect and the login check (from 7 to 23
+  // October 2026 every scheduled run got the 308 below). Each cron route checks CRON_SECRET itself.
+  if (request.nextUrl.pathname.startsWith("/api/cron/")) return NextResponse.next();
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
