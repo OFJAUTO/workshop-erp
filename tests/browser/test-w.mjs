@@ -17,6 +17,11 @@ const car = (await sql("select v.id, v.vin, j.job_number from public.vehicles v 
 if (!car?.vin) await sql("update public.vehicles set vin = 'WDD2050421R654321' where id = $1", [car.id]);
 const vin = car?.vin ?? "WDD2050421R654321";
 const mark = (await sql("select now() as t"))[0]?.t;
+// The database is shared with the live site, where scans@ofjauto.com has been connected since 19 October 2026. While a
+// real mailbox is connected, every step that would read it, mark it broken or disconnect it is skipped (on 23 October a
+// full run with the dummy Google secret disconnected it and told the owner "connect again").
+const realMailbox = ((await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active and mailbox not like 'e2e-%'"))[0]?.n ?? 0) > 0;
+if (realMailbox) console.log("NOTE  a real mailbox is connected: the steps of 5 and 6 that would touch it are skipped");
 
 // 1. The VIN in the subject.
 {
@@ -71,14 +76,16 @@ const mark = (await sql("select now() as t"))[0]?.t;
   check("5: the old Postmark webhook no longer exists (404, or sent to the login page like any private address)", old.status === 404 || (old.status >= 300 && old.status < 400), String(old.status));
   const cron = await fetch(`${base}/api/cron/mailbox`);
   check("5: the five-minute mailbox check refuses without the cron secret", cron.status === 401, String(cron.status));
-  const run = await fetch(`${base}/api/cron/mailbox`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ""}` } });
-  const rj = await run.json().catch(() => ({}));
-  check("5: with the secret it runs and says the mailbox is not connected yet", run.status === 503 && /not (set up|connected)/i.test(rj.error ?? ""), `${run.status} ${JSON.stringify(rj)}`);
-  const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
-  await go(page, `${base}/scans`);
-  const status = (await page.locator("[data-mailbox-status]").textContent()) ?? "";
-  check("5: the owner's page offers Connect (or names the Vercel variables when they are missing)", (await page.locator("[data-connect-mailbox]").count()) === 1 || /GOOGLE_OAUTH_CLIENT_ID/.test(status), status);
-  await browser.close();
+  if (!realMailbox) {
+    const run = await fetch(`${base}/api/cron/mailbox`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ""}` } });
+    const rj = await run.json().catch(() => ({}));
+    check("5: with the secret it runs and says the mailbox is not connected yet", run.status === 503 && /not (set up|connected)/i.test(rj.error ?? ""), `${run.status} ${JSON.stringify(rj)}`);
+    const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
+    await go(page, `${base}/scans`);
+    const status = (await page.locator("[data-mailbox-status]").textContent()) ?? "";
+    check("5: the owner's page offers Connect (or names the Vercel variables when they are missing)", (await page.locator("[data-connect-mailbox]").count()) === 1 || /GOOGLE_OAUTH_CLIENT_ID/.test(status), status);
+    await browser.close();
+  }
 }
 
 // 6. The one-time Google sign-in as scans@ofjauto.com (read only). Run with GOOGLE_OAUTH_CLIENT_ID, _SECRET and SCANS_MAILBOX set on the dev server (test values).
@@ -95,11 +102,13 @@ const mark = (await sql("select now() as t"))[0]?.t;
   check("6: a one-time check value travels with it, kept in a cookie only the server reads", !!state && loc.searchParams.get("state") === state && /HttpOnly/i.test(setCookie));
   const adv = await fetch(`${base}/api/google/mailbox/connect`, { headers: { cookie: await cookieHeader("service_advisor") }, redirect: "manual" });
   check("6: only the owner can connect", adv.status === 307 && /error=/.test(adv.headers.get("location") ?? "") && !/accounts\.google\.com/.test(adv.headers.get("location") ?? ""), adv.headers.get("location"));
+  const activeBefore = (await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active"))[0]?.n ?? 0;
   const bad = await fetch(`${base}/api/google/mailbox/callback?state=wrong&code=x`, { headers: { cookie: `${ownerCookie}; erp_mailbox_state=${state}` }, redirect: "manual" });
   const badLoc = decodeURIComponent(bad.headers.get("location") ?? "");
-  check("6: an answer that does not match this browser is refused and nothing is stored", /did not match/.test(badLoc) && ((await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active"))[0]?.n ?? 0) === 0, badLoc);
+  check("6: an answer that does not match this browser is refused and nothing is stored", /did not match/.test(badLoc) && ((await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active"))[0]?.n ?? 0) === activeBefore, badLoc);
   const cancel = await fetch(`${base}/api/google/mailbox/callback?state=${state}&error=access_denied`, { headers: { cookie: `${ownerCookie}; erp_mailbox_state=${state}` }, redirect: "manual" });
   check("6: cancelled on Google's page: nothing connected", /cancelled/.test(decodeURIComponent(cancel.headers.get("location") ?? "")));
+  if (!realMailbox) {
   const ct = await mail({ connectTest: { refreshToken: "e2e-refresh-token-1234567890" } });
   check("6: the stored permission is encrypted (the token never appears in the table) and reads back", ct.status === 200 && ct.json.ok === true && ct.json.plainStored === false && ct.json.roundTrip === true, JSON.stringify(ct.json));
   const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
@@ -120,7 +129,11 @@ const mark = (await sql("select now() as t"))[0]?.t;
   check("6: Disconnect closes the permission and Connect is offered again", ((await sql("select count(*)::int as n from public.google_mailbox_tokens where is_active"))[0]?.n ?? 0) === 0 && (await page.locator("[data-connect-mailbox]").count()) === 1);
   await browser.close();
   await sql("delete from public.notifications where type = 'scan_mailbox_problem' and created_at > $1", [mark6]);
+  }
 }
+
+// Step 3's made-up report told the real owner and managers; those alerts carry no job, so the shared clean-up never sees them.
+await sql("delete from public.notifications where type = 'scan_unmatched' and created_at > $1 and body like '%WAUZZZ8V9KA000000%'", [mark]);
 
 cleanupDb();
 process.exit(summary() ? 1 : 0);
