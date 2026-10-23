@@ -73,7 +73,9 @@ export function ModelYearSelect({
           maxLength={4}
           placeholder="Four digits, e.g. 2003"
           required={required}
-          autoFocus
+          // Only when the person picked "Older or other": a year read from an older car's VIN must not pull the
+          // cursor out of the VIN box half way through typing it.
+          autoFocus={!fromVin}
         />
       ) : null}
     </div>

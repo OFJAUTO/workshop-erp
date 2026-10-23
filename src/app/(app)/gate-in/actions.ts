@@ -9,6 +9,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
+import { customersByPhone, gateInCustomer } from "@/lib/gate-in-search";
 import { mileageChecks, toMiles, type MileageUnit } from "@/lib/mileage";
 import { notifyManagers, notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
@@ -327,13 +328,29 @@ const quickSchema = z
     if (year < 1950 || year > new Date().getFullYear() + 1) ctx.addIssue({ code: "custom", path: ["model_year"], message: "Check the model year." });
   });
 
+/**
+ * The new customer's mobile checked against the customers on record while the form is filled in: the gate-in role
+ * gets the name, the mobile and how many cars the customer has, nothing more.
+ */
+export async function checkCustomerPhone(phone: string): Promise<{ id: string; name: string; phone: string; cars: number } | null> {
+  await requirePermission("gateIn");
+  const [hit] = await customersByPhone(phone);
+  if (!hit) return null;
+  const c = await gateInCustomer(hit.id);
+  return { id: hit.id, name: hit.name, phone: hit.phone, cars: c?.cars.length ?? 0 };
+}
+
 export async function createCustomerAndVehicle(_state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("gateIn");
   const values = formValues(formData);
   const get = (k: string) => formData.get(k) ?? "";
+  // "+ New car for this customer" (or Yes on the same-number question): the car goes to the customer on record.
+  const existingId = blankToNull(formData.get("customer_id"));
+  const existing = existingId ? await gateInCustomer(existingId) : null;
+  if (existingId && !existing) return { error: "That customer could not be found. Search for them again.", values };
   const parsed = quickSchema.safeParse({
-    full_name: get("full_name"),
-    phone: get("phone"),
+    full_name: existing ? existing.name : get("full_name"),
+    phone: existing ? existing.phone : get("phone"),
     email: get("email"),
     trn: get("trn"),
     no_plate: get("no_plate"),
@@ -352,6 +369,18 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
+
+  // No second customer with the same mobile unless the person said it is a different person (checked here as well
+  // as on the form, so it holds whatever the browser sends).
+  if (!existing && !blankToNull(formData.get("appointment_id")) && formData.get("phone_different") !== "1") {
+    const [same] = await customersByPhone(d.phone);
+    if (same) {
+      return {
+        error: `This number belongs to ${same.name}. Add the car to ${same.name}, or choose "No, a different person".`,
+        values: { ...values, dup_customer_id: same.id, dup_customer_name: same.name, dup_customer_phone: same.phone },
+      };
+    }
+  }
 
   const picture = formData.get("car_picture"); // optional now: the phone checklist asks for it
 
@@ -389,8 +418,8 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
 
   // From an appointment, the customer already exists: use that record instead of adding a second one.
   const appointmentId = blankToNull(formData.get("appointment_id"));
-  let customer: { id: string } | null = null;
-  if (appointmentId) {
+  let customer: { id: string } | null = existing ? { id: existing.id } : null;
+  if (appointmentId && !customer) {
     const { data: appt } = await supabase.from("appointments").select("customer_id").eq("id", appointmentId).maybeSingle();
     if (appt) {
       customer = { id: appt.customer_id };

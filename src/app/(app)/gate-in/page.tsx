@@ -1,22 +1,21 @@
-import Link from "next/link";
 import { Badge, Button, Card, Empty, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
+import { gateInSearch, type GateInCar } from "@/lib/gate-in-search";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type VehicleRow } from "@/lib/types";
 import { WaitingPanel } from "@/components/WaitingPanel";
 
-type Row = VehicleRow & {
-  make: { name: string } | null;
-  model: { name: string } | null;
-  customer: { full_name: string; company_name: string | null; phone: string; is_vip: boolean } | null;
-};
+type Mode = "car" | "customer";
 
-export default async function GateInSearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+const carLine = (c: GateInCar) => [c.make, c.model, c.variant, c.model_year].filter(Boolean).join(" ") + (c.colour ? ` · ${c.colour}` : "");
+
+export default async function GateInSearchPage({ searchParams }: { searchParams: Promise<{ q?: string; mode?: string }> }) {
   const staff = await requirePermission("gateIn");
   const gateInOnly = staff.role_id === "gate_in";
-  const { q = "" } = await searchParams;
-  const term = q.trim().replace(/\s+/g, "");
+  const { q = "", mode: modeRaw } = await searchParams;
+  const mode: Mode = modeRaw === "customer" ? "customer" : "car";
+  const term = q.trim();
 
   const supabase = await createClient();
   // The person's own gate-ins still waiting for photos or video.
@@ -29,32 +28,103 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
     .limit(10);
   type Pending = { id: string; job_number: string; gated_in_at: string; vehicle: (Pick<VehicleRow, "has_plate" | "plate_country" | "plate_emirate" | "plate_code" | "plate_number" | "vin"> & { make: { name: string } | null; model: { name: string } | null }) | null };
   const pending = (pendingRows ?? []) as unknown as Pending[];
-  let rows: Row[] = [];
-  let openJobs = new Map<string, { id: string; job_number: string }>();
-  if (term) {
-    const like = `%${term.replace(/[%_]/g, "")}%`;
-    const { data } = await supabase
-      .from("vehicles")
-      .select(
-        "kind, id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(full_name, company_name, phone, is_vip)",
+
+  // Server side and narrow: name, mobile and the customer's cars only.
+  const { cars, customers } = term ? await gateInSearch(term) : { cars: [], customers: [] };
+  const nothing = !!term && cars.length === 0 && customers.length === 0;
+
+  const carButton = (c: GateInCar) =>
+    c.openJob ? (
+      gateInOnly ? (
+        <LinkButton href={`/jobs/${c.openJob.id}/media`} tone="secondary" size="lg">
+          Photos and video
+        </LinkButton>
+      ) : (
+        <LinkButton href={`/jobs/${c.openJob.id}`} tone="secondary" size="lg">
+          Open job card
+        </LinkButton>
       )
-      .eq("is_active", true)
-      .or(`plate_number.ilike.${like},vin.ilike.${like}`)
-      .limit(20);
-    rows = (data ?? []) as unknown as Row[];
-    if (rows.length) {
-      const { data: jobs } = await supabase
-        .from("jobs")
-        .select("id, job_number, vehicle_id")
-        .eq("is_open", true)
-        .in("vehicle_id", rows.map((r) => r.id));
-      openJobs = new Map((jobs ?? []).map((j) => [j.vehicle_id, { id: j.id, job_number: j.job_number }]));
-    }
-  }
+    ) : (
+      <LinkButton href={`/gate-in/new?vehicle=${c.id}`} size="lg" data-gatein-car-start={c.id}>
+        Gate in this car
+      </LinkButton>
+    );
+
+  const carsBlock = cars.length ? (
+    <section className="flex flex-col gap-3" data-gatein-cars>
+      <SectionLabel right={`${cars.length}`}>Cars</SectionLabel>
+      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+        {cars.map((c) => (
+          <Card key={c.id} className="flex flex-col gap-3" data-gatein-car={c.id}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-extrabold text-xl tracking-[0.03em]">{formatPlate(c)}</span>
+              {c.isVip ? <Badge tone="ink">VIP</Badge> : null}
+              {c.openJob ? <Badge tone="amber">In workshop · {c.openJob.job_number}</Badge> : null}
+            </div>
+            <span className="font-semibold">{carLine(c)}</span>
+            <span className="text-sm text-muted">
+              {c.customerName} · {c.customerPhone}
+              {c.vin ? ` · VIN ${c.vin}` : ""}
+            </span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {carButton(c)}
+              {!gateInOnly ? (
+                <LinkButton href={`/vehicles/${c.id}`} tone="ghost" size="lg">
+                  Car details
+                </LinkButton>
+              ) : null}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </section>
+  ) : null;
+
+  const customersBlock = customers.length ? (
+    <section className="flex flex-col gap-3" data-gatein-customers>
+      <SectionLabel right={`${customers.length}`}>Customers</SectionLabel>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {customers.map((cu) => (
+          <Card key={cu.id} className="flex flex-col gap-3" data-gatein-customer={cu.id}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-extrabold text-lg uppercase">{cu.name}</span>
+              {cu.isVip ? <Badge tone="ink">VIP</Badge> : null}
+            </div>
+            <span className="text-sm font-semibold">{cu.phone}</span>
+            {cu.cars.length ? (
+              <ul className="flex flex-col divide-y divide-line border-y border-line">
+                {cu.cars.map((c) => (
+                  <li key={c.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3" data-gatein-customer-car={c.id}>
+                    <span className="flex flex-col">
+                      <span className="font-bold tracking-[0.03em]">
+                        {formatPlate(c)}
+                        {c.openJob ? <span className="ml-2 align-middle"><Badge tone="amber">In workshop · {c.openJob.job_number}</Badge></span> : null}
+                      </span>
+                      <span className="text-xs text-muted">{carLine(c)}</span>
+                    </span>
+                    {carButton(c)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">No car on record yet.</p>
+            )}
+            <div>
+              <LinkButton href={`/gate-in/new-car?customer=${cu.id}`} tone={mode === "customer" ? "primary" : "secondary"} size="lg" data-new-car-for={cu.id}>
+                + New car for this customer
+              </LinkButton>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </section>
+  ) : null;
+
+  const modeLink = (m: Mode) => `/gate-in?mode=${m}${term ? `&q=${encodeURIComponent(term)}` : ""}`;
 
   return (
     <>
-      <PageHeader title="Gate in a car" subtitle="Find the car by plate or VIN. New car? Add the customer and car in one step." actions={<><LinkButton href="/gate-in/loose" tone="secondary" size="lg">Loose items, no car</LinkButton><LinkButton href="/gate-in/new-car" tone="secondary" size="lg">New customer and car</LinkButton></>} />
+      <PageHeader title="Gate in a car" subtitle="Find the car, or the customer, in one box. A new customer? Add the customer and car in one step." />
 
       <WaitingPanel staff={staff} />
       {pending.length ? (
@@ -77,66 +147,62 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
       ) : null}
 
       <Card className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" data-gatein-modes>
+          <LinkButton href={modeLink("car")} tone={mode === "car" ? "primary" : "secondary"} size="lg" aria-pressed={mode === "car"} data-gatein-mode="car">
+            Existing car
+          </LinkButton>
+          <LinkButton href={modeLink("customer")} tone={mode === "customer" ? "primary" : "secondary"} size="lg" aria-pressed={mode === "customer"} data-gatein-mode="customer">
+            Existing customer, new car
+          </LinkButton>
+          <LinkButton href="/gate-in/new-car" tone="secondary" size="lg" data-gatein-mode="new">
+            New customer and car
+          </LinkButton>
+        </div>
         <form className="flex flex-wrap gap-2" action="/gate-in">
-          <Input name="q" defaultValue={q} placeholder="Plate number or VIN" className="max-w-md text-lg font-bold uppercase" autoFocus autoCapitalize="characters" />
+          <input type="hidden" name="mode" value={mode} />
+          <Input
+            name="q"
+            defaultValue={q}
+            placeholder={mode === "customer" ? "Customer name or mobile" : "Plate, VIN, customer name or mobile"}
+            className="max-w-md text-lg font-bold"
+            autoFocus
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="characters"
+            data-gatein-search
+          />
           <Button type="submit" size="lg">
             Search
           </Button>
         </form>
+        <p className="text-sm text-muted">
+          {mode === "customer" ? "Find the customer by name or mobile, then add the new car to them." : "Plate, VIN, the customer's name or mobile all work."}{" "}
+          <a href="/gate-in/loose" className="underline underline-offset-4 font-semibold">Loose items, no car</a>
+        </p>
       </Card>
 
-      {term && rows.length === 0 ? (
-        <Empty title="No car matches">
-          Check the plate, or <Link href="/gate-in/new-car" className="underline underline-offset-4 font-semibold">add the customer and car</Link>.
-        </Empty>
-      ) : null}
-
-      {rows.length ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
-          {rows.map((v) => {
-            const open = openJobs.get(v.id);
-            return (
-              <Card key={v.id} className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-extrabold text-xl tracking-[0.03em]">{formatPlate(v)}</span>
-                  {v.customer?.is_vip ? <Badge tone="ink">VIP</Badge> : null}
-                  {open ? <Badge tone="amber">In workshop · {open.job_number}</Badge> : null}
-                </div>
-                <span className="font-semibold">
-                  {[v.make?.name, v.model?.name, v.variant, v.model_year].filter(Boolean).join(" ")}
-                  {v.colour ? ` · ${v.colour}` : ""}
-                </span>
-                <span className="text-sm text-muted">
-                  {v.customer?.company_name ?? v.customer?.full_name} · {v.customer?.phone}
-                  {v.vin ? ` · VIN ${v.vin}` : ""}
-                </span>
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {open ? (
-                    gateInOnly ? (
-                      <LinkButton href={`/jobs/${open.id}/media`} tone="secondary" size="lg">
-                        Photos and video
-                      </LinkButton>
-                    ) : (
-                      <LinkButton href={`/jobs/${open.id}`} tone="secondary" size="lg">
-                        Open job card
-                      </LinkButton>
-                    )
-                  ) : (
-                    <LinkButton href={`/gate-in/new?vehicle=${v.id}`} size="lg">
-                      Gate in this car
-                    </LinkButton>
-                  )}
-                  {!gateInOnly ? (
-                    <LinkButton href={`/vehicles/${v.id}`} tone="ghost" size="lg">
-                      Car details
-                    </LinkButton>
-                  ) : null}
-                </div>
-              </Card>
-            );
-          })}
+      {nothing ? (
+        <div data-gatein-nothing>
+          <Empty title="Nothing matches">
+            <span className="flex flex-col items-center gap-3">
+              <span>No car or customer found for “{term}”.</span>
+              <LinkButton href="/gate-in/new-car" size="lg">New customer and car</LinkButton>
+            </span>
+          </Empty>
         </div>
       ) : null}
+
+      {mode === "customer" ? (
+        <>
+          {customersBlock}
+          {carsBlock}
+        </>
+      ) : (
+        <>
+          {carsBlock}
+          {customersBlock}
+        </>
+      )}
     </>
   );
 }

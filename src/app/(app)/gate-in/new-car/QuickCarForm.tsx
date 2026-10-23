@@ -4,11 +4,14 @@ import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ModelYearSelect } from "@/components/ModelYearSelect";
 import { SearchSelect } from "@/components/SearchSelect";
-import { Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
+import { Button, Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
 import { makeFromVin, modelYearFromVin } from "@/lib/vin";
+import { checkCustomerPhone } from "../actions";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES, type VehicleMakeRow, type VehicleModelRow } from "@/lib/types";
 
 export type VariantMap = Record<string, string[]>;
+/** An existing customer the car is added to: name and mobile only (all the gate-in role may see). */
+export type ExistingCustomer = { id: string; name: string; phone: string; cars?: number };
 
 export function QuickCarForm({
   action,
@@ -16,21 +19,111 @@ export function QuickCarForm({
   models,
   variants,
   initialValues = {},
+  customer = null,
 }: {
   action: FormAction;
   makes: VehicleMakeRow[];
   models: VehicleModelRow[];
   variants: VariantMap;
   initialValues?: Record<string, string>;
+  customer?: ExistingCustomer | null;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
-      {(v) => <Fields v={v} makes={makes} models={models} variants={variants} />}
+      {(v) => <Fields v={v} makes={makes} models={models} variants={variants} fixed={customer} />}
     </ActionForm>
   );
 }
 
-function Fields({ v, makes, models, variants }: { v: Record<string, string>; makes: VehicleMakeRow[]; models: VehicleModelRow[]; variants: VariantMap }) {
+/** The customer box: fixed when the car is added to an existing customer, otherwise the new customer's details with the mobile checked against the customers on record. */
+function CustomerCard({ v, fixed }: { v: Record<string, string>; fixed: ExistingCustomer | null }) {
+  const fromValues = v.customer_id && v.customer_name ? { id: v.customer_id, name: v.customer_name, phone: v.customer_phone ?? "" } : null;
+  const [existing, setExisting] = useState<ExistingCustomer | null>(fixed ?? fromValues);
+  const [dup, setDup] = useState<ExistingCustomer | null>(v.dup_customer_id ? { id: v.dup_customer_id, name: v.dup_customer_name ?? "", phone: v.dup_customer_phone ?? "" } : null);
+  const [different, setDifferent] = useState(v.phone_different === "1");
+  const [checking, setChecking] = useState(false);
+  // The server asks the same question when the form arrives without it (its answer comes back in the form values).
+  const [seenDup, setSeenDup] = useState(v.dup_customer_id ?? "");
+  if ((v.dup_customer_id ?? "") !== seenDup) {
+    setSeenDup(v.dup_customer_id ?? "");
+    if (v.dup_customer_id) {
+      setDup({ id: v.dup_customer_id, name: v.dup_customer_name ?? "", phone: v.dup_customer_phone ?? "" });
+      setDifferent(false);
+    }
+  }
+
+  async function checkPhone(phone: string) {
+    if (phone.replace(/\D/g, "").length < 7) { setDup(null); return; }
+    setChecking(true);
+    try {
+      const hit = await checkCustomerPhone(phone);
+      setDup(hit);
+      if (!hit) setDifferent(false);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  if (existing) {
+    return (
+      <Card className="flex flex-col gap-3" data-existing-customer={existing.id}>
+        <input type="hidden" name="customer_id" value={existing.id} />
+        <input type="hidden" name="customer_name" value={existing.name} />
+        <input type="hidden" name="customer_phone" value={existing.phone} />
+        <SectionLabel>Customer</SectionLabel>
+        <span className="font-extrabold text-lg uppercase">{existing.name}</span>
+        <span className="text-sm font-semibold">{existing.phone}</span>
+        {existing.cars != null ? <span className="text-xs text-muted">{existing.cars === 0 ? "No car on record yet" : `${existing.cars} car${existing.cars === 1 ? "" : "s"} already on record`}. The new car is added to this customer.</span> : <span className="text-xs text-muted">The new car is added to this customer.</span>}
+        {fixed ? (
+          <a href="/gate-in/new-car" className="text-sm underline underline-offset-4 font-semibold self-start">Not this customer? New customer and car</a>
+        ) : (
+          <button type="button" className="text-sm underline underline-offset-4 font-semibold self-start min-h-11" onClick={() => { setExisting(null); setDifferent(true); }}>
+            No, a different person: enter the new customer
+          </button>
+        )}
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="flex flex-col gap-4">
+      <SectionLabel>Customer</SectionLabel>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Name">
+          <Input name="full_name" defaultValue={v.full_name} required minLength={2} autoFocus />
+        </Field>
+        <Field label="Phone (WhatsApp)" hint={checking ? "Checking the number…" : undefined}>
+          <Input name="phone" type="tel" inputMode="tel" defaultValue={v.phone} required placeholder="+971 50 123 4567" onBlur={(e) => void checkPhone(e.currentTarget.value)} data-new-customer-phone />
+        </Field>
+        <Field label="Email" optional>
+          <Input name="email" type="email" inputMode="email" defaultValue={v.email} />
+        </Field>
+        <Field label="TRN" optional hint="15 digits, for companies.">
+          <Input name="trn" inputMode="numeric" maxLength={15} defaultValue={v.trn} />
+        </Field>
+      </div>
+      {different ? <input type="hidden" name="phone_different" value="1" /> : null}
+      {dup && !different ? (
+        <div className="rounded-control border-2 border-ink p-4 flex flex-col gap-3" data-dup-phone={dup.id}>
+          <p className="font-semibold">
+            This number belongs to <span className="uppercase">{dup.name}</span> – add the car to <span className="uppercase">{dup.name}</span> instead?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="lg" onClick={() => { setExisting(dup); setDup(null); }} data-dup-yes>
+              Yes, add the car to <span className="uppercase ml-1">{dup.name}</span>
+            </Button>
+            <Button type="button" size="lg" tone="secondary" onClick={() => setDifferent(true)} data-dup-no>
+              No, a different person
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {dup && different ? <p className="text-xs text-muted" data-dup-different>Saved as a different person who shares the number with <span className="uppercase">{dup.name}</span>.</p> : null}
+    </Card>
+  );
+}
+
+function Fields({ v, makes, models, variants, fixed }: { v: Record<string, string>; makes: VehicleMakeRow[]; models: VehicleModelRow[]; variants: VariantMap; fixed: ExistingCustomer | null }) {
   const [noPlate, setNoPlate] = useState(v.no_plate === "on");
   const [country, setCountry] = useState(v.plate_country || "UAE");
   const [vin, setVin] = useState(v.vin || "");
@@ -65,23 +158,27 @@ function Fields({ v, makes, models, variants }: { v: Record<string, string>; mak
       {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="flex flex-col gap-6">
-          <Card className="flex flex-col gap-4">
-            <SectionLabel>Customer</SectionLabel>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Name">
-                <Input name="full_name" defaultValue={v.full_name} required minLength={2} autoFocus />
-              </Field>
-              <Field label="Phone (WhatsApp)">
-                <Input name="phone" type="tel" inputMode="tel" defaultValue={v.phone} required placeholder="+971 50 123 4567" />
-              </Field>
-              <Field label="Email" optional>
-                <Input name="email" type="email" inputMode="email" defaultValue={v.email} />
-              </Field>
-              <Field label="TRN" optional hint="15 digits, for companies.">
-                <Input name="trn" inputMode="numeric" maxLength={15} defaultValue={v.trn} />
-              </Field>
-            </div>
-          </Card>
+          {v.appointment_id ? (
+            <Card className="flex flex-col gap-4">
+              <SectionLabel>Customer</SectionLabel>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Name">
+                  <Input name="full_name" defaultValue={v.full_name} required minLength={2} autoFocus />
+                </Field>
+                <Field label="Phone (WhatsApp)">
+                  <Input name="phone" type="tel" inputMode="tel" defaultValue={v.phone} required placeholder="+971 50 123 4567" />
+                </Field>
+                <Field label="Email" optional>
+                  <Input name="email" type="email" inputMode="email" defaultValue={v.email} />
+                </Field>
+                <Field label="TRN" optional hint="15 digits, for companies.">
+                  <Input name="trn" inputMode="numeric" maxLength={15} defaultValue={v.trn} />
+                </Field>
+              </div>
+            </Card>
+          ) : (
+            <CustomerCard v={v} fixed={fixed} />
+          )}
 
           <Card className="flex flex-col gap-4">
             <SectionLabel>Number plate</SectionLabel>

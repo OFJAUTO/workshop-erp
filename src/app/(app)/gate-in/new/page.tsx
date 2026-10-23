@@ -20,6 +20,8 @@ type Row = VehicleRow & {
 
 export default async function NewGateInPage({ searchParams }: { searchParams: Promise<{ vehicle?: string; appointment?: string }> }) {
   const staff = await requirePermission("gateIn");
+  // The gate-in role gets what gate-in needs only: no customer page, no earlier visits, no money (23 October 2026).
+  const gateInOnly = staff.role_id === "gate_in";
   const { vehicle: vehicleId, appointment: appointmentId } = await searchParams;
   if (!vehicleId) redirect("/gate-in");
 
@@ -49,7 +51,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const admin = createAdminClient();
   // Declined work from earlier visits, and accepted estimates waiting for this car.
   const [{ data: declined }, { data: estimates }] = await Promise.all([
-    admin.from("declined_work").select("id, title, details, amount_aed, declined_at").eq("vehicle_id", v.id).eq("is_active", true).order("declined_at", { ascending: false }).limit(10),
+    gateInOnly ? Promise.resolve({ data: [] as { id: string; title: string; details: string | null; amount_aed: number | null; declined_at: string }[] }) : admin.from("declined_work").select("id, title, details, amount_aed, declined_at").eq("vehicle_id", v.id).eq("is_active", true).order("declined_at", { ascending: false }).limit(10),
     admin.from("quotations").select("id, number, total_aed, responded_at, approver_name").eq("kind", "estimate").eq("vehicle_id", v.id).eq("status", "approved").eq("is_active", true).order("responded_at", { ascending: false }),
   ]);
   const { data: attachedJobs } = (estimates ?? []).length ? await admin.from("jobs").select("estimate_id").in("estimate_id", (estimates ?? []).map((e) => e.id)) : { data: [] };
@@ -58,8 +60,8 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const windowDays = Number(settings.comeback_window_days) || 90;
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const nowMs = Date.now();
-  const recentJobs = visits.filter((h) => !h.is_open && h.gated_out_at && nowMs - Date.parse(h.gated_out_at) < windowDays * 86400000).map((h) => ({ id: h.id, label: `${h.job_number} · ${formatDate(h.gated_out_at)}`, hint: (h.gate_in?.customer_requests ?? "").slice(0, 80) }));
-  const openEstimates = (estimates ?? []).filter((e) => !used.has(e.id)).map((e) => ({ id: e.id, label: `${e.number} · AED ${Number(e.total_aed).toLocaleString("en-GB")}`, hint: `Accepted by ${e.approver_name ?? "the customer"} ${formatDate(e.responded_at)}` }));
+  const recentJobs = visits.filter((h) => !h.is_open && h.gated_out_at && nowMs - Date.parse(h.gated_out_at) < windowDays * 86400000).map((h) => ({ id: h.id, label: `${h.job_number} · ${formatDate(h.gated_out_at)}`, hint: gateInOnly ? "" : (h.gate_in?.customer_requests ?? "").slice(0, 80) }));
+  const openEstimates = (estimates ?? []).filter((e) => !used.has(e.id)).map((e) => ({ id: e.id, label: gateInOnly ? e.number : `${e.number} · AED ${Number(e.total_aed).toLocaleString("en-GB")}`, hint: `Accepted by ${e.approver_name ?? "the customer"} ${formatDate(e.responded_at)}` }));
 
   // Started from the calendar: the appointment's reason becomes the first request line.
   const { data: appointment } = appointmentId
@@ -103,9 +105,13 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
         <div className="flex flex-col gap-6">
           <Card className="flex flex-col gap-3">
             <SectionLabel>Customer</SectionLabel>
-            <Link href={`/customers/${v.customer?.id}`} className="font-bold hover:underline underline-offset-4">
-              {v.customer?.company_name ?? v.customer?.full_name}
-            </Link>
+            {gateInOnly ? (
+              <span className="font-bold">{v.customer?.company_name ?? v.customer?.full_name}</span>
+            ) : (
+              <Link href={`/customers/${v.customer?.id}`} className="font-bold hover:underline underline-offset-4">
+                {v.customer?.company_name ?? v.customer?.full_name}
+              </Link>
+            )}
             <span className="text-sm text-muted">{v.customer?.phone}</span>
             {v.customer?.is_vip && v.customer.vip_note ? (
               <div className="rounded-control border border-ink p-3 text-sm font-medium whitespace-pre-wrap">{v.customer.vip_note}</div>
@@ -118,6 +124,8 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             />
           </Card>
 
+          {gateInOnly ? null : (
+          <>
           <Card className="flex flex-col gap-3">
             <SectionLabel right={visits.length ? `${visits.length}` : undefined}>Previous visits</SectionLabel>
             {visits.length === 0 ? (
@@ -152,6 +160,8 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
               <p className="text-sm text-muted">None recorded.</p>
             )}
           </Card>
+          </>
+          )}
         </div>
       </div>
     </>

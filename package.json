@@ -87,7 +87,8 @@
     "test:estimates4": "node --env-file=.env.local tests/browser/test-estimates4.mjs",
     "test:spell5": "node --env-file=.env.local tests/browser/test-spell5.mjs",
     "test:inspection6": "node --env-file=.env.local tests/browser/test-inspection6.mjs",
-    "test:body7": "node --env-file=.env.local tests/browser/test-body7.mjs"
+    "test:body7": "node --env-file=.env.local tests/browser/test-body7.mjs",
+    "test:gatein1": "node --env-file=.env.local tests/browser/test-gatein1.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",
