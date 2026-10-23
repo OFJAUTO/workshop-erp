@@ -1,4 +1,5 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
+import { checkLateJobs } from "@/lib/background-jobs";
 import { getCurrentStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -12,6 +13,9 @@ async function clientFor(staff: { viewingAs: unknown; actingAs: unknown }) {
 export async function GET() {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  // Every signed-in screen polls here, so a background job that stopped is noticed even when both jobs stopped
+  // (at most once a minute per server, after the answer has gone).
+  after(() => checkLateJobs().catch(() => null));
   const supabase = await clientFor(staff);
   const [{ data: items }, { count }] = await Promise.all([
     supabase

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { checkLateJobs, recordJobRun } from "@/lib/background-jobs";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { recalcTripKm } from "@/lib/delivery";
 import { aftercareHourly } from "@/lib/aftercare";
@@ -35,6 +36,29 @@ export async function GET(request: NextRequest) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Not allowed." }, { status: 401 });
   }
+  // Every run is recorded for Settings > Background jobs (23 October 2026), good or bad.
+  try {
+    const report = await runHousekeeping();
+    await recordJobRun("housekeeping", true, housekeepingWords(report));
+    await checkLateJobs(true).catch(() => null);
+    return NextResponse.json({ ok: true, ...report });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await recordJobRun("housekeeping", false, `Stopped with an error: ${message}`).catch(() => null);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
+/** "3 reminders · 1 quotation expired", or "Nothing due". */
+function housekeepingWords(report: Record<string, number>): string {
+  const words: Record<string, string> = { videosDeleted: "video removed", remindersSent: "approval reminder", appointmentReminders: "booking reminder", inspectionWarnings: "inspection warning", assignmentWarnings: "assignment warning", quotesExpired: "quotation expired", estimateFollowUps: "estimate follow-up" };
+  const parts = Object.entries(report)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => (words[k] ? `${n} ${words[k]}${n === 1 ? "" : "s"}` : `${k} ${n}`));
+  return parts.length ? parts.slice(0, 6).join(" · ") : "Nothing due";
+}
+
+async function runHousekeeping(): Promise<Record<string, number>> {
   const admin = createAdminClient();
   const settings = await getSettings();
   const report: Record<string, number> = { videosDeleted: 0, remindersSent: 0, appointmentReminders: 0, inspectionWarnings: 0, assignmentWarnings: 0, quotesExpired: 0, estimateFollowUps: 0 };
@@ -504,5 +528,5 @@ export async function GET(request: NextRequest) {
       report.monthlySummary = 1;
     }
   }
-  return NextResponse.json({ ok: true, ...report });
+  return report;
 }

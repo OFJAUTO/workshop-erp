@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadDrivers } from "@/lib/delivery";
 import { removeRecoveryDriver, saveRecoveryDriver, saveRecoveryRates } from "@/app/(app)/jobs/delivery-actions";
 import { RATE_KIND_LABELS, recoveryRatesOf, type RateKind } from "@/lib/recovery";
+import { jobLate, jobTime, lateWords, loadBackgroundJobs } from "@/lib/background-jobs";
 import { saveSettings } from "./actions";
 import { clearTestDataAction } from "./clear-actions";
 import { ClearTestData } from "./ClearTestData";
@@ -75,6 +76,12 @@ export default async function SettingsPage() {
   const recoveryFlag = Number((data ?? []).find((r) => r.key === "recovery_flag_percent")?.value ?? 25);
   const pendingReview = (reviewMakes ?? 0) + (reviewModels ?? 0);
   const totalBytes = usage.reduce((a, b) => a + b.bytes, 0);
+  // The scheduled jobs and when each last ran (23 October 2026).
+  const jobs = await loadBackgroundJobs();
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const nowMs = Date.now();
+  const minutesAgo = (iso: string | null) => (iso ? Math.max(0, Math.round((nowMs - Date.parse(iso)) / 60000)) : null);
+  const ago = (m: number | null) => (m === null ? "" : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`);
 
   return (
     <>
@@ -137,6 +144,30 @@ export default async function SettingsPage() {
           />
         </div>
         <div className="flex flex-col gap-6">
+          <Card id="background-jobs" className="flex flex-col gap-3" data-background-jobs>
+            <SectionLabel>Background jobs</SectionLabel>
+            <ul className="flex flex-col divide-y divide-line">
+              {jobs.map((j) => {
+                const late = jobLate(j, nowMs);
+                const failed = !late && j.last_ok === false;
+                return (
+                  <li key={j.key} className={`py-2.5 flex flex-col gap-0.5 ${late || failed ? "text-red" : ""}`} data-job={j.key} data-job-state={late ? "late" : failed ? "failed" : j.last_ran_at ? "ok" : "never"}>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="font-bold">{j.label}</span>
+                      <span className={`text-xs ${late || failed ? "" : "text-muted"}`}>{j.schedule_label}</span>
+                    </span>
+                    <span className="text-sm font-semibold" data-job-last>
+                      {j.last_ran_at ? `Last ran: ${jobTime(j.last_ran_at)} ${j.last_ok ? "✓" : "✗"}` : "Not run yet"}
+                      {j.last_ran_at && !late ? <span className="font-normal text-muted"> · {ago(minutesAgo(j.last_ran_at))} ago</span> : null}
+                    </span>
+                    {late ? <span className="text-sm font-bold" data-job-late>{lateWords(j)}: late (it runs {j.schedule_label}).</span> : null}
+                    {j.last_result ? <span className={`text-xs ${late || failed ? "" : "text-muted"}`} data-job-result>{j.last_result}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="text-xs text-muted">Red when a job is late (mailbox check over 15 minutes, hourly housekeeping over 2 hours) or its last run failed. A late job rings your bell once.</p>
+          </Card>
           <Card id="drivers" className="flex flex-col gap-3" data-recovery-drivers>
             <SectionLabel right={`${recoveryDrivers.length}`}>Recovery drivers</SectionLabel>
             <p className="text-xs text-muted">The regular driver is prefilled at gate-out; the rest are one tap. A driver typed at gate-out joins this list by himself. Empty company = our truck.</p>

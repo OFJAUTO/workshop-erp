@@ -104,6 +104,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "scan_received", label: "An Autel scan report arrived for your car", locked: true },
   { type: "scan_unmatched", label: "An Autel scan report could not be matched to a car", locked: true },
   { type: "scan_mailbox_problem", label: "The scans mailbox needs to be connected again", locked: true },
+  { type: "background_job_late", label: "A background job (mailbox check, hourly housekeeping) has not run on time (owner)", locked: true },
   { type: "film_waste", label: "A film roll finished with too many metres unaccounted", locked: true },
   { type: "aftercare_due", label: "A 10-day after-care check due or missed", locked: true },
   { type: "scan_approval", label: "A technician asks to skip the pre-scan", locked: true },
