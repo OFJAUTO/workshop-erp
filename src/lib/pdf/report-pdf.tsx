@@ -4,7 +4,6 @@ import { formatDateTime } from "@/lib/format";
 import { MEASUREMENTS, ROAD_TEST_SECTION_KEY, TYRE_ACTIONS, TYRE_CONDITIONS, TYRE_POSITIONS, TYRE_REPLACE_REASONS, itemStatusLabel, type ItemStatus, needsAttention, itemExtraWords } from "@/lib/inspection";
 import type { InspectionBundle, InspectionMediaRow } from "@/lib/inspection-data";
 import { vehicleTitle, type JobCard } from "@/lib/job-data";
-import { feeNotice } from "@/lib/jobs";
 import { roadTestSummary, type RoadTestRow } from "@/lib/road-test";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -23,8 +22,9 @@ const PHOTOS_PER_ITEM = 3;
 /**
  * The customer's inspection report on the document template, in the order of the online page: anything
  * dangerous first, then what needs attention (Bad, then Average, the tyres, the battery), what passed in
- * one line per section, the measurements, the workshop's note and the inspection fee note. No requests, no
- * staff names, no parts, no costs.
+ * one line per section, the measurements and the workshop's note. No requests, no staff names, no parts, no
+ * costs. The inspection fee line is not on the report (23 October 2026): it stays on the gate-in approval page,
+ * with the car's own amount, where the customer agreed to it.
  */
 export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, roadTest: RoadTestRow | null, settings: Settings, token?: string | null): Promise<Buffer> {
   const insp = bundle.inspection;
@@ -90,7 +90,6 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
   const [logo, qr] = await Promise.all([loadLogo(), token ? qrPng(`${PRODUCTION_SITE_URL}/report/${token}`) : Promise.resolve(null)]);
   const tyreRows = [...TYRE_POSITIONS, { key: "spare", label: "Spare" }].filter((p) => m[`tyre_${p.key}_tread`] || m[`tyre_${p.key}_action`]);
   const measures = MEASUREMENTS.filter((x) => !x.key.startsWith("tyre_") && m[x.key] != null && String(m[x.key]) !== "");
-  const fee = feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed);
   const attentionCount = attention.length + tyres.length + (batteryReplace ? 1 : 0);
 
   const doc = (
@@ -276,7 +275,6 @@ export async function renderReportPdf(card: JobCard, bundle: InspectionBundle, r
           <Text>{insp.manager_note}</Text>
         </View>
       ) : null}
-      {fee ? <Text style={[styles.lineTitle, { marginTop: 10 }]}>{fee}</Text> : null}
     </PdfDocument>
   );
   return renderToBuffer(doc);

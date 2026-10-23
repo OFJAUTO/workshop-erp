@@ -24,8 +24,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /**
  * The customer's inspection report: the car, anything dangerous in red, what needs attention (Bad, then
- * Average), what passed folded away, the workshop's note, the inspection fee note and the advisor's Call and
- * WhatsApp buttons. No staff names besides the advisor's first name on the buttons, no parts, no prices.
+ * Average), what passed folded away, the workshop's note and the Call button. No inspection fee line: that
+ * stays on the gate-in approval page (23 October 2026). No staff names besides the advisor's first name on the buttons, no parts, no prices.
  */
 export default async function CustomerReportPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
