@@ -44,6 +44,28 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     });
   }
 
+  // 1b. Cheques recorded and still clearing (deposits and payments): "Cleared" right on the row (26 October 2026).
+  const { data: chequeRows } = await admin.from("payments").select(PAYMENT_SELECT + `, job:jobs(job_number, vehicle:vehicles(${PLATE_SELECT}))`).eq("is_active", true).eq("status", "recorded").eq("method", "cheque").eq("cheque_status", "pending");
+  for (const raw of (chequeRows ?? []) as unknown as Record<string, unknown>[]) {
+    const p = toPayment(raw);
+    const job = raw.job as { job_number: string; vehicle: PlateRow | null } | null;
+    out.push({
+      jobId: p.job_id ?? `cheque:${p.id}`,
+      plate: job?.vehicle ? formatPlate(job.vehicle) : (job?.job_number ?? p.number),
+      car: null,
+      what: `Cheque${p.cheque_number ? ` ${p.cheque_number}` : ""} (${p.number}) to clear when the bank confirms`,
+      amount: aed(p.amount_aed),
+      actionLabel: "Cleared",
+      href: p.job_id ? `/jobs/${p.job_id}/invoice` : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices",
+      always: true,
+      replaces: true,
+      urgency: "amber",
+      since: p.cheque_date ?? p.received_at,
+      hint: "The cheque is recorded. Tap Cleared once the bank confirms the money; a bounced cheque is reversed from the money page.",
+      inline: { kind: "cheque_clear", paymentId: p.id },
+    });
+  }
+
   // 2. Deposits asked for and not yet received: one line per job, the Record deposit panel right there.
   for (const d of await depositsWaiting()) {
     out.push({

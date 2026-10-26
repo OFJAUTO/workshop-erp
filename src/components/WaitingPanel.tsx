@@ -1,5 +1,5 @@
 import type { CurrentStaff } from "@/lib/auth";
-import { verifyPaymentAction } from "@/app/(app)/invoices/actions";
+import { setChequeStatus, verifyPaymentAction } from "@/app/(app)/invoices/actions";
 import { getSettings } from "@/lib/settings";
 import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { loadWaitingOnYou, type Urgency, type WaitingItem } from "@/lib/waiting";
@@ -25,7 +25,7 @@ export type ExtraWaiting = {
   /** A longer explanation, shown on hover (the line itself stays short). */
   hint?: string;
   /** The exact action right on the row instead of a link. */
-  inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData };
+  inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData } | { kind: "cheque_clear"; paymentId: string };
 };
 
 type RowItem = WaitingItem & { amount?: string | null; urgency: Urgency; inline?: ExtraWaiting["inline"] };
@@ -45,6 +45,12 @@ function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: Recor
       <span className="text-xs text-muted whitespace-nowrap">{owner ? `${i.role.replace(/_/g, " ")} · ` : ""}{i.wait ? `waiting ${i.wait}` : ""}</span>
       {i.inline?.kind === "record_deposit" ? (
         <RecordDeposit d={i.inline.deposit} charges={charges} label={i.actionLabel} />
+      ) : i.inline?.kind === "cheque_clear" ? (
+        <form action={setChequeStatus.bind(null, i.inline.paymentId)}>
+          <input type="hidden" name="status" value="cleared" />
+          <input type="hidden" name="return_to" value="/dashboard" />
+          <Button type="submit" size="md" data-cheque-cleared>{i.actionLabel}</Button>
+        </form>
       ) : i.inline?.kind === "confirm_payment" ? (
         <form action={verifyPaymentAction.bind(null, i.inline.paymentId)}>
           <input type="hidden" name="return_to" value="/dashboard" />

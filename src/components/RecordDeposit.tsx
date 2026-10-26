@@ -6,6 +6,7 @@ import { recordDepositPanel, type RecordDepositResult } from "@/app/(app)/dashbo
 import { JobFileUpload, type JobFile } from "./JobFileUpload";
 import { SendLinkDialog } from "./SendLinkDialog";
 import { Button, Input } from "./ui";
+import { newUuid } from "@/lib/uuid";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const METHODS = [
@@ -54,7 +55,8 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Extract<RecordDepositResult, { ok: true }> | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
-  const [clientKey] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`));
+  // A real uuid: the proof files are tied to it in job_files.ref_id (a uuid column) until the save re-points them.
+  const [clientKey] = useState(newUuid);
 
   const value = Number(amount.replace(/[^\d.]/g, "")) || 0;
   const overBy = Math.max(0, Math.round((value - d.outstanding) * 100) / 100);
@@ -82,7 +84,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
       fd.set("cheque_bank", chequeBank);
       fd.set("cheque_date", chequeDate);
     }
-    const r = await recordDepositPanel(fd).catch(() => ({ error: "Could not record the deposit. Try again." }) as RecordDepositResult);
+    const r = await recordDepositPanel(fd).catch(() => ({ error: "Couldn't save – nothing was recorded. Try again or tell the owner." }) as RecordDepositResult);
     setBusy(false);
     setConfirming(false);
     if ("error" in r) {
@@ -153,7 +155,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                 </div>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">Proof{needsProof ? " (required: the card slip or the transfer screenshot)" : " (optional)"}</span>
-                  <JobFileUpload jobId={d.jobId} kind="payment_proof" refId={`pay:${clientKey}`} files={files} accept="any" label="Take photo / attach" compact removable onAdded={(f) => setFiles((x) => [...x, f])} onRemoved={(f) => setFiles((x) => x.filter((y) => y.id !== f.id))} />
+                  <JobFileUpload jobId={d.jobId} kind="payment_proof" refId={clientKey} files={files} accept="any" label="Take photo / attach" compact removable onAdded={(f) => setFiles((x) => [...x, f])} onRemoved={(f) => setFiles((x) => x.filter((y) => y.id !== f.id))} />
                 </div>
                 {error ? <p className="text-sm font-semibold text-red" data-deposit-error>{error}</p> : null}
                 {confirming ? (

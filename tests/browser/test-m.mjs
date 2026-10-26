@@ -189,7 +189,7 @@ await section("6 pay now", async () => {
   check("6: the customer lands back on the proforma page with the thank-you", /paid=1/.test(cp.url()) && /Thank you, your payment was received/.test(back) && /Paid, thank you/i.test(back), cp.url());
   await cb.close();
   const pay = await until(async () => (await sql("select method, amount_aed::float as amount, bank_charge_aed::float as charge, received_by, reference from public.payments where job_id = $1 and status = 'recorded' and method = 'link'", [jobId]))[0], 30, 500);
-  check("6: the payment is recorded as a payment link at 1.75% with nobody behind it", pay?.amount === 945 && pay?.charge === 16.54 && pay?.received_by === null && /N-Genius mock-/.test(pay?.reference ?? ""), JSON.stringify(pay));
+  check("6: the payment is recorded as a payment link at 1.75% with nobody behind it", pay?.amount === 945 && pay?.charge === 16.54 && pay?.received_by === null && /Paid online · card \*{4}\d{4}/.test(pay?.reference ?? ""), JSON.stringify(pay));
   const tax = await until(async () => (await sql("select number from public.invoices where job_id = $1 and kind = 'tax_invoice' and status = 'issued'", [jobId]))[0], 30, 500);
   check("6: the tax invoice followed by itself", !!tax);
   const paidLink = (await sql("select paid_at, payment_id, state from public.payment_links where id = $1", [link?.id]))[0];

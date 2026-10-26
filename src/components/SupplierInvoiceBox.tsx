@@ -63,7 +63,7 @@ export function SupplierInvoiceBox({ jobId, poId, poTotal, clientKey, canFollow 
           {jobId ? (
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Photo or PDF of the invoice (several pages are fine; needed before the supplier is paid)</span>
-              <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId ?? (clientKey ? `recv:${clientKey}` : null)} files={files} accept="pdf" label="Take photo / attach" compact removable onAdded={(f) => setFiles((x) => [...x, f])} onRemoved={(f) => setFiles((x) => x.filter((y) => y.id !== f.id))} />
+              <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId ?? clientKey ?? null} files={files} accept="pdf" label="Take photo / attach" compact removable onAdded={(f) => setFiles((x) => [...x, f])} onRemoved={(f) => setFiles((x) => x.filter((y) => y.id !== f.id))} />
               <input type="hidden" name="scan_path" value={files[0]?.path ?? ""} />
             </div>
           ) : null}

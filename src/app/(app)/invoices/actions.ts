@@ -9,7 +9,7 @@ import { PAYMENT_SELECT, loadInvoice, nextDocumentNumber, toPayment } from "@/li
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPayment, type Actor } from "@/lib/payments";
+import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
@@ -224,7 +224,7 @@ export async function setChequeStatus(paymentId: string, formData: FormData) {
   const { data: raw } = await admin.from("payments").select(PAYMENT_SELECT).eq("id", paymentId).maybeSingle();
   if (!raw) redirect("/invoices");
   const p = toPayment(raw as Record<string, unknown>);
-  const back = p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
+  const back = String(formData.get("return_to") ?? "") === "/dashboard" ? "/dashboard" : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
   const status = String(formData.get("status") ?? "");
   if (p.method !== "cheque" || !["cleared", "bounced"].includes(status)) redirect(back);
   const now = new Date().toISOString();
@@ -232,6 +232,8 @@ export async function setChequeStatus(paymentId: string, formData: FormData) {
   if (p.job_id) {
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: cheque ${p.cheque_number ?? ""} ${status} (${staff.display_name})`, created_by: staff.id });
     if (p.invoice_id) await settleJob(p.job_id, p.invoice_id, staff.id);
+    // A deposit cheque that clears: the deposit may now be covered, so Parts hear the LPO can go.
+    if (!p.invoice_id && status === "cleared") await tellDepositCovered(p.job_id).catch(() => null);
     if (status === "bounced") {
       const advisors = await advisorsOf(p.job_id);
       await notifyStaff(advisors, { type: "cheque_bounced", title: `Cheque bounced · ${p.number}`, body: `AED ${p.amount_aed.toLocaleString("en-GB")} reversed. The balance is due again.`, jobId: p.job_id, href: back });

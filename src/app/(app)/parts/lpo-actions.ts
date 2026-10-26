@@ -1,5 +1,6 @@
 "use server";
 
+import { isUuid } from "@/lib/uuid";
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
@@ -169,8 +170,8 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
       for (const poId of poIds) {
         await admin.from("purchase_orders").update({ supplier_invoice_number: num ? num.slice(0, 80) : null, supplier_invoice_date: date, supplier_invoice_amount: amount, ...(scanPath ? { supplier_invoice_path: scanPath } : {}), supplier_invoice_status: "received", supplier_invoice_at: now, supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
       }
-      // Files uploaded before the save carry recv:<key>; they re-point to the (first) LPO so the scan shows on its page.
-      if (clientKey) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", `recv:${clientKey}`).is("removed_at", null);
+      // Files uploaded before the save carry the panel's key (a uuid); they re-point to the (first) LPO so the scan shows on its page.
+      if (isUuid(clientKey)) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", clientKey).is("removed_at", null);
       invoiceWord = " Supplier invoice saved.";
     }
   }

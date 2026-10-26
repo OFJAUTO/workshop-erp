@@ -70,14 +70,18 @@ export async function depositsWaiting(): Promise<DepositWaiting[]> {
     admin.from("jobs").select(`id, job_number, is_open, gated_in_by, customer:customers(full_name, company_name, phone), vehicle:vehicles(${PLATE_SELECT}, model_year, make:vehicle_makes(name), model:vehicle_models(name))`).in("id", jobIds),
     admin.from("payments").select(PAYMENT_SELECT).in("job_id", jobIds).eq("is_active", true),
   ]);
-  const payments = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared"));
+  const live = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
+  const payments = live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared");
+  // A cheque still clearing (26 October 2026): recorded, so not "to record" again; it shows as "Cheque to clear".
+  const clearing = live.filter((p) => p.method === "cheque" && p.cheque_status === "pending");
   const out: DepositWaiting[] = [];
   for (const j of (jobs ?? []) as unknown as { id: string; job_number: string; is_open: boolean; gated_in_by: string | null; customer: { full_name: string; company_name: string | null; phone: string | null } | null; vehicle: (PlateRow & { model_year?: number | null; make?: { name: string } | null; model?: { name: string } | null }) | null }[]) {
     if (!j.is_open) continue;
     const mine = rows.filter((q) => q.job_id === j.id);
     const required = round2(mine.reduce((a, q) => a + (Number(q.deposit_aed) || 0), 0));
     const received = round2(payments.filter((p) => p.job_id === j.id).reduce((a, p) => a + p.amount_aed, 0));
-    if (received + 0.005 >= required) continue;
+    const pendingCheques = round2(clearing.filter((p) => p.job_id === j.id).reduce((a, p) => a + p.amount_aed, 0));
+    if (received + pendingCheques + 0.005 >= required) continue;
     const first = mine[0];
     const approvedAt = (first.responded_at as string | null) ?? null;
     out.push({

@@ -1,4 +1,5 @@
 import "server-only";
+import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
@@ -99,7 +100,10 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     // Staff cannot record more than the balance: it waits for the owner.
     const pct = bankChargePercentFor(settings, method);
     const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
-    if (error || !created) return { error: error?.message ?? "Could not record the payment." };
+    if (error || !created) {
+      await logAppError("record payment: insert (above balance)", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
+      return { error: SAVE_FAILED };
+    }
     await notifyRoles(["owner"], { type: "overpayment_approval", title: `Payment above the balance needs your approval · ${created.number}`, body: `${actor.display_name} wants to record ${money(amount)} by ${method}; the balance is ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
     if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method} is above the balance of ${money(balance ?? 0)}; waiting for the owner's approval (asked by ${actor.display_name})`, created_by: actor.id });
     return { ok: true, pendingOwner: true, number: created.number, paymentId: created.id, message: `${created.number} is above the balance. The owner has been asked to approve it.` };
@@ -108,15 +112,23 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const verifies = actor.role_id === "owner" || actor.role_id === "accounts";
   const now = new Date().toISOString();
   const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
-  if (error || !created) return { error: error?.message ?? "Could not record the payment." };
-  if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as a deposit"} received by ${actor.display_name}${over ? " (above the balance, owner)" : ""}`, created_by: actor.id });
-  // Money arrived: "Customer says paid" is answered.
-  if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
-  if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
-  if (!input.invoiceId && jobId) await afterDepositRecorded(jobId, String(created.id), amount, actor, settings);
-  if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
-  if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
-  if (over) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
+  if (error || !created) {
+    await logAppError("record payment: insert", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
+    return { error: SAVE_FAILED };
+  }
+  // The receipt is written: what follows never turns it into a "failed" save for staff (logged instead).
+  try {
+    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as a deposit"} received by ${actor.display_name}${over ? " (above the balance, owner)" : ""}`, created_by: actor.id });
+    // Money arrived: "Customer says paid" is answered.
+    if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
+    if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
+    if (!input.invoiceId && jobId) await afterDepositRecorded(jobId, String(created.id), amount, actor, settings);
+    if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
+    if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
+    if (over) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
+  } catch (err) {
+    await logAppError(`record payment: after ${created.number}`, err, { staffId: actor.id, jobId, detail: { paymentId: created.id } });
+  }
   return { ok: true, number: created.number, paymentId: created.id, message: `${created.number} recorded.${method === "cheque" ? " The cheque counts as unpaid until it clears." : ""}` };
 }
 
@@ -125,6 +137,15 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
  * approved. Settings may ask for a tax invoice for the deposit as well (the receipt is always there).
  */
 async function afterDepositRecorded(jobId: string, paymentId: string, amount: number, actor: Actor, settings: Settings) {
+  await tellDepositCovered(jobId);
+  if (settings.deposit_document === "tax_invoice") await createDepositInvoice(jobId, paymentId, amount, { id: actor.id, display_name: actor.display_name }, settings).catch(() => null);
+}
+
+/**
+ * Once the deposit is covered (a cheque only once it has cleared), Parts and the owner hear that the LPO can be
+ * approved. Called when a deposit is recorded and when a deposit cheque clears (26 October 2026).
+ */
+export async function tellDepositCovered(jobId: string) {
   const admin = createAdminClient();
   const st = await depositState(jobId);
   if (st.required > 0 && !st.short) {
@@ -136,7 +157,6 @@ async function afterDepositRecorded(jobId: string, paymentId: string, amount: nu
     const plate = vehicle ? formatPlate(vehicle) : (job?.job_number ?? "");
     await notifyRoles(["parts", "owner"], { type: "deposit_received", title: `Deposit received: LPO can be approved · ${plate}`, body: `${money(st.received)} received of ${money(st.required)} asked on ${st.quotationNumbers.join(", ")}.${pending ? ` ${pending.number} is waiting for approval.` : ""}`, jobId, href: pending ? `/parts/orders/${pending.id}` : `/parts/${jobId}` });
   }
-  if (settings.deposit_document === "tax_invoice") await createDepositInvoice(jobId, paymentId, amount, { id: actor.id, display_name: actor.display_name }, settings).catch(() => null);
 }
 
 /** A wrong receipt is never deleted: the owner or the head accountant voids it with a reason; it stays visible, struck through. */

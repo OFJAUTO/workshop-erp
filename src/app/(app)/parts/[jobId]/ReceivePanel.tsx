@@ -1,5 +1,6 @@
 "use client";
 
+import { newUuid } from "@/lib/uuid";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
@@ -9,7 +10,8 @@ export type ReceiveRow = { id: string; description: string; qty: number; supplie
 export type ReceivedRow = { id: string; description: string; qty: number };
 type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
 
-const newKey = () => `recvp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+// A real uuid: a supplier invoice scan uploaded before the save is tied to it in job_files.ref_id (a uuid column).
+const newKey = () => newUuid();
 
 /**
  * Receiving parts from the supplier, all on this page: a tick box per line, Select all, "Mark N received",
