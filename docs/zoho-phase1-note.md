@@ -67,6 +67,18 @@ the match.
   matching the ERP's), `zoho1-erp-invoice-1/2/3.png` (the three ERP invoices), `zoho1-mapping.png`,
   `zoho1-sync-page.png` (a failed row with the reason and Retry).
 
+## The adversarial review round (same evening)
+
+Before calling it done, a four-way review (money correctness, never-twice, security, ERP regressions) attacked
+the build and confirmed 20 weaknesses; all were fixed and re-proven live. The important ones in plain words:
+a server hiccup (5xx) no longer re-sends a write (it could have posted a payment twice — now only reads retry,
+and a failed write goes back to the queue, which always searches Zoho before creating); two syncs running at
+once can never take the same document (rows are claimed while in flight); a labour line whose rounded hours
+cannot land the exact amount posts as one unit at the exact amount instead of leaking fils into Round-off;
+two customers who share a mobile number can never land on one Zoho ledger (the name must match too); an
+invoice number already in Zoho on a different customer is never touched; a receipt voided at the exact moment
+it was being posted turns red instead of green.
+
 ## What I need from you / Mathew
 
 1. **Mathew:** open Settings → Zoho Books → Account mapping and review the pre-filled names (they are my

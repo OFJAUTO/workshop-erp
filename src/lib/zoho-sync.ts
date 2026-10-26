@@ -388,7 +388,12 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     const k = incomeKeyOf(l, l.quotation_line_id ? qMap.get(l.quotation_line_id) : undefined, job?.department ?? null);
     incomeCounts[k] = (incomeCounts[k] ?? 0) + 1;
   }
+  // Zoho honours ONE discount level: with discount_type entity_level the per-line discount field is IGNORED
+  // (found live, 26 October 2026 — the uncapped corrective pass had been hiding it in Round-off). So the lines
+  // go at their pre-discount figures and every discount — per line, quotation-wide, warranty — folds into the
+  // one entity discount, exactly how the ERP's own documents show them (one summed green Discount row).
   const buildItems = (roundoffAed: number) => {
+    let lineDiscounts = 0;
     const items: Record<string, unknown>[] = lines.map((l, i) => {
       const q = l.quotation_line_id ? qMap.get(l.quotation_line_id) : undefined;
       const comp = l.price_display === "complimentary" || l.price_display === "included" || l.amount_aed === 0;
@@ -399,40 +404,42 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
       // qty × rate must land the line's exact amount. When it cannot (a labour line stores its hours to one
       // decimal: 0.33 h × 350 = 115.50 but quantity 0.3), the line posts as one unit at the exact amount — the
       // hours already sit in the description — rather than leaking the difference into the Round-off account or
-      // showing a discount the ERP document does not have.
+      // claiming a discount the ERP document does not have.
       if (!comp && (discount < -0.009 || (!realDiscount && discount > 0.009))) {
         qty = 1;
         rate = l.amount_aed;
         discount = 0;
       }
-      discount = Math.max(0, discount);
+      lineDiscounts = round2(lineDiscounts + Math.max(0, discount));
       const word = l.price_display === "included" ? "Included" : "Complimentary";
       return {
         name: cut(l.description, 100),
         description: cut([comp ? word : null, l.details].filter(Boolean).join(" · "), 2000),
         quantity: qty,
         rate,
-        ...(discount > 0 ? { discount } : {}),
         tax_id: accounts.taxId,
         account_id: accounts.income[incomeKeyOf(l, q, job?.department ?? null)],
         item_order: i + 1,
       };
     });
     if (roundoffAed !== 0) items.push({ name: "Round-off", quantity: 1, rate: roundoffAed, tax_id: accounts.taxId, account_id: accounts.income.other, item_order: items.length + 1 });
-    return items;
+    return { items, lineDiscounts };
   };
-  const discountTotal = round2(inv.discount_aed + inv.warranty_credit_aed);
-  const body = (roundoffAed: number) => ({
-    customer_id: "", // filled below
-    invoice_number: inv.number,
-    date: dubaiDate(inv.issued_at),
-    reference_number: job?.job_number ?? inv.number,
-    place_of_supply: "DU",
-    ...(snap.trn ? { is_reverse_charge_applied: false } : {}),
-    line_items: buildItems(roundoffAed),
-    ...(discountTotal > 0 ? { discount: discountTotal, discount_type: "entity_level", is_discount_before_tax: true } : {}),
-    ...(inv.discount_note || inv.notes ? { notes: cut([inv.discount_note, inv.notes].filter(Boolean).join("\n"), 2000) } : {}),
-  });
+  const body = (roundoffAed: number) => {
+    const built = buildItems(roundoffAed);
+    const discountTotal = round2(inv.discount_aed + inv.warranty_credit_aed + built.lineDiscounts);
+    return {
+      customer_id: "", // filled below
+      invoice_number: inv.number,
+      date: dubaiDate(inv.issued_at),
+      reference_number: job?.job_number ?? inv.number,
+      place_of_supply: "DU",
+      ...(snap.trn ? { is_reverse_charge_applied: false } : {}),
+      line_items: built.items,
+      ...(discountTotal > 0 ? { discount: discountTotal, discount_type: "entity_level", is_discount_before_tax: true } : {}),
+      ...(inv.discount_note || inv.notes ? { notes: cut([inv.discount_note, inv.notes].filter(Boolean).join("\n"), 2000) } : {}),
+    };
+  };
 
   const contactId = await ensureContact(org, inv.customer_id);
   const matches = (z: ZohoInvoice) => near(z.total, inv.total_aed) && near(z.tax_total, inv.vat_aed);
