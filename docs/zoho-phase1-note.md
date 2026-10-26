@@ -51,8 +51,21 @@ the match.
 - `npm run test:zoho1` — 27 local checks: the REAL write guard refusal, the money screens queue every
   recorded payment exactly once, a pending cheque is not queued and a cleared one is, the sync page, the
   mapping screen, the amber Waiting row, Retry.
-- `npm run test:zoho1live` — against the live site and OFJ TEST: (RESULTS FILLED AFTER THE RUN)
-- Screenshots in `tests/browser/shots/`: `zoho1-sync-page.png`, `zoho1-mapping.png`.
+- `npm run test:zoho1live` — 22 checks against the live site and OFJ TEST, all green:
+  (a) a deposit by payment link posted as an advance without VAT (bank charge 1.75% carried), the invoice
+  posted with the exact same number, the advance applied, the final cash payment applied, Zoho balance 0;
+  (b) a line discount + the quotation discount + the round-off landed 1,600.00 with VAT 76.19 to the fils,
+  labour and parts each in their own income account; (c) a bodyshop package posted as one line with the
+  item list, the complimentary line at 0, the bodyshop account; (d) card 2.26% and transfer 0% bank charges,
+  both applied, balance 0; (e) a forced failure read "Mapping missing: Bodyshop & PPF", Retry posted it, and
+  with the stored id wiped the worker ADOPTED the existing Zoho invoice — same id, never a second copy;
+  (f) a write aimed at the REAL organization is refused by the guard before any network work.
+- **Backfill done**: the 14 customers and the RCT-00036 deposit (AED 10,000, bank charge 175.00) already in
+  the ERP were queued and posted to OFJ TEST — 15 posted, 0 failed. (No tax invoices existed to backfill;
+  the test data had just been cleared.)
+- Screenshots in `tests/browser/shots/`: `zoho1-sync-posted.png` (every row green with Zoho's figures
+  matching the ERP's), `zoho1-erp-invoice-1/2/3.png` (the three ERP invoices), `zoho1-mapping.png`,
+  `zoho1-sync-page.png` (a failed row with the reason and Retry).
 
 ## What I need from you / Mathew
 

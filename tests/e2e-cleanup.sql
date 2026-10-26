@@ -20,9 +20,9 @@ begin
   delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotations where job_id is null and (customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
-  delete from public.zoho_outbox where job_id = any(job_ids) or record_id = any(cust_ids) or record_id in (select id from public.invoices where job_id = any(job_ids)) or record_id in (select id from public.payments where job_id = any(job_ids) or invoice_id in (select id from public.invoices where job_id = any(job_ids)));
+  delete from public.zoho_outbox where job_id = any(job_ids) or record_id = any(cust_ids) or record_id in (select id from public.invoices where job_id = any(job_ids)) or record_id in (select id from public.payments where job_id = any(job_ids) or customer_id = any(cust_ids) or invoice_id in (select id from public.invoices where job_id = any(job_ids)));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
-  delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids);
+  delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids) or customer_id = any(cust_ids);
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
   delete from public.inspection_items where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_findings where inspection_id in (select id from public.inspections where job_id = any(job_ids));
@@ -78,9 +78,9 @@ begin
   delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotations where job_id is null and (customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
-  delete from public.zoho_outbox where job_id = any(job_ids) or record_id = any(cust_ids) or record_id in (select id from public.invoices where job_id = any(job_ids)) or record_id in (select id from public.payments where job_id = any(job_ids) or invoice_id in (select id from public.invoices where job_id = any(job_ids)));
+  delete from public.zoho_outbox where job_id = any(job_ids) or record_id = any(cust_ids) or record_id in (select id from public.invoices where job_id = any(job_ids)) or record_id in (select id from public.payments where job_id = any(job_ids) or customer_id = any(cust_ids) or invoice_id in (select id from public.invoices where job_id = any(job_ids)));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
-  delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids);
+  delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids) or customer_id = any(cust_ids);
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
   delete from public.inspection_items where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_findings where inspection_id in (select id from public.inspections where job_id = any(job_ids));

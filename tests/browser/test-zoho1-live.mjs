@@ -198,6 +198,7 @@ await section("e2 never twice (adopt by number)", async () => {
 });
 
 /* ---------------- clean up (the ERP side; OFJ TEST keeps its test documents) ---------------- */
+if (process.env.KEEP) { console.log(String.fromCharCode(10) + "KEEP=1: the rows stay for screenshots - run npm run test:cleanup after."); process.exit(summary() ? 1 : 0); }
 await sql("delete from public.zoho_outbox where job_id = $1 or record_id in (select id from public.payments where job_id = $1) or record_id in (select id from public.invoices where job_id = $1) or record_id = $2", [jobId, customerId]).catch(() => null);
 cleanupDb();
 process.exit(summary() ? 1 : 0);

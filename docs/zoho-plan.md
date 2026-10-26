@@ -97,7 +97,7 @@ that call. Zoho's own sequences are never used; if Zoho ever refuses a number as
 **failed — needs a look** rather than letting Zoho pick a different number. The daily reconciliation (below)
 compares the two sides number by number, so a mismatch cannot stay hidden.
 
-## 3. Sync design (Phase 2+)
+## 3. Sync design (BUILT in Phase 1, 26 October 2026 — `src/lib/zoho-sync.ts`)
 
 - **Outbox table** `zoho_outbox`: one row per document to post (kind, ERP id, payload hash, status
   pending/sent/failed, attempts, last_error, zoho_id). Writers (issue tax invoice, record payment, receive
@@ -121,7 +121,7 @@ compares the two sides number by number, so a mismatch cannot stay hidden.
 | Phase | What | Effort |
 |---|---|---|
 | **0 — now** | Plan + OAuth connection, org picker (REAL read-only / TEST writable), read-only listing (orgs, taxes, chart of accounts, payment modes/bank accounts), mirror REAL's taxes+accounts into TEST. Nothing writes to REAL. | done with this batch |
-| **1** | Customers + tax invoices + payments/deposits + credit notes → **OFJ TEST**. Outbox, worker, sync page, number checks, apply-advances. Prove with a full month replay into TEST and a reconciliation of every day. | 1–2 overnight batches |
+| **1** | Customers + tax invoices + payments/deposits → **OFJ TEST**. Outbox, worker (five-minute cron `/api/cron/zoho` + Sync now), mapping screen, sync page `/zoho`, number checks, apply-advances, backfill. **Done 26 October 2026** (`npm run test:zoho1` 27 local checks, `npm run test:zoho1live` 22 live checks against OFJ TEST, all green; the existing ERP data backfilled). Credit notes moved to Phase 2 — until then a credit note on a posted invoice turns its sync row red for manual entry. The daily reconciliation report stays in Phase 4. | done |
 | **2** | Suppliers, bills with attachments, vendor payments, expenses (commissions, recovery, bank charges). Still TEST. | 1 overnight batch |
 | **3** | Accountant reviews OFJ TEST side by side with the ERP; fixes; then **go-live**: the owner turns `zoho_live_enabled` ON, the sync re-points at 942979945 and replays from the agreed start date (nothing posted to REAL before that date). | half a batch + accountant time |
 | **4** | Daily reconciliation live, alerts, and the monthly close checklist (bank, card clearing and payment-link clearing accounts reconciled). | half a batch |
@@ -138,13 +138,24 @@ compares the two sides number by number, so a mismatch cannot stay hidden.
 - **Mirror into OFJ TEST**: one button copies REAL's tax rates and chart-of-account names into TEST (create
   missing only, never delete, never touch REAL).
 
-## 6. To verify against OFJ TEST in Phase 1 (flagged, not assumed)
+## 6. Verified against OFJ TEST on 26 October 2026 (test:zoho1live, all green)
 
-- `ignore_auto_number_generation` on invoice/credit-note create keeps our numbers exactly.
-- A customer payment with no `invoices` array is accepted as an advance (unused amount), and
-  `POST /invoices/{id}/credits` with `invoice_payments` applies it.
-- Zero-rate lines and invoice-level discount land the ERP's rounded total to the fil.
-- A custom payment mode name ("Payment Link") on the payment, or `others` + reference.
+- `ignore_auto_number_generation=true` keeps our numbers exactly (Zoho carries the ERP's number verbatim).
+- A customer payment with **no `invoices` array is accepted** as an advance (unapplied), and
+  `POST /invoices/{id}/credits` with only `invoice_payments` applies it — but only the payment's **unused**
+  amount may be applied (an advance spent on one invoice has nothing left; Zoho refuses with "exceeds the
+  total payment"), so the worker reads `GET /customerpayments/{id}` first.
+- `rate: 0` lines (complimentary) and a **negative-rate "Round-off" line with the 5% tax id** are accepted;
+  entity-level discount before tax + that line land the ERP's rounded total AND VAT to the fils
+  (proved: 1,600.00 / VAT 76.19 from lines of 700 + 900-after-line-discount, discount 70, round-off −6.19).
+- `line_items.account_id` IS accepted on ad-hoc invoice lines (undocumented but works): each line lands in
+  its mapped income account without Zoho Items.
+- Payment modes: `cash`, `creditcard`, `banktransfer`, `check`, and `others` for the payment link, with the
+  RCT number as `reference_number` and `bank_charges` carried (2.26% card / 1.75% link).
+- `GET /invoices?invoice_number=` list rows have NO `tax_total` — read the found invoice in full before
+  judging its figures (the adopt pass broke on NaN until then).
+- `GET /customerpayments?reference_number=&customer_id=` scopes the adopt search to the customer, so a
+  receipt number reused after "Clear test data" never adopts someone else's payment.
 
 ## 7. Needed from the owner / accountant
 
