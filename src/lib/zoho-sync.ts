@@ -923,6 +923,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   const admin = createAdminClient();
   const po = await poForZoho(poId);
   if (po.kind === "main") return { result: { skipped: "A main LPO splits into supplier LPOs; the bills sit on those." } };
+  if (/^our stock$/i.test(po.supplier_name.trim())) return { result: { skipped: "An Our-stock LPO is internal (our own shelf): no supplier bill." } };
   if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number || !po.supplier_invoice_date) {
     return { wait: "Waiting for the supplier invoice to be entered on the LPO." };
   }
