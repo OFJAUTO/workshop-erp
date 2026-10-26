@@ -296,6 +296,16 @@ function countablePayments(rows: PaymentRow[]): PaymentRow[] {
   return rows.filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared"));
 }
 
+/** How much of a Zoho payment is still unapplied (a deposit may already sit on another invoice). */
+async function paymentUnused(org: string, zohoPaymentId: string): Promise<number> {
+  const j = await zohoFetch<{ payment?: { amount: number; unused_amount?: number; invoices?: { amount_applied: number }[] } }>(`/customerpayments/${zohoPaymentId}`, { org });
+  const p = j.payment;
+  if (!p) return 0;
+  if (typeof p.unused_amount === "number") return round2(p.unused_amount);
+  const applied = (p.invoices ?? []).reduce((a, i) => a + (Number(i.amount_applied) || 0), 0);
+  return round2(Number(p.amount) - applied);
+}
+
 async function applyToZohoInvoice(org: string, zohoInvoiceId: string, pays: { zohoId: string; amount: number }[]): Promise<number> {
   if (!pays.length) return 0;
   const already = await zohoAppliedPayments(org, zohoInvoiceId);
@@ -304,7 +314,9 @@ async function applyToZohoInvoice(org: string, zohoInvoiceId: string, pays: { zo
   const invoice_payments: { payment_id: string; amount_applied: number }[] = [];
   for (const p of pays) {
     if (already.has(p.zohoId) || remaining <= 0.005) continue;
-    const take = round2(Math.min(p.amount, remaining));
+    // Only the payment's UNUSED part can go on: a deposit already applied elsewhere has nothing left to give.
+    const unused = await paymentUnused(org, p.zohoId);
+    const take = round2(Math.min(p.amount, unused, remaining));
     if (take <= 0) continue;
     invoice_payments.push({ payment_id: p.zohoId, amount_applied: take });
     remaining = round2(remaining - take);

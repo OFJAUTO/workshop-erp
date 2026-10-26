@@ -45,10 +45,14 @@ const r2 = (n) => Math.round(n * 100) / 100;
 let jobId = null;
 let customerId = null;
 let vehicleId = null;
-let nextInv = 90000; // replaced below by max+1
+// Run-unique numbers: 'TINV-' never collides with the ERP's own INV- numbering (nextDocumentNumber scans 'INV-%'
+// only) and never collides in OFJ TEST across runs, so every run creates fresh Zoho invoices and the adopt pass
+// is tested deliberately in (e2), never by accident against an older run's leftovers.
+const RUN = Date.now().toString(36);
+let nextInv = 1;
 
 async function newInvoice({ lines, discount = 0, rounded = null, vatPercent = 5 }) {
-  const number = `INV-${String(nextInv++).padStart(5, "0")}`;
+  const number = `TINV-${RUN}-${nextInv++}`;
   const subtotal = r2(lines.reduce((a, l) => a + l.amount, 0));
   const before = r2(subtotal - discount);
   const total = rounded ?? r2(before + r2(before * (vatPercent / 100)));
@@ -88,9 +92,7 @@ await section("0 setup", async () => {
   const [job] = await sql("select customer_id, vehicle_id from public.jobs where id = $1", [jobId]);
   customerId = job.customer_id;
   vehicleId = job.vehicle_id;
-  const [mx] = await sql("select coalesce(max(substring(number from 5)::int), 0) + 1 as n from public.invoices where kind = 'tax_invoice' and number ~ '^INV-\\d{5}$'");
-  nextInv = Number(mx.n);
-  check("0: seed ready", !!jobId && !!customerId && nextInv > 0, JSON.stringify({ jobId, nextInv }));
+  check("0: seed ready", !!jobId && !!customerId, JSON.stringify({ jobId, run: RUN }));
   const w = await api("/api/e2e/zoho", { action: "write_org" });
   check("0: writes aim at OFJ TEST and the switch is off", w.json?.org === "944122733" && w.json?.live === false, JSON.stringify(w.json)?.slice(0, 120));
 });
@@ -109,6 +111,7 @@ await section("a deposit by link + final cash", async () => {
   check("a: the link's 1.75% bank charge rode along", dep?.zoho_result?.bank_charges === 3.5, JSON.stringify(dep?.zoho_result));
   const inv = await syncedRow(invA.id);
   check("a: the invoice posted with the ERP figures to the fils", inv?.status === "synced" && inv?.zoho_result?.zoho?.total === invA.total && inv?.zoho_result?.zoho?.vat === invA.vat, JSON.stringify(inv)?.slice(0, 400));
+  check("a: Zoho carries the ERP's exact number", inv?.zoho_result?.number === invA.number, String(inv?.zoho_result?.number));
   check("a: the advance was applied at invoice time", (inv?.zoho_result?.applied_payments ?? 0) >= 1, JSON.stringify(inv?.zoho_result));
   const pay = await syncedRow(cash.id);
   check("a: the cash payment posted and was applied at once", pay?.status === "synced" && pay?.zoho_result?.applied_now === 1, JSON.stringify(pay)?.slice(0, 300));
