@@ -77,7 +77,11 @@ once can never take the same document (rows are claimed while in flight); a labo
 cannot land the exact amount posts as one unit at the exact amount instead of leaking fils into Round-off;
 two customers who share a mobile number can never land on one Zoho ledger (the name must match too); an
 invoice number already in Zoho on a different customer is never touched; a receipt voided at the exact moment
-it was being posted turns red instead of green.
+it was being posted turns red instead of green. The new 1-dirham cap on the correction pass then CAUGHT a live
+Zoho behaviour the old unbounded pass had been hiding: Zoho honours only ONE discount level, so a per-line
+discount sent next to the invoice-level one was silently ignored. Every discount now folds into the one
+invoice-level discount — the same single summed Discount row your own documents show — and the full live test
+ran again: 22/22, every invoice landing on the first attempt with no corrections at all.
 
 ## What I need from you / Mathew
 
