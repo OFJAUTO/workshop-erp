@@ -475,7 +475,8 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   const contactId = await ensureContact(org, p.customer_id);
   let zid = p.zoho_payment_id;
   if (!zid) {
-    const j = await zohoFetch<{ customerpayments?: ZohoPayment[] }>(`/customerpayments?reference_number=${encodeURIComponent(p.number)}`, { org });
+    // Scoped to the customer: a receipt number reused after Clear test data never adopts someone else's payment.
+    const j = await zohoFetch<{ customerpayments?: ZohoPayment[] }>(`/customerpayments?reference_number=${encodeURIComponent(p.number)}&customer_id=${encodeURIComponent(contactId)}`, { org });
     const same = j.customerpayments?.find((x) => x.reference_number === p.number) ?? null;
     if (same && !near(Number(same.amount), p.amount_aed)) throw new ZohoError(`A payment with the receipt number ${p.number} already exists in Zoho with a different amount (${Number(same.amount).toFixed(2)} there, ${p.amount_aed.toFixed(2)} here): the accountant checks it in Zoho.`);
     zid = same?.payment_id ?? null;

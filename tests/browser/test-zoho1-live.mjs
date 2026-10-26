@@ -74,11 +74,12 @@ async function newInvoice({ lines, discount = 0, rounded = null, vatPercent = 5 
   return inv;
 }
 
+let nextRct = 1;
 async function newPayment({ invoiceId = null, method, amount, chargePercent = 0, isDeposit = false }) {
   const [p] = await sql(
-    `insert into public.payments (job_id, invoice_id, customer_id, method, amount_aed, bank_charge_aed, is_deposit, status, received_at)
-     values ($1, $2, $3, $4, $5, $6, $7, 'recorded', now()) returning id, number, amount_aed::float as amount, bank_charge_aed::float as charge`,
-    [jobId, invoiceId, customerId, method, amount, r2(amount * (chargePercent / 100)), isDeposit],
+    `insert into public.payments (number, job_id, invoice_id, customer_id, method, amount_aed, bank_charge_aed, is_deposit, status, received_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, 'recorded', now()) returning id, number, amount_aed::float as amount, bank_charge_aed::float as charge`,
+    [`TRCT-${RUN}-${nextRct++}`, jobId, invoiceId, customerId, method, amount, r2(amount * (chargePercent / 100)), isDeposit],
   );
   return p;
 }
@@ -121,6 +122,7 @@ await section("a deposit by link + final cash", async () => {
   check("a: re-checked - Zoho balance 0 after both payments", again?.status === "synced" && again?.zoho_result?.zoho?.balance === 0, JSON.stringify(again?.zoho_result));
   const [cust] = await sql("select zoho_contact_id from public.customers where id = $1", [customerId]);
   check("a: the customer's Zoho id is stored (matched or created once)", !!cust?.zoho_contact_id, JSON.stringify(cust));
+  await sql("update public.payments set job_id = null where is_deposit and job_id = $1", [jobId]);
 });
 
 /* ---------------- (b) line discount, total discount and round-off ---------------- */
