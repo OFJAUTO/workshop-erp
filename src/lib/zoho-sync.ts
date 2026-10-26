@@ -798,6 +798,8 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
       date: dubaiDate(cn.issued_at),
       reason_for_credit_debit_note: "others",
       reference_number: par.number,
+      // Must match the invoice it credits, or Zoho refuses the association ("Place Of Supply is different").
+      place_of_supply: "DU",
       line_items: lines.length
         ? lines.map((l, i) => ({ name: cut(l.description, 100), quantity: 1, rate: l.amount_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey], item_order: i + 1 }))
         : [{ name: cut(cn.notes ?? `Credit against ${par.number}`, 100), quantity: 1, rate: cn.taxable_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey] }],
