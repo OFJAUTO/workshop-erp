@@ -80,10 +80,12 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       <Card className="flex flex-wrap items-center gap-2" data-zoho-controls>
-        <form action={syncZohoNow}>
-          <Button type="submit" size="md" data-zoho-sync-now>Sync now</Button>
-        </form>
-        {staff.role_id === "owner" ? (
+        {!staff.viewingAs ? (
+          <form action={syncZohoNow}>
+            <Button type="submit" size="md" data-zoho-sync-now>Sync now</Button>
+          </form>
+        ) : null}
+        {staff.role_id === "owner" && !staff.viewingAs ? (
           <form action={backfillZoho}>
             <Button type="submit" tone="secondary" size="md" data-zoho-backfill>Backfill: queue everything already in the ERP</Button>
           </form>
@@ -129,7 +131,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                         Open in Zoho
                       </a>
                     ) : null}
-                    {r.status === "failed" ? (
+                    {r.status === "failed" && !staff.viewingAs ? (
                       <form action={retryZohoRow.bind(null, r.id)}>
                         <Button type="submit" tone="secondary" size="md" data-zoho-retry>Retry</Button>
                       </form>

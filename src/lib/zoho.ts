@@ -188,8 +188,10 @@ export async function zohoFetch<T = Record<string, unknown>>(path: string, opts:
       return { res, j };
     };
     let { res, j } = await call();
-    if (res.status === 429 || res.status >= 500) {
-      // Backoff on 429 and 5xx: one pause, one more try. Anything else is a real answer.
+    // Backoff: a 429 was NOT processed and is always safe to re-send; a 5xx may have been processed AFTER the
+    // write committed, so only reads retry — a failed write falls back to the outbox, whose retry runs the
+    // adopt-by-number/reference search first and so never posts twice (review finding, 26 October 2026).
+    if (res.status === 429 || (res.status >= 500 && method === "GET")) {
       await new Promise((r) => setTimeout(r, res.status === 429 ? 3000 : 1500));
       lastCall = Date.now();
       ({ res, j } = await call());

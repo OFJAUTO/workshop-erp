@@ -16,6 +16,12 @@ export async function POST(request: NextRequest) {
   }
   const body = (await request.json().catch(() => ({}))) as { action?: string };
   if (body.action === "write_to_real") {
+    // The probe only makes sense while the real book is read-only: with the go-live switch ON it would be a
+    // genuine write attempt (and on a dev machine would smear last_error on the live token row) — refused.
+    const settings = await getSettings();
+    if (settings.zoho_live_enabled === true) {
+      return NextResponse.json({ refused: false, error: "The go-live switch is ON: this probe only runs while the real book is read-only." }, { status: 409 });
+    }
     // The guard test: this must throw the refusal, never reach Zoho.
     try {
       await zohoFetch("/contacts", { org: ZOHO_REAL_ORG_ID, method: "POST", body: { contact_name: "E2e guard probe" } });

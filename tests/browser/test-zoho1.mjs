@@ -113,7 +113,7 @@ await section("3 sync page and waiting", async () => {
     // The amber row on Waiting on you.
     await go(page, `${base}/dashboard`);
     const dash = plainText(await page.content());
-    check("3: Waiting on you carries the failed Zoho row, amber, pointing at the sync page", /Tax invoice did not post: Mapping missing: Spare parts/.test(dash), dash.slice(0, 200));
+    check("3: Waiting on you carries the failed Zoho row, amber, pointing at the sync page", /Tax invoice: Mapping missing: Spare parts/.test(dash), dash.slice(0, 200));
 
     // Retry puts it back in the queue (the worker itself is live-only; dev says so instead of pretending).
     await go(page, `${base}/zoho?show=failed`);

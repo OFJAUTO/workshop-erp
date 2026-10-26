@@ -139,13 +139,19 @@ export type OutboxRow = {
 
 /** One row per document. A failed row goes back to pending; a synced row is left alone (nothing posts twice). */
 export async function enqueueZoho(kind: ZohoKind, recordId: string, jobId: string | null = null, by: string | null = null): Promise<void> {
+  // Supabase returns errors instead of throwing: each is checked, or a lost enqueue would be silent.
   const admin = createAdminClient();
-  const { data: ex } = await admin.from("zoho_outbox").select("id, status").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+  const { data: ex, error: readError } = await admin.from("zoho_outbox").select("id, status").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+  if (readError) throw new Error(readError.message);
   if (!ex) {
-    await admin.from("zoho_outbox").insert({ kind, record_id: recordId, job_id: jobId, created_by: by });
+    const { error } = await admin.from("zoho_outbox").insert({ kind, record_id: recordId, job_id: jobId, created_by: by });
+    if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
     return;
   }
-  if (ex.status === "failed") await admin.from("zoho_outbox").update({ status: "pending", last_error: null, updated_at: new Date().toISOString() }).eq("id", ex.id);
+  if (ex.status === "failed") {
+    const { error } = await admin.from("zoho_outbox").update({ status: "pending", last_error: null, updated_at: new Date().toISOString() }).eq("id", ex.id);
+    if (error) throw new Error(error.message);
+  }
 }
 
 /** The hooks call this: a Zoho hiccup must never break a receipt or an invoice. */
@@ -161,9 +167,12 @@ export async function tryEnqueueZoho(kind: ZohoKind, recordId: string, jobId: st
 export async function flagZohoAttention(kind: ZohoKind, recordId: string, reason: string): Promise<void> {
   try {
     const admin = createAdminClient();
-    const { data: ex } = await admin.from("zoho_outbox").select("id").eq("kind", kind).eq("record_id", recordId).maybeSingle();
-    if (ex) await admin.from("zoho_outbox").update({ status: "failed", last_error: reason, updated_at: new Date().toISOString() }).eq("id", ex.id);
-    else await admin.from("zoho_outbox").insert({ kind, record_id: recordId, status: "failed", last_error: reason });
+    const { data: ex, error: readError } = await admin.from("zoho_outbox").select("id").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+    if (readError) throw new Error(readError.message);
+    const { error } = ex
+      ? await admin.from("zoho_outbox").update({ status: "failed", last_error: reason, updated_at: new Date().toISOString() }).eq("id", ex.id)
+      : await admin.from("zoho_outbox").insert({ kind, record_id: recordId, status: "failed", last_error: reason });
+    if (error) throw new Error(error.message);
   } catch (e) {
     await logAppError("zoho_flag", e, { detail: { kind, recordId } });
   }
@@ -210,17 +219,22 @@ export async function ensureContact(org: string, customerId: string): Promise<st
   const c = data as CustomerRow | null;
   if (!c) throw new ZohoError("The customer no longer exists in the ERP.");
   let zid = c.zoho_contact_id;
-  if (!zid) {
+  const name = (c.company_name?.trim() || c.full_name).trim();
+  const sameName = (x: ZohoContact) => x.contact_name.trim().toLowerCase() === name.toLowerCase() || x.contact_name.trim().toLowerCase() === `${name} · ${c.customer_number}`.toLowerCase();
+  // The two searches: by mobile AND the same name (two people may share a number - gate-in allows it), then by
+  // the exact name. Adopting the first phone hit blind would post one customer's money on another's ledger.
+  const lookFor = async (): Promise<string | null> => {
     const digits = (c.phone ?? "").replace(/\D/g, "").slice(-9);
     if (digits.length >= 7) {
       const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?phone_contains=${encodeURIComponent(digits)}`, { org });
-      zid = j.contacts?.[0]?.contact_id ?? null;
+      const hit = j.contacts?.find(sameName);
+      if (hit) return hit.contact_id;
     }
-    const name = (c.company_name?.trim() || c.full_name).trim();
-    if (!zid) {
-      const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name=${encodeURIComponent(name)}`, { org });
-      zid = j.contacts?.find((x) => x.contact_name.trim().toLowerCase() === name.toLowerCase())?.contact_id ?? null;
-    }
+    const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name=${encodeURIComponent(name)}`, { org });
+    return j.contacts?.find(sameName)?.contact_id ?? null;
+  };
+  if (!zid) {
+    zid = await lookFor();
     if (!zid) {
       const words = c.full_name.trim().split(/\s+/);
       const body = (contactName: string) => ({
@@ -236,10 +250,14 @@ export async function ensureContact(org: string, customerId: string): Promise<st
         const j = await zohoFetch<{ contact?: ZohoContact }>("/contacts", { org, method: "POST", body: body(name) });
         zid = j.contact?.contact_id ?? null;
       } catch (e) {
-        // A contact with the same display name exists: the customer number makes ours unmistakable.
         if (e instanceof ZohoError && /exist/i.test(e.message)) {
-          const j = await zohoFetch<{ contact?: ZohoContact }>("/contacts", { org, method: "POST", body: body(`${name} · ${c.customer_number}`) });
-          zid = j.contact?.contact_id ?? null;
+          // "Exists" can mean our own just-created contact (a half-finished run): search again before anything new.
+          zid = await lookFor();
+          if (!zid) {
+            // A different person really holds this display name: the customer number makes ours unmistakable.
+            const j = await zohoFetch<{ contact?: ZohoContact }>("/contacts", { org, method: "POST", body: body(`${name} · ${c.customer_number}`) });
+            zid = j.contact?.contact_id ?? null;
+          }
         } else throw e;
       }
       if (!zid) throw new ZohoError("Zoho did not return the new contact.");
@@ -264,7 +282,7 @@ function incomeKeyOf(line: InvoiceLineRow, q: QLineLite | undefined, jobDept: st
   return "other";
 }
 
-type ZohoInvoice = { invoice_id: string; invoice_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; reference_number?: string };
+type ZohoInvoice = { invoice_id: string; invoice_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; reference_number?: string; customer_id?: string };
 
 async function zohoInvoiceById(org: string, id: string): Promise<ZohoInvoice | null> {
   try {
@@ -306,23 +324,34 @@ async function paymentUnused(org: string, zohoPaymentId: string): Promise<number
   return round2(Number(p.amount) - applied);
 }
 
-async function applyToZohoInvoice(org: string, zohoInvoiceId: string, pays: { zohoId: string; amount: number }[]): Promise<number> {
-  if (!pays.length) return 0;
+type ApplyOut = { applied: number; available: number; shorts: string[] };
+
+async function applyToZohoInvoice(org: string, zohoInvoiceId: string, pays: { zohoId: string; amount: number; receipt: string }[]): Promise<ApplyOut> {
+  if (!pays.length) return { applied: 0, available: 0, shorts: [] };
   const already = await zohoAppliedPayments(org, zohoInvoiceId);
   const inv = await zohoInvoiceById(org, zohoInvoiceId);
   let remaining = inv?.balance ?? 0;
+  let available = 0;
+  const shorts: string[] = [];
   const invoice_payments: { payment_id: string; amount_applied: number }[] = [];
   for (const p of pays) {
-    if (already.has(p.zohoId) || remaining <= 0.005) continue;
-    // Only the payment's UNUSED part can go on: a deposit already applied elsewhere has nothing left to give.
+    if (already.has(p.zohoId)) {
+      available = round2(available + p.amount);
+      continue;
+    }
+    // Only the payment's UNUSED part can go on: a deposit already applied elsewhere has nothing left to give —
+    // and the caller is told, in the receipt's own words, how much ran short.
     const unused = await paymentUnused(org, p.zohoId);
-    const take = round2(Math.min(p.amount, unused, remaining));
+    const usable = round2(Math.min(p.amount, unused));
+    available = round2(available + usable);
+    if (usable < p.amount - 0.005) shorts.push(`${p.receipt} has only ${usable.toFixed(2)} left in Zoho (${p.amount.toFixed(2)} here) — the rest sits on another document`);
+    const take = round2(Math.min(usable, remaining));
     if (take <= 0) continue;
     invoice_payments.push({ payment_id: p.zohoId, amount_applied: take });
     remaining = round2(remaining - take);
   }
   if (invoice_payments.length) await zohoFetch(`/invoices/${zohoInvoiceId}/credits`, { org, method: "POST", body: { invoice_payments } });
-  return invoice_payments.length;
+  return { applied: invoice_payments.length, available, shorts };
 }
 
 async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string): Promise<HandlerOut> {
@@ -363,9 +392,20 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     const items: Record<string, unknown>[] = lines.map((l, i) => {
       const q = l.quotation_line_id ? qMap.get(l.quotation_line_id) : undefined;
       const comp = l.price_display === "complimentary" || l.price_display === "included" || l.amount_aed === 0;
-      const qty = l.quantity > 0 ? l.quantity : 1;
-      const rate = comp ? 0 : l.quantity > 0 ? l.unit_price : l.amount_aed;
-      const discount = comp ? 0 : Math.max(0, round2(rate * qty - l.amount_aed));
+      const realDiscount = (Number(l.discount_percent) || 0) > 0;
+      let qty = l.quantity > 0 ? l.quantity : 1;
+      let rate = comp ? 0 : l.quantity > 0 ? l.unit_price : l.amount_aed;
+      let discount = comp ? 0 : round2(rate * qty - l.amount_aed);
+      // qty × rate must land the line's exact amount. When it cannot (a labour line stores its hours to one
+      // decimal: 0.33 h × 350 = 115.50 but quantity 0.3), the line posts as one unit at the exact amount — the
+      // hours already sit in the description — rather than leaking the difference into the Round-off account or
+      // showing a discount the ERP document does not have.
+      if (!comp && (discount < -0.009 || (!realDiscount && discount > 0.009))) {
+        qty = 1;
+        rate = l.amount_aed;
+        discount = 0;
+      }
+      discount = Math.max(0, discount);
       const word = l.price_display === "included" ? "Included" : "Complimentary";
       return {
         name: cut(l.description, 100),
@@ -403,8 +443,12 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     const byNumber = await zohoInvoiceByNumber(org, inv.number);
     // The list row misses tax_total, so the found invoice is read in full before any judgement on its figures.
     const full = byNumber ? await zohoInvoiceById(org, byNumber.invoice_id) : null;
-    // Our own earlier post (figures match, or a half-finished run on the same job) is adopted and corrected below.
-    // Anything else with our number is NEVER overwritten: the row fails in plain words instead.
+    // Only OUR OWN earlier post is adopted: it must sit on the same customer, and either the figures match or it
+    // is a half-finished run on the same job (corrected below). Anything else holding our number — another
+    // customer's document, or a leftover with different figures — is NEVER overwritten: FAILED in plain words.
+    if (full && String(full.customer_id ?? "") !== contactId) {
+      throw new ZohoError(`An invoice numbered ${inv.number} already exists in Zoho on a different customer: the accountant checks it in Zoho.`);
+    }
     if (full && !matches(full) && (byNumber?.reference_number ?? full.reference_number) !== (job?.job_number ?? inv.number)) {
       throw new ZohoError(`An invoice numbered ${inv.number} already exists in Zoho with different figures (${full.total.toFixed(2)} there, ${inv.total_aed.toFixed(2)} here) and belongs to another job: the accountant checks it in Zoho.`);
     }
@@ -423,9 +467,13 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     if (!z) throw new ZohoError("Zoho did not return the new invoice.");
   }
 
-  // Totals to the fils: one corrective pass on the Round-off line, then FAILED with both figures.
+  // Totals to the fils: one corrective pass on the Round-off line, for ROUNDING only (a shift past 1 AED is a
+  // real difference and fails with both figures — Round-off must stay what it claims to be), then FAILED.
   if (!matches(z)) {
     const fix = round2(roundoff + (inv.taxable_aed - round2(z.total - z.tax_total)));
+    if (Math.abs(fix - roundoff) > 1) {
+      throw new ZohoError(`Totals differ for ${inv.number} beyond rounding: Zoho has ${z.total.toFixed(2)} (VAT ${z.tax_total.toFixed(2)}), the ERP has ${inv.total_aed.toFixed(2)} (VAT ${inv.vat_aed.toFixed(2)}).`);
+    }
     await zohoFetch(`/invoices/${z.invoice_id}?ignore_auto_number_generation=true`, { org, method: "PUT", body: { ...body(fix), customer_id: contactId } });
     z = await zohoInvoiceById(org, z.invoice_id);
     if (!z || !matches(z)) {
@@ -437,17 +485,20 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
 
   // Advances and payments already in Zoho land on the invoice now; the rest follow from their own rows.
   const synced = erpPays.filter((p) => (p as PaymentRow & { zoho_payment_id?: string | null }).zoho_payment_id);
-  const appliedNow = await applyToZohoInvoice(
+  const applyOut = await applyToZohoInvoice(
     org,
     z.invoice_id,
-    synced.map((p) => ({ zohoId: String((p as PaymentRow & { zoho_payment_id?: string | null }).zoho_payment_id), amount: p.amount_aed })),
+    synced.map((p) => ({ zohoId: String((p as PaymentRow & { zoho_payment_id?: string | null }).zoho_payment_id), amount: p.amount_aed, receipt: p.number })),
   );
+  // A payment whose credit was consumed by another document cannot cover this invoice: FAILED in the receipt's own
+  // words, so the accountant knows exactly what to look at (the retry recomputes from Zoho's live state).
+  if (applyOut.shorts.length) throw new ZohoError(`${inv.number} cannot be covered as the ERP expects: ${applyOut.shorts.join("; ")}.`);
   const after = (await zohoInvoiceById(org, z.invoice_id)) ?? z;
-  const appliedSum = round2(synced.reduce((a, p) => a + p.amount_aed, 0));
-  const expectedBalance = Math.max(0, round2(inv.total_aed - appliedSum));
+  const expectedBalance = Math.max(0, round2(inv.total_aed - applyOut.available));
   if (!near(after.balance, expectedBalance)) {
     throw new ZohoError(`The balance differs for ${inv.number}: Zoho says ${after.balance.toFixed(2)}, the ERP expects ${expectedBalance.toFixed(2)} after the payments posted so far.`);
   }
+  const appliedNow = applyOut.applied;
   return {
     zohoId: z.invoice_id,
     result: {
@@ -521,8 +572,13 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
     if (!zid) throw new ZohoError("Zoho did not return the new payment.");
   }
   await admin.from("payments").update({ zoho_payment_id: zid }).eq("id", p.id);
+  // A void that landed while the worker was posting must not end green: the row turns red for the accountant.
+  const { data: fresh } = await admin.from("payments").select("status").eq("id", p.id).maybeSingle();
+  if (fresh && (fresh.status === "voided" || fresh.status === "reversed")) {
+    throw new ZohoError(`${p.number} was ${fresh.status} in the ERP while it was being posted: remove the payment in Zoho by hand.`);
+  }
   let applied = 0;
-  if (zohoInvoiceId) applied = await applyToZohoInvoice(org, zohoInvoiceId, [{ zohoId: zid, amount: p.amount_aed }]);
+  if (zohoInvoiceId) applied = (await applyToZohoInvoice(org, zohoInvoiceId, [{ zohoId: zid, amount: p.amount_aed, receipt: p.number }])).applied;
   return {
     zohoId: zid,
     result: {
@@ -553,16 +609,21 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
   const org = await zohoWriteOrg();
   if (!org) return { pushed: 0, failed: 0, waiting: 0, skipped: "No test organization is picked on Settings > Zoho Books." };
   const admin = createAdminClient();
-  const { data } = await admin.from("zoho_outbox").select("id, kind, record_id, attempts, enqueued_at").eq("status", "pending").order("enqueued_at").limit(limit);
+  // A claim older than ten minutes belongs to a worker that died: the row may be taken again.
+  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data } = await admin.from("zoho_outbox").select("id, kind, record_id, attempts, enqueued_at").eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).order("enqueued_at").limit(limit);
   const rows = (data ?? []) as Pick<OutboxRow, "id" | "kind" | "record_id" | "attempts" | "enqueued_at">[];
   const report: DrainReport = { pushed: 0, failed: 0, waiting: 0 };
   if (!rows.length) return report;
   rows.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.enqueued_at.localeCompare(b.enqueued_at));
   let accounts: Resolved | null = null;
   let accountsError: string | null = null;
+  let accountsFatal = false;
   for (const row of rows) {
-    // The claim: two drains at once (the cron and a Sync now) never run the same row twice.
-    const { data: claimed } = await admin.from("zoho_outbox").update({ attempts: row.attempts + 1, updated_at: new Date().toISOString() }).eq("id", row.id).eq("attempts", row.attempts).select("id");
+    // The claim: two drains at once (the cron next to a Sync now) never run the same row twice — the row is
+    // marked in flight, not just version-checked, so a drain that STARTS mid-handler cannot take it either.
+    const now = new Date().toISOString();
+    const { data: claimed } = await admin.from("zoho_outbox").update({ claimed_at: now, attempts: row.attempts + 1, updated_at: now }).eq("id", row.id).eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).select("id");
     if (!claimed?.length) continue;
     try {
       let out: HandlerOut;
@@ -573,21 +634,27 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
             accounts = await resolveZohoAccounts(org, readZohoMap(await getSettings()));
           } catch (e) {
             accountsError = e instanceof Error ? e.message : String(e);
+            // Only a problem a human must fix (the mapping, the connection) fails rows; a hiccup waits.
+            accountsFatal = /Mapping missing|not found in this organization|No 5% tax|not connected|cannot be read|Pick the OFJ TEST/i.test(accountsError);
           }
         }
-        if (!accounts) throw new ZohoError(accountsError ?? "The account mapping could not be read.");
-        out = row.kind === "invoice" ? await syncInvoiceRow(org, accounts, row.record_id) : await syncPaymentRow(org, accounts, row.record_id);
+        if (!accounts) {
+          if (accountsFatal) throw new ZohoError(accountsError ?? "The account mapping could not be read.");
+          out = { wait: `Zoho could not be reached for the chart of accounts: ${accountsError ?? "unknown"}` };
+        } else {
+          out = row.kind === "invoice" ? await syncInvoiceRow(org, accounts, row.record_id) : await syncPaymentRow(org, accounts, row.record_id);
+        }
       }
       if (out.wait) {
-        await admin.from("zoho_outbox").update({ last_error: out.wait, updated_at: new Date().toISOString() }).eq("id", row.id);
+        await admin.from("zoho_outbox").update({ last_error: out.wait, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
         report.waiting++;
       } else {
-        await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, updated_at: new Date().toISOString() }).eq("id", row.id);
+        await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
         report.pushed++;
       }
     } catch (e) {
       const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-      await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, updated_at: new Date().toISOString() }).eq("id", row.id);
+      await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
       report.failed++;
       await logAppError("zoho_sync", e, { detail: { kind: row.kind, record: row.record_id } });
     }
@@ -595,27 +662,39 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
   return report;
 }
 
+/** Reads a whole table page by page: PostgREST caps one answer at 1,000 rows, which would blind the backfill. */
+async function pageAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  const size = 1000;
+  for (let from = 0; ; from += size) {
+    const { data, error } = await fetchPage(from, from + size - 1);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < size) return out;
+  }
+}
+
 /** The owner's backfill: every customer, recorded deposit, issued tax invoice and recorded payment joins the queue. */
 export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number }> {
   const admin = createAdminClient();
   const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0 };
-  const { data: existing } = await admin.from("zoho_outbox").select("kind, record_id");
-  const have = new Set((existing ?? []).map((r) => `${r.kind}:${r.record_id}`));
+  const existing = await pageAll<{ kind: string; record_id: string }>((a, b) => admin.from("zoho_outbox").select("kind, record_id").order("enqueued_at").range(a, b));
+  const have = new Set(existing.map((r) => `${r.kind}:${r.record_id}`));
   const put: { kind: ZohoKind; record_id: string; job_id: string | null; created_by: string | null }[] = [];
-  const { data: customers } = await admin.from("customers").select("id").eq("is_active", true);
-  for (const c of customers ?? []) {
+  const customers = await pageAll<{ id: string }>((a, b) => admin.from("customers").select("id").eq("is_active", true).order("id").range(a, b));
+  for (const c of customers) {
     if (have.has(`contact:${c.id}`)) continue;
     put.push({ kind: "contact", record_id: c.id, job_id: null, created_by: by });
     out.contacts++;
   }
-  const { data: invoices } = await admin.from("invoices").select("id, job_id").eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null);
-  for (const i of invoices ?? []) {
+  const invoices = await pageAll<{ id: string; job_id: string | null }>((a, b) => admin.from("invoices").select("id, job_id").eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null).order("id").range(a, b));
+  for (const i of invoices) {
     if (have.has(`invoice:${i.id}`)) continue;
     put.push({ kind: "invoice", record_id: i.id, job_id: i.job_id, created_by: by });
     out.invoices++;
   }
-  const { data: pays } = await admin.from("payments").select("id, job_id, is_deposit, method, cheque_status, status").eq("status", "recorded");
-  for (const p of pays ?? []) {
+  const pays = await pageAll<{ id: string; job_id: string | null; is_deposit: boolean; method: string; cheque_status: string | null }>((a, b) => admin.from("payments").select("id, job_id, is_deposit, method, cheque_status").eq("status", "recorded").order("id").range(a, b));
+  for (const p of pays) {
     if (p.method === "cheque" && p.cheque_status !== "cleared") continue;
     const kind: ZohoKind = p.is_deposit ? "deposit" : "payment";
     if (have.has(`${kind}:${p.id}`)) continue;
@@ -624,7 +703,8 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     else out.payments++;
   }
   for (let i = 0; i < put.length; i += 200) {
-    const { error } = await admin.from("zoho_outbox").insert(put.slice(i, i + 200));
+    // ignoreDuplicates: a row enqueued by a hook mid-backfill never aborts the rest.
+    const { error } = await admin.from("zoho_outbox").upsert(put.slice(i, i + 200), { onConflict: "kind,record_id", ignoreDuplicates: true });
     if (error) throw new Error(error.message);
   }
   return out;

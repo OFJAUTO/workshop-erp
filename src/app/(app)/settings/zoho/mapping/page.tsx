@@ -118,12 +118,13 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
         </Card>
 
         <Card className="flex flex-col gap-3" data-map-other>
-          <SectionLabel>Charges and advances</SectionLabel>
+          <SectionLabel>Charges and advances — for the accountant&apos;s reference</SectionLabel>
+          <p className="text-xs text-muted">The sync sends the bank-charge amount on each payment and leaves deposits unapplied until the invoice takes them; WHICH accounts Zoho books those to is decided by Zoho&apos;s own organization settings, not here. These two boxes record the agreed names so the accountant sets Zoho to match.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Bank charges (card 2.26%, link 1.75%)" hint="The expense account Zoho books the charge to when a payment carries one.">
+            <Field label="Bank charges (card 2.26%, link 1.75%)" hint="Agreed expense account — set it in Zoho's own settings too.">
               {box("map__bank_charges", bestMatch(map.bankCharges, SUGGESTED_MAP.bankCharges, expense, MATCH_WORDS.bank_charges), expense)}
             </Field>
-            <Field label="Customer advances" hint="Where unapplied deposits sit until the tax invoice takes them (for the accountant's review).">
+            <Field label="Customer advances" hint="Agreed liability account for unapplied deposits — set it in Zoho's own settings too.">
               {box("map__advances", bestMatch(map.advances, SUGGESTED_MAP.advances, liability, MATCH_WORDS.advances), liability)}
             </Field>
           </div>
