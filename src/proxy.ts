@@ -39,8 +39,7 @@ export async function proxy(request: NextRequest) {
   // Vercel's scheduler calls the jobs on the deployment's own vercel.app address and does not follow redirects, so
   // /api/cron/* is answered directly on any host, before the address redirect and the login check (from 7 to 23
   // October 2026 every scheduled run got the 308 below). Each cron route checks CRON_SECRET itself.
-  // The support inspection (/api/zoho/inspect) is a machine route like the crons: its own CRON_SECRET check guards it.
-  if (request.nextUrl.pathname.startsWith("/api/cron/") || request.nextUrl.pathname === "/api/zoho/inspect") return NextResponse.next();
+  if (request.nextUrl.pathname.startsWith("/api/cron/")) return NextResponse.next();
 
   let response = NextResponse.next({ request });
 

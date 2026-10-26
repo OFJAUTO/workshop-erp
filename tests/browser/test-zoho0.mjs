@@ -30,10 +30,6 @@ try {
   }
   const settings = await go(page, `${base}/settings`).then(async () => ((await page.textContent("body")) ?? ""));
   check("1: Settings links to Zoho Books", /Zoho Books/.test(settings));
-  {
-    const ins = await fetch(`${base}/api/zoho/inspect`);
-    check("1: the inspection route refuses without the secret", ins.status === 401, String(ins.status));
-  }
 
   /* 2. Connect: off to Zoho's own sign-in with the one-time check value. */
   const r = await fetch(`${base}/api/zoho/connect`, { headers: { cookie: ownerCookie }, redirect: "manual" });
