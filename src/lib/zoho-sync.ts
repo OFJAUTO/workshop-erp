@@ -892,7 +892,7 @@ async function poForZoho(poId: string): Promise<PoRow> {
 }
 
 /** The LPO's supplier record, by id or (legacy rows) by name. */
-async function poVendor(org: string, po: PoRow): Promise<string> {
+async function poVendor(org: string, po: PoRow): Promise<{ vendorId: string; trn: string }> {
   const admin = createAdminClient();
   let supplierId = po.supplier_id;
   if (!supplierId) {
@@ -900,7 +900,18 @@ async function poVendor(org: string, po: PoRow): Promise<string> {
     supplierId = (data as { id: string } | null)?.id ?? null;
     if (!supplierId) throw new ZohoError(`${po.number} has no supplier record in the ERP (only the name "${po.supplier_name}").`);
   }
-  return ensureVendor(org, supplierId);
+  const vendorId = await ensureVendor(org, supplierId);
+  const { data: s } = await admin.from("suppliers").select("trn").eq("id", supplierId).maybeSingle();
+  return { vendorId, trn: ((s as { trn: string | null } | null)?.trn ?? "").replace(/\D/g, "") };
+}
+
+/** A VAT bill needs a VAT-registered vendor: once the TRN is on the supplier, the Zoho vendor follows it. */
+async function vendorVatRegistered(org: string, po: PoRow, v: { vendorId: string; trn: string }): Promise<void> {
+  if (v.trn.length !== 15) {
+    throw new ZohoError(`${po.supplier_name} has no TRN in the ERP, and a VAT bill needs the supplier's VAT registration: enter the 15-digit TRN from their invoice on Parts > Suppliers, then press Retry.`);
+  }
+  // Idempotent: the vendor may have been created before the TRN was known ("VAT or Exemption cannot be applied").
+  await zohoFetch(`/contacts/${v.vendorId}`, { org, method: "PUT", body: { tax_treatment: "vat_registered", tax_reg_no: v.trn } });
 }
 
 /**
@@ -915,7 +926,9 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number || !po.supplier_invoice_date) {
     return { wait: "Waiting for the supplier invoice to be entered on the LPO." };
   }
-  const vendorId = await poVendor(org, po);
+  const vendor = await poVendor(org, po);
+  await vendorVatRegistered(org, po, vendor);
+  const vendorId = vendor.vendorId;
   const [{ data: lineRows }, { data: chargeRows }] = await Promise.all([
     admin.from("purchase_order_lines").select("description, quantity, unit_cost, invoice_unit_cost, invoice_check").eq("po_id", po.id),
     admin.from("supplier_charges").select("description, amount_aed").eq("po_id", po.id).eq("is_active", true).is("removed_at", null),
@@ -1012,7 +1025,7 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
     await tryEnqueueZoho("bill", po.id, po.job_id);
     return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
   }
-  const vendorId = await poVendor(org, po);
+  const vendorId = (await poVendor(org, po)).vendorId;
   let zid = po.zoho_billpayment_id;
   if (!zid) {
     const j = await zohoFetch<{ vendorpayments?: { payment_id: string; reference_number?: string }[] }>(`/vendorpayments?reference_number=${encodeURIComponent(po.number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
