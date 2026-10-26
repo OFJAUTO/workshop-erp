@@ -158,7 +158,17 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
   // (a void, a bounce, a credit note), so the reason itself carries the action, not a "did not post" prefix.
   const { data: zoho } = await admin.from("zoho_outbox").select("id, kind, last_error, enqueued_at").eq("status", "failed").order("enqueued_at").limit(20);
   for (const z of (zoho ?? []) as { id: string; kind: string; last_error: string | null; enqueued_at: string }[]) {
-    const kindWord = z.kind === "invoice" ? "Tax invoice" : z.kind === "contact" ? "Customer" : z.kind === "deposit" ? "Deposit" : "Payment";
+    const kindWord =
+      z.kind === "invoice" ? "Tax invoice"
+      : z.kind === "contact" ? "Customer"
+      : z.kind === "deposit" ? "Deposit"
+      : z.kind === "creditnote" ? "Credit note"
+      : z.kind === "vendor" ? "Supplier"
+      : z.kind === "bill" ? "Supplier bill"
+      : z.kind === "billpayment" ? "Supplier payment"
+      : z.kind === "commission" ? "Commission"
+      : z.kind === "recovery" ? "Recovery month"
+      : "Payment";
     out.push({ jobId: `zoho:${z.id}`, plate: "Zoho Books", car: null, what: `${kindWord}: ${(z.last_error ?? "see the sync page").slice(0, 140)}`, amount: null, actionLabel: "Open the sync page", href: "/zoho?show=failed", always: true, urgency: "amber", since: z.enqueued_at });
   }
   return out;

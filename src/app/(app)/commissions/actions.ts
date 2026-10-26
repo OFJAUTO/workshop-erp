@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { loadCommissions } from "@/lib/commissions";
 import { decideCommission, saveCommission } from "@/app/(app)/quotes/actions";
+import { tryEnqueueZoho } from "@/lib/zoho-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const back = (msg: string, isError = false) => redirect(`/commissions?${isError ? "error" : "message"}=${encodeURIComponent(msg)}`);
@@ -67,6 +68,8 @@ export async function payCommissions(formData: FormData) {
     await admin.from("quotations").update({ commission_paid_at: now, commission_paid_by: staff.id, commission_paid_method: method, commission_paid_note: note, commission_payment_id: pay!.id, updated_by: staff.id }).eq("id", r.quotationId);
     if (r.jobId) await admin.from("job_events").insert({ job_id: r.jobId, event_type: "commission_paid", note: `Commission AED ${r.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} to ${r.recipient} paid by ${staff.display_name} (${method === "cash" ? "cash" : `bank transfer${reference ? `, ref ${reference}` : ""}`}) · voucher ${pay!.number}`, created_by: staff.id });
   }
+  // Zoho Books phase 2: the paid voucher becomes an expense (the signed proof attaches once uploaded).
+  await tryEnqueueZoho("commission", String(pay!.id), rows[0]?.jobId ?? null, staff.id);
   revalidatePath("/commissions");
   revalidatePath("/reports/monthly");
   redirect(`/commissions?message=${encodeURIComponent(`${pay!.number}: AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} to ${recipients[0]} by ${method === "cash" ? "cash" : "bank transfer"}. ${method === "cash" ? "Print the voucher, sign it, then upload the signed copy." : "Upload the bank slip or screenshot."}`)}&voucher=${pay!.id}`);

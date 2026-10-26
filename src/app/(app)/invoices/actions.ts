@@ -288,11 +288,10 @@ export async function issueCreditNote(invoiceId: string, formData: FormData) {
     if (hot) await notifyRoles(["owner"], { type: "commission_approval", title: `Credit note on a job with a commission · ${hot.number}`, body: `${hot.commission_to} has AED ${Number(hot.commission_aed).toLocaleString("en-GB")} commission on this job and a credit note was just issued. Check it on the Commissions page.`, jobId: bundle.invoice.job_id, href: "/commissions" });
   }
   if (bundle.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle.invoice.job_id, event_type: "credit_note", note: `${number} issued by ${staff.display_name} against ${bundle.invoice.number}: AED ${round2(amount + vat).toLocaleString("en-GB", { minimumFractionDigits: 2 })} with VAT (${description})`, created_by: staff.id });
-  // Credit notes do not sync yet (phase 2): an invoice already in Zoho turns red so the accountant enters the credit by hand.
-  {
-    const { data: zinv } = await admin.from("invoices").select("zoho_invoice_id").eq("id", invoiceId).maybeSingle();
-    if ((zinv as { zoho_invoice_id?: string | null } | null)?.zoho_invoice_id) await flagZohoAttention("invoice", invoiceId, `${number} was issued against ${bundle.invoice.number} after it reached Zoho: enter the credit note in Zoho by hand (credit notes sync in a later phase).`);
-  }
+  // Zoho Books phase 2: the credit note posts by itself and applies against the invoice (which posts first if it
+  // has not yet - the credit note waits for it in the queue).
+  await tryEnqueueZoho("invoice", invoiceId, bundle.invoice.job_id);
+  await tryEnqueueZoho("creditnote", String(cn.id), bundle.invoice.job_id, staff.id);
   refresh(bundle.invoice.job_id, invoiceId);
   redirect(`/invoices/${cn.id}?message=${encodeURIComponent(`${number} issued.`)}`);
 }

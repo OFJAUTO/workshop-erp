@@ -96,7 +96,9 @@
     "test:receipt": "node --env-file=.env.local tests/browser/test-receipt.mjs",
     "test:zoho0": "node --env-file=.env.local tests/browser/test-zoho0.mjs",
     "test:zoho1": "node --env-file=.env.local tests/browser/test-zoho1.mjs",
-    "test:zoho1live": "node --env-file=.env.local tests/browser/test-zoho1-live.mjs"
+    "test:zoho1live": "node --env-file=.env.local tests/browser/test-zoho1-live.mjs",
+    "test:zoho2": "node --env-file=.env.local tests/browser/test-zoho2.mjs",
+    "test:zoho2live": "node --env-file=.env.local tests/browser/test-zoho2-live.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

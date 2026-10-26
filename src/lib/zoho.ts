@@ -159,7 +159,10 @@ export class ZohoError extends Error {
   }
 }
 
-export async function zohoFetch<T = Record<string, unknown>>(path: string, opts: { org?: string | null; method?: "GET" | "POST" | "PUT" | "DELETE"; body?: Record<string, unknown>; write?: boolean } = {}): Promise<T> {
+/** A file for Zoho's multipart endpoints (bill/credit-note attachments, expense receipts). */
+export type ZohoUpload = { field: string; filename: string; contentType: string; data: Buffer; extra?: Record<string, string> };
+
+export async function zohoFetch<T = Record<string, unknown>>(path: string, opts: { org?: string | null; method?: "GET" | "POST" | "PUT" | "DELETE"; body?: Record<string, unknown>; upload?: ZohoUpload; write?: boolean } = {}): Promise<T> {
   const method = opts.method ?? "GET";
   const write = opts.write ?? method !== "GET";
   if (write) {
@@ -178,10 +181,22 @@ export async function zohoFetch<T = Record<string, unknown>>(path: string, opts:
       const token = await zohoAccessToken();
       const url = new URL(`${ZOHO_API_URL}${path}`);
       if (opts.org) url.searchParams.set("organization_id", opts.org);
+      // A file travels as multipart/form-data: fetch sets the boundary itself, so no content-type header here.
+      let body: BodyInit | undefined;
+      let contentType: Record<string, string> = {};
+      if (opts.upload) {
+        const form = new FormData();
+        form.set(opts.upload.field, new Blob([new Uint8Array(opts.upload.data)], { type: opts.upload.contentType }), opts.upload.filename);
+        for (const [k, v] of Object.entries(opts.upload.extra ?? {})) form.set(k, v);
+        body = form;
+      } else if (opts.body) {
+        body = JSON.stringify(opts.body);
+        contentType = { "content-type": "application/json" };
+      }
       const res = await fetch(url, {
         method,
-        headers: { Authorization: `Zoho-oauthtoken ${token}`, ...(opts.body ? { "content-type": "application/json" } : {}) },
-        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, ...contentType },
+        body,
         cache: "no-store",
       });
       const j = (await res.json().catch(() => ({}))) as Record<string, unknown> & { code?: number; message?: string };

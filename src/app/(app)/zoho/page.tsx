@@ -22,7 +22,18 @@ const FILTERS = [
   { key: "synced", label: "Posted" },
 ] as const;
 
-const KIND_WORDS: Record<ZohoKind, string> = { contact: "Customer", deposit: "Deposit", invoice: "Tax invoice", payment: "Payment" };
+const KIND_WORDS: Record<ZohoKind, string> = {
+  contact: "Customer",
+  deposit: "Deposit",
+  invoice: "Tax invoice",
+  payment: "Payment",
+  creditnote: "Credit note",
+  vendor: "Supplier",
+  bill: "Supplier bill",
+  billpayment: "Supplier payment",
+  commission: "Commission",
+  recovery: "Recovery month",
+};
 
 const aed = (n: number) => `AED ${Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
@@ -34,6 +45,23 @@ function resultWords(row: OutboxRow): string | null {
     const z = r.zoho as { total?: number; vat?: number; balance?: number } | undefined;
     if (!z) return null;
     return `In Zoho: ${aed(z.total ?? 0)} · VAT ${aed(z.vat ?? 0)} · balance ${aed(z.balance ?? 0)} — matches the ERP to the fils`;
+  }
+  if (row.kind === "creditnote") {
+    const z = r.zoho as { total?: number; unapplied?: number } | undefined;
+    if (!z) return null;
+    return `Credit note in Zoho: ${aed(z.total ?? 0)} · applied to ${String(r.applied_to ?? "the invoice")}${typeof r.invoice_balance_after === "number" ? ` · invoice balance now ${aed(r.invoice_balance_after)}` : ""}`;
+  }
+  if (row.kind === "bill") {
+    const z = r.zoho as { net?: number; vat?: number; total?: number; balance?: number } | undefined;
+    if (!z) return null;
+    return `Bill in Zoho: ${aed(z.net ?? 0)} + VAT ${aed(z.vat ?? 0)} = ${aed(z.total ?? 0)} · due ${aed(z.balance ?? 0)}${r.attached ? " · scan attached" : ""}${r.price_flags ? ` · ${r.price_flags} price flag(s) in the notes` : ""} — matches the ERP to the fils`;
+  }
+  if (row.kind === "billpayment") {
+    return `Paid in Zoho${typeof r.amount === "number" ? `: ${aed(r.amount)}` : ""} · the bill shows ${aed(Number(r.bill_balance_after) || 0)} due`;
+  }
+  if (row.kind === "commission" || row.kind === "recovery") {
+    const amount = typeof r.amount === "number" ? aed(r.amount) : "";
+    return `Expense in Zoho: ${amount}${r.receipt ? " · proof attached" : typeof r.note === "string" ? ` · ${r.note}` : ""}`;
   }
   const amount = typeof r.amount === "number" ? aed(r.amount) : null;
   const charge = typeof r.bank_charges === "number" && r.bank_charges > 0 ? ` · bank charge ${aed(r.bank_charges)}` : "";
@@ -52,18 +80,35 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   ]);
   const rows = (rowsRaw ?? []) as OutboxRow[];
 
-  // The document names, batched per kind: INV-xxxxx, RCT-xxxxx or the customer's name.
+  // The document names, batched per kind: INV-xxxxx, RCT-xxxxx, LPO-xxxxx, CPV-xxxxx or the person's name.
   const names = new Map<string, string>();
-  const invoiceIds = rows.filter((r) => r.kind === "invoice").map((r) => r.record_id);
-  const paymentIds = rows.filter((r) => r.kind === "deposit" || r.kind === "payment").map((r) => r.record_id);
-  const customerIds = rows.filter((r) => r.kind === "contact").map((r) => r.record_id);
-  if (invoiceIds.length) for (const i of (await admin.from("invoices").select("id, number, total_aed").in("id", invoiceIds)).data ?? []) names.set(`invoice:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
+  const idsOf = (...kinds: ZohoKind[]) => rows.filter((r) => kinds.includes(r.kind)).map((r) => r.record_id);
+  const invoiceIds = idsOf("invoice", "creditnote");
+  const paymentIds = idsOf("deposit", "payment");
+  const customerIds = idsOf("contact");
+  const supplierIds = idsOf("vendor");
+  const poIds = idsOf("bill", "billpayment");
+  const voucherIds = idsOf("commission");
+  const payoutIds = idsOf("recovery");
+  if (invoiceIds.length)
+    for (const i of (await admin.from("invoices").select("id, number, total_aed").in("id", invoiceIds)).data ?? []) {
+      names.set(`invoice:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
+      names.set(`creditnote:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
+    }
   if (paymentIds.length)
     for (const p of (await admin.from("payments").select("id, number, amount_aed").in("id", paymentIds)).data ?? []) {
       names.set(`deposit:${p.id}`, `${p.number} · ${aed(Number(p.amount_aed))}`);
       names.set(`payment:${p.id}`, `${p.number} · ${aed(Number(p.amount_aed))}`);
     }
   if (customerIds.length) for (const c of (await admin.from("customers").select("id, full_name, company_name").in("id", customerIds)).data ?? []) names.set(`contact:${c.id}`, String(c.company_name || c.full_name));
+  if (supplierIds.length) for (const s of (await admin.from("suppliers").select("id, name").in("id", supplierIds)).data ?? []) names.set(`vendor:${s.id}`, String(s.name));
+  if (poIds.length)
+    for (const po of (await admin.from("purchase_orders").select("id, number, supplier_name, supplier_invoice_number").in("id", poIds)).data ?? []) {
+      names.set(`bill:${po.id}`, `${po.supplier_invoice_number ?? po.number} · ${po.supplier_name}`);
+      names.set(`billpayment:${po.id}`, `${po.number} · ${po.supplier_name}`);
+    }
+  if (voucherIds.length) for (const v of (await admin.from("commission_payments").select("id, number, recipient, amount_aed").in("id", voucherIds)).data ?? []) names.set(`commission:${v.id}`, `${v.number} · ${v.recipient} · ${aed(Number(v.amount_aed))}`);
+  if (payoutIds.length) for (const r of (await admin.from("recovery_payouts").select("id, who, month, total_aed").in("id", payoutIds)).data ?? []) names.set(`recovery:${r.id}`, `${r.month} · ${r.who} · ${aed(Number(r.total_aed))}`);
 
   const counts = Object.fromEntries(FILTERS.map((f) => [f.key, f.key === "all" ? rows.length : rows.filter((r) => r.status === f.key).length]));
   const filtered = show === "all" ? rows : rows.filter((r) => r.status === show);

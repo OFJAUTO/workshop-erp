@@ -44,16 +44,36 @@ export const DEPOSIT_METHODS = [
 ] as const;
 export type MethodKey = (typeof DEPOSIT_METHODS)[number]["key"];
 
+/** Phase 2: what supplier bills post to (the parts themselves, and courier/freight charged on the invoice). */
+export const PURCHASE_TYPES = [
+  { key: "parts", label: "Parts purchases" },
+  { key: "courier", label: "Courier & freight" },
+] as const;
+export type PurchaseKey = (typeof PURCHASE_TYPES)[number]["key"];
+
+/** Phase 2: the owner's expense buckets (commissions when the voucher is paid; recovery when the month is paid). */
+export const EXPENSE_TYPES = [
+  { key: "commission", label: "Sales commissions" },
+  { key: "recovery", label: "Recovery & transport" },
+] as const;
+export type ExpenseKey = (typeof EXPENSE_TYPES)[number]["key"];
+
 /** Zoho account NAMES (not ids): the same mapping reads in OFJ TEST today and in the REAL book at go-live. */
 export type ZohoAccountMap = {
   income: Partial<Record<IncomeKey, string>>;
   depositTo: Partial<Record<MethodKey, string>>;
+  purchases: Partial<Record<PurchaseKey, string>>;
+  expense: Partial<Record<ExpenseKey, string>>;
+  /** The cash/bank account supplier payments and expenses are PAID FROM. */
+  paidFrom?: string;
   bankCharges?: string;
   advances?: string;
+  /** Reference only (no ERP refund records yet): where a credit-note refund would be paid from. */
+  advancesRefund?: string;
 };
 
 /** The pre-fill when the live chart has no better match; also what "Create the suggested accounts" makes in OFJ TEST. */
-export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; bankCharges: string; advances: string } = {
+export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; bankCharges: string; advances: string; advancesRefund: string } = {
   income: {
     labour: "Mechanical labour income",
     parts: "Spare parts income",
@@ -69,13 +89,23 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
     transfer: "Bank - AED",
     cheque: "Bank - AED",
   },
+  purchases: {
+    parts: "Parts purchases",
+    courier: "Courier and freight",
+  },
+  expense: {
+    commission: "Sales commissions",
+    recovery: "Recovery and transport",
+  },
+  paidFrom: "Bank - AED",
   bankCharges: "Bank Fees and Charges",
   advances: "Customer advances",
+  advancesRefund: "Bank - AED",
 };
 
 export function readZohoMap(settings: Settings): ZohoAccountMap {
   const raw = (settings.zoho_account_map ?? {}) as ZohoAccountMap;
-  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, bankCharges: raw.bankCharges, advances: raw.advances };
+  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, bankCharges: raw.bankCharges, advances: raw.advances, advancesRefund: raw.advancesRefund };
 }
 
 /** Where writes go: OFJ TEST until the owner declares go-live (zohoFetch refuses REAL anyway while the switch is off). */
@@ -85,7 +115,7 @@ export async function zohoWriteOrg(): Promise<string | null> {
   return zohoTestOrgId();
 }
 
-type Resolved = { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; taxId: string };
+type Resolved = { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; taxId: string };
 
 /**
  * Names become account ids in the organization being written to. A name missing from the mapping fails in plain
@@ -98,7 +128,7 @@ async function resolveZohoAccounts(org: string, map: ZohoAccountMap): Promise<Re
   if (!tax) throw new ZohoError("No 5% tax exists in this Zoho organization. Run the mirror on Settings > Zoho Books.");
   const byName = new Map(chart.filter((a) => a.is_active !== false).map((a) => [a.account_name.trim().toLowerCase(), a]));
   const mayCreate = org !== ZOHO_REAL_ORG_ID;
-  const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank"): Promise<string> => {
+  const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank" | "expense"): Promise<string> => {
     const clean = (name ?? "").trim();
     if (!clean) throw new ZohoError(`Mapping missing: ${label}. Pick the account on Settings > Zoho Books > Mapping.`);
     const found = byName.get(clean.toLowerCase());
@@ -117,12 +147,17 @@ async function resolveZohoAccounts(org: string, map: ZohoAccountMap): Promise<Re
   for (const t of INCOME_TYPES) income[t.key] = await resolve(map.income[t.key], t.label, "income");
   const depositTo = {} as Record<MethodKey, string>;
   for (const m of DEPOSIT_METHODS) depositTo[m.key] = await resolve(map.depositTo[m.key], `Deposit-to account for ${m.label}`, m.key === "cash" ? "cash" : "bank");
-  return { income, depositTo, taxId: tax.tax_id };
+  const purchases = {} as Record<PurchaseKey, string>;
+  for (const p of PURCHASE_TYPES) purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
+  const expense = {} as Record<ExpenseKey, string>;
+  for (const e of EXPENSE_TYPES) expense[e.key] = await resolve(map.expense[e.key], e.label, "expense");
+  const paidFrom = await resolve(map.paidFrom, "Paid-from account (supplier payments and expenses)", "bank");
+  return { income, depositTo, purchases, expense, paidFrom, taxId: tax.tax_id };
 }
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -178,6 +213,15 @@ export async function flagZohoAttention(kind: ZohoKind, recordId: string, reason
   }
 }
 
+/** Something was ADDED to an already-synced document (a voucher proof uploaded late): the row runs once more. */
+export async function reopenZoho(kind: ZohoKind, recordId: string): Promise<void> {
+  try {
+    await createAdminClient().from("zoho_outbox").update({ status: "pending", last_error: null, updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
+  } catch (e) {
+    await logAppError("zoho_reopen", e, { detail: { kind, recordId } });
+  }
+}
+
 /* ------------------------------------------------------- helpers ------------------------------------------------------- */
 
 const MODE: Record<MethodKey, string> = { cash: "cash", card: "creditcard", link: "others", transfer: "banktransfer", cheque: "check" };
@@ -188,7 +232,14 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 
 /** Open-in-Zoho addresses for the sync page. */
 export function zohoOpenUrl(org: string, kind: ZohoKind, zohoId: string): string {
-  const section = kind === "invoice" ? "invoices" : kind === "contact" ? "contacts" : "paymentsreceived";
+  const section =
+    kind === "invoice" ? "invoices"
+    : kind === "contact" || kind === "vendor" ? "contacts"
+    : kind === "creditnote" ? "creditnotes"
+    : kind === "bill" ? "bills"
+    : kind === "billpayment" ? "paymentsmade"
+    : kind === "commission" || kind === "recovery" ? "expenses"
+    : "paymentsreceived";
   return `https://books.zoho.com/app/${org}#/${section}/${zohoId}`;
 }
 
@@ -307,6 +358,12 @@ async function zohoAppliedPayments(org: string, zohoInvoiceId: string): Promise<
   const credits = await zohoFetch<{ credits?: { payment_id?: string; creditnote_id?: string }[] }>(`/invoices/${zohoInvoiceId}/creditsapplied`, { org });
   for (const cr of credits.credits ?? []) if (cr.payment_id) applied.add(String(cr.payment_id));
   return applied;
+}
+
+/** How much CREDIT NOTE money already sits on the Zoho invoice (phase 2): the balance check must count it. */
+async function zohoCreditedTotal(org: string, zohoInvoiceId: string): Promise<number> {
+  const j = await zohoFetch<{ credits?: { creditnote_id?: string; credited_amount?: number; amount_applied?: number }[] }>(`/invoices/${zohoInvoiceId}/creditsapplied`, { org });
+  return round2((j.credits ?? []).filter((c) => c.creditnote_id).reduce((a, c) => a + (Number(c.credited_amount ?? c.amount_applied) || 0), 0));
 }
 
 /** The ERP payments that belong on this invoice: its own rows plus the job's deposits; cheques only once cleared. */
@@ -501,7 +558,9 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
   // words, so the accountant knows exactly what to look at (the retry recomputes from Zoho's live state).
   if (applyOut.shorts.length) throw new ZohoError(`${inv.number} cannot be covered as the ERP expects: ${applyOut.shorts.join("; ")}.`);
   const after = (await zohoInvoiceById(org, z.invoice_id)) ?? z;
-  const expectedBalance = Math.max(0, round2(inv.total_aed - applyOut.available));
+  // Credit notes applied in Zoho (phase 2) reduce the balance there while the ERP's own balance ignores them.
+  const credited = await zohoCreditedTotal(org, z.invoice_id);
+  const expectedBalance = Math.max(0, round2(inv.total_aed - applyOut.available - credited));
   if (!near(after.balance, expectedBalance)) {
     throw new ZohoError(`The balance differs for ${inv.number}: Zoho says ${after.balance.toFixed(2)}, the ERP expects ${expectedBalance.toFixed(2)} after the payments posted so far.`);
   }
@@ -599,11 +658,512 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   };
 }
 
+/* ------------------------------------------------- phase 2: vendors, bills, credit notes, expenses ------------------------------------------------- */
+
+const CONTENT_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+/** What Zoho accepts on bill/credit-note attachments; expense receipts also take xls/xlsx/doc/docx. */
+const BILL_ATTACH_EXTS = new Set(["pdf", "png", "jpg", "jpeg", "gif", "bmp"]);
+const RECEIPT_EXTS = new Set(["pdf", "png", "jpg", "jpeg", "gif", "bmp", "xls", "xlsx"]);
+
+async function bucketFile(bucket: string, path: string): Promise<{ data: Buffer; ext: string; contentType: string; name: string } | null> {
+  try {
+    const { data } = await createAdminClient().storage.from(bucket).download(path);
+    if (!data) return null;
+    const name = path.split("/").pop() ?? "file";
+    const ext = (name.split(".").pop() ?? "").toLowerCase();
+    return { data: Buffer.from(await data.arrayBuffer()), ext, contentType: CONTENT_TYPES[ext] ?? "application/octet-stream", name };
+  } catch {
+    return null;
+  }
+}
+
+type SupplierLite = { id: string; name: string; phone: string | null; email: string | null; trn: string | null; zoho_vendor_id: string | null };
+
+/**
+ * The supplier's Zoho vendor: stored id first, then the exact name among vendors, then create. Zoho contact names
+ * are unique across customers AND vendors, so a clash with a customer gets the "· Supplier" suffix.
+ */
+export async function ensureVendor(org: string, supplierId: string): Promise<string> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("suppliers").select("id, name, phone, email, trn, zoho_vendor_id").eq("id", supplierId).maybeSingle();
+  const s = data as SupplierLite | null;
+  if (!s) throw new ZohoError("The supplier no longer exists in the ERP.");
+  let zid = s.zoho_vendor_id;
+  const name = s.name.trim();
+  const sameName = (x: ZohoContact) => x.contact_name.trim().toLowerCase() === name.toLowerCase() || x.contact_name.trim().toLowerCase() === `${name} · supplier`;
+  const lookFor = async (): Promise<string | null> => {
+    const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name=${encodeURIComponent(name)}&contact_type=vendor`, { org });
+    return j.contacts?.find(sameName)?.contact_id ?? null;
+  };
+  if (!zid) {
+    zid = await lookFor();
+    if (!zid) {
+      const trn = (s.trn ?? "").replace(/\D/g, "");
+      const body = (contactName: string) => ({
+        contact_name: cut(contactName, 200),
+        company_name: cut(name, 200),
+        contact_type: "vendor",
+        ...(s.phone || s.email ? { contact_persons: [{ first_name: cut(name, 100), mobile: s.phone ?? "", phone: s.phone ?? "", ...(s.email ? { email: s.email } : {}), is_primary_contact: true }] } : {}),
+        ...(trn.length === 15 ? { tax_treatment: "vat_registered", tax_reg_no: trn } : { tax_treatment: "vat_not_registered" }),
+        place_of_supply: "AE",
+      });
+      try {
+        const j = await zohoFetch<{ contact?: ZohoContact }>("/contacts", { org, method: "POST", body: body(name) });
+        zid = j.contact?.contact_id ?? null;
+      } catch (e) {
+        if (e instanceof ZohoError && /exist/i.test(e.message)) {
+          zid = await lookFor();
+          if (!zid) {
+            const j = await zohoFetch<{ contact?: ZohoContact }>("/contacts", { org, method: "POST", body: body(`${name} · Supplier`) });
+            zid = j.contact?.contact_id ?? null;
+          }
+        } else throw e;
+      }
+      if (!zid) throw new ZohoError("Zoho did not return the new vendor.");
+    }
+    await admin.from("suppliers").update({ zoho_vendor_id: zid }).eq("id", s.id);
+  }
+  await admin.from("zoho_outbox").update({ status: "synced", zoho_id: zid, synced_at: new Date().toISOString(), last_error: null }).eq("kind", "vendor").eq("record_id", s.id).neq("status", "synced");
+  return zid;
+}
+
+/* ----------------------------------------------------------- credit notes ----------------------------------------------------------- */
+
+type ZohoCreditNote = { creditnote_id: string; creditnote_number: string; status: string; total: number; balance: number; customer_id?: string };
+
+async function zohoCreditNoteById(org: string, id: string): Promise<ZohoCreditNote | null> {
+  try {
+    const j = await zohoFetch<{ creditnote?: ZohoCreditNote }>(`/creditnotes/${id}`, { org });
+    return j.creditnote ?? null;
+  } catch (e) {
+    if (e instanceof ZohoError && e.code === 1002) return null;
+    throw e;
+  }
+}
+
+/**
+ * An ERP credit note (one lump line, owner-issued) becomes a Zoho credit note with the SAME CN number, applied
+ * against the original invoice. The UAE edition requires a credit reason; the ERP has none, so "others" with the
+ * owner's own wording in the line. Refunds are not posted: the ERP records no refunds yet.
+ */
+async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("invoices").select(`${INVOICE_SELECT}, zoho_creditnote_id`).eq("id", invoiceId).maybeSingle();
+  if (!raw) throw new ZohoError("The credit note no longer exists in the ERP.");
+  const cn = toInvoice(raw as Record<string, unknown>) as InvoiceRow & { zoho_creditnote_id: string | null };
+  if (cn.kind !== "credit_note") return { result: { skipped: "Not a credit note." } };
+  if (cn.status === "cancelled" && !cn.zoho_creditnote_id) return { result: { skipped: "Cancelled in the ERP before it was posted. Nothing went to Zoho." } };
+  if (cn.status === "cancelled") throw new ZohoError(`${cn.number} was cancelled in the ERP after it reached Zoho: the accountant voids it in Zoho by hand.`);
+  if (!cn.credit_of) throw new ZohoError(`${cn.number} has no parent invoice in the ERP.`);
+  const [{ data: parent }, { data: lineRows }, job] = await Promise.all([
+    admin.from("invoices").select("id, number, job_id, zoho_invoice_id").eq("id", cn.credit_of).maybeSingle(),
+    admin.from("invoice_lines").select(INVOICE_LINE_SELECT).eq("invoice_id", cn.id).eq("is_active", true).order("position"),
+    cn.job_id ? admin.from("jobs").select("department").eq("id", cn.job_id).maybeSingle().then((r) => r.data as { department: string | null } | null) : Promise.resolve(null),
+  ]);
+  const par = parent as { id: string; number: string; job_id: string | null; zoho_invoice_id: string | null } | null;
+  if (!par) throw new ZohoError(`${cn.number}: the invoice it credits no longer exists in the ERP.`);
+  if (!par.zoho_invoice_id) {
+    // The parent posts first; the credit note waits its turn.
+    await tryEnqueueZoho("invoice", par.id, par.job_id);
+    return { wait: `Waiting for ${par.number} to reach Zoho first.` };
+  }
+  const contactId = await ensureContact(org, cn.customer_id);
+  const lines = (lineRows ?? []).map((r) => toInvoiceLine(r as Record<string, unknown>));
+  const incomeKey: IncomeKey = job?.department === "bodyshop" ? "bodyshop" : "other";
+  const matches = (z: ZohoCreditNote) => near(z.total, cn.total_aed);
+
+  let z: ZohoCreditNote | null = cn.zoho_creditnote_id ? await zohoCreditNoteById(org, cn.zoho_creditnote_id) : null;
+  if (!z) {
+    const j = await zohoFetch<{ creditnotes?: ZohoCreditNote[] }>(`/creditnotes?creditnote_number=${encodeURIComponent(cn.number)}`, { org });
+    const found = j.creditnotes?.find((x) => x.creditnote_number === cn.number) ?? null;
+    const full = found ? await zohoCreditNoteById(org, found.creditnote_id) : null;
+    if (full && (String(full.customer_id ?? "") !== contactId || !matches(full))) {
+      throw new ZohoError(`A credit note numbered ${cn.number} already exists in Zoho with different figures or on another customer: the accountant checks it in Zoho.`);
+    }
+    z = full;
+  }
+  if (!z) {
+    const body = {
+      customer_id: contactId,
+      creditnote_number: cn.number,
+      date: dubaiDate(cn.issued_at),
+      reason_for_credit_debit_note: "others",
+      reference_number: par.number,
+      line_items: lines.length
+        ? lines.map((l, i) => ({ name: cut(l.description, 100), quantity: 1, rate: l.amount_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey], item_order: i + 1 }))
+        : [{ name: cut(cn.notes ?? `Credit against ${par.number}`, 100), quantity: 1, rate: cn.taxable_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey] }],
+      ...(cn.notes ? { notes: cut(cn.notes, 2000) } : {}),
+    };
+    try {
+      const j = await zohoFetch<{ creditnote?: ZohoCreditNote }>("/creditnotes?ignore_auto_number_generation=true", { org, method: "POST", body });
+      z = j.creditnote ?? null;
+    } catch (e) {
+      const again = await zohoFetch<{ creditnotes?: ZohoCreditNote[] }>(`/creditnotes?creditnote_number=${encodeURIComponent(cn.number)}`, { org });
+      const found = again.creditnotes?.find((x) => x.creditnote_number === cn.number);
+      const full = found ? await zohoCreditNoteById(org, found.creditnote_id) : null;
+      if (!full || String(full.customer_id ?? "") !== contactId) throw e;
+      z = full;
+    }
+    if (!z) throw new ZohoError("Zoho did not return the new credit note.");
+  }
+  if (!matches(z)) throw new ZohoError(`Totals differ for ${cn.number}: Zoho has ${z.total.toFixed(2)}, the ERP has ${cn.total_aed.toFixed(2)}.`);
+  await admin.from("invoices").update({ zoho_creditnote_id: z.creditnote_id }).eq("id", cn.id);
+
+  // Apply the unapplied part against the original invoice (never twice: Zoho's own balance says what is left).
+  let appliedNow = 0;
+  const parentInv = await zohoInvoiceById(org, par.zoho_invoice_id);
+  const canApply = round2(Math.min(z.balance, parentInv?.balance ?? 0));
+  if (canApply > 0.005) {
+    await zohoFetch(`/creditnotes/${z.creditnote_id}/invoices`, { org, method: "POST", body: { invoices: [{ invoice_id: par.zoho_invoice_id, amount_applied: canApply }] } });
+    appliedNow = canApply;
+  }
+  const after = (await zohoCreditNoteById(org, z.creditnote_id)) ?? z;
+  const parentAfter = await zohoInvoiceById(org, par.zoho_invoice_id);
+  return {
+    zohoId: z.creditnote_id,
+    result: {
+      number: cn.number,
+      zoho: { total: after.total, unapplied: after.balance },
+      erp: { total: cn.total_aed, vat: cn.vat_aed },
+      applied_to: par.number,
+      applied_now: appliedNow,
+      invoice_balance_after: parentAfter?.balance ?? null,
+    },
+  };
+}
+
+/* ----------------------------------------------------------- bills ----------------------------------------------------------- */
+
+type ZohoBill = { bill_id: string; bill_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; vendor_id?: string; documents?: unknown[] };
+
+async function zohoBillById(org: string, id: string): Promise<ZohoBill | null> {
+  try {
+    const j = await zohoFetch<{ bill?: ZohoBill }>(`/bills/${id}`, { org });
+    return j.bill ?? null;
+  } catch (e) {
+    if (e instanceof ZohoError && e.code === 1002) return null;
+    throw e;
+  }
+}
+
+type PoRow = {
+  id: string;
+  number: string;
+  kind: string;
+  job_id: string | null;
+  supplier_id: string | null;
+  supplier_name: string;
+  total_cost_aed: number | null;
+  supplier_invoice_status: string | null;
+  supplier_invoice_number: string | null;
+  supplier_invoice_date: string | null;
+  supplier_invoice_amount: number | null;
+  supplier_invoice_path: string | null;
+  supplier_paid_at: string | null;
+  supplier_paid_reference: string | null;
+  zoho_bill_id: string | null;
+  zoho_billpayment_id: string | null;
+};
+
+const PO_ZOHO_SELECT = "id, number, kind, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, zoho_bill_id, zoho_billpayment_id";
+
+async function poForZoho(poId: string): Promise<PoRow> {
+  const { data } = await createAdminClient().from("purchase_orders").select(PO_ZOHO_SELECT).eq("id", poId).maybeSingle();
+  if (!data) throw new ZohoError("The LPO no longer exists in the ERP.");
+  const po = data as unknown as PoRow;
+  po.total_cost_aed = Number(po.total_cost_aed) || 0;
+  po.supplier_invoice_amount = po.supplier_invoice_amount == null ? null : Number(po.supplier_invoice_amount);
+  return po;
+}
+
+/** The LPO's supplier record, by id or (legacy rows) by name. */
+async function poVendor(org: string, po: PoRow): Promise<string> {
+  const admin = createAdminClient();
+  let supplierId = po.supplier_id;
+  if (!supplierId) {
+    const { data } = await admin.from("suppliers").select("id").ilike("name", po.supplier_name).limit(1).maybeSingle();
+    supplierId = (data as { id: string } | null)?.id ?? null;
+    if (!supplierId) throw new ZohoError(`${po.number} has no supplier record in the ERP (only the name "${po.supplier_name}").`);
+  }
+  return ensureVendor(org, supplierId);
+}
+
+/**
+ * One Zoho bill per supplier LPO with its invoice entered: the bill number is the SUPPLIER'S invoice number,
+ * the parts go as one summary line at the invoice's NET figures (Zoho adds the 5%), each courier/freight charge
+ * is its own line, the price-differs flags ride in the notes and the scan is attached.
+ */
+async function syncBillRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const po = await poForZoho(poId);
+  if (po.kind === "main") return { result: { skipped: "A main LPO splits into supplier LPOs; the bills sit on those." } };
+  if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number || !po.supplier_invoice_date) {
+    return { wait: "Waiting for the supplier invoice to be entered on the LPO." };
+  }
+  const vendorId = await poVendor(org, po);
+  const [{ data: lineRows }, { data: chargeRows }] = await Promise.all([
+    admin.from("purchase_order_lines").select("description, quantity, unit_cost, invoice_unit_cost, invoice_check").eq("po_id", po.id),
+    admin.from("supplier_charges").select("description, amount_aed").eq("po_id", po.id).eq("is_active", true).is("removed_at", null),
+  ]);
+  const lines = (lineRows ?? []).map((l) => ({ description: String(l.description ?? ""), quantity: Number(l.quantity) || 0, unit: Number(l.invoice_unit_cost ?? l.unit_cost) || 0, lpoUnit: Number(l.unit_cost) || 0, check: (l.invoice_check ?? null) as string | null }));
+  const charges = (chargeRows ?? []).map((c) => ({ description: String(c.description ?? ""), amount: round2(Number(c.amount_aed) || 0) }));
+  const partsNet = round2(lines.reduce((a, l) => a + l.quantity * l.unit, 0));
+  const chargesSum = round2(charges.reduce((a, c) => a + c.amount, 0));
+  const linesTotal = round2(partsNet + chargesSum);
+  // "The total must equal the invoice amount entered": when Peter typed a (before-VAT) figure that differs from
+  // the lines, the ENTERED figure wins and the parts line absorbs the difference, named as per the invoice.
+  const entered = po.supplier_invoice_amount;
+  const useEntered = entered != null && entered > 0 && Math.abs(entered - linesTotal) > 0.05;
+  const expectedNet = useEntered ? round2(entered) : linesTotal;
+  const partsRate = round2(expectedNet - chargesSum);
+  if (partsRate < -0.005) throw new ZohoError(`${po.number}: the invoice amount entered (${expectedNet.toFixed(2)}) is less than the courier/freight charges on it (${chargesSum.toFixed(2)}): check the figures on the LPO page.`);
+  const flagged = lines.filter((l) => l.check && l.check !== "match");
+  const notes = cut(
+    [
+      `ERP ${po.number}`,
+      ...(useEntered ? [`Entered invoice total ${expectedNet.toFixed(2)} (the LPO lines sum to ${linesTotal.toFixed(2)})`] : []),
+      ...flagged.map((l) => `Price differs from the LPO — ${l.description}: LPO ${l.lpoUnit.toFixed(2)}, invoice ${l.unit.toFixed(2)} (${l.check})`),
+    ].join("\n"),
+    2000,
+  );
+  const line_items: Record<string, unknown>[] = [];
+  if (partsRate > 0.005 || lines.length) {
+    line_items.push({ name: cut(`Parts per ${po.number} – ${lines.length} item${lines.length === 1 ? "" : "s"}`, 100), rate: partsRate, quantity: 1, account_id: accounts.purchases.parts, tax_id: accounts.taxId });
+  }
+  for (const c of charges) line_items.push({ name: cut(c.description, 100), rate: c.amount, quantity: 1, account_id: accounts.purchases.courier, tax_id: accounts.taxId });
+  if (!line_items.length) throw new ZohoError(`${po.number} has nothing to bill (no lines and no charges).`);
+
+  const matches = (z: ZohoBill) => near(z.sub_total, expectedNet);
+  let z: ZohoBill | null = po.zoho_bill_id ? await zohoBillById(org, po.zoho_bill_id) : null;
+  if (!z) {
+    const j = await zohoFetch<{ bills?: ZohoBill[] }>(`/bills?bill_number=${encodeURIComponent(po.supplier_invoice_number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
+    const found = j.bills?.find((x) => x.bill_number === po.supplier_invoice_number) ?? null;
+    const full = found ? await zohoBillById(org, found.bill_id) : null;
+    if (full && !matches(full)) {
+      throw new ZohoError(`A bill numbered ${po.supplier_invoice_number} already exists in Zoho for this supplier with different figures (${full.sub_total.toFixed(2)} there, ${expectedNet.toFixed(2)} here) — another LPO may share the same supplier invoice: the accountant combines them in Zoho by hand.`);
+    }
+    z = full;
+  }
+  if (!z) {
+    const body = { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false };
+    try {
+      const j = await zohoFetch<{ bill?: ZohoBill }>("/bills", { org, method: "POST", body });
+      z = j.bill ?? null;
+    } catch (e) {
+      const again = await zohoFetch<{ bills?: ZohoBill[] }>(`/bills?bill_number=${encodeURIComponent(po.supplier_invoice_number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
+      const found = again.bills?.find((x) => x.bill_number === po.supplier_invoice_number);
+      const full = found ? await zohoBillById(org, found.bill_id) : null;
+      if (!full) throw e;
+      z = full;
+    }
+    if (!z) throw new ZohoError("Zoho did not return the new bill.");
+  }
+  if (!matches(z)) throw new ZohoError(`Totals differ for the bill ${po.supplier_invoice_number} (${po.number}): Zoho has ${z.sub_total.toFixed(2)} before VAT, the ERP has ${expectedNet.toFixed(2)}.`);
+  await admin.from("purchase_orders").update({ zoho_bill_id: z.bill_id }).eq("id", po.id);
+
+  // The scan: the first live invoice file on the LPO (stock orders have none - that is fine). Never twice: the
+  // bill's own documents list says whether something is already attached.
+  let attached = (z.documents?.length ?? 0) > 0;
+  if (!attached) {
+    const { data: files } = await admin.from("job_files").select("storage_path").eq("kind", "supplier_invoice").eq("ref_id", po.id).is("removed_at", null).order("created_at").limit(5);
+    const paths = [...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...(po.supplier_invoice_path ? [po.supplier_invoice_path] : [])];
+    for (const p of paths) {
+      const file = await bucketFile("job-files", p);
+      if (!file || !BILL_ATTACH_EXTS.has(file.ext)) continue;
+      await zohoFetch(`/bills/${z.bill_id}/attachment`, { org, method: "POST", upload: { field: "attachment", filename: file.name, contentType: file.contentType, data: file.data } });
+      attached = true;
+      break;
+    }
+  }
+  return {
+    zohoId: z.bill_id,
+    result: {
+      bill: po.supplier_invoice_number,
+      lpo: po.number,
+      zoho: { net: z.sub_total, vat: z.tax_total, total: z.total, balance: z.balance },
+      erp: { net: expectedNet, charges: chargesSum },
+      attached,
+      ...(flagged.length ? { price_flags: flagged.length } : {}),
+    },
+  };
+}
+
+/** The supplier marked paid: one Zoho vendor payment settling the bill in full, from the mapped paid-from account. */
+async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const po = await poForZoho(poId);
+  if (!po.supplier_paid_at) return { wait: "Waiting for the LPO to be marked paid." };
+  if (!po.zoho_bill_id) {
+    await tryEnqueueZoho("bill", po.id, po.job_id);
+    return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
+  }
+  const vendorId = await poVendor(org, po);
+  let zid = po.zoho_billpayment_id;
+  if (!zid) {
+    const j = await zohoFetch<{ vendorpayments?: { payment_id: string; reference_number?: string }[] }>(`/vendorpayments?reference_number=${encodeURIComponent(po.number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
+    zid = j.vendorpayments?.find((x) => x.reference_number === po.number)?.payment_id ?? null;
+  }
+  let amount = 0;
+  if (!zid) {
+    const bill = await zohoBillById(org, po.zoho_bill_id);
+    if (!bill) throw new ZohoError(`The Zoho bill of ${po.number} cannot be read back.`);
+    if (bill.balance <= 0.005) {
+      return { zohoId: null, result: { skipped: `The bill ${bill.bill_number} is already settled in Zoho.`, lpo: po.number } };
+    }
+    amount = round2(bill.balance);
+    const j = await zohoFetch<{ vendorpayment?: { payment_id: string } }>("/vendorpayments", {
+      org,
+      method: "POST",
+      body: {
+        vendor_id: vendorId,
+        amount,
+        date: dubaiDate(po.supplier_paid_at),
+        payment_mode: "banktransfer",
+        paid_through_account_id: accounts.paidFrom,
+        reference_number: po.number,
+        description: cut(`${po.number}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}`, 200),
+        bills: [{ bill_id: po.zoho_bill_id, amount_applied: amount }],
+      },
+    });
+    zid = j.vendorpayment?.payment_id ?? null;
+    if (!zid) throw new ZohoError("Zoho did not return the new vendor payment.");
+  }
+  await admin.from("purchase_orders").update({ zoho_billpayment_id: zid }).eq("id", po.id);
+  const after = await zohoBillById(org, po.zoho_bill_id);
+  if (after && after.balance > 0.005) throw new ZohoError(`${po.number} is marked paid in the ERP but the Zoho bill still shows ${after.balance.toFixed(2)} due: the accountant checks it in Zoho.`);
+  return { zohoId: zid, result: { lpo: po.number, bill: po.supplier_invoice_number, amount: amount || after?.total || null, bill_balance_after: after?.balance ?? 0 } };
+}
+
+/* ----------------------------------------------------------- expenses ----------------------------------------------------------- */
+
+type ZohoExpense = { expense_id: string; total: number; status?: string; expense_receipt_name?: string | null; reference_number?: string };
+
+async function zohoExpenseById(org: string, id: string): Promise<ZohoExpense | null> {
+  try {
+    const j = await zohoFetch<{ expense?: ZohoExpense }>(`/expenses/${id}`, { org });
+    return j.expense ?? null;
+  } catch (e) {
+    if (e instanceof ZohoError && e.code === 1002) return null;
+    throw e;
+  }
+}
+
+async function expenseByReference(org: string, reference: string): Promise<ZohoExpense | null> {
+  const j = await zohoFetch<{ expenses?: ZohoExpense[] }>(`/expenses?reference_number=${encodeURIComponent(reference)}`, { org });
+  const found = j.expenses?.find((x) => x.reference_number === reference) ?? null;
+  return found ? await zohoExpenseById(org, found.expense_id) : null;
+}
+
+async function createExpense(org: string, input: { accountId: string; paidThroughId: string; date: string; amount: number; reference: string; description: string }): Promise<ZohoExpense> {
+  const existing = await expenseByReference(org, input.reference);
+  if (existing) {
+    if (!near(existing.total, input.amount)) throw new ZohoError(`An expense with the reference ${input.reference} already exists in Zoho with a different amount (${existing.total.toFixed(2)} there, ${input.amount.toFixed(2)} here): the accountant checks it in Zoho.`);
+    return existing;
+  }
+  const j = await zohoFetch<{ expense?: ZohoExpense }>("/expenses", {
+    org,
+    method: "POST",
+    body: { account_id: input.accountId, paid_through_account_id: input.paidThroughId, date: input.date, amount: input.amount, reference_number: cut(input.reference, 100), description: cut(input.description, 100) },
+  });
+  if (!j.expense) throw new ZohoError("Zoho did not return the new expense.");
+  return j.expense;
+}
+
+async function attachReceipt(org: string, expense: ZohoExpense, file: { data: Buffer; ext: string; contentType: string; name: string } | null): Promise<boolean> {
+  if (expense.expense_receipt_name) return true;
+  if (!file || !RECEIPT_EXTS.has(file.ext)) return false;
+  await zohoFetch(`/expenses/${expense.expense_id}/receipt`, { org, method: "POST", upload: { field: "receipt", filename: file.name, contentType: file.contentType, data: file.data } });
+  return true;
+}
+
+/** A paid commission voucher (CPV-xxxxx) = one Zoho expense with the signed voucher or slip as the receipt. */
+async function syncCommissionRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("commission_payments").select("id, number, recipient, method, paid_on, amount_aed, reference, proof_path, is_active, zoho_expense_id").eq("id", paymentId).maybeSingle();
+  const v = data as { id: string; number: string; recipient: string; method: string; paid_on: string; amount_aed: number; reference: string | null; proof_path: string | null; is_active: boolean; zoho_expense_id: string | null } | null;
+  if (!v) throw new ZohoError("The commission voucher no longer exists in the ERP.");
+  if (!v.is_active) return { result: { skipped: "The voucher is inactive in the ERP. Nothing posted." } };
+  const amount = round2(Number(v.amount_aed) || 0);
+  let z = v.zoho_expense_id ? await zohoExpenseById(org, v.zoho_expense_id) : null;
+  if (!z) {
+    z = await createExpense(org, {
+      accountId: accounts.expense.commission,
+      paidThroughId: v.method === "cash" ? accounts.depositTo.cash : accounts.paidFrom,
+      date: String(v.paid_on).slice(0, 10),
+      amount,
+      reference: v.number,
+      description: `Commission · ${v.recipient}`,
+    });
+  }
+  if (!near(z.total, amount)) throw new ZohoError(`Totals differ for ${v.number}: Zoho has ${z.total.toFixed(2)}, the ERP has ${amount.toFixed(2)}.`);
+  await admin.from("commission_payments").update({ zoho_expense_id: z.expense_id }).eq("id", v.id);
+  const receipt = await attachReceipt(org, z, v.proof_path ? await bucketFile("job-files", v.proof_path) : null);
+  return {
+    zohoId: z.expense_id,
+    result: { voucher: v.number, recipient: v.recipient, amount, mode: v.method, receipt, ...(receipt ? {} : { note: "The signed voucher is not uploaded yet; it attaches by itself once it is." }) },
+  };
+}
+
+/** A recovery month marked paid = one Zoho expense per driver/company, with the month's trip list attached as Excel. */
+async function syncRecoveryRow(org: string, accounts: Resolved, payoutId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("recovery_payouts").select("id, who, month, total_aed, trip_count, paid_at, zoho_expense_id").eq("id", payoutId).maybeSingle();
+  const p = data as { id: string; who: string; month: string; total_aed: number; trip_count: number; paid_at: string; zoho_expense_id: string | null } | null;
+  if (!p) throw new ZohoError("The recovery payout no longer exists in the ERP.");
+  const amount = round2(Number(p.total_aed) || 0);
+  const reference = cut(`RECOV ${p.month} ${p.who}`, 100);
+  let z = p.zoho_expense_id ? await zohoExpenseById(org, p.zoho_expense_id) : null;
+  if (!z) {
+    z = await createExpense(org, {
+      accountId: accounts.expense.recovery,
+      paidThroughId: accounts.paidFrom,
+      date: dubaiDate(p.paid_at),
+      amount,
+      reference,
+      description: `Recovery ${p.month} · ${p.who} · ${p.trip_count} trip${p.trip_count === 1 ? "" : "s"}`,
+    });
+  }
+  if (!near(z.total, amount)) throw new ZohoError(`Totals differ for the recovery month ${p.month} (${p.who}): Zoho has ${z.total.toFixed(2)}, the ERP has ${amount.toFixed(2)}.`);
+  await admin.from("recovery_payouts").update({ zoho_expense_id: z.expense_id }).eq("id", p.id);
+  let receipt = !!z.expense_receipt_name;
+  if (!receipt) {
+    // The month's trip list as the receipt, built fresh (the same figures the /recovery page showed).
+    const { data: tripRows } = await admin.from("recovery_trips").select("job_id, kind, company, driver_name, scheduled_date, delivered_at, created_at, price_aed, road_km").eq("paid_month", p.month).eq("is_active", true);
+    const whoOf = (t: { company: string | null; driver_name: string | null }) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
+    const trips = ((tripRows ?? []) as { job_id: string | null; kind: string; company: string | null; driver_name: string | null; scheduled_date: string | null; delivered_at: string | null; created_at: string; price_aed: number | null; road_km: number | null }[]).filter((t) => whoOf(t) === p.who);
+    const { buildXlsx } = await import("@/lib/xlsx");
+    const buf = await buildXlsx([
+      {
+        name: cut(p.who.replace(/[\\/?*[\]:]/g, " "), 31) || "Month",
+        columns: [
+          { header: "Date", key: "date", width: 12 },
+          { header: "Kind", key: "kind", width: 10 },
+          { header: "Km", key: "km", width: 8 },
+          { header: "Price AED", key: "price", width: 12, numFmt: "#,##0.00" },
+        ],
+        rows: trips.map((t) => ({ date: String(t.delivered_at ?? t.scheduled_date ?? t.created_at).slice(0, 10), kind: t.kind, km: Number(t.road_km) || "", price: round2(Number(t.price_aed) || 0) })),
+        totals: { price: amount },
+      },
+    ]);
+    receipt = await attachReceipt(org, z, { data: buf, ext: "xlsx", contentType: CONTENT_TYPES.xlsx, name: `recovery-${p.month}.xlsx` });
+  }
+  return { zohoId: z.expense_id, result: { month: p.month, who: p.who, amount, trips: p.trip_count, receipt } };
+}
+
 /* ------------------------------------------------------- the worker ------------------------------------------------------- */
 
 export type DrainReport = { pushed: number; failed: number; waiting: number; skipped?: string };
 
-const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, deposit: 1, invoice: 2, payment: 3 };
+const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, invoice: 3, creditnote: 4, payment: 5, bill: 6, billpayment: 7, commission: 8, recovery: 9 };
 
 /**
  * The five-minute worker (and the Sync now button): oldest first, contacts before deposits before invoices before
@@ -635,6 +1195,7 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
     try {
       let out: HandlerOut;
       if (row.kind === "contact") out = { zohoId: await ensureContact(org, row.record_id) };
+      else if (row.kind === "vendor") out = { zohoId: await ensureVendor(org, row.record_id) };
       else {
         if (!accounts && !accountsError) {
           try {
@@ -649,7 +1210,14 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
           if (accountsFatal) throw new ZohoError(accountsError ?? "The account mapping could not be read.");
           out = { wait: `Zoho could not be reached for the chart of accounts: ${accountsError ?? "unknown"}` };
         } else {
-          out = row.kind === "invoice" ? await syncInvoiceRow(org, accounts, row.record_id) : await syncPaymentRow(org, accounts, row.record_id);
+          out =
+            row.kind === "invoice" ? await syncInvoiceRow(org, accounts, row.record_id)
+            : row.kind === "creditnote" ? await syncCreditNoteRow(org, accounts, row.record_id)
+            : row.kind === "bill" ? await syncBillRow(org, accounts, row.record_id)
+            : row.kind === "billpayment" ? await syncBillPaymentRow(org, accounts, row.record_id)
+            : row.kind === "commission" ? await syncCommissionRow(org, accounts, row.record_id)
+            : row.kind === "recovery" ? await syncRecoveryRow(org, accounts, row.record_id)
+            : await syncPaymentRow(org, accounts, row.record_id);
         }
       }
       if (out.wait) {
@@ -681,10 +1249,10 @@ async function pageAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{
   }
 }
 
-/** The owner's backfill: every customer, recorded deposit, issued tax invoice and recorded payment joins the queue. */
-export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number }> {
+/** The owner's backfill: everything already in the ERP joins the queue — phase 1 money and phase 2 purchases/expenses. */
+export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number; creditnotes: number; vendors: number; bills: number; billpayments: number; commissions: number; recoveries: number }> {
   const admin = createAdminClient();
-  const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0 };
+  const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0, creditnotes: 0, vendors: 0, bills: 0, billpayments: 0, commissions: 0, recoveries: 0 };
   const existing = await pageAll<{ kind: string; record_id: string }>((a, b) => admin.from("zoho_outbox").select("kind, record_id").order("enqueued_at").range(a, b));
   const have = new Set(existing.map((r) => `${r.kind}:${r.record_id}`));
   const put: { kind: ZohoKind; record_id: string; job_id: string | null; created_by: string | null }[] = [];
@@ -708,6 +1276,44 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     put.push({ kind, record_id: p.id, job_id: p.job_id, created_by: by });
     if (p.is_deposit) out.deposits++;
     else out.payments++;
+  }
+  // Phase 2: credit notes, vendors, supplier bills and payments, paid commissions, paid recovery months.
+  const cns = await pageAll<{ id: string; job_id: string | null }>((a, b) => admin.from("invoices").select("id, job_id").eq("kind", "credit_note").eq("status", "issued").order("id").range(a, b));
+  for (const c of cns) {
+    if (have.has(`creditnote:${c.id}`)) continue;
+    put.push({ kind: "creditnote", record_id: c.id, job_id: c.job_id, created_by: by });
+    out.creditnotes++;
+  }
+  const vendors = await pageAll<{ id: string }>((a, b) => admin.from("suppliers").select("id").eq("is_active", true).order("id").range(a, b));
+  for (const s of vendors) {
+    if (have.has(`vendor:${s.id}`)) continue;
+    put.push({ kind: "vendor", record_id: s.id, job_id: null, created_by: by });
+    out.vendors++;
+  }
+  const pos = await pageAll<{ id: string; job_id: string | null; supplier_paid_at: string | null }>((a, b) =>
+    admin.from("purchase_orders").select("id, job_id, supplier_paid_at").neq("kind", "main").eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).not("supplier_invoice_date", "is", null).eq("is_active", true).order("id").range(a, b),
+  );
+  for (const po of pos) {
+    if (!have.has(`bill:${po.id}`)) {
+      put.push({ kind: "bill", record_id: po.id, job_id: po.job_id, created_by: by });
+      out.bills++;
+    }
+    if (po.supplier_paid_at && !have.has(`billpayment:${po.id}`)) {
+      put.push({ kind: "billpayment", record_id: po.id, job_id: po.job_id, created_by: by });
+      out.billpayments++;
+    }
+  }
+  const vouchers = await pageAll<{ id: string }>((a, b) => admin.from("commission_payments").select("id").eq("is_active", true).order("id").range(a, b));
+  for (const v of vouchers) {
+    if (have.has(`commission:${v.id}`)) continue;
+    put.push({ kind: "commission", record_id: v.id, job_id: null, created_by: by });
+    out.commissions++;
+  }
+  const payouts = await pageAll<{ id: string }>((a, b) => admin.from("recovery_payouts").select("id").order("id").range(a, b));
+  for (const r of payouts) {
+    if (have.has(`recovery:${r.id}`)) continue;
+    put.push({ kind: "recovery", record_id: r.id, job_id: null, created_by: by });
+    out.recoveries++;
   }
   for (let i = 0; i < put.length; i += 200) {
     // ignoreDuplicates: a row enqueued by a hook mid-backfill never aborts the rest.

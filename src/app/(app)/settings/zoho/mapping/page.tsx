@@ -2,7 +2,7 @@ import { Button, Card, Field, LinkButton, Notice, PageHeader, SectionLabel, Sele
 import { requirePermission } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { listAccounts, zohoConfigured, zohoConnection, type ZohoAccount } from "@/lib/zoho";
-import { DEPOSIT_METHODS, INCOME_TYPES, SUGGESTED_MAP, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
+import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
 import { saveZohoMapping, useSuggestedMapping } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +40,12 @@ const MATCH_WORDS: Record<string, string[]> = {
   cheque: ["bank - aed", "current account", "bank"],
   bank_charges: ["bank fees", "bank charge"],
   advances: ["advance", "unearned"],
+  purchase_parts: ["parts purchase", "cost of goods", "purchases"],
+  purchase_courier: ["courier", "freight", "shipping"],
+  expense_commission: ["commission"],
+  expense_recovery: ["recovery", "towing", "transport"],
+  paid_from: ["bank - aed", "current account", "bank"],
+  advances_refund: ["bank - aed", "bank"],
 };
 
 export default async function ZohoMappingPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
@@ -117,6 +123,25 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
           </div>
         </Card>
 
+        <Card className="flex flex-col gap-3" data-map-purchases>
+          <SectionLabel>Purchases and expenses — bills, commissions and recovery</SectionLabel>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {PURCHASE_TYPES.map((p) => (
+              <Field key={p.key} label={p.label} hint={p.key === "parts" ? "Where supplier bills put the parts (at net cost)." : "Courier/freight charged on a supplier's invoice — its own line on that bill, never doubled as an expense."}>
+                {box(`map__purchase__${p.key}`, bestMatch(map.purchases[p.key], SUGGESTED_MAP.purchases[p.key], expense, MATCH_WORDS[`purchase_${p.key}`] ?? []), expense)}
+              </Field>
+            ))}
+            {EXPENSE_TYPES.map((e) => (
+              <Field key={e.key} label={e.label} hint={e.key === "commission" ? "One expense per paid voucher (CPV), with the signed proof attached." : "One expense per driver/company per paid month, with the trip list attached."}>
+                {box(`map__expense__${e.key}`, bestMatch(map.expense[e.key], SUGGESTED_MAP.expense[e.key], expense, MATCH_WORDS[`expense_${e.key}`] ?? []), expense)}
+              </Field>
+            ))}
+            <Field label="Paid from" hint="The cash/bank account supplier payments and expenses are paid from.">
+              {box("map__paid_from", bestMatch(map.paidFrom, SUGGESTED_MAP.paidFrom, depositable, MATCH_WORDS.paid_from), depositable)}
+            </Field>
+          </div>
+        </Card>
+
         <Card className="flex flex-col gap-3" data-map-other>
           <SectionLabel>Charges and advances — for the accountant&apos;s reference</SectionLabel>
           <p className="text-xs text-muted">The sync sends the bank-charge amount on each payment and leaves deposits unapplied until the invoice takes them; WHICH accounts Zoho books those to is decided by Zoho&apos;s own organization settings, not here. These two boxes record the agreed names so the accountant sets Zoho to match.</p>
@@ -126,6 +151,9 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
             </Field>
             <Field label="Customer advances" hint="Agreed liability account for unapplied deposits — set it in Zoho's own settings too.">
               {box("map__advances", bestMatch(map.advances, SUGGESTED_MAP.advances, liability, MATCH_WORDS.advances), liability)}
+            </Field>
+            <Field label="Advance refunds paid from" hint="Where a credit-note refund would be paid from. The ERP records no refunds yet, so this is the agreed name only.">
+              {box("map__advances_refund", bestMatch(map.advancesRefund, SUGGESTED_MAP.advancesRefund, depositable, MATCH_WORDS.advances_refund), depositable)}
             </Field>
           </div>
         </Card>

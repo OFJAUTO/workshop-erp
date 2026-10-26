@@ -18,6 +18,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
+import { tryEnqueueZoho } from "@/lib/zoho-sync";
 import { ensureWorkLines } from "@/lib/work-data";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -275,6 +276,8 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...(mismatches ? {} : { supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id }), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
+  // Zoho Books phase 2: the entered invoice becomes the supplier's bill.
+  await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
   return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };
 }
 
@@ -344,6 +347,8 @@ export async function markSupplierPaid(poId: string, formData: FormData) {
   const now = new Date().toISOString();
   await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: staff.id, supplier_paid_reference: reference ? reference.slice(0, 120) : null, updated_by: staff.id }).eq("id", poId);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: paid to ${po.supplier_name}${reference ? ` (${reference})` : ""} by ${staff.display_name}`, created_by: staff.id });
+  // Zoho Books phase 2: the payment settles the supplier's bill (which posts first if it has not yet).
+  await tryEnqueueZoho("billpayment", poId, po.job_id, staff.id);
   refresh(po.job_id, poId);
   redirect(`${back}?message=${encodeURIComponent(`${po.number} marked paid to ${po.supplier_name}.`)}`);
 }

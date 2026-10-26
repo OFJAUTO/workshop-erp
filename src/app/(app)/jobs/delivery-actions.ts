@@ -7,6 +7,7 @@ import { closeJob } from "@/lib/close-job";
 import { activeDeliveryTrip, tripCar, recalcTripKm } from "@/lib/delivery";
 import { blankToNull } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
+import { tryEnqueueZoho } from "@/lib/zoho-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_RECOVERY_RATES, priceHistoryOf, type RateKind } from "@/lib/recovery";
 
@@ -281,7 +282,9 @@ export async function markMonthPaid(formData: FormData) {
   if (!unpaid.length) redirect(`/recovery?month=${month}&message=${encodeURIComponent("Already marked paid.")}`);
   const now = new Date().toISOString();
   for (const t of unpaid) await admin.from("recovery_trips").update({ status: "paid", paid_month: month, updated_by: staff.id }).eq("id", t.id);
-  await admin.from("recovery_payouts").upsert({ who, month, total_aed: Math.round(total * 100) / 100, trip_count: unpaid.length, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" });
+  const { data: payout } = await admin.from("recovery_payouts").upsert({ who, month, total_aed: Math.round(total * 100) / 100, trip_count: unpaid.length, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" }).select("id").single();
+  // Zoho Books phase 2: the paid month becomes one expense with the trip list attached.
+  if (payout?.id) await tryEnqueueZoho("recovery", String(payout.id), null, staff.id);
   revalidatePath("/recovery");
   redirect(`/recovery?month=${month}&message=${encodeURIComponent(`${who}: ${month} marked paid (AED ${total.toLocaleString("en-GB")}). The month is locked.`)}`);
 }
