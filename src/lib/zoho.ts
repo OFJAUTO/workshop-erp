@@ -248,7 +248,7 @@ export async function listPaymentModes(org: string): Promise<string[] | null> {
   }
 }
 
-export type MirrorResult = { taxesCreated: string[]; accountsCreated: string[]; skipped: string[] };
+export type MirrorResult = { taxesCreated: string[]; accountsCreated: string[]; alreadyThere: number; skipped: string[] };
 
 /**
  * B4: OFJ TEST mirrors the REAL organization's lists — read from REAL (read-only), create what is missing in
@@ -263,10 +263,13 @@ export async function mirrorRealIntoTest(): Promise<MirrorResult> {
     listAccounts(ZOHO_REAL_ORG_ID),
     listAccounts(testOrg),
   ]);
-  const out: MirrorResult = { taxesCreated: [], accountsCreated: [], skipped: [] };
+  const out: MirrorResult = { taxesCreated: [], accountsCreated: [], alreadyThere: 0, skipped: [] };
   const haveTax = new Set(testTaxes.map((t) => `${t.tax_name.toLowerCase()}|${Number(t.tax_percentage)}`));
   for (const t of realTaxes) {
-    if (haveTax.has(`${t.tax_name.toLowerCase()}|${Number(t.tax_percentage)}`)) continue;
+    if (haveTax.has(`${t.tax_name.toLowerCase()}|${Number(t.tax_percentage)}`)) {
+      out.alreadyThere++;
+      continue;
+    }
     try {
       await zohoFetch("/settings/taxes", { org: testOrg, method: "POST", body: { tax_name: t.tax_name, tax_percentage: t.tax_percentage, ...(t.tax_type ? { tax_type: t.tax_type } : {}) } });
       out.taxesCreated.push(`${t.tax_name} (${t.tax_percentage}%)`);
@@ -276,7 +279,11 @@ export async function mirrorRealIntoTest(): Promise<MirrorResult> {
   }
   const haveAcc = new Set(testAccounts.map((a) => a.account_name.toLowerCase()));
   for (const a of realAccounts) {
-    if (a.is_active === false || haveAcc.has(a.account_name.toLowerCase())) continue;
+    if (a.is_active === false) continue;
+    if (haveAcc.has(a.account_name.toLowerCase())) {
+      out.alreadyThere++;
+      continue;
+    }
     try {
       await zohoFetch("/chartofaccounts", { org: testOrg, method: "POST", body: { account_name: a.account_name, account_type: a.account_type } });
       out.accountsCreated.push(`${a.account_name} (${a.account_type})`);

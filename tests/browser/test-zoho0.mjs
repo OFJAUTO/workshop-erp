@@ -18,14 +18,22 @@ const ownerCookie = await cookieHeader("owner");
 /* 1. The owner's page: Connect (or the env var names when not configured). */
 const { browser, page } = await browserFor("owner", { viewport: { width: 1400, height: 1000 } });
 try {
-  await go(page, `${base}/settings/zoho`);
-  const body = ((await page.textContent("main")) ?? "").replace(/\s+/g, " ");
-  const configured = (await page.locator("[data-zoho-connect]").count()) === 1 || /Connected/.test(body);
-  check("1: the page offers Connect, or names ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET when unset", configured || /ZOHO_CLIENT_ID/.test(body), body.slice(0, 200));
-  check("1: one-way and the read-only rule are said in plain words", /one-way/i.test(body) && /read-only until go-live/i.test(body));
-  await page.screenshot({ path: shot("zoho0-1-settings.png"), fullPage: true });
+  if (!realConnection) {
+    // Loading this page with a connection in the shared database would try the token refresh with the dev
+    // machine's test secret and write last_error on the REAL row — so it only loads while nothing is connected.
+    await go(page, `${base}/settings/zoho`);
+    const body = ((await page.textContent("main")) ?? "").replace(/\s+/g, " ");
+    const configured = (await page.locator("[data-zoho-connect]").count()) === 1 || /Connected/.test(body);
+    check("1: the page offers Connect, or names ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET when unset", configured || /ZOHO_CLIENT_ID/.test(body), body.slice(0, 200));
+    check("1: one-way and the read-only rule are said in plain words", /one-way/i.test(body) && /read-only until go-live/i.test(body));
+    await page.screenshot({ path: shot("zoho0-1-settings.png"), fullPage: true });
+  }
   const settings = await go(page, `${base}/settings`).then(async () => ((await page.textContent("body")) ?? ""));
   check("1: Settings links to Zoho Books", /Zoho Books/.test(settings));
+  {
+    const ins = await fetch(`${base}/api/zoho/inspect`);
+    check("1: the inspection route refuses without the secret", ins.status === 401, String(ins.status));
+  }
 
   /* 2. Connect: off to Zoho's own sign-in with the one-time check value. */
   const r = await fetch(`${base}/api/zoho/connect`, { headers: { cookie: ownerCookie }, redirect: "manual" });
