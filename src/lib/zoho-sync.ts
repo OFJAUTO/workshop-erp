@@ -264,7 +264,7 @@ function incomeKeyOf(line: InvoiceLineRow, q: QLineLite | undefined, jobDept: st
   return "other";
 }
 
-type ZohoInvoice = { invoice_id: string; invoice_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number };
+type ZohoInvoice = { invoice_id: string; invoice_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; reference_number?: string };
 
 async function zohoInvoiceById(org: string, id: string): Promise<ZohoInvoice | null> {
   try {
@@ -385,11 +385,16 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
   const contactId = await ensureContact(org, inv.customer_id);
   const matches = (z: ZohoInvoice) => near(z.total, inv.total_aed) && near(z.tax_total, inv.vat_aed);
 
-  // Never twice: stored id, else the same number already in Zoho (adopted only when the figures agree), else create.
+  // Never twice: stored id, else the same number already in Zoho (adopted only when it is OURS), else create.
   let z: ZohoInvoice | null = inv.zoho_invoice_id ? await zohoInvoiceById(org, inv.zoho_invoice_id) : null;
-  if (!z) z = await zohoInvoiceByNumber(org, inv.number);
-  if (z && !matches(z)) {
-    // Adopted figures that disagree can come from our own earlier half-finished run: one corrective pass below.
+  if (!z) {
+    const byNumber = await zohoInvoiceByNumber(org, inv.number);
+    // Our own earlier post (figures match, or a half-finished run on the same job) is adopted and corrected below.
+    // Anything else with our number is NEVER overwritten: the row fails in plain words instead.
+    if (byNumber && !matches(byNumber) && byNumber.reference_number !== (job?.job_number ?? inv.number)) {
+      throw new ZohoError(`An invoice numbered ${inv.number} already exists in Zoho with different figures (${byNumber.total.toFixed(2)} there, ${inv.total_aed.toFixed(2)} here) and belongs to another job: the accountant checks it in Zoho.`);
+    }
+    z = byNumber;
   }
   if (!z) {
     try {
@@ -459,7 +464,9 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   let zid = p.zoho_payment_id;
   if (!zid) {
     const j = await zohoFetch<{ customerpayments?: ZohoPayment[] }>(`/customerpayments?reference_number=${encodeURIComponent(p.number)}`, { org });
-    zid = j.customerpayments?.find((x) => x.reference_number === p.number)?.payment_id ?? null;
+    const same = j.customerpayments?.find((x) => x.reference_number === p.number) ?? null;
+    if (same && !near(Number(same.amount), p.amount_aed)) throw new ZohoError(`A payment with the receipt number ${p.number} already exists in Zoho with a different amount (${Number(same.amount).toFixed(2)} there, ${p.amount_aed.toFixed(2)} here): the accountant checks it in Zoho.`);
+    zid = same?.payment_id ?? null;
   }
   // When the tax invoice is already in Zoho, the payment can be applied the moment it is created.
   let zohoInvoiceId: string | null = null;
