@@ -94,7 +94,9 @@
     "test:jobs4": "node --env-file=.env.local tests/browser/test-jobs4.mjs",
     "test:paymethods": "node --env-file=.env.local tests/browser/test-paymethods.mjs",
     "test:receipt": "node --env-file=.env.local tests/browser/test-receipt.mjs",
-    "test:zoho0": "node --env-file=.env.local tests/browser/test-zoho0.mjs"
+    "test:zoho0": "node --env-file=.env.local tests/browser/test-zoho0.mjs",
+    "test:zoho1": "node --env-file=.env.local tests/browser/test-zoho1.mjs",
+    "test:zoho1live": "node --env-file=.env.local tests/browser/test-zoho1-live.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

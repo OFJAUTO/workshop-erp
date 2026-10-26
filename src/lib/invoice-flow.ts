@@ -8,6 +8,7 @@ import { createAdminClient } from "./supabase/admin";
 import { round2 } from "./quotes";
 import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
+import { tryEnqueueZoho } from "./zoho-sync";
 
 type Actor = { id: string; display_name: string } | null;
 
@@ -154,6 +155,8 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
   }
   await admin.from("payments").update({ invoice_id: tax.id, updated_by: by }).eq("invoice_id", pro.id);
   await admin.from("invoices").update({ converted_to: tax.id, updated_by: by }).eq("id", pro.id);
+  // Zoho Books (one-way): the tax invoice joins the outbox the moment it exists.
+  await tryEnqueueZoho("invoice", String(tax.id), jobId, by);
   await admin.from("jobs").update({ ready_token: token, ...(job.status === "pending_payment" && bal.balance <= 0.005 ? { status: "ready" } : {}) }).eq("id", jobId);
   const paidNote = opts.force ? `${number} issued by the owner before full payment (${money(bal.balance)} still due): ${opts.force.reason}` : `${number} generated: ${pro.number} paid in full`;
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: paidNote, created_by: by });
@@ -242,6 +245,7 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
   if (error || !inv) return { error: error?.message ?? "Could not make the invoice." };
   await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: amount, amount_aed: amount, vat_aed: vat, total_aed: total, cost_aed: null, quotation_line_id: null, part_item_id: null, created_by: by, updated_by: by });
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for ${description} (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
+  await tryEnqueueZoho("invoice", String(inv.id), jobId, by);
   return { id: inv.id as string, number: inv.number as string, token: inv.token as string, total };
 }
 

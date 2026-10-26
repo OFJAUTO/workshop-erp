@@ -10,6 +10,7 @@ import { depositState } from "./deposits";
 import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 import { createAdminClient } from "./supabase/admin";
+import { flagZohoAttention, tryEnqueueZoho } from "./zoho-sync";
 
 /** Who records: a staff member, or the payment gateway (no id). */
 export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
@@ -123,6 +124,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
     if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
     if (!input.invoiceId && jobId) await afterDepositRecorded(jobId, String(created.id), amount, actor, settings);
+    // Zoho Books (one-way): the recorded money joins the outbox; a cheque waits until it clears.
+    if (method !== "cheque") await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);
     if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
     if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
     if (over) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
@@ -165,11 +168,13 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   if (!actor.id || !(actor.role_id === "owner" || (actor.role_id === "accounts" && actor.is_head_accountant))) return { error: "Only the owner or the head accountant can void a receipt." };
   const clean = reason.trim().slice(0, 300);
   if (clean.length < 3) return { error: "Write the reason for the void." };
-  const { data: raw } = await admin.from("payments").select(PAYMENT_SELECT).eq("id", paymentId).maybeSingle();
+  const { data: raw } = await admin.from("payments").select(`${PAYMENT_SELECT}, zoho_payment_id`).eq("id", paymentId).maybeSingle();
   if (!raw) return { error: "Receipt not found." };
   const p = toPayment(raw as Record<string, unknown>);
   if (p.status === "voided") return { error: "Already voided." };
   await admin.from("payments").update({ status: "voided", void_reason: clean, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
+  // A receipt that already reached Zoho cannot be unposted from here: the row turns red for accounts to fix by hand.
+  if ((raw as Record<string, unknown>).zoho_payment_id) await flagZohoAttention(p.is_deposit ? "deposit" : "payment", paymentId, `${p.number} was voided in the ERP after it reached Zoho: remove the payment in Zoho by hand. Reason: ${clean}`);
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) voided by ${actor.display_name}: ${clean}`, created_by: actor.id });
   if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
   await notifyRoles(["owner"], { type: "payment_void", title: `Receipt voided · ${p.number}`, body: `${money(p.amount_aed)} voided by ${actor.display_name}: ${clean}`, jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });
@@ -197,6 +202,7 @@ export async function decideOverpayment(paymentId: string, actor: Actor, approve
     await admin.from("payments").update({ status: "recorded", approved_by: actor.id, approved_at: now, verified_at: now, verified_by: actor.id, updated_by: actor.id }).eq("id", paymentId);
     if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: ${money(p.amount_aed)} above the balance approved by ${actor.display_name}${note ? `: ${note}` : ""}`, created_by: actor.id });
     if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
+    if (p.method !== "cheque" || p.cheque_status === "cleared") await tryEnqueueZoho(p.is_deposit ? "deposit" : "payment", paymentId, p.job_id, actor.id);
     if (p.approval_requested_by) await notifyStaff([p.approval_requested_by], { type: "payment_void", title: `Payment approved · ${p.number}`, body: `${money(p.amount_aed)} is recorded.`, jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });
     return { ok: true, message: `${p.number} recorded.` };
   }

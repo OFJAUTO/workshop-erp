@@ -71,7 +71,17 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
 
   return (
     <>
-      <PageHeader title="Zoho Books" subtitle="One-way: the ERP posts to Zoho, never the other way round. The REAL organization is read-only until go-live; every write goes to OFJ TEST." actions={<LinkButton href="/settings" tone="secondary">Back to Settings</LinkButton>} />
+      <PageHeader
+        title="Zoho Books"
+        subtitle="One-way: the ERP posts to Zoho, never the other way round. The REAL organization is read-only until go-live; every write goes to OFJ TEST."
+        actions={
+          <span className="flex flex-wrap gap-2">
+            <LinkButton href="/zoho" tone="secondary">Sync page</LinkButton>
+            <LinkButton href="/settings/zoho/mapping" tone="secondary">Account mapping</LinkButton>
+            <LinkButton href="/settings" tone="secondary">Back to Settings</LinkButton>
+          </span>
+        }
+      />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 

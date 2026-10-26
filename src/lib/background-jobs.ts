@@ -10,7 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * notification poll every signed-in screen makes, so it is noticed even when both jobs have stopped.
  */
 
-export type JobKey = "mailbox" | "housekeeping";
+export type JobKey = "mailbox" | "housekeeping" | "zoho";
 export type BackgroundJob = {
   key: JobKey;
   label: string;

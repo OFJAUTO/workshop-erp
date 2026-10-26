@@ -65,7 +65,7 @@ export default async function SettingsPage() {
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
     else if (row.key === "recovery_providers" || row.key === "labour_hours_memory" || row.key === "recovery_rates" || row.key === "recovery_flag_percent") continue;
-    else if (row.key === "zoho_org_real" || row.key === "zoho_org_test" || row.key === "zoho_live_enabled") continue;
+    else if (row.key === "zoho_org_real" || row.key === "zoho_org_test" || row.key === "zoho_live_enabled" || row.key === "zoho_account_map") continue;
     else if (row.key === "inbound_scan_token" || row.key === "scans_mailbox_last_check" || row.key === "break_mechanical" || row.key === "break_bodyshop") continue;
     else if (row.key === "break_times") breakTimes = (row.value as Record<string, Record<string, string>>) ?? {};
     else initial[row.key] = typeof row.value === "string" ? row.value : String(row.value ?? "");

@@ -153,5 +153,12 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       out.push({ jobId: `payout:${who}`, plate: who, car: null, what: `Recovery month ready to pay`, amount: aed(g.total), actionLabel: "Mark paid", href: "/recovery", always: true, urgency: "grey", hint: "Every trip is approved: pay the month and it locks." });
     }
   }
+
+  // 6. Zoho Books: a document that failed to post needs a human (phase 1, 26 October 2026).
+  const { data: zoho } = await admin.from("zoho_outbox").select("id, kind, last_error, enqueued_at").eq("status", "failed").order("enqueued_at").limit(20);
+  for (const z of (zoho ?? []) as { id: string; kind: string; last_error: string | null; enqueued_at: string }[]) {
+    const kindWord = z.kind === "invoice" ? "Tax invoice" : z.kind === "contact" ? "Customer" : z.kind === "deposit" ? "Deposit" : "Payment";
+    out.push({ jobId: `zoho:${z.id}`, plate: "Zoho Books", car: null, what: `${kindWord} did not post: ${(z.last_error ?? "see the sync page").slice(0, 140)}`, amount: null, actionLabel: "Open the sync page", href: "/zoho?show=failed", always: true, urgency: "amber", since: z.enqueued_at });
+  }
   return out;
 }

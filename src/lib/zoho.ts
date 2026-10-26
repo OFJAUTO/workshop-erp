@@ -188,8 +188,9 @@ export async function zohoFetch<T = Record<string, unknown>>(path: string, opts:
       return { res, j };
     };
     let { res, j } = await call();
-    if (res.status === 429) {
-      await new Promise((r) => setTimeout(r, 3000));
+    if (res.status === 429 || res.status >= 500) {
+      // Backoff on 429 and 5xx: one pause, one more try. Anything else is a real answer.
+      await new Promise((r) => setTimeout(r, res.status === 429 ? 3000 : 1500));
       lastCall = Date.now();
       ({ res, j } = await call());
     }

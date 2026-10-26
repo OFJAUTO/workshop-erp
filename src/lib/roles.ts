@@ -118,6 +118,8 @@ export const PERMISSIONS = {
   approveCreditNotes: ["owner"],
   viewProfitList: ["owner", "accounts"],
   exportAccounts: ["owner", "accounts"],
+  /** The Zoho Books sync page and the account mapping: the owner and accounts (Settings itself stays the owner's). */
+  zohoSync: ["owner", "accounts"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
