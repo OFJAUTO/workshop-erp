@@ -250,6 +250,10 @@ const DEFAULTS = {
   premium_brands: [] as string[],
   premium_brand_fee_aed: 1500,
   inspection_fee_notice: "If no work is approved after the inspection, an inspection fee of AED [amount] will apply.",
+  // Zoho Books (26 October 2026, docs/zoho-plan.md): the REAL organization is read-only until go-live.
+  zoho_org_real: "942979945",
+  zoho_org_test: "",
+  zoho_live_enabled: false,
   // The grey note at the end of every receipt (26 October 2026), edited by the owner in Settings.
   receipt_footer_note: "This is a payment receipt, not a tax invoice. The tax invoice is issued when the job is paid in full, with this amount deducted.",
   inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [amount] درهمًا.",

@@ -42,7 +42,7 @@ const ownerViews = await q(`select c.relname from pg_class c join pg_namespace n
 check("no view runs as its owner (RLS bypass)", ownerViews.length === 0, ownerViews.map((r) => r.relname).join(", "));
 
 // 4. Server-only token tables: dark to both API roles.
-const SERVER_ONLY = ["short_links", "payment_requests", "payment_links", "setup_links", "quick_codes", "google_mailbox_tokens", "staff_private", "background_jobs", "app_errors"];
+const SERVER_ONLY = ["short_links", "payment_requests", "payment_links", "setup_links", "quick_codes", "google_mailbox_tokens", "staff_private", "background_jobs", "app_errors", "zoho_tokens"];
 for (const t of SERVER_ONLY) {
   const g = await q(`select coalesce(string_agg(distinct grantee || ':' || privilege_type, ','), '') as g from information_schema.role_table_grants where table_schema = 'public' and table_name = '${t}' and grantee in ('anon'${t === "staff_private" ? "" : ",'authenticated'"})`);
   check(`${t} is not reachable by ${t === "staff_private" ? "anon" : "anon or authenticated"}`, !g[0]?.g, g[0]?.g);
