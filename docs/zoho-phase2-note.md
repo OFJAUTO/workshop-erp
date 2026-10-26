@@ -60,6 +60,28 @@ on the sync page; they post by themselves.
   failures with Retry), `zoho2-erp-lpo.png` (the LPO next to its bill figures), `zoho2-erp-creditnote.png`,
   `zoho2-mapping.png`.
 
+## The adversarial review round (same night)
+
+A four-way review (money, never-twice, security, regressions) attacked the build and confirmed 22 weaknesses;
+all were fixed and the full live test ran again, 24/24. The ones worth knowing in plain words:
+
+- **One supplier invoice belongs to one supplier.** Ticking parts from two different suppliers and typing one
+  invoice would have put the whole amount on BOTH suppliers' bills — now the receive panel refuses in plain
+  words ("receive one supplier's delivery at a time"). Same-supplier multi-LPO receives still work.
+- **A bill counts what was delivered.** A short-shipped LPO bills the received quantities, and an undelivered
+  line on a part delivery bills nothing — no more paying for units that never arrived.
+- **Typing the WITH-VAT total into the before-VAT box** (the single most likely slip — it lands at exactly +5%
+  and used to pass silently) now gets its own pointed question before it saves.
+- **A credit note can never over-credit an invoice**, even against credits the accountant entered in Zoho by
+  hand before the sync existed — Zoho's own applied list is counted first.
+- **A recovery month paid twice** (late trips) now sums the payout and turns the expense row red with both
+  figures, instead of the second batch silently never reaching the books.
+- **An invoice changed after its bill posted** turns red ("fix the bill in Zoho by hand") rather than
+  silently never re-posting; a scan uploaded after the bill posted attaches by itself on the next run.
+- **The Zoho reference ids on ERP records are now server-only** (a database trigger): no login can point a
+  document at a different Zoho record by hand.
+- A missing bills/expenses mapping fails only the rows that need it — never the Phase 1 money.
+
 ## What I need from you / Mathew / Peter
 
 1. **Peter**: enter the TRN for the four suppliers above (Parts > Suppliers), then press Retry on the four
