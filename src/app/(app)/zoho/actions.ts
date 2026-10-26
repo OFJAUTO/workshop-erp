@@ -51,7 +51,7 @@ export async function backfillZoho() {
   let words: string;
   try {
     const r = await enqueueBackfill(staff.id);
-    words = `Queued: ${r.contacts} customer(s), ${r.deposits} deposit(s), ${r.invoices} tax invoice(s), ${r.payments} payment(s). The five-minute sync works through them; Sync now pushes the first batch at once.`;
+    words = `Queued: ${r.contacts} customer(s), ${r.deposits} deposit(s), ${r.invoices} tax invoice(s), ${r.payments} payment(s), ${r.creditnotes} credit note(s), ${r.vendors} supplier(s), ${r.bills} supplier bill(s), ${r.billpayments} supplier payment(s), ${r.commissions} commission(s), ${r.recoveries} recovery month(s). The five-minute sync works through them; Sync now pushes the first batch at once.`;
     kind = "message";
   } catch (e) {
     unstable_rethrow(e);

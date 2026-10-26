@@ -115,7 +115,24 @@ export async function zohoWriteOrg(): Promise<string | null> {
   return zohoTestOrgId();
 }
 
-type Resolved = { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; taxId: string };
+type Resolved = {
+  income: Record<IncomeKey, string>;
+  depositTo: Record<MethodKey, string>;
+  taxId: string;
+  /** Phase 2 groups resolve softly: a missing bills/expenses mapping fails ONLY the rows that need it, never the phase 1 money. */
+  purchases?: Record<PurchaseKey, string>;
+  purchasesError?: string;
+  expense?: Record<ExpenseKey, string>;
+  expenseError?: string;
+  paidFrom?: string;
+  paidFromError?: string;
+};
+
+/** The account a handler needs, or its group's plain-words reason. */
+function needAccounts<T>(group: T | undefined, error: string | undefined): T {
+  if (!group) throw new ZohoError(error ?? "The account mapping could not be read.");
+  return group;
+}
 
 /**
  * Names become account ids in the organization being written to. A name missing from the mapping fails in plain
@@ -147,12 +164,28 @@ async function resolveZohoAccounts(org: string, map: ZohoAccountMap): Promise<Re
   for (const t of INCOME_TYPES) income[t.key] = await resolve(map.income[t.key], t.label, "income");
   const depositTo = {} as Record<MethodKey, string>;
   for (const m of DEPOSIT_METHODS) depositTo[m.key] = await resolve(map.depositTo[m.key], `Deposit-to account for ${m.label}`, m.key === "cash" ? "cash" : "bank");
-  const purchases = {} as Record<PurchaseKey, string>;
-  for (const p of PURCHASE_TYPES) purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
-  const expense = {} as Record<ExpenseKey, string>;
-  for (const e of EXPENSE_TYPES) expense[e.key] = await resolve(map.expense[e.key], e.label, "expense");
-  const paidFrom = await resolve(map.paidFrom, "Paid-from account (supplier payments and expenses)", "bank");
-  return { income, depositTo, purchases, expense, paidFrom, taxId: tax.tax_id };
+  const out: Resolved = { income, depositTo, taxId: tax.tax_id };
+  // The phase 2 groups fail softly: only the rows needing them carry the reason.
+  try {
+    const purchases = {} as Record<PurchaseKey, string>;
+    for (const p of PURCHASE_TYPES) purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
+    out.purchases = purchases;
+  } catch (e) {
+    out.purchasesError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    const expense = {} as Record<ExpenseKey, string>;
+    for (const x of EXPENSE_TYPES) expense[x.key] = await resolve(map.expense[x.key], x.label, "expense");
+    out.expense = expense;
+  } catch (e) {
+    out.expenseError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    out.paidFrom = await resolve(map.paidFrom, "Paid-from account (supplier payments and expenses)", "bank");
+  } catch (e) {
+    out.paidFromError = e instanceof Error ? e.message : String(e);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
@@ -213,12 +246,27 @@ export async function flagZohoAttention(kind: ZohoKind, recordId: string, reason
   }
 }
 
-/** Something was ADDED to an already-synced document (a voucher proof uploaded late): the row runs once more. */
+/** Something was ADDED to an already-synced document (a voucher proof uploaded late): the row runs once more.
+ * Clearing claimed_at also releases a row that is mid-flight, so the worker's final write misses and the next
+ * run picks the addition up instead of losing it. */
 export async function reopenZoho(kind: ZohoKind, recordId: string): Promise<void> {
   try {
-    await createAdminClient().from("zoho_outbox").update({ status: "pending", last_error: null, updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
+    const { error } = await createAdminClient().from("zoho_outbox").update({ status: "pending", last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
+    if (error) throw new Error(error.message);
   } catch (e) {
     await logAppError("zoho_reopen", e, { detail: { kind, recordId } });
+  }
+}
+
+/** A dependency joins the queue only when it has NO row at all — a FAILED parent keeps its reason and its red row
+ * (enqueueZoho would flip it back to a reasonless "Waiting" on every drain). */
+async function ensureQueued(kind: ZohoKind, recordId: string, jobId: string | null): Promise<void> {
+  try {
+    const admin = createAdminClient();
+    const { error } = await admin.from("zoho_outbox").upsert({ kind, record_id: recordId, job_id: jobId }, { onConflict: "kind,record_id", ignoreDuplicates: true });
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    await logAppError("zoho_ensure_queued", e, { detail: { kind, recordId } });
   }
 }
 
@@ -281,7 +329,8 @@ export async function ensureContact(org: string, customerId: string): Promise<st
       const hit = j.contacts?.find(sameName);
       if (hit) return hit.contact_id;
     }
-    const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name=${encodeURIComponent(name)}`, { org });
+    // contains, not exact: a contact created under the clash suffix must still be found on a retry.
+    const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name_contains=${encodeURIComponent(name)}`, { org });
     return j.contacts?.find(sameName)?.contact_id ?? null;
   };
   if (!zid) {
@@ -701,7 +750,8 @@ export async function ensureVendor(org: string, supplierId: string): Promise<str
   const name = s.name.trim();
   const sameName = (x: ZohoContact) => x.contact_name.trim().toLowerCase() === name.toLowerCase() || x.contact_name.trim().toLowerCase() === `${name} · supplier`;
   const lookFor = async (): Promise<string | null> => {
-    const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name=${encodeURIComponent(name)}&contact_type=vendor`, { org });
+    // contains, not exact: a vendor created under the "· Supplier" suffix must still be found on a retry.
+    const j = await zohoFetch<{ contacts?: ZohoContact[] }>(`/contacts?contact_name_contains=${encodeURIComponent(name)}&contact_type=vendor`, { org });
     return j.contacts?.find(sameName)?.contact_id ?? null;
   };
   if (!zid) {
@@ -773,7 +823,7 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
   if (!par) throw new ZohoError(`${cn.number}: the invoice it credits no longer exists in the ERP.`);
   if (!par.zoho_invoice_id) {
     // The parent posts first; the credit note waits its turn.
-    await tryEnqueueZoho("invoice", par.id, par.job_id);
+    await ensureQueued("invoice", par.id, par.job_id);
     return { wait: `Waiting for ${par.number} to reach Zoho first.` };
   }
   const contactId = await ensureContact(org, cn.customer_id);
@@ -792,6 +842,14 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
     z = full;
   }
   if (!z) {
+    // Never credit twice: a credit note entered BY HAND in Zoho during phase 1 carries Zoho's own number, so the
+    // number search above cannot see it — but the invoice's applied credits can. More credit than the invoice has
+    // room for means something is already there: a human decides, nothing posts.
+    const parentBefore = await zohoInvoiceById(org, par.zoho_invoice_id);
+    const creditedBefore = await zohoCreditedTotal(org, par.zoho_invoice_id);
+    if (parentBefore && creditedBefore + cn.total_aed > parentBefore.total + 0.009) {
+      throw new ZohoError(`${par.number} already carries ${creditedBefore.toFixed(2)} of credit in Zoho (maybe entered by hand before the sync): posting ${cn.number} (${cn.total_aed.toFixed(2)}) would credit more than the invoice. The accountant checks it in Zoho.`);
+    }
     const body = {
       customer_id: contactId,
       creditnote_number: cn.number,
@@ -930,11 +988,21 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   const vendor = await poVendor(org, po);
   await vendorVatRegistered(org, po, vendor);
   const vendorId = vendor.vendorId;
-  const [{ data: lineRows }, { data: chargeRows }] = await Promise.all([
-    admin.from("purchase_order_lines").select("description, quantity, unit_cost, invoice_unit_cost, invoice_check").eq("po_id", po.id),
+  const [{ data: lineRows }, { data: chargeRows }, { data: poStatusRow }] = await Promise.all([
+    admin.from("purchase_order_lines").select("description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").eq("po_id", po.id),
     admin.from("supplier_charges").select("description, amount_aed").eq("po_id", po.id).eq("is_active", true).is("removed_at", null),
+    admin.from("purchase_orders").select("status").eq("id", po.id).maybeSingle(),
   ]);
-  const lines = (lineRows ?? []).map((l) => ({ description: String(l.description ?? ""), quantity: Number(l.quantity) || 0, unit: Number(l.invoice_unit_cost ?? l.unit_cost) || 0, lpoUnit: Number(l.unit_cost) || 0, check: (l.invoice_check ?? null) as string | null }));
+  const fullyReceived = ((poStatusRow as { status?: string } | null)?.status ?? "") !== "partly_received";
+  // The bill reflects what the supplier DELIVERED and invoiced: the received quantity when one is recorded,
+  // the ordered quantity on a fully received LPO, and nothing for an undelivered line on a part delivery.
+  const lines = (lineRows ?? []).map((l) => ({
+    description: String(l.description ?? ""),
+    quantity: l.received_qty != null ? Number(l.received_qty) || 0 : fullyReceived ? Number(l.quantity) || 0 : 0,
+    unit: Number(l.invoice_unit_cost ?? l.unit_cost) || 0,
+    lpoUnit: Number(l.unit_cost) || 0,
+    check: (l.invoice_check ?? null) as string | null,
+  }));
   const charges = (chargeRows ?? []).map((c) => ({ description: String(c.description ?? ""), amount: round2(Number(c.amount_aed) || 0) }));
   const partsNet = round2(lines.reduce((a, l) => a + l.quantity * l.unit, 0));
   const chargesSum = round2(charges.reduce((a, c) => a + c.amount, 0));
@@ -946,6 +1014,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   const expectedNet = useEntered ? round2(entered) : linesTotal;
   const partsRate = round2(expectedNet - chargesSum);
   if (partsRate < -0.005) throw new ZohoError(`${po.number}: the invoice amount entered (${expectedNet.toFixed(2)}) is less than the courier/freight charges on it (${chargesSum.toFixed(2)}): check the figures on the LPO page.`);
+  const purchases = needAccounts(accounts.purchases, accounts.purchasesError);
   const flagged = lines.filter((l) => l.check && l.check !== "match");
   const notes = cut(
     [
@@ -957,9 +1026,9 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   );
   const line_items: Record<string, unknown>[] = [];
   if (partsRate > 0.005 || lines.length) {
-    line_items.push({ name: cut(`Parts per ${po.number} – ${lines.length} item${lines.length === 1 ? "" : "s"}`, 100), rate: partsRate, quantity: 1, account_id: accounts.purchases.parts, tax_id: accounts.taxId });
+    line_items.push({ name: cut(`Parts per ${po.number} – ${lines.length} item${lines.length === 1 ? "" : "s"}`, 100), rate: partsRate, quantity: 1, account_id: purchases.parts, tax_id: accounts.taxId });
   }
-  for (const c of charges) line_items.push({ name: cut(c.description, 100), rate: c.amount, quantity: 1, account_id: accounts.purchases.courier, tax_id: accounts.taxId });
+  for (const c of charges) line_items.push({ name: cut(c.description, 100), rate: c.amount, quantity: 1, account_id: purchases.courier, tax_id: accounts.taxId });
   if (!line_items.length) throw new ZohoError(`${po.number} has nothing to bill (no lines and no charges).`);
 
   const matches = (z: ZohoBill) => near(z.sub_total, expectedNet);
@@ -993,15 +1062,27 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   // The scan: the first live invoice file on the LPO (stock orders have none - that is fine). Never twice: the
   // bill's own documents list says whether something is already attached.
   let attached = (z.documents?.length ?? 0) > 0;
+  let attachNote: string | null = null;
   if (!attached) {
     const { data: files } = await admin.from("job_files").select("storage_path").eq("kind", "supplier_invoice").eq("ref_id", po.id).is("removed_at", null).order("created_at").limit(5);
     const paths = [...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...(po.supplier_invoice_path ? [po.supplier_invoice_path] : [])];
+    let readable = 0;
     for (const p of paths) {
       const file = await bucketFile("job-files", p);
-      if (!file || !BILL_ATTACH_EXTS.has(file.ext)) continue;
+      if (!file) continue;
+      if (!BILL_ATTACH_EXTS.has(file.ext)) {
+        attachNote = "The scan's format is not one Zoho accepts (it needs pdf, jpg, png, gif or bmp).";
+        continue;
+      }
+      readable++;
       await zohoFetch(`/bills/${z.bill_id}/attachment`, { org, method: "POST", upload: { field: "attachment", filename: file.name, contentType: file.contentType, data: file.data } });
       attached = true;
+      attachNote = null;
       break;
+    }
+    // A scan exists but could not be read from storage: FAILED so a Retry attaches it, never a silent miss.
+    if (!attached && paths.length && !readable && !attachNote) {
+      throw new ZohoError(`The bill for ${po.number} posted but its scan could not be read from storage: press Retry to attach it.`);
     }
   }
   return {
@@ -1012,6 +1093,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
       zoho: { net: z.sub_total, vat: z.tax_total, total: z.total, balance: z.balance },
       erp: { net: expectedNet, charges: chargesSum },
       attached,
+      ...(attachNote ? { note: attachNote } : {}),
       ...(flagged.length ? { price_flags: flagged.length } : {}),
     },
   };
@@ -1021,9 +1103,10 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
 async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const po = await poForZoho(poId);
+  if (/^our stock$/i.test(po.supplier_name.trim())) return { result: { skipped: "An Our-stock LPO is internal (our own shelf): no supplier payment." } };
   if (!po.supplier_paid_at) return { wait: "Waiting for the LPO to be marked paid." };
   if (!po.zoho_bill_id) {
-    await tryEnqueueZoho("bill", po.id, po.job_id);
+    await ensureQueued("bill", po.id, po.job_id);
     return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
   }
   const vendorId = (await poVendor(org, po)).vendorId;
@@ -1048,7 +1131,7 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
         amount,
         date: dubaiDate(po.supplier_paid_at),
         payment_mode: "banktransfer",
-        paid_through_account_id: accounts.paidFrom,
+        paid_through_account_id: needAccounts(accounts.paidFrom, accounts.paidFromError),
         reference_number: po.number,
         description: cut(`${po.number}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}`, 200),
         bills: [{ bill_id: po.zoho_bill_id, amount_applied: amount }],
@@ -1057,9 +1140,11 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
     zid = j.vendorpayment?.payment_id ?? null;
     if (!zid) throw new ZohoError("Zoho did not return the new vendor payment.");
   }
-  await admin.from("purchase_orders").update({ zoho_billpayment_id: zid }).eq("id", po.id);
+  // The id is stored only once the bill really shows 0 due: an adopted foreign/partial payment must fail loudly
+  // WITHOUT locking creation out on the next run.
   const after = await zohoBillById(org, po.zoho_bill_id);
   if (after && after.balance > 0.005) throw new ZohoError(`${po.number} is marked paid in the ERP but the Zoho bill still shows ${after.balance.toFixed(2)} due: the accountant checks it in Zoho.`);
+  await admin.from("purchase_orders").update({ zoho_billpayment_id: zid }).eq("id", po.id);
   return { zohoId: zid, result: { lpo: po.number, bill: po.supplier_invoice_number, amount: amount || after?.total || null, bill_balance_after: after?.balance ?? 0 } };
 }
 
@@ -1116,8 +1201,8 @@ async function syncCommissionRow(org: string, accounts: Resolved, paymentId: str
   let z = v.zoho_expense_id ? await zohoExpenseById(org, v.zoho_expense_id) : null;
   if (!z) {
     z = await createExpense(org, {
-      accountId: accounts.expense.commission,
-      paidThroughId: v.method === "cash" ? accounts.depositTo.cash : accounts.paidFrom,
+      accountId: needAccounts(accounts.expense, accounts.expenseError).commission,
+      paidThroughId: v.method === "cash" ? accounts.depositTo.cash : needAccounts(accounts.paidFrom, accounts.paidFromError),
       date: String(v.paid_on).slice(0, 10),
       amount,
       reference: v.number,
@@ -1144,8 +1229,8 @@ async function syncRecoveryRow(org: string, accounts: Resolved, payoutId: string
   let z = p.zoho_expense_id ? await zohoExpenseById(org, p.zoho_expense_id) : null;
   if (!z) {
     z = await createExpense(org, {
-      accountId: accounts.expense.recovery,
-      paidThroughId: accounts.paidFrom,
+      accountId: needAccounts(accounts.expense, accounts.expenseError).recovery,
+      paidThroughId: needAccounts(accounts.paidFrom, accounts.paidFromError),
       date: dubaiDate(p.paid_at),
       amount,
       reference,
@@ -1240,17 +1325,21 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
             : await syncPaymentRow(org, accounts, row.record_id);
         }
       }
+      // Every outcome write carries the claim stamp: a row reopened mid-flight (a proof uploaded while the
+      // handler ran) keeps its fresh pending state and runs again, instead of being marked synced over it.
       if (out.wait) {
-        await admin.from("zoho_outbox").update({ last_error: out.wait, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
+        await admin.from("zoho_outbox").update({ last_error: out.wait, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now);
         report.waiting++;
       } else {
-        await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
-        report.pushed++;
+        const { data: s } = await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
+        if (s?.length) report.pushed++;
+        else report.waiting++;
       }
     } catch (e) {
       const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-      await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id);
-      report.failed++;
+      const { data: f } = await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
+      if (f?.length) report.failed++;
+      else report.waiting++;
       await logAppError("zoho_sync", e, { detail: { kind: row.kind, record: row.record_id } });
     }
   }
@@ -1311,7 +1400,7 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     out.vendors++;
   }
   const pos = await pageAll<{ id: string; job_id: string | null; supplier_paid_at: string | null }>((a, b) =>
-    admin.from("purchase_orders").select("id, job_id, supplier_paid_at").neq("kind", "main").eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).not("supplier_invoice_date", "is", null).eq("is_active", true).order("id").range(a, b),
+    admin.from("purchase_orders").select("id, job_id, supplier_paid_at").neq("kind", "main").not("supplier_name", "ilike", "our stock").eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).not("supplier_invoice_date", "is", null).eq("is_active", true).order("id").range(a, b),
   );
   for (const po of pos) {
     if (!have.has(`bill:${po.id}`)) {

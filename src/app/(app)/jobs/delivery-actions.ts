@@ -7,7 +7,7 @@ import { closeJob } from "@/lib/close-job";
 import { activeDeliveryTrip, tripCar, recalcTripKm } from "@/lib/delivery";
 import { blankToNull } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
-import { tryEnqueueZoho } from "@/lib/zoho-sync";
+import { reopenZoho, tryEnqueueZoho } from "@/lib/zoho-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_RECOVERY_RATES, priceHistoryOf, type RateKind } from "@/lib/recovery";
 
@@ -282,9 +282,16 @@ export async function markMonthPaid(formData: FormData) {
   if (!unpaid.length) redirect(`/recovery?month=${month}&message=${encodeURIComponent("Already marked paid.")}`);
   const now = new Date().toISOString();
   for (const t of unpaid) await admin.from("recovery_trips").update({ status: "paid", paid_month: month, updated_by: staff.id }).eq("id", t.id);
-  const { data: payout } = await admin.from("recovery_payouts").upsert({ who, month, total_aed: Math.round(total * 100) / 100, trip_count: unpaid.length, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" }).select("id").single();
-  // Zoho Books phase 2: the paid month becomes one expense with the trip list attached.
-  if (payout?.id) await tryEnqueueZoho("recovery", String(payout.id), null, staff.id);
+  // A month can be paid AGAIN when late trips arrive: the payout row carries the WHOLE month (summed), and the
+  // already-synced Zoho expense reopens so the difference fails in plain words instead of the second batch
+  // silently never reaching the books.
+  const { data: existing } = await admin.from("recovery_payouts").select("id, total_aed, trip_count").eq("who", who).eq("month", month).maybeSingle();
+  const sumTotal = Math.round((total + Number(existing?.total_aed ?? 0)) * 100) / 100;
+  const sumCount = unpaid.length + (Number(existing?.trip_count) || 0);
+  const { data: payout, error: payoutError } = await admin.from("recovery_payouts").upsert({ who, month, total_aed: sumTotal, trip_count: sumCount, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" }).select("id").single();
+  if (payoutError || !payout) redirect(`/recovery?month=${month}&error=${encodeURIComponent(`The trips are marked paid but the payout record did not save (${payoutError?.message ?? "unknown"}). Tell the owner before paying anyone.`)}`);
+  if (existing) await reopenZoho("recovery", String(payout.id));
+  else await tryEnqueueZoho("recovery", String(payout.id), null, staff.id);
   revalidatePath("/recovery");
   redirect(`/recovery?month=${month}&message=${encodeURIComponent(`${who}: ${month} marked paid (AED ${total.toLocaleString("en-GB")}). The month is locked.`)}`);
 }

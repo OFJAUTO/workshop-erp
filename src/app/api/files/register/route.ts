@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAppError } from "@/lib/app-errors";
+import { reopenZoho } from "@/lib/zoho-sync";
 import { isUuid } from "@/lib/uuid";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
 import { FILE_KINDS, authoriseJobUpload } from "../prepare/route";
@@ -38,6 +39,11 @@ export async function POST(request: NextRequest) {
   if (error || !row) {
     await logAppError("file register: insert", error ?? new Error("no row"), { staffId: who.staffId, jobId, detail: { kind } });
     return NextResponse.json({ error: "Couldn't attach the file – nothing was saved. Try again or tell the owner." }, { status: 500 });
+  }
+  // Zoho Books phase 2: a supplier-invoice scan added AFTER the bill posted attaches on the next sync run.
+  if (kind === "supplier_invoice" && refId) {
+    const { data: zpo } = await admin.from("purchase_orders").select("id, zoho_bill_id").eq("id", refId).maybeSingle();
+    if ((zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id) await reopenZoho("bill", refId);
   }
   const { data: signed } = await admin.storage.from(JOB_FILES_BUCKET).createSignedUrl(path, 3600);
   return NextResponse.json({ ok: true, id: row.id, path, url: signed?.signedUrl ?? null });

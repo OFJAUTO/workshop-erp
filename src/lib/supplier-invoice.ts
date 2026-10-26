@@ -41,6 +41,12 @@ export function checkSupplierInvoice(i: SupplierInvoiceInput): SupplierInvoiceCh
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Enter the date printed on the supplier invoice." };
   if (date > i.today) return { ok: false, error: "The invoice date cannot be in the future." };
   if (i.amount !== null && i.amount > 0 && i.poTotal !== null && i.poTotal > 0) {
+    // The single most likely slip: typing the WITH-VAT total into the before-VAT box lands at exactly +5%,
+    // which the 5% band would otherwise wave through without a word (27 October 2026).
+    const vatLike = Math.abs(i.amount - i.poTotal * 1.05) <= Math.max(1, i.poTotal * 0.002);
+    if (vatLike && !i.amountConfirmed) {
+      return { ok: false, needsAmountConfirm: true, error: `AED ${i.amount.toLocaleString("en-GB")} is exactly the order plus 5% VAT — this box wants the BEFORE-VAT figure. If the invoice really says ${i.amount.toLocaleString("en-GB")} before VAT, tick "the amount is right" to save it.` };
+    }
     const off = Math.abs(i.amount - i.poTotal) / i.poTotal;
     if (off > 0.05 && !i.amountConfirmed) {
       return { ok: false, needsAmountConfirm: true, error: `Invoice AED ${i.amount.toLocaleString("en-GB")} vs order AED ${i.poTotal.toLocaleString("en-GB")} – check the figure, then tick "the amount is right" to save it.` };

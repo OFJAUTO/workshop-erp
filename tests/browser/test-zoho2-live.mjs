@@ -199,14 +199,19 @@ await section("g forced failure and the adopt pass", async () => {
   const broken = JSON.parse(JSON.stringify(stored.value));
   delete broken.expense.commission;
   await sql("update public.settings set value = $1::jsonb where key = 'zoho_account_map'", [JSON.stringify(broken)]);
-  const [v] = await sql(
-    "insert into public.commission_payments (recipient, method, paid_on, amount_aed, paid_by, created_by, updated_by) select 'E2e Payee Zoho', 'cash', $1, 120, id, id, id from public.staff where role_id = 'owner' and is_active limit 1 returning id, number",
-    [TODAY],
-  );
-  await enqueue("commission", v.id);
-  const fail = await settled("commission", v.id);
-  check("g: the broken mapping fails in plain words, nothing half-posted", fail?.status === "failed" && /Mapping missing: Sales commissions/.test(fail?.last_error ?? ""), JSON.stringify(fail)?.slice(0, 250));
-  await sql("update public.settings set value = $1::jsonb where key = 'zoho_account_map'", [JSON.stringify(stored.value)]);
+  let v;
+  try {
+    [v] = await sql(
+      "insert into public.commission_payments (recipient, method, paid_on, amount_aed, paid_by, created_by, updated_by) select 'E2e Payee Zoho', 'cash', $1, 120, id, id, id from public.staff where role_id = 'owner' and is_active limit 1 returning id, number",
+      [TODAY],
+    );
+    await enqueue("commission", v.id);
+    const fail = await settled("commission", v.id);
+    check("g: the broken mapping fails in plain words, nothing half-posted", fail?.status === "failed" && /Mapping missing: Sales commissions/.test(fail?.last_error ?? ""), JSON.stringify(fail)?.slice(0, 250));
+  } finally {
+    // The mapping is LIVE production state: it goes back whatever happens above.
+    await sql("update public.settings set value = $1::jsonb where key = 'zoho_account_map'", [JSON.stringify(stored.value)]);
+  }
   await sql("update public.zoho_outbox set status = 'pending', last_error = null, claimed_at = null where kind = 'commission' and record_id = $1", [v.id]);
   const ok = await settled("commission", v.id);
   check("g: Retry posts it once (120.00)", ok?.status === "synced" && ok?.zoho_result?.amount === 120, JSON.stringify(ok)?.slice(0, 250));

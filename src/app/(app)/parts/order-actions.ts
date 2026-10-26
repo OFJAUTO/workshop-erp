@@ -18,7 +18,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
-import { tryEnqueueZoho } from "@/lib/zoho-sync";
+import { flagZohoAttention, tryEnqueueZoho } from "@/lib/zoho-sync";
 import { ensureWorkLines } from "@/lib/work-data";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -276,8 +276,15 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...(mismatches ? {} : { supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id }), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
-  // Zoho Books phase 2: the entered invoice becomes the supplier's bill.
-  await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
+  // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
+  // already posted cannot be re-posted (never twice): the row turns red for the accountant instead.
+  const { data: zpo } = await admin.from("purchase_orders").select("zoho_bill_id").eq("id", po.id).maybeSingle();
+  const changed = po.supplier_invoice_number && number && (po.supplier_invoice_number !== number.slice(0, 80) || (po.supplier_invoice_amount ?? null) !== (Number.isFinite(amount) && amount > 0 ? amount : null));
+  if ((zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id && changed) {
+    await flagZohoAttention("bill", po.id, `The supplier invoice on ${po.number} was changed after its bill reached Zoho (now ${number}): fix the bill in Zoho by hand.`);
+  } else {
+    await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
+  }
   return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };
 }
 

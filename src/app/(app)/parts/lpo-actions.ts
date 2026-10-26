@@ -150,6 +150,13 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   const scanPath = blankToNull(formData.get("scan_path"));
   // The invoice rules run first (only when a supplier LPO is involved; stray stock has no invoice to track).
   if (poIds.length) {
+    // One supplier invoice belongs to ONE supplier: typed across two suppliers it would land, whole, on both
+    // bills (and skip the 5% cross-check). Each supplier's delivery is received with its own invoice.
+    if (!toFollow && (num || date || amount)) {
+      const { data: sups } = await admin.from("purchase_orders").select("supplier_name").in("id", poIds);
+      const names = Array.from(new Set(((sups ?? []) as { supplier_name: string }[]).map((s) => s.supplier_name.trim().toLowerCase())));
+      if (names.length > 1) return { error: `The ticked parts come from ${names.length} different suppliers: receive one supplier's delivery at a time, each with its own invoice (or tick "Invoice to follow" for all of them).` };
+    }
     const poTotal = poIds.length === 1 ? Number((await admin.from("purchase_orders").select("total_cost_aed").eq("id", poIds[0]).maybeSingle()).data?.total_cost_aed) || null : null;
     const check = checkSupplierInvoice({ toFollow, number: num, date, amount, poTotal, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
     if (!check.ok) return { error: check.error };
@@ -169,7 +176,9 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
       invoiceWord = " Invoice to follow: it sits on the missing list until the number and date are entered.";
     } else {
       for (const poId of poIds) {
-        await admin.from("purchase_orders").update({ supplier_invoice_number: num ? num.slice(0, 80) : null, supplier_invoice_date: date, supplier_invoice_amount: amount, ...(scanPath ? { supplier_invoice_path: scanPath } : {}), supplier_invoice_status: "received", supplier_invoice_at: now, supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId);
+        // An invoice already on the LPO is never silently overwritten from the receive panel; the LPO page's own
+        // invoice form is the place to correct one.
+        await admin.from("purchase_orders").update({ supplier_invoice_number: num ? num.slice(0, 80) : null, supplier_invoice_date: date, supplier_invoice_amount: amount, ...(scanPath ? { supplier_invoice_path: scanPath } : {}), supplier_invoice_status: "received", supplier_invoice_at: now, supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId).neq("supplier_invoice_status", "received");
       }
       // Files uploaded before the save carry the panel's key (a uuid); they re-point to the (first) LPO so the scan shows on its page.
       if (isUuid(clientKey)) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", clientKey).is("removed_at", null);
