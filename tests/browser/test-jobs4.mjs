@@ -35,8 +35,16 @@ try {
   await poll();
   const first = await until(async () => { const t = await told("Mailbox check hasn't run since %"); return t.length ? t : null; }, 30, 500);
   check("2: the owner gets 'Mailbox check hasn't run since hh:mm'", !!first && /^Mailbox check hasn't run since \d\d:\d\d$/.test(first[0]), JSON.stringify(first));
+  // The LIVE site's own five-minute run writes this shared row: it can land between the bell above and the page
+  // below and make the job on-time again. The red line is asserted only while the test's own stale time still stands.
+  await sql("update public.background_jobs set last_ran_at = now() - make_interval(mins => 20), late_notified_at = now() where key = 'mailbox'");
   await go(page, `${base}/settings`);
-  check("2: the mailbox line is red and says so", (await mail.getAttribute("data-job-state")) === "late" && /text-red/.test((await mail.getAttribute("class")) ?? "") && /Mailbox check hasn't run since/.test(await mail.locator("[data-job-late]").textContent()));
+  const staleStands = ((await sql("select (last_ran_at < now() - make_interval(mins => 16)) as stale from public.background_jobs where key = 'mailbox'"))[0] ?? {}).stale === true;
+  if (staleStands) {
+    check("2: the mailbox line is red and says so", (await mail.getAttribute("data-job-state")) === "late" && /text-red/.test((await mail.getAttribute("class")) ?? "") && /Mailbox check hasn't run since/.test(await mail.locator("[data-job-late]").textContent()));
+  } else {
+    console.log("NOTE  the live five-minute run refreshed the row mid-test: the red-line look is skipped (the bell above already proved the lateness)");
+  }
   await box.screenshot({ path: shot("jobs4-2-mailbox-late.png") });
   await sleep(61000); // the poll checks at most once a minute per server
   await poll();

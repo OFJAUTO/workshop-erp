@@ -1,6 +1,7 @@
 import "server-only";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
-import { Image, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import type { ReactNode } from "react";
+import { Image, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, type InvoiceBundle, type InvoiceLineRow, type PaymentRow } from "@/lib/invoice-data";
 import { amountInWords, round2 } from "@/lib/money";
@@ -14,7 +15,7 @@ import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
-import { DocumentTail, InfoBoxes, LinesTable, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type DocLine, type PoDocRow, type SectionLine, type StatusBox } from "./template";
+import { RED, PALE, INK, GREY, GREEN, Amount, DocumentTail, InfoBoxes, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type PoDocRow, type SectionLine, type StatusBox, type Box } from "./template";
 import { addMonthsIso, dubaiDay } from "@/lib/warranty";
 import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
 
@@ -198,38 +199,138 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
 }
 
 /** A receipt for one payment, on the same template. */
-export async function renderReceiptPdf(payment: PaymentRow, invoice: InvoiceBundle | null, customer: { full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null, job: { job_number: string } | null, settings: Settings, receivedByName: string | null, deposit: { quotationNumber: string | null; quotationTotal: number; received: number; balance: number } | null = null): Promise<Buffer> {
-  void receivedByName;
+export type ReceiptVehicle = { title: string | null; plate: string; vin: string | null };
+export type ReceiptSummary = { totalLabel: string; total: number; paid: number; balance: number; paidInFull: boolean; pendingCheque: boolean };
+export type ReceiptData = {
+  payment: PaymentRow;
+  customer: { full_name: string; company_name: string | null; phone: string | null; trn: string | null } | null;
+  jobNumber: string | null;
+  vehicle: ReceiptVehicle | null;
+  /** The meta cell after the date: Quotation Q-00002, or the invoice's own number. */
+  docRef: { label: string; value: string } | null;
+  /** "Advance payment (deposit) against quotation Q-00002" / "Payment against invoice INV-00012". */
+  forLine: string;
+  summary: ReceiptSummary | null;
+  /** The invoice link token: the QR opens the invoice page. A deposit receipt has none. */
+  invoiceToken: string | null;
+};
+
+/** A drawn check mark: the document font has no ✓ glyph to rely on. */
+function CheckMark({ color, size }: { color: string; size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 12 12" style={{ marginRight: px(4) }}>
+      <Path d="M1.5 6.5 L4.8 9.8 L10.5 2.5" stroke={color} strokeWidth={2.2} fill="none" />
+    </Svg>
+  );
+}
+
+function SummaryCell({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: PALE, borderRadius: 5, paddingVertical: px(9), paddingHorizontal: px(11) }}>
+      <Text style={styles.smallTitle}>{label}</Text>
+      {children}
+    </View>
+  );
+}
+
+/**
+ * The receipt (26 October 2026, the owner's mock): the shared header, three boxes (received from, the vehicle,
+ * paid by), one FOR line, ONE framed "Amount received" box with the amount large and in words, and a three-part
+ * summary (total, paid to date, balance remaining or "Paid in full" with a green check). No lines table and the
+ * amount printed once: the old receipt repeated it seven times. One template for every receipt, deposits and
+ * payments alike; the customer's link opens this same PDF. The footer note is the owner's wording in Settings.
+ */
+export async function renderReceiptPdf(data: ReceiptData, settings: Settings): Promise<Buffer> {
+  const { payment, customer, vehicle, summary } = data;
   const currency = currencyOf(settings);
   const company = companyOf(settings);
-  const [logo, qr] = await Promise.all([loadLogo(), invoice?.invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/invoice/${invoice.invoice.token}`) : Promise.resolve(null)]);
-  const pending = payment.method === "cheque" && payment.cheque_status !== "cleared";
-  const line: DocLine = {
-    description: invoice ? `Payment against ${invoice.invoice.kind === "proforma" ? "proforma invoice" : "invoice"} ${invoice.invoice.number}` : deposit ? `Advance payment (deposit)${deposit.quotationNumber ? ` against quotation ${deposit.quotationNumber}` : ""}` : payment.is_deposit ? "Deposit" : "Payment",
-    details: [METHOD_LABELS[payment.method], payment.method === "cheque" ? `cheque ${payment.cheque_number ?? ""}${payment.cheque_bank ? `, ${payment.cheque_bank}` : ""}${payment.cheque_date ? `, dated ${formatDate(payment.cheque_date)}` : ""}` : payment.reference].filter(Boolean).join("  ·  "),
-    qty: "1",
-    rate: payment.amount_aed,
-    amount: payment.amount_aed,
-    vat: 0,
-    total: payment.amount_aed,
-  };
+  const [logo, qr] = await Promise.all([loadLogo(), data.invoiceToken ? qrPng(`${PRODUCTION_SITE_URL}/invoice/${data.invoiceToken}`) : Promise.resolve(null)]);
+  const pending = payment.method === "cheque" && payment.cheque_status === "pending" && payment.status === "recorded";
+  const voided = payment.status === "voided" || payment.status === "reversed";
+  const note = String(settings.receipt_footer_note ?? "").trim();
+  const boxes: Box[] = [
+    {
+      title: "Received from",
+      strong: customer?.company_name ?? customer?.full_name ?? "Customer",
+      lines: [customer?.company_name ? customer.full_name : null, customer?.phone ?? null],
+      muted: [customer?.trn ? `TRN ${customer.trn}` : null],
+    },
+    ...(vehicle
+      ? [{ title: "Vehicle", strong: vehicle.title ?? vehicle.plate, rows: [["Plate", vehicle.title ? vehicle.plate : null], ["VIN", vehicle.vin]] } as Box]
+      : []),
+    {
+      title: "Paid by",
+      strong: METHOD_LABELS[payment.method] ?? payment.method,
+      rows: [
+        ["Reference", payment.reference],
+        ["Cheque no.", payment.cheque_number],
+        ["Bank", payment.cheque_bank],
+        ["Cheque date", payment.cheque_date ? formatDate(payment.cheque_date) : null],
+        ["Received", formatDateTime(payment.received_at)],
+      ],
+      muted: [pending ? "Cheque pending clearance" : null],
+    },
+  ];
   const doc = (
-    <PdfDocument title={`Receipt ${payment.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthe invoice online"} footerLines={[pending ? "This receipt is for a cheque that has not cleared yet. It counts as unpaid until it clears." : "Thank you for your payment."]}>
-      <TitleRow title="RECEIPT" meta={[{ label: "Receipt no.", value: payment.number }, { label: "Date", value: formatDate(payment.received_at) }, invoice ? { label: NUMBER_LABELS[invoice.invoice.kind], value: invoice.invoice.number } : null, deposit?.quotationNumber ? { label: "Quotation", value: deposit.quotationNumber } : null, job ? { label: "Job card", value: job.job_number } : null]} />
-      <InfoBoxes
-        boxes={[
-          { title: "Received from", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? customer.full_name : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
-          { title: "Payment", strong: METHOD_LABELS[payment.method], rows: [["Reference", payment.reference], ["Cheque no.", payment.cheque_number], ["Bank", payment.cheque_bank], ["Cheque date", payment.cheque_date ? formatDate(payment.cheque_date) : null], ["Received", formatDateTime(payment.received_at)]] },
+    <PdfDocument
+      title={`Receipt ${payment.number}`}
+      company={company}
+      logo={logo}
+      qr={qr}
+      uppercase={settings.customer_documents_uppercase === true}
+      scanLabel={"Scan to view\nthe invoice online"}
+      footerLines={[pending ? "This receipt is for a cheque that has not cleared yet. It counts as unpaid until it clears." : null].filter((x): x is string => !!x)}
+    >
+      <TitleRow
+        title="RECEIPT"
+        meta={[
+          { label: "Receipt no.", value: payment.number },
+          { label: "Date", value: formatDate(payment.received_at) },
+          data.docRef ? { label: data.docRef.label, value: data.docRef.value } : null,
+          data.jobNumber ? { label: "Job card", value: data.jobNumber } : null,
         ]}
       />
-      <LinesTable title="Payment" lines={[line]} currency={currency} vatPercent={0} subtotalLabel="Amount received" />
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: px(4) }}>
-        <TotalsBlock currency={currency} rows={[]} total={{ label: "Received", value: payment.amount_aed }} status={pending ? { title: "Cheque pending clearance", value: payment.amount_aed } : { title: "Received with thanks", value: payment.amount_aed, note: invoice ? (invoiceBalance(invoice.invoice, invoice.payments).balance > 0 ? `Balance remaining on the invoice ${invoiceBalance(invoice.invoice, invoice.payments).balance.toFixed(2)}` : "Invoice paid in full") : deposit ? (deposit.balance > 0 ? `Balance remaining AED ${deposit.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : "Quotation covered in full") : null }} />
+      {voided ? (
+        <View style={{ borderWidth: 1.5, borderColor: RED, borderRadius: 5, padding: px(8), marginBottom: px(8) }} wrap={false}>
+          <Text style={{ color: RED, fontWeight: 700 }}>VOIDED — this receipt was cancelled{payment.void_reason ? `: ${payment.void_reason}` : "."}</Text>
+        </View>
+      ) : null}
+      <InfoBoxes boxes={boxes} />
+      <View style={{ marginTop: px(2) }}>
+        <Text style={styles.smallTitle}>For</Text>
+        <Text style={{ fontSize: px(12.5) }}>{data.forLine}</Text>
       </View>
-      <View style={{ marginTop: px(14) }} wrap={false}>
-        <Text style={styles.smallTitle}>Amount in words</Text>
-        <Text style={styles.words}>{amountInWords(payment.amount_aed)}</Text>
+      <View style={{ borderWidth: 1.6, borderColor: INK, borderRadius: 6, paddingVertical: px(11), paddingHorizontal: px(13), marginTop: px(11), flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: px(10) }} wrap={false}>
+        <View style={{ flexShrink: 1, paddingRight: px(8) }}>
+          <Text style={styles.smallTitle}>Amount received</Text>
+          <Text style={{ fontSize: px(10.5), color: GREY }}>{amountInWords(payment.amount_aed)}</Text>
+        </View>
+        <Amount value={payment.amount_aed} currency={currency} size={px(21)} bold />
       </View>
+      {summary ? (
+        <View style={{ flexDirection: "row", gap: px(7), marginTop: px(9) }} wrap={false}>
+          <SummaryCell label={summary.totalLabel}>
+            <Amount value={summary.total} currency={currency} size={px(12.5)} bold align="flex-start" />
+          </SummaryCell>
+          <SummaryCell label="Paid to date">
+            <Amount value={summary.paid} currency={currency} size={px(12.5)} bold align="flex-start" />
+          </SummaryCell>
+          {summary.paidInFull ? (
+            <SummaryCell label="Balance">
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <CheckMark color={GREEN} size={px(11)} />
+                <Text style={{ color: GREEN, fontWeight: 700, fontSize: px(12.5) }}>Paid in full</Text>
+              </View>
+            </SummaryCell>
+          ) : (
+            <SummaryCell label="Balance remaining">
+              <Amount value={summary.balance} currency={currency} size={px(12.5)} bold align="flex-start" />
+              {summary.pendingCheque ? <Text style={{ fontSize: px(8.5), color: GREY }}>Cheque pending clearance counted once cleared</Text> : null}
+            </SummaryCell>
+          )}
+        </View>
+      ) : null}
+      {note ? <Text style={[styles.small, { marginTop: px(12) }]}>{note}</Text> : null}
     </PdfDocument>
   );
   return renderToBuffer(doc);

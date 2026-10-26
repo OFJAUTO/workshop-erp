@@ -101,6 +101,7 @@ const TEXT_KEYS = [
   "whatsapp_approval_template",
   "inspection_fee_notice",
   "inspection_fee_notice_ar",
+  "receipt_footer_note",
   "whatsapp_reminder_template",
   "whatsapp_reminder_car_drop",
   "whatsapp_reminder_we_collect",

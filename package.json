@@ -92,7 +92,8 @@
     "test:videos2": "node --env-file=.env.local tests/browser/test-videos2.mjs",
     "test:nofee3": "node --env-file=.env.local tests/browser/test-nofee3.mjs",
     "test:jobs4": "node --env-file=.env.local tests/browser/test-jobs4.mjs",
-    "test:paymethods": "node --env-file=.env.local tests/browser/test-paymethods.mjs"
+    "test:paymethods": "node --env-file=.env.local tests/browser/test-paymethods.mjs",
+    "test:receipt": "node --env-file=.env.local tests/browser/test-receipt.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

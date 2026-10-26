@@ -223,6 +223,9 @@ export function SettingsForm({
             <Field label="Inspection fee notice (Arabic)">
               <Textarea name="inspection_fee_notice_ar" defaultValue={v.inspection_fee_notice_ar} rows={2} dir="rtl" lang="ar" />
             </Field>
+            <Field label="Receipt footer note" hint="The grey note at the end of every receipt (deposits and payments).">
+              <Textarea name="receipt_footer_note" defaultValue={v.receipt_footer_note} rows={2} required />
+            </Field>
           </Card>
 
           <Card className="flex flex-col gap-4">

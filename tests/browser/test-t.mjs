@@ -168,7 +168,7 @@ await section("2 deposit gate", async () => {
   const rcpt = await fetch(`${base}/api/pdf/receipt/${pay.id}`, { headers: { cookie: await cookieHeader("owner") } });
   const text = rcpt.status === 200 ? await pdfText(Buffer.from(await rcpt.arrayBuffer())) : "";
   const qTotal = Number((await sql("select total_aed from public.quotations where id = $1", [quotationId]))[0]?.total_aed) || 0;
-  check("2: the receipt says Advance payment against the quotation, with the balance remaining", rcpt.status === 200 && /Advance payment \(deposit\) against quotation/i.test(text) && /Balance remaining AED/i.test(text) && text.includes((qTotal - 500).toLocaleString("en-GB", { minimumFractionDigits: 2 })), (text.match(/RECEIPT.{0,500}/i)?.[0] ?? text.slice(0, 300)));
+  check("2: the receipt says Advance payment against the quotation, with the balance remaining", rcpt.status === 200 && /Advance payment \(deposit\) against quotation/i.test(text) && /Balance remaining/i.test(text) && text.includes((qTotal - 500).toLocaleString("en-GB", { minimumFractionDigits: 2 })), (text.match(/RECEIPT.{0,500}/i)?.[0] ?? text.slice(0, 300)));
   const pub = await fetch(`${base}/api/pdf/receipt/${pay.id}?q=${token}`);
   check("2: the customer opens the receipt with the quotation's link token", pub.status === 200 && /pdf/.test(pub.headers.get("content-type") ?? ""), String(pub.status));
   const nope = await fetch(`${base}/api/pdf/receipt/${pay.id}?q=wrong`);
