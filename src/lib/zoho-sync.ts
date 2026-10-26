@@ -401,12 +401,14 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
   let z: ZohoInvoice | null = inv.zoho_invoice_id ? await zohoInvoiceById(org, inv.zoho_invoice_id) : null;
   if (!z) {
     const byNumber = await zohoInvoiceByNumber(org, inv.number);
+    // The list row misses tax_total, so the found invoice is read in full before any judgement on its figures.
+    const full = byNumber ? await zohoInvoiceById(org, byNumber.invoice_id) : null;
     // Our own earlier post (figures match, or a half-finished run on the same job) is adopted and corrected below.
     // Anything else with our number is NEVER overwritten: the row fails in plain words instead.
-    if (byNumber && !matches(byNumber) && byNumber.reference_number !== (job?.job_number ?? inv.number)) {
-      throw new ZohoError(`An invoice numbered ${inv.number} already exists in Zoho with different figures (${byNumber.total.toFixed(2)} there, ${inv.total_aed.toFixed(2)} here) and belongs to another job: the accountant checks it in Zoho.`);
+    if (full && !matches(full) && (byNumber?.reference_number ?? full.reference_number) !== (job?.job_number ?? inv.number)) {
+      throw new ZohoError(`An invoice numbered ${inv.number} already exists in Zoho with different figures (${full.total.toFixed(2)} there, ${inv.total_aed.toFixed(2)} here) and belongs to another job: the accountant checks it in Zoho.`);
     }
-    z = byNumber;
+    z = full;
   }
   if (!z) {
     try {
