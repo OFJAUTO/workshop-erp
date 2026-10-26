@@ -157,7 +157,7 @@ await section("d credit note against an invoice", async () => {
   await enqueue("creditnote", cnRow.id, jobId);
   const r = await settled("creditnote", cnRow.id);
   check("d: the credit note posted with the same CN number and totals (210.00 with VAT)", r?.status === "synced" && r?.zoho_result?.number === `TCN-${RUN}-1` && r?.zoho_result?.zoho?.total === 210, JSON.stringify(r)?.slice(0, 350));
-  check("d: it is applied to the invoice - balance 630 -> 420", r?.zoho_result?.applied_now === 210 && r?.zoho_result?.invoice_balance_after === 420, JSON.stringify(r?.zoho_result));
+  check("d: it is applied to the invoice - balance 630 -> 420", r?.zoho_result?.applied_total === 210 && r?.zoho_result?.invoice_balance_after === 420, JSON.stringify(r?.zoho_result));
   // The invoice's own re-check must now count the credit (expected balance 420, not 630).
   await sql("update public.zoho_outbox set status = 'pending', claimed_at = null where kind = 'invoice' and record_id = $1", [invD.id]);
   const again = await settled("invoice", invD.id);

@@ -804,7 +804,9 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
       ...(cn.notes ? { notes: cut(cn.notes, 2000) } : {}),
     };
     try {
-      const j = await zohoFetch<{ creditnote?: ZohoCreditNote }>("/creditnotes?ignore_auto_number_generation=true", { org, method: "POST", body });
+      // The UAE edition insists on the associated invoice ("Specify the Associated Invoice Number"), and passing
+      // it here also applies the credit against that invoice in the same breath.
+      const j = await zohoFetch<{ creditnote?: ZohoCreditNote }>(`/creditnotes?ignore_auto_number_generation=true&invoice_id=${encodeURIComponent(par.zoho_invoice_id)}`, { org, method: "POST", body });
       z = j.creditnote ?? null;
     } catch (e) {
       const again = await zohoFetch<{ creditnotes?: ZohoCreditNote[] }>(`/creditnotes?creditnote_number=${encodeURIComponent(cn.number)}`, { org });
@@ -828,6 +830,7 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
   }
   const after = (await zohoCreditNoteById(org, z.creditnote_id)) ?? z;
   const parentAfter = await zohoInvoiceById(org, par.zoho_invoice_id);
+  void appliedNow;
   return {
     zohoId: z.creditnote_id,
     result: {
@@ -835,7 +838,8 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
       zoho: { total: after.total, unapplied: after.balance },
       erp: { total: cn.total_aed, vat: cn.vat_aed },
       applied_to: par.number,
-      applied_now: appliedNow,
+      // What sits on invoices in all: creation-against-the-invoice applies it in the same breath.
+      applied_total: round2(after.total - after.balance),
       invoice_balance_after: parentAfter?.balance ?? null,
     },
   };
