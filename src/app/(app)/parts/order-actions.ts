@@ -425,6 +425,8 @@ export async function returnPart(partId: string, formData: FormData) {
   if (stage === "returned") {
     await admin.from("part_items").update({ return_status: "returned", returned_qty: p.received_qty || p.quantity, final_cost_aed: 0, issue_status: "none", issued_qty: 0, updated_by: staff.id }).eq("id", partId);
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "part_returned", note: `${p.description} returned to the supplier by ${staff.display_name}; cost taken off the job`, created_by: staff.id });
+    // Zoho Books phase 3: the return becomes a vendor credit against the supplier's bill.
+    await tryEnqueueZoho("vendorcredit", partId, p.job_id, staff.id);
   } else {
     if (!note || note.length < 3) redirect(`${back}?error=${encodeURIComponent("Say why the part goes back.")}`);
     await admin.from("part_items").update({ return_status: "to_return", return_note: note, issue_status: "none", issued_qty: 0, updated_by: staff.id }).eq("id", partId);

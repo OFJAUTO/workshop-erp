@@ -34,6 +34,7 @@ function read(formData: FormData) {
   return {
     name,
     trn,
+    vat_registered: formData.get("vat_registered") === "on",
     phone: blankToNull(formData.get("phone"))?.slice(0, 40) ?? null,
     email: blankToNull(formData.get("email"))?.slice(0, 120) ?? null,
     address: blankToNull(formData.get("address"))?.slice(0, 300) ?? null,

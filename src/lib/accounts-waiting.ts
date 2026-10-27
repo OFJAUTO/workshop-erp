@@ -168,8 +168,16 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       : z.kind === "billpayment" ? "Supplier payment"
       : z.kind === "commission" ? "Commission"
       : z.kind === "recovery" ? "Recovery month"
+      : z.kind === "vendorcredit" ? "Supplier credit"
+      : z.kind === "cnrefund" ? "Customer refund"
       : "Payment";
     out.push({ jobId: `zoho:${z.id}`, plate: "Zoho Books", car: null, what: `${kindWord}: ${(z.last_error ?? "see the sync page").slice(0, 140)}`, amount: null, actionLabel: "Open the sync page", href: "/zoho?show=failed", always: true, urgency: "amber", since: z.enqueued_at });
+  }
+
+  // 7. A red reconciliation day (phase 4): the books differ somewhere until someone looks.
+  const { data: redDays } = await admin.from("zoho_reconciliation").select("day, checked_at").eq("status", "red").order("day", { ascending: false }).limit(5);
+  for (const d of (redDays ?? []) as { day: string; checked_at: string }[]) {
+    out.push({ jobId: `recon:${d.day}`, plate: "Zoho Books", car: null, what: `Reconciliation differs on ${String(d.day).slice(0, 10)}`, amount: null, actionLabel: "Open the reconciliation", href: "/zoho/reconciliation", always: true, urgency: "amber", since: d.checked_at });
   }
   return out;
 }

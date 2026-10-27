@@ -256,6 +256,10 @@ const DEFAULTS = {
   zoho_live_enabled: false,
   /** Phase 1: Zoho account NAMES per line type and payment method (Settings > Zoho Books > Mapping). */
   zoho_account_map: {} as Record<string, unknown>,
+  /** Phase 4: Mathew's side-by-side review tick ({by, name, at}), the start date, and the switch history. */
+  zoho_golive_reviewed: {} as Record<string, unknown>,
+  zoho_golive_start_date: "",
+  zoho_golive_log: [] as unknown[],
   // The grey note at the end of every receipt (26 October 2026), edited by the owner in Settings.
   receipt_footer_note: "This is a payment receipt, not a tax invoice. The tax invoice is issued when the job is paid in full, with this amount deducted.",
   inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [amount] درهمًا.",

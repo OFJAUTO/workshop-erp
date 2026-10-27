@@ -14,7 +14,8 @@ import { ReasonChips } from "@/components/ReasonChips";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { decideOverpaymentAction, issueCreditNote, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, verifyPaymentAction, voidPaymentAction } from "../actions";
+import { decideOverpaymentAction, issueCreditNote, recordCnRefund, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, verifyPaymentAction, voidPaymentAction } from "../actions";
+import { ChoiceButtons } from "@/components/ui";
 import { PaymentForm } from "./PaymentForm";
 
 export const dynamic = "force-dynamic";
@@ -204,6 +205,34 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             />
             <p className="text-xs text-muted">An issued invoice is locked. Corrections are by credit note, approved by the owner.</p>
           </Card>
+          {invoice.kind === "credit_note" && invoice.status === "issued"
+            ? await (async () => {
+                // Phase 3: the refund PAID to the customer against this credit note (accounts or the owner).
+                const { data: rf } = await createAdminClient().from("invoices").select("refund_paid_at, refund_method, refund_reference, refund_amount_aed").eq("id", invoice.id).maybeSingle();
+                const refund = rf as { refund_paid_at: string | null; refund_method: string | null; refund_reference: string | null; refund_amount_aed: number | null } | null;
+                return (
+                  <Card className="flex flex-col gap-2" data-cn-refund>
+                    <SectionLabel>Refund to the customer</SectionLabel>
+                    {refund?.refund_paid_at ? (
+                      <p className="text-sm font-semibold text-green" data-cn-refund-done>
+                        AED {m(Number(refund.refund_amount_aed) || 0)} refunded by {refund.refund_method === "cash" ? "cash" : "bank transfer"}
+                        {refund.refund_reference ? ` (ref ${refund.refund_reference})` : ""} on {formatDate(refund.refund_paid_at)}.
+                      </p>
+                    ) : can(role, "recordPayments") && !staff.viewingAs ? (
+                      <form action={recordCnRefund.bind(null, invoice.id)} className="flex flex-col gap-2">
+                        <p className="text-xs text-muted">Only when money went BACK to the customer. A credit used against an invoice needs no refund.</p>
+                        <Input name="amount" inputMode="decimal" defaultValue={m(invoice.total_aed)} aria-label="Amount refunded with VAT" />
+                        <ChoiceButtons name="method" options={[{ value: "cash", label: "Cash" }, { value: "transfer", label: "Bank transfer" }]} columns={2} />
+                        <Input name="reference" placeholder="Transfer reference (needed for a transfer)" />
+                        <Button type="submit" size="md" data-cn-refund-save>Record the refund</Button>
+                      </form>
+                    ) : (
+                      <p className="text-sm text-muted">Accounts record the refund once it is paid.</p>
+                    )}
+                  </Card>
+                );
+              })()
+            : null}
           {(isTax || invoice.kind === "proforma") && can(role, "issueInvoices") && !staff.viewingAs ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>Payment link</SectionLabel>

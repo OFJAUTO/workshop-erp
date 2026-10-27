@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ZOHO_REAL_ORG_ID, ZohoError, zohoFetch } from "@/lib/zoho";
-import { readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
+import { beforeGoLiveStart, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
+import { goLiveChecklist } from "@/lib/zoho-golive";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,16 @@ export async function POST(request: NextRequest) {
   if (body.action === "write_org") {
     const [org, settings] = await Promise.all([zohoWriteOrg(), getSettings()]);
     return NextResponse.json({ org, live: settings.zoho_live_enabled === true, map: readZohoMap(settings) });
+  }
+  if (body.action === "golive_checklist") {
+    // The evaluated gates, without any flip: proves the switch blocks while anything is red.
+    const checklist = await goLiveChecklist({ checkReal: false });
+    return NextResponse.json(checklist);
+  }
+  if (body.action === "date_gate") {
+    // The PURE start-date rule, with injected values: the flip itself is never simulated against REAL.
+    const cases = (body as { cases?: { docDate: string; live: boolean; startDate: string }[] }).cases ?? [];
+    return NextResponse.json({ results: cases.map((c) => beforeGoLiveStart(c.docDate, c.live, c.startDate)) });
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }

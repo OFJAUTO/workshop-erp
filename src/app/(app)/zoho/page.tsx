@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { zohoOpenUrl, zohoWriteOrg, type OutboxRow, type ZohoKind } from "@/lib/zoho-sync";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
-import { backfillZoho, retryZohoRow, syncZohoNow } from "./actions";
+import { backfillZoho, retryZohoRow, syncZohoNow, tickGoLiveReview } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +33,8 @@ const KIND_WORDS: Record<ZohoKind, string> = {
   billpayment: "Supplier payment",
   commission: "Commission",
   recovery: "Recovery month",
+  vendorcredit: "Supplier credit",
+  cnrefund: "Customer refund",
 };
 
 const aed = (n: number) => `AED ${Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
@@ -58,6 +60,14 @@ function resultWords(row: OutboxRow): string | null {
   }
   if (row.kind === "billpayment") {
     return `Paid in Zoho${typeof r.amount === "number" ? `: ${aed(r.amount)}` : ""} · the bill shows ${aed(Number(r.bill_balance_after) || 0)} due`;
+  }
+  if (row.kind === "vendorcredit") {
+    const z = r.zoho as { total?: number; unapplied?: number } | undefined;
+    if (!z) return null;
+    return `Supplier credit in Zoho: ${aed(z.total ?? 0)}${typeof r.applied_now === "number" && r.applied_now > 0 ? ` · ${aed(r.applied_now)} applied to the bill` : ""}${typeof r.bill_balance_after === "number" ? ` · the bill shows ${aed(r.bill_balance_after)} due` : ""}`;
+  }
+  if (row.kind === "cnrefund") {
+    return `Refund in Zoho${typeof r.refund === "number" ? `: ${aed(r.refund)}` : ""}${typeof r.cn_unapplied_after === "number" ? ` · ${aed(r.cn_unapplied_after)} of the credit left unapplied` : ""}`;
   }
   if (row.kind === "commission" || row.kind === "recovery") {
     const amount = typeof r.amount === "number" ? aed(r.amount) : "";
@@ -90,6 +100,8 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   const poIds = idsOf("bill", "billpayment");
   const voucherIds = idsOf("commission");
   const payoutIds = idsOf("recovery");
+  const partIds = idsOf("vendorcredit");
+  const refundIds = idsOf("cnrefund");
   if (invoiceIds.length)
     for (const i of (await admin.from("invoices").select("id, number, total_aed").in("id", invoiceIds)).data ?? []) {
       names.set(`invoice:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
@@ -109,6 +121,8 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
     }
   if (voucherIds.length) for (const v of (await admin.from("commission_payments").select("id, number, recipient, amount_aed").in("id", voucherIds)).data ?? []) names.set(`commission:${v.id}`, `${v.number} · ${v.recipient} · ${aed(Number(v.amount_aed))}`);
   if (payoutIds.length) for (const r of (await admin.from("recovery_payouts").select("id, who, month, total_aed").in("id", payoutIds)).data ?? []) names.set(`recovery:${r.id}`, `${r.month} · ${r.who} · ${aed(Number(r.total_aed))}`);
+  if (partIds.length) for (const pt of (await admin.from("part_items").select("id, description, supplier").in("id", partIds)).data ?? []) names.set(`vendorcredit:${pt.id}`, `${pt.description}${pt.supplier ? ` · ${pt.supplier}` : ""}`);
+  if (refundIds.length) for (const rf of (await admin.from("invoices").select("id, number, refund_amount_aed, total_aed").in("id", refundIds)).data ?? []) names.set(`cnrefund:${rf.id}`, `${rf.number} · ${aed(Number(rf.refund_amount_aed ?? rf.total_aed))}`);
 
   const counts = Object.fromEntries(FILTERS.map((f) => [f.key, f.key === "all" ? rows.length : rows.filter((r) => r.status === f.key).length]));
   const filtered = show === "all" ? rows : rows.filter((r) => r.status === show);
@@ -119,7 +133,13 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
       <PageHeader
         title="Zoho Books sync"
         subtitle={`One-way: the ERP posts customers, deposits, tax invoices and payments to Zoho. ${live ? "LIVE: writes go to the REAL organization." : `Writes go to OFJ TEST only (${org ?? "no test organization picked"}); the REAL book (${ZOHO_REAL_ORG_ID}) stays read-only until go-live.`}`}
-        actions={<LinkButton href="/settings/zoho/mapping" tone="secondary">Account mapping</LinkButton>}
+        actions={
+          <span className="flex flex-wrap gap-2">
+            <LinkButton href="/zoho/reconciliation" tone="secondary">Reconciliation</LinkButton>
+            <LinkButton href="/zoho/close" tone="secondary">Monthly close</LinkButton>
+            <LinkButton href="/settings/zoho/mapping" tone="secondary">Account mapping</LinkButton>
+          </span>
+        }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -137,6 +157,26 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
         ) : null}
         <span className="text-xs text-muted">The sync also runs by itself every five minutes.</span>
       </Card>
+
+      {staff.role_id === "accounts" && !staff.viewingAs
+        ? await (async () => {
+            // Phase 4: Mathew's own tick that the OFJ TEST side-by-side review is done (one of the go-live gates).
+            const reviewed = (settings.zoho_golive_reviewed ?? {}) as { name?: string; at?: string };
+            return (
+              <Card className="flex flex-wrap items-center gap-3" data-golive-review>
+                <SectionLabel>Go-live review</SectionLabel>
+                {reviewed.at ? (
+                  <p className="text-sm font-semibold text-green" data-golive-reviewed>Reviewed side by side by {reviewed.name ?? "accounts"} on {String(reviewed.at).slice(0, 10)}.</p>
+                ) : (
+                  <form action={tickGoLiveReview} className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-muted">Once OFJ TEST matches the ERP side by side, tick it here — the owner&apos;s go-live checklist turns green.</span>
+                    <Button type="submit" size="md" data-golive-tick>The review is done</Button>
+                  </form>
+                )}
+              </Card>
+            );
+          })()
+        : null}
 
       <div className="flex flex-wrap gap-1 text-xs font-bold" data-zoho-filters>
         {FILTERS.map((f) => (

@@ -296,6 +296,35 @@ export async function issueCreditNote(invoiceId: string, formData: FormData) {
   redirect(`/invoices/${cn.id}?message=${encodeURIComponent(`${number} issued.`)}`);
 }
 
+/**
+ * Phase 3 (27 October 2026): accounts or the owner record a refund PAID to the customer against a credit note.
+ * One refund per credit note, never more than its total; it posts to Zoho from the mapped paid-from account.
+ */
+export async function recordCnRefund(invoiceId: string, formData: FormData) {
+  const staff = await requirePermission("recordPayments");
+  const back = `/invoices/${invoiceId}`;
+  if (staff.viewingAs) redirect(`${back}?error=${encodeURIComponent("Viewing only.")}`);
+  const bundle = await loadInvoice(invoiceId);
+  if (!bundle || bundle.invoice.kind !== "credit_note" || bundle.invoice.status !== "issued") redirect("/invoices");
+  const admin = createAdminClient();
+  const { data: existing } = await admin.from("invoices").select("refund_paid_at").eq("id", invoiceId).maybeSingle();
+  if ((existing as { refund_paid_at?: string | null } | null)?.refund_paid_at) redirect(`${back}?message=${encodeURIComponent("The refund is already recorded.")}`);
+  const amount = round2(Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, "")));
+  const method = String(formData.get("method") ?? "");
+  const reference = blankToNull(formData.get("reference"));
+  if (!Number.isFinite(amount) || amount <= 0) redirect(`${back}?error=${encodeURIComponent("Enter the amount refunded (with VAT).")}`);
+  if (amount > bundle.invoice.total_aed + 0.005) redirect(`${back}?error=${encodeURIComponent("That is more than the credit note.")}`);
+  if (method !== "cash" && method !== "transfer") redirect(`${back}?error=${encodeURIComponent("Pick cash or bank transfer.")}`);
+  if (method === "transfer" && !reference) redirect(`${back}?error=${encodeURIComponent("A transfer needs its reference.")}`);
+  const now = new Date().toISOString();
+  const { error } = await admin.from("invoices").update({ refund_paid_at: now, refund_paid_by: staff.id, refund_method: method, refund_reference: reference, refund_amount_aed: amount, updated_by: staff.id }).eq("id", invoiceId).is("refund_paid_at", null);
+  if (error) redirect(`${back}?error=${encodeURIComponent(error.message)}`);
+  if (bundle.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle.invoice.job_id, event_type: "payment", note: `${bundle.invoice.number}: AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} refunded to the customer by ${staff.display_name} (${method === "cash" ? "cash" : `bank transfer${reference ? `, ref ${reference}` : ""}`})`, created_by: staff.id });
+  await tryEnqueueZoho("cnrefund", invoiceId, bundle.invoice.job_id, staff.id);
+  refresh(bundle.invoice.job_id, invoiceId);
+  redirect(`${back}?message=${encodeURIComponent(`Refund of AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} recorded.`)}`);
+}
+
 /** Records that the "car is ready" message with the invoice went to the customer. */
 async function liveProforma(jobId: string) {
   const { data } = await createAdminClient().from("invoices").select("id, number, total_aed, token, sent_at, expected_payment_method, pay_now_enabled").eq("job_id", jobId).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).is("deposit_for_quotation_id", null).order("issued_at", { ascending: false }).limit(1).maybeSingle();

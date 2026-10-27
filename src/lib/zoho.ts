@@ -166,11 +166,15 @@ export async function zohoFetch<T = Record<string, unknown>>(path: string, opts:
   const method = opts.method ?? "GET";
   const write = opts.write ?? method !== "GET";
   if (write) {
-    // THE guard: nothing writes to the real book while the go-live switch is off.
+    // THE guard: nothing writes to the real book while the go-live switch is off — and once it is ON, the test
+    // organization is closed to writes too (the books live in ONE place at a time). The rule lives here, not in
+    // the callers.
     if (!opts.org) throw new ZohoError("A write needs its organization.");
+    const settings = await getSettings();
     if (opts.org === ZOHO_REAL_ORG_ID) {
-      const settings = await getSettings();
       if (settings.zoho_live_enabled !== true) throw new ZohoError("Refused: the REAL Zoho organization is read-only until the owner declares go-live. Writes go to OFJ TEST.");
+    } else if (settings.zoho_live_enabled === true) {
+      throw new ZohoError("Refused: the books are LIVE on the REAL organization — OFJ TEST is closed to writes.");
     }
   }
   const run = chain.then(async () => {

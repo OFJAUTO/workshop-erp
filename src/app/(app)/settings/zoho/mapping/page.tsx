@@ -152,7 +152,7 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
             <Field label="Customer advances" hint="Agreed liability account for unapplied deposits — set it in Zoho's own settings too.">
               {box("map__advances", bestMatch(map.advances, SUGGESTED_MAP.advances, liability, MATCH_WORDS.advances), liability)}
             </Field>
-            <Field label="Advance refunds paid from" hint="Where a credit-note refund would be paid from. The ERP records no refunds yet, so this is the agreed name only.">
+            <Field label="Advance refunds paid from" hint="The cash/bank account a credit-note refund is paid from (used the moment accounts record one).">
               {box("map__advances_refund", bestMatch(map.advancesRefund, SUGGESTED_MAP.advancesRefund, depositable, MATCH_WORDS.advances_refund), depositable)}
             </Field>
           </div>

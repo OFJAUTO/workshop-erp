@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
-type Supplier = { id: string; name: string; trn: string | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null; notes: string | null; is_active: boolean; default_discount_percent: number | null; discount_by_type: Record<string, number> | null };
+type Supplier = { id: string; name: string; trn: string | null; vat_registered: boolean; phone: string | null; email: string | null; address: string | null; payment_terms: string | null; notes: string | null; is_active: boolean; default_discount_percent: number | null; discount_by_type: Record<string, number> | null };
 
 function SupplierFields({ s, types, canDiscount }: { s?: Supplier; types: string[]; canDiscount: boolean }) {
   const byType = (s?.discount_by_type ?? {}) as Record<string, number>;
@@ -21,6 +21,11 @@ function SupplierFields({ s, types, canDiscount }: { s?: Supplier; types: string
       </div>
       <Field label="Name"><Input name="name" defaultValue={s?.name ?? ""} required textCase="title" /></Field>
       <Field label="TRN" optional hint="15 digits"><Input name="trn" defaultValue={s?.trn ?? ""} inputMode="numeric" maxLength={15} /></Field>
+      <label className="flex items-center gap-2 text-sm font-semibold sm:col-span-2" data-vat-switch>
+        <input type="checkbox" name="vat_registered" defaultChecked={s ? s.vat_registered !== false : true} className="h-5 w-5" />
+        VAT registered (charges 5% VAT and has a TRN)
+        <span className="text-xs font-normal text-muted">Untick only for a supplier who genuinely charges no VAT: their bills post to Zoho without VAT and need no TRN.</span>
+      </label>
       <Field label="Phone" optional><Input name="phone" defaultValue={s?.phone ?? ""} inputMode="tel" /></Field>
       <Field label="Email" optional><Input name="email" defaultValue={s?.email ?? ""} type="email" /></Field>
       <div className="sm:col-span-2"><Field label="Address" optional><Input name="address" defaultValue={s?.address ?? ""} textCase="sentence" /></Field></div>
@@ -39,7 +44,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
   const admin = createAdminClient();
   const settings = await getSettings();
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
-  const { data } = await admin.from("suppliers").select("id, name, trn, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type").order("name");
+  const { data } = await admin.from("suppliers").select("id, name, trn, vat_registered, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type").order("name");
   const all = (data ?? []) as Supplier[];
   const list = show === "all" ? all : all.filter((s) => s.is_active);
   return (

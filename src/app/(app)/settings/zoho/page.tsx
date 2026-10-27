@@ -16,7 +16,10 @@ import {
   type ZohoOrg,
 } from "@/lib/zoho";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
-import { disconnectZohoAction, mirrorZohoAction, setZohoTestOrg } from "./actions";
+import { disconnectZohoAction, flipGoLive, flipGoLiveBack, mirrorZohoAction, setGoLiveStartDate, setZohoTestOrg } from "./actions";
+import { goLiveChecklist } from "@/lib/zoho-golive";
+import { getSettings } from "@/lib/settings";
+import { Field, Input } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -176,6 +179,63 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
           )}
         </Card>
       ))}
+
+      {await (async () => {
+        // Phase 4: the go-live panel — the checklist (all green or the switch stays locked), the start date,
+        // the typed confirmation, and the logged way back.
+        const checklist = await goLiveChecklist({ checkReal: !!conn });
+        const log = Array.isArray((await getSettings()).zoho_golive_log) ? ((await getSettings()).zoho_golive_log as { action?: string; name?: string; at?: string; reason?: string; start_date?: string }[]) : [];
+        return (
+          <Card className={`flex flex-col gap-3 ${checklist.live ? "border-red-bar" : ""}`} data-golive-panel>
+            <SectionLabel right={checklist.live ? "LIVE" : checklist.allGreen ? "Ready" : "Not yet"}>Go-live</SectionLabel>
+            {checklist.live ? (
+              <Notice tone="error">The books are LIVE on the REAL organization (942979945). OFJ TEST is closed to writes. Documents from {checklist.startDate || "the start date"} post for real.</Notice>
+            ) : (
+              <p className="text-sm text-muted">The switch moves every write from OFJ TEST to the REAL book — only once every line below is green.</p>
+            )}
+            <ul className="flex flex-col divide-y divide-line" data-golive-checklist>
+              {checklist.items.map((i) => (
+                <li key={i.key} className="py-2 flex flex-col gap-0.5" data-golive-item={i.key} data-golive-ok={i.ok ? "1" : "0"}>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={i.ok ? "green" : "red"}>{i.ok ? "✓" : "✗"}</Badge>
+                    <span className="font-semibold text-sm">{i.label}</span>
+                  </div>
+                  <p className={`text-xs ${i.ok ? "text-muted" : "font-semibold text-red"}`}>{i.detail}</p>
+                </li>
+              ))}
+            </ul>
+            {!checklist.live ? (
+              <div className="flex flex-col gap-3">
+                <form action={setGoLiveStartDate} className="flex flex-wrap items-end gap-2">
+                  <Field label="Go-live start date" hint="Documents dated before it never post to the REAL book.">
+                    <Input name="start_date" type="date" defaultValue={checklist.startDate} className="w-44" />
+                  </Field>
+                  <Button type="submit" tone="secondary" size="md" data-golive-date-save>Save the date</Button>
+                </form>
+                <form action={flipGoLive} className="flex flex-wrap items-end gap-2 rounded-control border border-red-bar p-3" data-golive-flip>
+                  <Field label='Type REAL to confirm' hint="Writes re-point to O F J AUTOMOTIVE WORKS LLC (942979945). OFJ TEST closes.">
+                    <Input name="confirm" placeholder="REAL" className="w-44" autoComplete="off" />
+                  </Field>
+                  <Button type="submit" tone="danger" size="md" disabled={!checklist.allGreen} data-golive-flip-btn>Go live on the REAL organization</Button>
+                  {!checklist.allGreen ? <span className="text-xs font-semibold text-red">Locked until every line above is green.</span> : null}
+                </form>
+              </div>
+            ) : (
+              <form action={flipGoLiveBack} className="flex flex-wrap items-end gap-2" data-golive-back>
+                <Field label="Reason for going back to OFJ TEST" hint="Logged, and accounts are told.">
+                  <Input name="reason" className="w-80" />
+                </Field>
+                <Button type="submit" tone="danger" size="md" data-golive-back-btn>Back to OFJ TEST</Button>
+              </form>
+            )}
+            {log.length ? (
+              <p className="text-xs text-muted" data-golive-log>
+                History: {log.map((l) => `${String(l.at ?? "").slice(0, 16).replace("T", " ")} ${l.action === "live" ? `LIVE from ${l.start_date}` : `back (${l.reason})`} by ${l.name}`).join(" · ")}
+              </p>
+            ) : null}
+          </Card>
+        );
+      })()}
 
       {conn ? (
         <Card className="flex flex-col gap-3" data-zoho-mirror>

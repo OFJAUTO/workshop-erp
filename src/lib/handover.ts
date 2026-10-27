@@ -1,5 +1,6 @@
 import "server-only";
 import { addPartToStock } from "./stock";
+import { tryEnqueueZoho } from "./zoho-sync";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { hasNoHome } from "./part-state";
 import { PART_FULL_SELECT, toPartFull } from "./parts-data";
@@ -212,6 +213,8 @@ export async function setDisposition(jobId: string, partId: string, actor: Actor
   const label = input.disposition === "returned" ? `returned to the supplier${po?.number ? ` against ${po.number}` : ""} with a credit note` : input.disposition === "stock" ? `moved to stock${stockNote}` : input.disposition === "scrap" ? "scrapped" : "to be fitted on this car, waiting for the owner's approval";
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_disposition", note: `${p.description} ${label} (${actor.display_name})${input.note ? `: ${input.note}` : ""}`, created_by: actor.id });
   if (input.disposition === "fit_pending") await notifyRoles(["owner"], { type: "parts_no_home", title: `Fit a part as goodwill? · ${job?.job_number ?? ""}`, body: `${p.description} was marked not needed; Parts ask to fit it on this car anyway. Approve it under "Parts with no home".`, jobId, href: "/parts/no-home" });
+  // Zoho Books phase 3: a part returned to the supplier becomes a vendor credit against their bill.
+  if (input.disposition === "returned") await tryEnqueueZoho("vendorcredit", p.id, jobId, actor.id);
   return { ok: true, message: `${p.description}: ${label}.` };
 }
 
