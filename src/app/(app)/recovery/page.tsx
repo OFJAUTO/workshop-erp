@@ -87,7 +87,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="Recovery" subtitle="Every pick-up and delivery: the pin, the driver's photo and his price. Claimed, then Approved or Queried, then Paid." />
-      <LiveRefresh tables={["recovery_trips"]} />
+      <LiveRefresh tables={["recovery_trips"]} alwaysPollMs={role === "owner" || role === "accounts" ? undefined : 60000} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!home ? <p className="text-xs text-muted">Distances show once the workshop&apos;s own pin is in Settings (&quot;Workshop location pin&quot;).</p> : null}

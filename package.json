@@ -105,7 +105,8 @@
     "test:settle": "node --env-file=.env.local tests/browser/test-settle.mjs",
     "test:settlelive": "node --env-file=.env.local tests/browser/test-settle-live.mjs",
     "test:longdesc": "node --env-file=.env.local tests/browser/test-longdesc.mjs",
-    "test:version": "node --env-file=.env.local tests/browser/test-version.mjs"
+    "test:version": "node --env-file=.env.local tests/browser/test-version.mjs",
+    "test:realtime": "node --env-file=.env.local tests/browser/test-realtime.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

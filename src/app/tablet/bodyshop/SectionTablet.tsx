@@ -38,7 +38,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
   useEffect(() => {
-    const t = setInterval(() => router.refresh(), 30000);
+    // A shared tablet has no login, so no live feed reaches it: a check every minute, only while the screen is on.
+    const t = setInterval(() => document.visibilityState === "visible" && router.refresh(), 60000);
     return () => clearInterval(t);
   }, [router]);
   useEffect(() => {

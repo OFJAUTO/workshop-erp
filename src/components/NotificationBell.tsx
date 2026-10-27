@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { FALLBACK_POLL_MS, hiddenTracker, startLive } from "@/lib/live-connection";
 import { TONES, engine, isTone, playTone, type ToneId } from "@/lib/tones";
 
 type Item = { id: number; staff_id?: string; type: string; title: string; body: string | null; job_id: string | null; href: string | null; read_at: string | null; created_at: string };
 
 const VOLUME_KEY = "erp_notif_volume";
 const TONE_KEY = "erp_notif_tone";
-const POLL_MS = 30000;
 /** Anything that needs the owner's personal approval, and a technician's "additional work found" for the manager, gets the second sound. */
 const LOUD_TYPES = new Set(["owner_approval_needed", "inspection_change_requested", "move_requested", "po_approval", "credit_note_approval", "release_approval", "quote_owner_approval", "additional_work", "overpayment_approval", "comeback"]);
 type Volume = "off" | "low" | "normal" | "loud";
@@ -128,17 +128,30 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
         setItems((prev) => [n, ...prev].slice(0, 30));
         setUnread((u) => u + 1);
         announce(n);
+      })
+      // Read on another device (or "Mark all read"): the badge follows without asking the server.
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "notifications" }, (payload) => {
+        const n = payload.new as Item;
+        if (n.staff_id !== staffId) return;
+        setItems((prev) => {
+          const was = prev.find((i) => i.id === n.id);
+          if (was && !was.read_at && n.read_at) setUnread((u) => Math.max(0, u - 1));
+          return prev.map((i) => (i.id === n.id ? { ...i, ...n } : i));
+        });
       });
-    let cancelled = false;
-    // Hand the live connection the login first; otherwise the access rules see an anonymous visitor.
+    // No timed re-check while the live connection is up (27 October 2026): only while it is down, every minute.
+    const stop = startLive(supabase, channel, { onReconnect: () => load(false), fallback: () => load(false), fallbackMs: FALLBACK_POLL_MS });
+    // Viewing or acting as someone else: the live feed carries the signed-in person's own rows only, so the bell
+    // of the person on screen is checked every minute instead.
+    let other: ReturnType<typeof setInterval> | null = null;
+    let gone = false;
     supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
-      if (data.session) supabase.realtime.setAuth(data.session.access_token);
-      channel.subscribe();
+      if (!gone && data.session && data.session.user.id !== staffId) other = setInterval(() => document.visibilityState === "visible" && load(false), FALLBACK_POLL_MS);
     });
-    const poll = setInterval(() => load(false), POLL_MS);
+    const away = hiddenTracker();
     const onVisible = () => {
-      if (document.visibilityState === "visible") load(false);
+      if (document.visibilityState === "hidden") away.hide();
+      else if (away.shouldCatchUp()) load(false);
     };
     document.addEventListener("visibilitychange", onVisible);
     const close = (e: MouseEvent) => {
@@ -153,10 +166,10 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
     };
     document.addEventListener("pointerdown", unlock, { once: true });
     return () => {
-      cancelled = true;
       clearTimeout(first);
-      clearInterval(poll);
-      supabase.removeChannel(channel);
+      gone = true;
+      stop();
+      if (other) clearInterval(other);
       document.removeEventListener("visibilitychange", onVisible);
       document.removeEventListener("mousedown", close);
       document.removeEventListener("pointerdown", unlock);

@@ -4,23 +4,26 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
+import { FALLBACK_POLL_MS, hiddenTracker, startLive } from "@/lib/live-connection";
 
 type Row = Record<string, unknown>;
 
 /**
  * Re-renders the page when rows change in the given tables (logged-in users), within seconds through
- * Supabase Realtime, with a quiet 30-second re-fetch as the net under it. Invisible to the person:
- * no reload, no flicker, no scroll jump, and never while someone is typing (refreshWhenIdle). A hidden
- * tab pauses; coming back refreshes at once. A changed row flashes the matching [data-flash-id] card
- * softly. When the connection is gone a small grey "Offline – reconnecting…" chip shows; the access
- * rules decide per person what the live feed may carry, exactly as they do for the pages themselves.
+ * Supabase Realtime. Since 27 October 2026 there is NO timed re-fetch while the live connection is up:
+ * the server is asked again only when something changed, when the connection comes back after a drop,
+ * or every `pollMs` while it is DOWN (startLive). Invisible to the person: no reload, no flicker, no
+ * scroll jump, and never while someone is typing (refreshWhenIdle). A hidden tab pauses; coming back
+ * refreshes once only if something changed meanwhile or it was away five minutes. A changed row flashes
+ * the matching [data-flash-id] card softly. When the connection is gone a small grey "Offline –
+ * reconnecting…" chip shows; the access rules decide per person what the live feed may carry.
  *
  * Subscriptions are deliberately unfiltered on the server: Supabase Realtime did not deliver filtered
  * changes (for example `job_id=eq.<uuid>`) to this project, so the check happens here instead. With
  * `jobId` set, only changes to that job trigger a refresh. Every table given here must be in the
  * supabase_realtime publication, or the whole channel goes quiet.
  */
-export function LiveRefresh({ tables, jobId, pollMs = 30000, showUpdated = false }: { tables: string[]; jobId?: string; pollMs?: number; /** A small grey "Updated just now" (the dashboard). */ showUpdated?: boolean }) {
+export function LiveRefresh({ tables, jobId, pollMs = FALLBACK_POLL_MS, alwaysPollMs, showUpdated = false }: { tables: string[]; jobId?: string; /** How often to check the server while the live connection is DOWN (never while it is up). */ pollMs?: number; /** Only for a person whose access rules hide these tables from the live feed (the page itself reads them on the server): a plain timed check while the tab is visible. */ alwaysPollMs?: number; /** A small grey "Updated just now" (the dashboard). */ showUpdated?: boolean }) {
   const router = useRouter();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
@@ -30,8 +33,12 @@ export function LiveRefresh({ tables, jobId, pollMs = 30000, showUpdated = false
 
   useEffect(() => {
     const supabase = createClient();
+    const away = hiddenTracker();
     const refresh = () => {
-      if (document.visibilityState === "hidden") return; // paused: the return to the tab catches up
+      if (document.visibilityState === "hidden") {
+        away.missed(); // paused: the return to the tab catches up
+        return;
+      }
       refreshWhenIdle(() => {
         router.refresh();
         setUpdatedAt(Date.now());
@@ -62,25 +69,20 @@ export function LiveRefresh({ tables, jobId, pollMs = 30000, showUpdated = false
         }
       });
     }
-    let cancelled = false;
-    // The browser client starts the live connection with the public key; hand it the login
-    // first, otherwise the access rules see an anonymous visitor and nothing arrives.
-    supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
-      if (data.session) supabase.realtime.setAuth(data.session.access_token);
-      channel.subscribe((status) => {
-        // If the live connection drops and comes back, catch up at once; while it is gone, say so quietly.
-        if (status === "SUBSCRIBED") {
-          setOffline(false);
-          schedule();
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          if (!navigator.onLine) setOffline(true);
-        }
-      });
+    // If the live connection drops and comes back, catch up at once; while it is gone, check every pollMs and say so quietly.
+    const stop = startLive(supabase, channel, {
+      onReconnect: schedule,
+      fallback: refresh,
+      fallbackMs: pollMs,
+      onStatus: (live) => {
+        if (live) setOffline(false);
+        else if (!navigator.onLine) setOffline(true);
+      },
     });
-    const poll = pollMs > 0 ? setInterval(refresh, pollMs) : null;
+    const always = alwaysPollMs && alwaysPollMs > 0 ? setInterval(refresh, Math.max(15000, alwaysPollMs)) : null;
     const onVisible = () => {
-      if (document.visibilityState === "visible") refresh();
+      if (document.visibilityState === "hidden") away.hide();
+      else if (away.shouldCatchUp()) refresh();
     };
     const onOffline = () => setOffline(true);
     const onOnline = () => {
@@ -91,15 +93,14 @@ export function LiveRefresh({ tables, jobId, pollMs = 30000, showUpdated = false
     window.addEventListener("offline", onOffline);
     window.addEventListener("online", onOnline);
     return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-      if (poll) clearInterval(poll);
+      stop();
+      if (always) clearInterval(always);
       if (timer.current) clearTimeout(timer.current);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("online", onOnline);
     };
-  }, [router, key, jobId, pollMs]);
+  }, [router, key, jobId, pollMs, alwaysPollMs]);
 
   // "Updated just now", then the minutes, kept fresh without re-rendering the page.
   useEffect(() => {
