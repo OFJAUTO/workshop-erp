@@ -3,7 +3,8 @@ import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { amountInWords } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { complimentaryWord, discountLabelOf, blockOf, isComplimentary, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, round2, withPositions , hasPackageLine } from "@/lib/quotes";
+import { complimentaryWord, discountLabelOf, blockOf, isComplimentary, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, round2, hasPackageLine } from "@/lib/quotes";
+import { positionsWords } from "@/lib/parts-list";
 import type { Settings } from "@/lib/settings";
 import { dubaiDate } from "@/lib/jobs";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -48,9 +49,9 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     const number = part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null);
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
-      description: withPositions(title, l.positions),
-      // A part: its availability in plain words (Today, Tomorrow, In 2 days) as the small grey line, then its type.
-      details: l.package_items ? packageDetailsText(l.package_items) : [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details, !l.package_items && lineIsPpf(l, kindOfService.get(l.service_id ?? "") ?? null) ? cutWords(l.cut_method, l.cut_note) : null, lineTintWords(l, kindOfService.get(l.service_id ?? "") ?? null, tintSpec, tintLimit)].filter(Boolean).join(" · ") || null,
+      description: title,
+      // The positions on their own line first (ALL 4, FRONT PAIR…); then a part's availability in plain words (Today, Tomorrow, In 2 days) as the small grey line, then its type.
+      details: l.package_items ? packageDetailsText(l.package_items) : [positionsWords(l.positions) || null, l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.line_type === "part" ? partTypeText(l) : null, l.details, !l.package_items && lineIsPpf(l, kindOfService.get(l.service_id ?? "") ?? null) ? cutWords(l.cut_method, l.cut_note) : null, lineTintWords(l, kindOfService.get(l.service_id ?? "") ?? null, tintSpec, tintLimit)].filter(Boolean).join(" · ") || null,
       qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
       rate: unit,
       amount,

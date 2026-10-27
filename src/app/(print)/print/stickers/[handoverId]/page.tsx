@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { BatterySticker, PartSticker, batteryLine, stickerPageCss } from "@/components/StickerArt";
+import { stickerPosition } from "@/lib/parts-list";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { HANDOVER_SELECT, type HandoverRow } from "@/lib/handover";
@@ -33,7 +34,8 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   const vin = h.job?.vehicle?.vin ?? "";
   const date = formatDate(h.confirmed_at ?? h.created_at);
   const plan = Object.entries(h.stickers ?? {});
-  const { data: wmRows } = plan.length ? await admin.from("part_items").select("id, warranty_months").in("id", plan.map(([id]) => id)) : { data: [] as { id: string; warranty_months: number | null }[] };
+  const { data: wmRows } = plan.length ? await admin.from("part_items").select("id, warranty_months, positions").in("id", plan.map(([id]) => id)) : { data: [] as { id: string; warranty_months: number | null; positions: string[] | null }[] };
+  const partPositions = new Map((wmRows ?? []).map((r) => [r.id as string, ((r as { positions?: string[] | null }).positions ?? null)]));
   const partMonths = new Map((wmRows ?? []).map((r) => [r.id as string, (r.warranty_months as number | null) ?? null]));
   const first = !h.stickers_printed_at;
   if (first) await admin.from("part_handovers").update({ stickers_printed_at: new Date().toISOString(), updated_by: staff.id }).eq("id", handoverId);
@@ -51,7 +53,7 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
         until.setUTCMonth(until.getUTCMonth() + months);
         stickers.push(<BatterySticker key={`${partId}-${n}`} w={ss.batteryW} h={ss.batteryH} logoUrl={logo} d={{ qr, months, installed: date, until: formatDate(until.toISOString()), vin, title: ss.wording.battery, valid: ss.wording.battery_valid, line: batteryLine(item?.description, s.brand, s.model) }} />);
       } else {
-        stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, jobNumber: h.job?.job_number ?? "", name: item?.description ?? "Part", index: n + 1, count: s.count, date }} />);
+        stickers.push(<PartSticker key={`${partId}-${n}`} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, jobNumber: h.job?.job_number ?? "", name: item?.description ?? "Part", index: n + 1, count: s.count, date, pos: stickerPosition(partPositions.get(partId), n + 1, s.count) }} />);
       }
     }
   }

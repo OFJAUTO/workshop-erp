@@ -8,7 +8,7 @@
  * band with the date that matters, the VIN, a QR. The oil sticker's QR opens WhatsApp to book the next service.
  */
 import { FitText } from "./FitText";
-export type PartStickerData = { qr: string; jobNumber: string; name: string; index: number; count: number; date?: string | null };
+export type PartStickerData = { qr: string; jobNumber: string; name: string; index: number; count: number; date?: string | null; /** Where this unit goes (FRONT LEFT, or ALL 4 + SPARE). */ pos?: string | null };
 export type BatteryStickerData = { qr: string; installed: string; until: string; months: number; vin: string; title: string; valid: string; /** Which battery: "Main battery · Varta AGM 95Ah" or "Auxiliary battery". */ line: string };
 
 /** The line that says which battery the sticker is for, from the part's description, brand and model. */
@@ -34,6 +34,7 @@ export function PartSticker({ w, h, logoUrl, d }: { w: number; h: number; logoUr
           <div style={{ textAlign: "right", width: "100%", minWidth: 0 }}>
             <FitText text={d.jobNumber} maxMm={4.2 * u} minOneLineMm={2.2 * u} minMm={2.2 * u} allowWrap={false} lineHeight={1} style={{ fontWeight: 800, letterSpacing: "0.3px", textAlign: "right" }} />
             {d.date ? <div style={{ fontSize: `${2.2 * u}mm`, marginTop: `${0.6 * u}mm` }}>{d.date}</div> : null}
+            {d.pos ? <div style={{ fontSize: `${2.2 * u}mm`, fontWeight: 800, marginTop: `${0.4 * u}mm`, textTransform: "uppercase", lineHeight: 1.1 }} data-sticker-pos>{d.pos}</div> : null}
           </div>
         </div>
       </div>

@@ -17,6 +17,7 @@ import { decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { RED, PALE, INK, GREY, GREEN, Amount, DocumentTail, InfoBoxes, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type PoDocRow, type SectionLine, type StatusBox, type Box } from "./template";
 import { addMonthsIso, dubaiDay } from "@/lib/warranty";
+import { positionsWords } from "@/lib/parts-list";
 import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
@@ -352,7 +353,8 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
     const disc = l.discount_percent !== null && l.discount_percent !== undefined ? l.discount_percent : list > 0 ? round2((1 - l.unit_cost / list) * 100) : 0;
     const net = round2(l.quantity * l.unit_cost);
     const vat = round2(net * (vatPercent / 100));
-    return { partNumber: l.part_number, name: l.description, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
+    const positions = l.part_item_id ? (bundle.parts ?? []).find((p) => p.id === l.part_item_id)?.positions : null;
+    return { partNumber: l.part_number, name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
   });
   // The supplier's own charges on this order (courier, freight): one row each, after the parts.
   for (const c of bundle.charges ?? []) {

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { PartSticker, stickerPageCss } from "@/components/StickerArt";
+import { stickerPosition } from "@/lib/parts-list";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, toPartFull, type JobBrief } from "@/lib/parts-data";
@@ -36,7 +37,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
   if (!job && test !== "1") notFound();
   const j = (job as unknown as JobBrief | null) ?? null;
   const jobNumber = j?.job_number ?? "J-00000";
-  type Label = { key: string; qr: string; name: string; index: number; count: number; date: string | null };
+  type Label = { key: string; qr: string; name: string; index: number; count: number; date: string | null; pos?: string | null };
   const labels: Label[] = [];
   if (test === "1") {
     const qr = await qrDataUrl(qrUrl("TESTCODE"), 300);
@@ -48,7 +49,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
       const code = await ensureQrLink("part", { jobId, refId: p.id }, staff.id);
       const qr = await qrDataUrl(qrUrl(code), 300);
       const count = Math.max(1, Math.round(Number(p.received_qty) || Number(p.confirmed_quantity ?? p.quantity) || 1));
-      for (let n = 1; n <= count; n++) labels.push({ key: `${p.id}-${n}`, qr, name: p.description, index: n, count, date: null });
+      for (let n = 1; n <= count; n++) labels.push({ key: `${p.id}-${n}`, qr, name: p.description, index: n, count, date: null, pos: stickerPosition(p.positions, n, count) });
     }
   }
   const backHref = back || (test === "1" ? "/settings/stickers" : `/parts/${jobId}`);
@@ -66,7 +67,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
           extra={<a href={backHref} style={{ marginLeft: "auto" }}>Back</a>}
         >
           {labels.map((l) => (
-            <PartSticker key={l.key} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr: l.qr, jobNumber, name: l.name, index: l.index, count: l.count, date: l.date }} />
+            <PartSticker key={l.key} w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr: l.qr, jobNumber, name: l.name, index: l.index, count: l.count, date: l.date, pos: l.pos ?? null }} />
           ))}
         </StickerSheet>
       )}

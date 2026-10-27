@@ -2,7 +2,7 @@ import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
 import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
-import { cleanPartsList, mergePartsList } from "./parts-list";
+import { cleanPartsList, mergePartsList, positionsWords } from "./parts-list";
 import { quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
 import { expectedChargePercent, type Settings } from "./settings";
 import { newToken } from "./media";
@@ -209,7 +209,7 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
         source_type: srcType,
         source_key: srcKey,
         label: line.name,
-        requested_text: [`× ${line.qty}`, line.positions.join(", "), line.note ?? ""].filter(Boolean).join(" · "),
+        requested_text: [`× ${line.qty}`, positionsWords(line.positions), line.note ?? ""].filter(Boolean).join(" · "),
         quantity: line.qty,
         unit: line.unit === "set" ? "set" : "pc",
         positions: line.positions,

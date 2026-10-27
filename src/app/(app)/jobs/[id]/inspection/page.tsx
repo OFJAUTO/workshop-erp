@@ -12,7 +12,7 @@ import { INSPECTION_STATUS_LABELS, MEASUREMENTS, TYRE_REPLACE_REASONS, itemStatu
 import { inspectionLocked, inspectionWorkingMinutes, loadInspection, tyreSizeSuggestionFor, type InspectionMediaRow, inspectionDangerous, type InspectionItemRow } from "@/lib/inspection-data";
 import { wheelConditionLines } from "@/lib/wheels";
 import { loadCatalogue } from "@/lib/parts-catalogue";
-import { cleanPartsList, mergePartsList } from "@/lib/parts-list";
+import { cleanPartsList, mergePartsList, positionsWords } from "@/lib/parts-list";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { workingTimeOf } from "@/lib/jobs";
 import { PrescanToggle } from "@/components/PrescanToggle";
@@ -276,7 +276,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                       <li key={l.key} className="py-1.5 flex flex-wrap items-center gap-2">
                         <span className="font-semibold">{l.name}</span>
                         <span className="text-muted">× {l.qty}</span>
-                        {l.positions.length ? <span className="text-muted">{l.positions.join(", ")}</span> : null}
+                        {l.positions.length ? <span className="text-muted">{positionsWords(l.positions)}</span> : null}
                         {l.note ? <span className="text-xs text-muted">{l.note}</span> : null}
                       </li>
                     ))}

@@ -55,16 +55,42 @@ export const PAIR_CHOICES: { label: string; positions: string[]; qty: number }[]
   { label: "All four", positions: ["Front left", "Front right", "Rear left", "Rear right"], qty: 4 },
 ];
 
-/** "front pair", "rear pair", "all four", "front and rear", else the positions in lower case. */
+/**
+ * THE short form of a set of positions, used on every screen and document (owner's rule, 27 October 2026):
+ * all four = "ALL 4" · all four + spare = "ALL 4 + SPARE" · FL+FR = "FRONT PAIR" · RL+RR = "REAR PAIR" ·
+ * FL+RL = "LEFT SIDE" · FR+RR = "RIGHT SIDE" · one = its name · any other mix = the list.
+ */
 export function positionsWords(positions: string[] | null | undefined): string {
   if (!positions?.length) return "";
-  const s = new Set(positions.map((p) => p.toLowerCase()));
-  const fl = s.has("front left"), fr = s.has("front right"), rl = s.has("rear left"), rr = s.has("rear right");
-  if (s.size === 4 && fl && fr && rl && rr) return "all four";
-  if (s.size === 2 && fl && fr) return "front pair";
-  if (s.size === 2 && rl && rr) return "rear pair";
-  if (s.size === 2 && s.has("front") && s.has("rear")) return "front and rear";
-  return positions.map((p) => p.toLowerCase()).join(", ");
+  const s = new Set(positions.map((p) => p.trim().toLowerCase()));
+  const fl = s.has("front left"), fr = s.has("front right"), rl = s.has("rear left"), rr = s.has("rear right"), spare = s.has("spare");
+  const four = fl && fr && rl && rr;
+  if (four && s.size === 4) return "ALL 4";
+  if (four && spare && s.size === 5) return "ALL 4 + SPARE";
+  if (s.size === 2 && fl && fr) return "FRONT PAIR";
+  if (s.size === 2 && rl && rr) return "REAR PAIR";
+  if (s.size === 2 && fl && rl) return "LEFT SIDE";
+  if (s.size === 2 && fr && rr) return "RIGHT SIDE";
+  return Array.from(new Set(positions.map((p) => p.trim().toUpperCase()))).join(", ");
+}
+
+/** How many units a set of positions stands for (a pair is two, a "Front" axle job is one). */
+export function positionsCount(positions: string[] | null | undefined): number {
+  return new Set((positions ?? []).map((p) => p.trim().toLowerCase()).filter(Boolean)).size;
+}
+
+/**
+ * The warning when the ticked positions and the quantity disagree on a PER-UNIT line (tyres, pads sold per piece):
+ * "5 positions ticked but qty is 4 – fix one". Axle positions (Front, Rear, Left, Right) are not units, so a line using
+ * them never warns.
+ */
+export function positionsQtyMismatch(positions: string[] | null | undefined, qty: number | null | undefined): string | null {
+  const n = positionsCount(positions);
+  if (!n) return null;
+  const unitPositions = (positions ?? []).every((p) => ["front left", "front right", "rear left", "rear right", "spare"].includes(p.trim().toLowerCase()));
+  if (!unitPositions) return null;
+  const q = Number(qty) || 0;
+  return q === n ? null : `${n} position${n === 1 ? "" : "s"} ticked but qty is ${q} – fix one`;
 }
 
 /** The axles a set of positions touches, for a per-axle part offered alongside (a wear sensor for front pads). */
@@ -185,7 +211,7 @@ export function partsListLine(e: { name: string; qty: number; positions: string[
   const words = positionsWords(e.positions);
   // A paired part reads "Lower control arm - front pair - 2".
   if (/pair|all four/.test(words)) return `${e.name} - ${words} - ${e.qty}`;
-  return `${e.name} × ${e.qty}${e.positions.length ? ` · ${e.positions.join(", ")}` : ""}`;
+  return `${e.name} × ${e.qty}${e.positions.length ? ` · ${positionsWords(e.positions)}` : ""}`;
 }
 
 const TYRE_POS: { key: string; label: string; side: "front" | "rear" }[] = [
@@ -264,4 +290,15 @@ export function suggestCatalogue(label: string, catalogue: CatalogueRow[], learn
     }
   }
   return out.slice(0, 14);
+}
+
+/**
+ * What one sticker of a part says about where it goes: with one position per unit (four tyres, four positions) the
+ * n-th sticker names its own position (FRONT LEFT); otherwise every sticker carries the short form (ALL 4 + SPARE).
+ */
+export function stickerPosition(positions: string[] | null | undefined, index: number, count: number): string | null {
+  const list = Array.from(new Set((positions ?? []).map((p) => p.trim()).filter(Boolean)));
+  if (!list.length) return null;
+  if (list.length === count && index >= 1 && index <= count) return list[index - 1].toUpperCase();
+  return positionsWords(list) || null;
 }

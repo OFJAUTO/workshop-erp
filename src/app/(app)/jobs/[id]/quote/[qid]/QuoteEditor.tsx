@@ -7,7 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/components/PartPicker";
 import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
-import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { goesWithOffers, positionsQtyMismatch, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { PositionsLine } from "@/components/PositionsLine";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
 import { packageCostEstimate } from "@/lib/package-cost";
@@ -187,7 +188,7 @@ const boxLabel = "flex flex-col gap-0.5 text-[11px] font-semibold text-muted";
 const POSITION_CHOICES: string[][] = [["Front"], ["Rear"], ["Front", "Rear"], ["Front left", "Front right"], ["Rear left", "Rear right"], ["Front left", "Front right", "Rear left", "Rear right"], ["Left"], ["Right"]];
 const positionChoiceLabel = (ps: string[]) => {
   const w = positionsWords(ps);
-  return w === "front pair" ? "Front pair" : w === "rear pair" ? "Rear pair" : w === "all four" ? "All four" : w === "front and rear" ? "Front and rear" : ps[0];
+  return w === "FRONT PAIR" ? "Front pair" : w === "REAR PAIR" ? "Rear pair" : w === "ALL 4" ? "All four" : ps.length === 2 && ps.includes("Front") && ps.includes("Rear") ? "Front and rear" : ps[0];
 };
 
 const STRIP_KEY = "erp-quote-strip";
@@ -378,7 +379,8 @@ export function QuoteEditor({
   };
   const [reviseAsk, setReviseAsk] = useState(false);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
-  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean }>({});
+  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean; skipPositions?: boolean }>({});
+  const [positionsAsk, setPositionsAsk] = useState<string | null>(null);
   const [partsAsk, setPartsAsk] = useState<{ message: string; missing: string[] } | null>(null);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
   const [minFlags, setMinFlags] = useState<Set<string>>(() => new Set());
@@ -684,6 +686,7 @@ export function QuoteEditor({
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
     if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
+    if (r.ask === "positions") { setPositionsAsk(r.message ?? "Positions and quantity disagree."); return { ok: true }; }
     if (r.ok) skips.current = {};
     return r;
   });
@@ -697,6 +700,7 @@ export function QuoteEditor({
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
     if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
+    if (r.ask === "positions") { setPositionsAsk(r.message ?? "Positions and quantity disagree."); return { ok: true }; }
     if (r.ok) skips.current = {};
     return r;
   });
@@ -887,7 +891,7 @@ export function QuoteEditor({
             {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect || internal ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
                 {internal ? <span data-internal-badge><Badge tone="neutral">Internal cost only · not on the customer&apos;s documents</Badge></span> : null}
-                {positions.length ? <span>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "front and rear" : positions.map((p) => p.toLowerCase()).join(", ")}</span> : null}
+                {positions.length ? <span className="font-semibold uppercase" data-line-positions>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "FRONT AND REAR" : positionsWords(positions)}</span> : null}
                 {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
                 {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
                 {l.details ? <Badge tone="outline">Note: {l.details.length > 36 ? `${l.details.slice(0, 34)}…` : l.details}</Badge> : null}
@@ -1356,7 +1360,8 @@ export function QuoteEditor({
                 <thead>
                   <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
                     <th className="py-1 pr-2">#</th>
-                    <th className="py-1 pr-2">Part</th>
+                    {/* The name keeps a real width (it wraps by words, never a letter per line). */}
+                    <th className="py-1 pr-2" style={{ minWidth: "9rem" }}>Part</th>
                     <th className="py-1 pr-2">Availability</th>
                     <th className="py-1 pr-2 text-right">Qty</th>
                     <th className="py-1 pr-2 text-right">Cost</th>
@@ -1411,9 +1416,10 @@ export function QuoteEditor({
                                 {!disabled && l.part_item_id ? <button type="button" onClick={() => { setRenameError(null); setRenamePart({ lineId: l.id, partId: l.part_item_id!, value: l.title }); }} aria-label="Rename for the customer" title="Rename for the customer (the supplier name and part number never change)" className="min-h-7 min-w-7 shrink-0 rounded-control border border-line text-xs font-bold text-muted hover:border-ink" data-rename-part={l.id}>✎</button> : null}
                               </>
                             )}
-                            {l.positions?.length ? <span className="text-xs text-muted shrink-0">{l.positions.join(", ")}</span> : null}
-                            {partTypeText(l) ? <Badge tone="outline">{partTypeText(l)}</Badge> : null}
                           </div>
+                          <PositionsLine positions={l.positions} />
+                          {partTypeText(l) ? <div><Badge tone="outline">{partTypeText(l)}</Badge></div> : null}
+                          {positionsQtyMismatch(l.positions, l.quantity) ? <div className="text-[11px] font-bold text-red" data-positions-mismatch>{positionsQtyMismatch(l.positions, l.quantity)}</div> : null}
                           <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-[11px] text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
@@ -1837,6 +1843,18 @@ export function QuoteEditor({
               <Button type="button" size="md" onClick={() => { const id = compAsk; setCompAsk(null); patch(id, { price_display: "complimentary", unit_price: 0 }, true); }} data-comp-yes>Complimentary</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => { const id = compAsk; setCompAsk(null); patch(id, { price_display: "included", unit_price: 0 }, true); }} data-comp-included>Included in package</Button>
               <Button type="button" tone="ghost" size="md" onClick={() => setCompAsk(null)} data-comp-no>No, it needs a price</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {positionsAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-positions-ask>
+          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">Positions and quantity disagree</span>
+            <span className="text-sm">{positionsAsk}</span>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => setPositionsAsk(null)} data-positions-fix>Go back and fix</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { setPositionsAsk(null); skips.current.skipPositions = true; completeNow(false); }} data-positions-override>Complete anyway (owner)</Button>
             </div>
           </div>
         </div>

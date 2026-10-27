@@ -3,7 +3,8 @@ import { packageDetailsText } from "./packages";
 import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
-import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine, withPositions } from "./quotes";
+import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
+import { positionsWords } from "./parts-list";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -296,8 +297,16 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   const cost = l.line_type === "part" ? round2((part?.final_cost_aed ?? part?.cost_aed ?? l.unit_cost ?? 0) * (l.quantity || 1)) : lineCost(l);
   return {
     section: isPart ? "parts" : "services",
-    description: withPositions(title, l.positions),
-    details: l.package_items ? packageDetailsText(l.package_items) : l.line_type === "labour" ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : lineIsPpf(l) ? [l.details, cutWords(l.cut_method, l.cut_note)].filter(Boolean).join(" · ") : l.details,
+    description: title,
+    // The positions on their own line (ALL 4, FRONT PAIR…), then the line's own details.
+    details:
+      [
+        positionsWords(l.positions) || null,
+        // Labour with no hours (complimentary lathe work) prints nothing rather than "0.0 h".
+        l.package_items ? packageDetailsText(l.package_items) : l.line_type === "labour" ? ((l.hours ?? 0) > 0 ? `${(Math.round((l.hours ?? 0) * 10) / 10).toFixed(1)} h` : null) : l.line_type === "part" ? [partTypeText(l), l.details].filter(Boolean).join(" · ") || null : lineIsPpf(l) ? [l.details, cutWords(l.cut_method, l.cut_note)].filter(Boolean).join(" · ") : l.details,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null,
     part_number: number,
     quantity: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : l.quantity || 1,
     hours: l.line_type === "labour" ? Math.round((l.hours ?? 0) * 10) / 10 : null,

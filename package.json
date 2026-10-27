@@ -100,7 +100,8 @@
     "test:zoho2": "node --env-file=.env.local tests/browser/test-zoho2.mjs",
     "test:zoho2live": "node --env-file=.env.local tests/browser/test-zoho2-live.mjs",
     "test:zoho3": "node --env-file=.env.local tests/browser/test-zoho3.mjs",
-    "test:zoho3live": "node --env-file=.env.local tests/browser/test-zoho3-live.mjs"
+    "test:zoho3live": "node --env-file=.env.local tests/browser/test-zoho3-live.mjs",
+    "test:positions": "node --env-file=.env.local tests/browser/test-positions.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

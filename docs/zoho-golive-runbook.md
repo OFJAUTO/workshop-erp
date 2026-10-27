@@ -18,10 +18,11 @@ after it posts to the REAL book by itself.
    Courier, Commission, Recovery, the paid-from bank, the refund account, and so on). Create any that are missing in
    Zoho: Accountant → Chart of Accounts → New Account.
 3. The **5% VAT tax** must exist in the REAL book (it does by default in a UAE organization).
-4. Check the **numbering**: the ERP posts its own numbers (INV-…, CN-…, the supplier's invoice number on bills).
-   If the REAL book already holds hand-made documents with the same numbers, those rows turn red ("already exists
-   … the accountant checks it") — nothing is ever overwritten. Tell Omar before the flip if that is likely.
-5. Do **not** create customers, invoices or bills by hand for anything from the start date on — the ERP does that.
+4. In Zoho: Settings → Invoices → set **Zoho's own invoice prefix to something other than INV-** (for example
+   **Z-**). The ERP posts its own INV- numbers; the go-live panel checks this live.
+5. On the mapping page, the four **"Supplier payments by bank transfer / card / cash / cheque"** boxes say which
+   account each supplier payment leaves from (an empty box uses the general "Paid from" account).
+6. Do **not** create customers, invoices or bills by hand for anything from the start date on — the ERP does that.
 
 ## Step 2 — Mathew checks the TEST books are clean (in the ERP)
 
@@ -40,21 +41,24 @@ after it posts to the REAL book by itself.
 ## Step 3 — Omar chooses the start date (in the ERP)
 
 1. Open **Settings → Zoho Books**, the **Go-live** panel.
-2. Under **Go-live start date** pick the first day the REAL book owns — normally the **1st of a month** — and press
-   **Save the date**. Agree it with Mathew: it is the date of his opening balances.
-3. The switch stays **locked until that day arrives** (a flip before it would leave the days in between in neither
+2. Under **Go-live start date** pick the first day the REAL book owns — it must be the **1st of a month** (likely
+   1 December) — and press **Save the date**. Agree it with Mathew: it is the date of his opening balances.
+3. **No live Zoho tests in the 7 days before the flip:** their documents stay in OFJ TEST and keep those days red.
+   If one ran, the panel shows a red warning with the first safe day.
+4. The switch stays **locked until that day arrives** (a flip before it would leave the days in between in neither
    book). Flipping a few days *after* the start date is fine: the flip posts everything from the start date that was
    already made in the ERP into the REAL book.
 
 ## Step 4 — Omar flips the switch (on the start date, or after it)
 
-1. On the same panel, six lines must all be green:
+1. On the same panel, seven lines must all be green:
    - Mathew's review tick;
    - the mapping is complete;
    - every mapped name exists in the REAL book (checked live when the panel opens);
+   - Zoho's own invoice prefix is not INV- (checked live);
    - no failed syncs;
    - the last seven calendar days reconciled green;
-   - the start date is chosen and has arrived.
+   - the start date is chosen (the 1st of a month) and has arrived.
 2. Type **REAL** in the confirm box and press **Go live on the REAL organization**. The server checks all six lines
    again at that moment, and refuses if the sync is posting a document right then ("try again in a minute").
 3. What the button does — **once in the life of the books**, in one step that cannot half-happen:
@@ -115,3 +119,11 @@ every new document waits in the queue. **Nothing already posted is removed.** Wh
 - Supplier bills carry the supplier's own figures, the courier as its own line and the scan attached; a supplier
   credit (a part returned to the supplier) waits for its bill and is applied to it.
 - The sync runs by itself every five minutes on the live server; **Sync now** on /zoho is only for impatience.
+
+### Paying a supplier (accounts)
+
+On the LPO page, **Paid to supplier** asks how it was paid — **Bank transfer** (the default), **Card**, **Cash** or
+**Cheque** — an optional reference, and the **proof** (bank slip, card slip, signed receipt or cheque copy). The
+line under the method buttons shows which account each method pays from. No proof at hand? Mark it paid anyway: the
+LPO then shows **Proof missing** with an **Upload the proof** button. In Zoho the supplier payment carries that
+method, comes out of that account, and the proof is attached.

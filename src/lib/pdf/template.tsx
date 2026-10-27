@@ -363,7 +363,7 @@ export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLab
   );
 }
 
-export type PoDocRow = { partNumber: string | null; name: string; qty: string; list: number; disc: number; net: number; vat: number; total: number };
+export type PoDocRow = { partNumber: string | null; name: string; /** The positions on their own small line (ALL 4, FRONT PAIR…). */ sub?: string | null; qty: string; list: number; disc: number; net: number; vat: number; total: number };
 
 /** The supplier copy's lines: part number and name in full, list price, discount, net, VAT and total. Long part numbers wrap inside the row. */
 export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPercent?: number }) {
@@ -391,7 +391,10 @@ export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPe
         <View key={i} style={styles.tr} wrap={false}>
           <Text style={styles.cNo}>{i + 1}</Text>
           <Text style={cPn}>{r.partNumber ?? ""}</Text>
-          <Text style={[styles.cDesc, styles.lineTitle]}>{r.name}</Text>
+          <View style={styles.cDesc}>
+            <Text style={styles.lineTitle}>{r.name}</Text>
+            {r.sub ? <Text style={{ fontSize: 7, color: GREY, marginTop: 1 }}>{r.sub}</Text> : null}
+          </View>
           <Text style={styles.cQty}>{r.qty}</Text>
           <Text style={cList}>{moneyDigits(r.list)}</Text>
           <Text style={cDisc}>{r.disc ? `${Math.round(r.disc * 100) / 100}%` : ""}</Text>
