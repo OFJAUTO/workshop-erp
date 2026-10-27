@@ -3,7 +3,7 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { drainZohoOutbox, enqueueBackfill } from "@/lib/zoho-sync";
+import { drainZohoOutbox, enqueueBackfill, flagZohoAttention } from "@/lib/zoho-sync";
 
 const back = (kind: "message" | "error", text: string, show?: string): never => redirect(`/zoho?${show ? `show=${show}&` : ""}${kind}=${encodeURIComponent(text)}`);
 
@@ -13,6 +13,12 @@ export async function retryZohoRow(id: string, formData: FormData) {
   if (staff.viewingAs) return back("error", "Viewing only.");
   void formData;
   const admin = createAdminClient();
+  // A row only a human can settle (a document in the REAL book's opening balances) is never re-run: the handler does
+  // not know it is already in a book and could post it again.
+  const { data: row } = await admin.from("zoho_outbox").select("zoho_result").eq("id", id).maybeSingle();
+  if ((row as { zoho_result?: { hand_only?: boolean } | null } | null)?.zoho_result?.hand_only === true) {
+    return back("error", 'This one is corrected by hand in Zoho (it sits in the opening balances): make the change there, then press "Done by hand".', "failed");
+  }
   await admin.from("zoho_outbox").update({ status: "pending", last_error: null, updated_at: new Date().toISOString() }).eq("id", id).neq("status", "synced");
   let words: string;
   try {
@@ -35,7 +41,7 @@ export async function markZohoDoneByHand(id: string, formData: FormData) {
   const note = String(formData.get("note") ?? "").trim().slice(0, 300);
   if (note.length < 3) return back("error", "Write what was done in Zoho (for example: entered by hand as INV-123, or voided).", "failed");
   const admin = createAdminClient();
-  const { data: row } = await admin.from("zoho_outbox").select("id, status, last_error").eq("id", id).maybeSingle();
+  const { data: row } = await admin.from("zoho_outbox").select("id, kind, record_id, status, last_error, zoho_id").eq("id", id).maybeSingle();
   if (!row || row.status !== "failed") return back("error", "Only a red row can be closed by hand.", "failed");
   const now = new Date().toISOString();
   const { data: done } = await admin
@@ -45,7 +51,36 @@ export async function markZohoDoneByHand(id: string, formData: FormData) {
     .eq("status", "failed")
     .select("id");
   if (!done?.length) return back("error", "The row changed meanwhile: look at it again.", "failed");
-  return back("message", "Closed as done by hand. The row keeps who did it and why.", "failed");
+  // An invoice settled by hand that never reached Zoho through the sync: the payments and deposits that ALREADY posted
+  // for it went up unapplied (the invoice applies them when it posts — and now it never will), so each turns red.
+  let extra = "";
+  if (row.kind === "invoice" && !row.zoho_id) {
+    const n = await flagPaymentsOfHandInvoice(String(row.record_id));
+    if (n) extra = ` ${n} payment${n === 1 ? "" : "s"} already in Zoho for it turned red: apply ${n === 1 ? "it" : "them"} to the invoice there by hand.`;
+  }
+  return back("message", `Closed as done by hand. The row keeps who did it and why.${extra}`, "failed");
+}
+
+/** The payments of an invoice closed by hand that already posted (unapplied) to Zoho: red, to be applied by hand. */
+async function flagPaymentsOfHandInvoice(invoiceId: string): Promise<number> {
+  const admin = createAdminClient();
+  const { data: inv } = await admin.from("invoices").select("id, number, job_id, zoho_invoice_id").eq("id", invoiceId).maybeSingle();
+  const i = inv as { id: string; number: string; job_id: string | null; zoho_invoice_id: string | null } | null;
+  if (!i || i.zoho_invoice_id) return 0;
+  const { data: pays } = await admin
+    .from("payments")
+    .select("id, number, amount_aed, is_deposit")
+    .eq("status", "recorded")
+    .or(`invoice_id.eq.${i.id}${i.job_id ? `,and(job_id.eq.${i.job_id},is_deposit.eq.true)` : ""}`);
+  let n = 0;
+  for (const p of (pays ?? []) as { id: string; number: string; amount_aed: number; is_deposit: boolean }[]) {
+    const kind = p.is_deposit ? "deposit" : "payment";
+    const { data: ob } = await admin.from("zoho_outbox").select("status, zoho_id").eq("kind", kind).eq("record_id", p.id).maybeSingle();
+    if ((ob as { status?: string; zoho_id?: string | null } | null)?.status !== "synced" || !(ob as { zoho_id?: string | null }).zoho_id) continue;
+    await flagZohoAttention(kind, p.id, `${i.number} was settled by hand in Zoho, so ${p.number} (AED ${Number(p.amount_aed).toFixed(2)}), already posted there unapplied, was never applied to it: apply it in Zoho by hand, then press "Done by hand".`);
+    n++;
+  }
+  return n;
 }
 
 /** The whole queue runs now instead of waiting for the five-minute cron. */

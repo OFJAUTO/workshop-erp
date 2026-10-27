@@ -281,7 +281,7 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   // After go-live a bill from before the start date sits in the REAL book's opening balances: it is never queued
   // again (a moved date could post it twice), a correction to it turns red instead.
   const { data: zpo } = await admin.from("purchase_orders").select("zoho_bill_id").eq("id", po.id).maybeSingle();
-  const where = (zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id ? "current" : await zohoPostedSomewhere("bill", po.id);
+  const where = (zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id ? "current" : await zohoPostedSomewhere("bill", po.id, po.supplier_invoice_date, true);
   const changed =
     po.supplier_invoice_number &&
     number &&
@@ -293,6 +293,7 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
       where === "opening"
         ? `The supplier invoice on ${po.number} was changed after go-live (now ${number}, ${invoiceDate}); its bill reached OFJ TEST before the start date and sits in the REAL book's opening balances: correct it there by hand, then press "Done by hand".`
         : `The supplier invoice on ${po.number} was changed after its bill reached Zoho (now ${number}, ${invoiceDate}): fix the bill in Zoho by hand, then press "Done by hand".`,
+      { handOnly: where === "opening" },
     );
   } else if (where !== "opening") {
     await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);

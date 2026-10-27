@@ -73,6 +73,8 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
     return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   };
 
+  // After go-live the test organization is fixed for good (OFJ TEST's archive is keyed to it).
+  const orgsWentLive = wentLiveOf(await getSettings());
   return (
     <>
       <PageHeader
@@ -133,7 +135,7 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
                   <span className="text-xs text-muted font-mono">{id}</span>
                   <span className="text-xs text-muted">{[o.country, o.currency_code].filter(Boolean).join(" · ")}</span>
                   <span className="flex-1" />
-                  {isReal ? <Badge tone="ink">REAL · read-only until go-live</Badge> : isTest ? <Badge tone="amber">TEST · writable</Badge> : (
+                  {isReal ? <Badge tone="ink">{orgsWentLive ? "REAL · the live book" : "REAL · read-only until go-live"}</Badge> : isTest ? <Badge tone="amber">{orgsWentLive ? "TEST · closed for good" : "TEST · writable"}</Badge> : orgsWentLive ? null : (
                     <form action={setZohoTestOrg}>
                       <input type="hidden" name="org_id" value={id} />
                       <input type="hidden" name="org_name" value={o.name} />

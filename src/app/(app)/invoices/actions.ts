@@ -233,7 +233,7 @@ export async function setChequeStatus(paymentId: string, formData: FormData) {
   // Zoho Books (one-way): a cheque counts the day it clears; a bounce after it reached Zoho turns red for accounts.
   if (status === "cleared") await tryEnqueueZoho(p.is_deposit ? "deposit" : "payment", paymentId, p.job_id, staff.id);
   else {
-    const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId);
+    const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId, p.cleared_at ?? p.received_at);
     if (where) {
       await flagZohoAttention(
         p.is_deposit ? "deposit" : "payment",
@@ -241,6 +241,7 @@ export async function setChequeStatus(paymentId: string, formData: FormData) {
         where === "opening"
           ? `${p.number} bounced after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand".`
           : `${p.number} bounced in the ERP after it reached Zoho: remove the payment in Zoho by hand, then press "Done by hand".`,
+        { handOnly: where === "opening" },
       );
     }
   }

@@ -175,7 +175,7 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   await admin.from("payments").update({ status: "voided", void_reason: clean, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
   // A receipt that already reached a Zoho book cannot be unposted from here: the row turns red for accounts to fix
   // by hand — including, after go-live, one that sits in the REAL book's opening balances.
-  const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId);
+  const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId, p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at);
   if (where) {
     await flagZohoAttention(
       p.is_deposit ? "deposit" : "payment",
@@ -183,6 +183,7 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
       where === "opening"
         ? `${p.number} was voided after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand". Reason: ${clean}`
         : `${p.number} was voided in the ERP after it reached Zoho: remove the payment in Zoho by hand, then press "Done by hand". Reason: ${clean}`,
+      { handOnly: where === "opening" },
     );
   }
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) voided by ${actor.display_name}: ${clean}`, created_by: actor.id });

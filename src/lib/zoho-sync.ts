@@ -150,20 +150,25 @@ async function parentClosedByHand(kind: ZohoKind, recordId: string): Promise<boo
 
 /**
  * Did this document already reach a Zoho book? "current" = the current queue posted it (or it was closed by hand);
- * "opening" = after go-live, it reached OFJ TEST before the start date and so sits in the REAL book's opening
- * balances. The change hooks (void, bounce, a corrected supplier invoice) flag those for a by-hand correction
- * instead of re-posting; anything else is simply (re)queued.
+ * "opening" = after go-live, it is dated BEFORE the start date and reached OFJ TEST (got a Zoho id there), so it sits
+ * in the REAL book's opening balances. A document dated from the start date is a replay, never "opening": until its
+ * REAL row posts, null — the caller simply (re)queues it. The change hooks (void, bounce, a corrected supplier
+ * invoice) flag "current" and "opening" for a by-hand correction instead of re-posting.
+ * docStamp = the document's own date (a timestamp, or a plain day with isDay).
  */
-export async function zohoPostedSomewhere(kinds: ZohoKind | ZohoKind[], recordId: string): Promise<"current" | "opening" | null> {
+export async function zohoPostedSomewhere(kinds: ZohoKind | ZohoKind[], recordId: string, docStamp: string | null | undefined, isDay = false): Promise<"current" | "opening" | null> {
   const admin = createAdminClient();
   const list = Array.isArray(kinds) ? kinds : [kinds];
   const { data: cur } = await admin.from("zoho_outbox").select("zoho_id, zoho_result").in("kind", list).eq("record_id", recordId).limit(1);
   const c = ((cur ?? []) as { zoho_id: string | null; zoho_result: { manual?: boolean } | null }[])[0];
   if (c && (c.zoho_id || c.zoho_result?.manual === true)) return "current";
-  if (!wentLiveOf(await getSettings())) return null;
+  const settings = await getSettings();
+  if (!wentLiveOf(settings) || !docStamp) return null;
+  const day = isDay ? String(docStamp).slice(0, 10) : dubaiDate(String(docStamp));
+  if (!beforeGoLiveStart(day, true, String(settings.zoho_golive_start_date ?? ""))) return null;
   const testOrg = await zohoTestOrgId();
   if (!testOrg) return null;
-  const { data: arch } = await admin.from("zoho_outbox_archive").select("zoho_id").eq("org", testOrg).in("kind", list).eq("record_id", recordId).eq("status", "synced").not("zoho_id", "is", null).limit(1);
+  const { data: arch } = await admin.from("zoho_outbox_archive").select("zoho_id").eq("org", testOrg).in("kind", list).eq("record_id", recordId).not("zoho_id", "is", null).limit(1);
   return (arch ?? []).length ? "opening" : null;
 }
 
@@ -187,7 +192,7 @@ async function startDateSkip(docDate: string, kinds: ZohoKind | ZohoKind[], reco
   if (!beforeGoLiveStart(docDate, live, start)) return null;
   const testOrg = await zohoTestOrgId();
   const { data } = testOrg
-    ? await createAdminClient().from("zoho_outbox_archive").select("status").eq("org", testOrg).in("kind", Array.isArray(kinds) ? kinds : [kinds]).eq("record_id", recordId).eq("status", "synced").limit(1)
+    ? await createAdminClient().from("zoho_outbox_archive").select("status").eq("org", testOrg).in("kind", Array.isArray(kinds) ? kinds : [kinds]).eq("record_id", recordId).or("status.eq.synced,zoho_id.not.is.null").limit(1)
     : { data: [] };
   if ((data ?? []).length) return { result: { skipped: `Dated ${docDate}, before the go-live start date ${start}: it stays in OFJ TEST's history and never posts to the REAL book.` } };
   throw new ZohoError(`Dated ${docDate}, before the go-live start date ${start}, and it never reached OFJ TEST: it is in no Zoho book. ${DONE_BY_HAND}`);
@@ -295,8 +300,10 @@ export type OutboxRow = {
 export async function enqueueZoho(kind: ZohoKind, recordId: string, jobId: string | null = null, by: string | null = null): Promise<void> {
   // Supabase returns errors instead of throwing: each is checked, or a lost enqueue would be silent.
   const admin = createAdminClient();
-  const { data: ex, error: readError } = await admin.from("zoho_outbox").select("id, status").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+  const { data: ex, error: readError } = await admin.from("zoho_outbox").select("id, status, zoho_result").eq("kind", kind).eq("record_id", recordId).maybeSingle();
   if (readError) throw new Error(readError.message);
+  // A row only a human can settle (a document in the opening balances) stays red: re-running could post it twice.
+  if ((ex as { zoho_result?: { hand_only?: boolean } | null } | null)?.zoho_result?.hand_only === true) return;
   if (!ex) {
     const { error } = await admin.from("zoho_outbox").insert({ kind, record_id: recordId, job_id: jobId, created_by: by });
     if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
@@ -317,15 +324,20 @@ export async function tryEnqueueZoho(kind: ZohoKind, recordId: string, jobId: st
   }
 }
 
-/** Something changed in the ERP AFTER the document reached Zoho (a void, a bounce, a credit note): the row turns red for accounts. */
-export async function flagZohoAttention(kind: ZohoKind, recordId: string, reason: string): Promise<void> {
+/**
+ * Something changed in the ERP AFTER the document reached Zoho (a void, a bounce, a credit note): the row turns red
+ * for accounts. handOnly (a document in the REAL book's opening balances): no handler can ever fix it, so Retry and
+ * re-queues leave the row alone — only "Done by hand" closes it.
+ */
+export async function flagZohoAttention(kind: ZohoKind, recordId: string, reason: string, opts: { handOnly?: boolean } = {}): Promise<void> {
   try {
     const admin = createAdminClient();
     const { data: ex, error: readError } = await admin.from("zoho_outbox").select("id").eq("kind", kind).eq("record_id", recordId).maybeSingle();
     if (readError) throw new Error(readError.message);
+    const hand = opts.handOnly ? { zoho_result: { hand_only: true } } : {};
     const { error } = ex
-      ? await admin.from("zoho_outbox").update({ status: "failed", last_error: reason, updated_at: new Date().toISOString() }).eq("id", ex.id)
-      : await admin.from("zoho_outbox").insert({ kind, record_id: recordId, status: "failed", last_error: reason });
+      ? await admin.from("zoho_outbox").update({ status: "failed", last_error: reason, ...hand, updated_at: new Date().toISOString() }).eq("id", ex.id)
+      : await admin.from("zoho_outbox").insert({ kind, record_id: recordId, status: "failed", last_error: reason, ...hand });
     if (error) throw new Error(error.message);
   } catch (e) {
     await logAppError("zoho_flag", e, { detail: { kind, recordId } });
@@ -341,6 +353,7 @@ export async function reopenZoho(kind: ZohoKind, recordId: string): Promise<void
     // A row the accountant closed by hand is not re-posted (with no Zoho id the handler could make a second
     // document): it turns red so the addition is made in Zoho by hand too.
     const { data: ex } = await admin.from("zoho_outbox").select("zoho_result").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+    if ((ex as { zoho_result?: { hand_only?: boolean } | null } | null)?.zoho_result?.hand_only === true) return;
     if ((ex as { zoho_result?: { manual?: boolean } | null } | null)?.zoho_result?.manual === true) {
       const { error } = await admin.from("zoho_outbox").update({ status: "failed", last_error: 'A file or figure was added after this was done by hand: add it in Zoho by hand too, then press "Done by hand".', updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
       if (error) throw new Error(error.message);
@@ -1892,15 +1905,21 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
   if (since && preStart.length) {
     const testOrg = await zohoTestOrgId();
     const archived = testOrg
-      ? await pageAll<{ kind: string; record_id: string; status: string; last_error: string | null }>((a, b) => admin.from("zoho_outbox_archive").select("kind, record_id, status, last_error").eq("org", testOrg).order("record_id").range(a, b))
+      ? await pageAll<{ kind: string; record_id: string; status: string; last_error: string | null; zoho_id: string | null }>((a, b) => admin.from("zoho_outbox_archive").select("kind, record_id, status, last_error, zoho_id").eq("org", testOrg).order("record_id").range(a, b))
       : [];
     const inTest = new Map(archived.map((r) => [`${r.kind}:${r.record_id}`, r]));
     const red = preStart
       .filter((d) => inTest.get(`${d.kind}:${d.record_id}`)?.status !== "synced")
       .map((d) => {
         const was = inTest.get(`${d.kind}:${d.record_id}`);
-        const why = was ? `it was still ${was.status === "failed" ? "red" : "waiting"} in OFJ TEST at the flip${was.last_error ? ` (${cut100(was.last_error)})` : ""}` : "it never reached OFJ TEST";
-        return { kind: d.kind, record_id: d.record_id, job_id: d.job_id, created_by: by, status: "failed", last_error: `Dated ${d.day}, before the go-live start date ${since}, and ${why}: it is in no Zoho book. ${DONE_BY_HAND}` };
+        const reason = was?.last_error ? ` (${cut100(was.last_error)})` : "";
+        // It DID reach OFJ TEST (it has a Zoho id there) but a change was still waiting at the flip: it sits in the
+        // opening balances, so only the change is made by hand — never the document again.
+        if (was?.zoho_id) {
+          return { kind: d.kind, record_id: d.record_id, job_id: d.job_id, created_by: by, status: "failed", zoho_result: { hand_only: true }, last_error: `Dated ${d.day}, before the go-live start date ${since}: it reached OFJ TEST (so it is in the opening balances), but a change was still waiting there at the flip${reason}. Make that change by hand in the REAL book's opening balances, then press "Done by hand".` };
+        }
+        const why = was ? `it was still ${was.status === "failed" ? "red" : "waiting"} in OFJ TEST at the flip${reason}` : "it never reached OFJ TEST";
+        return { kind: d.kind, record_id: d.record_id, job_id: d.job_id, created_by: by, status: "failed", zoho_result: null, last_error: `Dated ${d.day}, before the go-live start date ${since}, and ${why}: it is in no Zoho book. ${DONE_BY_HAND}` };
       });
     for (let i = 0; i < red.length; i += 200) {
       const { error } = await admin.from("zoho_outbox").upsert(red.slice(i, i + 200), { onConflict: "kind,record_id", ignoreDuplicates: true });

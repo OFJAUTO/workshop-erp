@@ -26,6 +26,8 @@ export async function setZohoTestOrg(formData: FormData) {
   const name = String(formData.get("org_name") ?? "").trim();
   if (!/^\d{5,}$/.test(id)) return back("error", "That organization id does not look right.");
   if (id === ZOHO_REAL_ORG_ID) return back("error", "The REAL organization stays read-only until go-live. Pick OFJ TEST.");
+  // After go-live OFJ TEST's archive (what is in the opening balances) is keyed to the organization picked then.
+  if ((await zohoBooksNow()).wentLive) return back("error", "The books went live: the test organization is fixed for good.");
   const admin = createAdminClient();
   await admin.from("settings").update({ value: id, updated_by: staff.id }).eq("key", "zoho_org_test");
   return back("message", `Writes now go to ${name || "the test organization"} (${id}). The REAL organization stays read-only.`);

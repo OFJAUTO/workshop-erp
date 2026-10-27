@@ -273,6 +273,53 @@ await section("7b late addition to a hand-closed row", async () => {
   check("7b: the hand-closed row turns red asking for the addition by hand", r?.status === "failed" && /added after this was done by hand/.test(r?.last_error ?? ""), JSON.stringify(r));
 });
 
+/* ---------------- 7c. a by-hand-only row (opening balances) is never re-run ---------------- */
+await section("7c by-hand-only rows", async () => {
+  await sql("insert into public.zoho_outbox (kind, record_id, job_id, status, last_error, zoho_result) values ('creditnote', $1, $2, 'failed', 'E2e: sits in the opening balances', '{\"hand_only\": true}'::jsonb) on conflict (kind, record_id) do update set status = 'failed', last_error = excluded.last_error, zoho_result = excluded.zoho_result", [cnId, jobId]);
+  await api("/api/e2e/zoho", { action: "reopen", kind: "creditnote", recordId: cnId });
+  const r = (await sql("select status, zoho_result from public.zoho_outbox where kind = 'creditnote' and record_id = $1", [cnId]))[0];
+  check("7c: a late addition leaves a by-hand-only row red and untouched", r?.status === "failed" && r?.zoho_result?.hand_only === true, JSON.stringify(r));
+  const { browser, page } = await browserFor("accounts", { viewport: { width: 1440, height: 1400 } });
+  try {
+    await go(page, `${base}/zoho?show=failed`);
+    const row = page.locator('li[data-zoho-row="failed"]', { hasText: "E2e: sits in the opening balances" }).first();
+    await row.locator("[data-zoho-retry]").click();
+    await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    const after = (await sql("select status from public.zoho_outbox where kind = 'creditnote' and record_id = $1", [cnId]))[0];
+    check("7c: Retry refuses it in plain words (it could post twice)", /corrected\+by\+hand|corrected%20by%20hand/.test(page.url()) && after?.status === "failed", `${page.url().slice(-120)} ${JSON.stringify(after)}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+/* ---------------- 7d. "Done by hand" on an invoice turns its already-posted payments red ---------------- */
+await section("7d done by hand on an invoice", async () => {
+  const [inv] = await sql(
+    "insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, token, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed) values ('INV-E2EZ3-H', 'tax_invoice', $1, $2, $3, 'e2e-z3-inv-h', 400, 0, 400, 20, 420) returning id",
+    [jobId, customerId, vehicleId],
+  );
+  const [pay] = await sql(
+    "insert into public.payments (number, job_id, invoice_id, customer_id, method, amount_aed, bank_charge_aed, is_deposit, status, received_at) values ('RCT-E2EZ3-H', $1, $2, $3, 'cash', 420, 0, false, 'recorded', now()) returning id",
+    [jobId, inv.id, customerId],
+  );
+  await sql("insert into public.zoho_outbox (kind, record_id, job_id, status, last_error) values ('invoice', $1, $2, 'failed', 'E2e: invoice refused in Zoho')", [inv.id, jobId]);
+  await sql("insert into public.zoho_outbox (kind, record_id, job_id, status, zoho_id, synced_at, zoho_result) values ('payment', $1, $2, 'synced', 'E2E-FAKE-PAY', now(), '{\"amount\": 420}'::jsonb)", [pay.id, jobId]);
+  const { browser, page } = await browserFor("accounts", { viewport: { width: 1440, height: 1400 } });
+  try {
+    await go(page, `${base}/zoho?show=failed`);
+    const row = page.locator('li[data-zoho-row="failed"]', { hasText: "INV-E2EZ3-H" }).first();
+    await row.locator("[data-zoho-by-hand] summary").click();
+    await row.locator("[data-zoho-by-hand-note]").fill("Entered by hand as INV-9001");
+    await row.locator("[data-zoho-by-hand-save]").click();
+    await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    const p = await until(async () => { const r = (await sql("select status, last_error, zoho_id from public.zoho_outbox where kind = 'payment' and record_id = $1", [pay.id]))[0]; return r?.status === "failed" ? r : null; });
+    check("7d: the payment already in Zoho turns red, keeping its Zoho id, asking to apply it by hand", p?.status === "failed" && p?.zoho_id === "E2E-FAKE-PAY" && /INV-E2EZ3-H was settled by hand in Zoho, so .* already posted there unapplied, was never applied/.test(p?.last_error ?? ""), JSON.stringify(p));
+    check("7d: the message says so next to the button", /payment.*already\+in\+Zoho|payment.*already%20in%20Zoho/.test(page.url()), page.url().slice(-160));
+  } finally {
+    await browser.close();
+  }
+});
+
 /* ---------------- 8. the go-live switch, simulated in a rolled-back transaction ---------------- */
 await section("8 switch simulation (rolled back)", async () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -320,6 +367,16 @@ await section("8 switch simulation (rolled back)", async () => {
       try { await q("select public.zoho_switch_org($1, $2, false, null, null)", [testOrg, SIM]); } catch (e) { once = e.message; }
       check("8: once the books went live, the switch refuses to run again", /already went live/.test(once), once || "went through");
       await q("rollback to savepoint once");
+
+      // Bills dated from the start date are replayed as NEW bills: their OFJ TEST VAT snapshot goes; older ones keep it.
+      await q("savepoint taxed");
+      const [sup] = await q("insert into public.suppliers (name, phone) values ('E2e Sim Supplier', '+971500000095') returning id");
+      const [newBill] = await q("insert into public.purchase_orders (number, kind, supplier_id, supplier_name, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, zoho_bill_taxed) values ('LPO-E2E9-SIM-1', 'supplier', $1, 'E2e Sim Supplier', 'received', 10, 'received', 'SIM-1', '2026-11-03', true) returning id", [sup.id]);
+      const [oldBill] = await q("insert into public.purchase_orders (number, kind, supplier_id, supplier_name, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, zoho_bill_taxed) values ('LPO-E2E9-SIM-2', 'supplier', $1, 'E2e Sim Supplier', 'received', 10, 'received', 'SIM-2', '2026-10-20', true) returning id", [sup.id]);
+      await q("select public.zoho_switch_org($1, $2, false, null, '2026-11-01'::date)", [testOrg, SIM]);
+      const snaps = await q("select number, zoho_bill_taxed from public.purchase_orders where id in ($1, $2) order by number", [newBill.id, oldBill.id]);
+      check("8: the switch clears the VAT snapshot of bills from the start date only (they post again as new bills)", snaps[0]?.zoho_bill_taxed === null && snaps[1]?.zoho_bill_taxed === true, JSON.stringify(snaps));
+      await q("rollback to savepoint taxed");
 
       const r1 = (await q("select public.zoho_switch_org($1, $2, false, null, null) as r", [testOrg, SIM]))[0].r;
       const mid = await snap(testOrg);
