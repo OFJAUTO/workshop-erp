@@ -3,6 +3,7 @@
 import type { QuoteLock } from "@/lib/quote-lock";
 import { TextCounter } from "@/components/TextCounter";
 import { LINE_TEXT_MAX } from "@/lib/text-limits";
+import { flushTimers, onPageLeave } from "@/lib/app-version";
 import { LockedQuote } from "./LockedQuote";
 import { lineIsTint } from "@/lib/tint";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
@@ -513,10 +514,17 @@ export function QuoteEditor({
     return () => document.removeEventListener("pointerdown", close);
   }, [menuFor]);
 
+  const waiting = useRef<Record<string, () => Op>>({});
   const debounced = (key: string, op: () => Op) => {
     if (timers.current[key]) clearTimeout(timers.current[key]);
-    timers.current[key] = setTimeout(() => save(op()), 500);
+    waiting.current[key] = op;
+    timers.current[key] = setTimeout(() => {
+      delete timers.current[key];
+      delete waiting.current[key];
+      save(op());
+    }, 500);
   };
+  useEffect(() => onPageLeave(() => flushTimers(timers.current, waiting.current, save)), [save]);
   const patch = (id: string, fields: Partial<QuoteLine>, immediate = false) => {
     setDirty((s) => (s.has(id) ? s : new Set(s).add(id)));
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...fields } : l)));

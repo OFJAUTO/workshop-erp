@@ -52,3 +52,4 @@ AGENTS.md
 # Screenshots written by the browser tests
 tests/browser/shots/
 tests/tmp/
+public/version.json

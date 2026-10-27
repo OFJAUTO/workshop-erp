@@ -1,7 +1,11 @@
 "use client";
 
+import { isStaleVersionError, reloadForNewVersion } from "@/lib/app-version";
+
 /** The last line of defence: if even the frame fails, a plain white page with a button, never a black screen. */
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // A tab still running the previous version reloads itself once instead of showing this page.
+  if (typeof window !== "undefined" && isStaleVersionError(error.message ?? "")) reloadForNewVersion();
   return (
     <html lang="en">
       <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#f4f4f5", color: "#111" }}>

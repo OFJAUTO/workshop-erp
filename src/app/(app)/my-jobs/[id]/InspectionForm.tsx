@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { flushTimers, onPageLeave } from "@/lib/app-version";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
 import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, acPartFor, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
@@ -338,10 +339,17 @@ export function InspectionForm({
   const scanGateOpen = !scanState?.gate || !!scanState.readAt || !!scanState.approvedAt;
   const locked = disabled || !scanGateOpen;
 
+  const waiting = useRef<Record<string, () => Op>>({});
   function debounced(key: string, op: () => Op) {
     if (timers.current[key]) clearTimeout(timers.current[key]);
-    timers.current[key] = setTimeout(() => save(op()), 500);
+    waiting.current[key] = op;
+    timers.current[key] = setTimeout(() => {
+      delete timers.current[key];
+      delete waiting.current[key];
+      save(op());
+    }, 500);
   }
+  useEffect(() => onPageLeave(() => flushTimers(timers.current, waiting.current, save)), [save]);
   const [touchedKeys, setTouchedKeys] = useState<Set<string>>(() => new Set());
   const patchItem = (key: string, fields: Partial<ItemState>, immediate = true) => {
     setTouchedKeys((s) => (s.has(key) ? s : new Set(s).add(key)));

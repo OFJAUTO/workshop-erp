@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { onPageLeave } from "@/lib/app-version";
 
 const SKIP_TYPES = new Set(["hidden", "file", "password", "submit", "button", "reset", "image"]);
 
@@ -54,24 +55,34 @@ export function FormDraft({ draftKey, skip = [], ttlHours = 24 }: { draftKey: st
       }
     } catch {}
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const writeNow = () => {
+      try {
+        const v: Record<string, string | string[]> = {};
+        const fd = new FormData(form);
+        for (const [k, val] of fd.entries()) {
+          if (typeof val !== "string") continue;
+          const el = form.elements.namedItem(k);
+          if (el instanceof HTMLInputElement && SKIP_TYPES.has(el.type)) continue;
+          const cur = v[k];
+          v[k] = cur === undefined ? val : Array.isArray(cur) ? [...cur, val] : [cur, val];
+        }
+        localStorage.setItem(key, JSON.stringify({ t: Date.now(), v }));
+      } catch {}
+    };
     const saveDraft = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        try {
-          const v: Record<string, string | string[]> = {};
-          const fd = new FormData(form);
-          for (const [k, val] of fd.entries()) {
-            if (typeof val !== "string") continue;
-            const el = form.elements.namedItem(k);
-            if (el instanceof HTMLInputElement && SKIP_TYPES.has(el.type)) continue;
-            const cur = v[k];
-            v[k] = cur === undefined ? val : Array.isArray(cur) ? [...cur, val] : [cur, val];
-          }
-          localStorage.setItem(key, JSON.stringify({ t: Date.now(), v }));
-        } catch {}
+        writeNow();
       }, 300);
     };
+    let submitted = false;
+    const stopLeave = onPageLeave(() => {
+      if (!timer || submitted) return;
+      clearTimeout(timer);
+      timer = null;
+      writeNow();
+    });
     const clear = () => {
       try {
         localStorage.removeItem(key);
@@ -79,11 +90,16 @@ export function FormDraft({ draftKey, skip = [], ttlHours = 24 }: { draftKey: st
     };
     form.addEventListener("input", saveDraft);
     form.addEventListener("change", saveDraft);
-    form.addEventListener("submit", clear);
+    const onSubmit = () => {
+      submitted = true;
+      clear();
+    };
+    form.addEventListener("submit", onSubmit);
     return () => {
+      stopLeave();
       form.removeEventListener("input", saveDraft);
       form.removeEventListener("change", saveDraft);
-      form.removeEventListener("submit", clear);
+      form.removeEventListener("submit", onSubmit);
       if (timer) clearTimeout(timer);
     };
   }, [draftKey, skip, ttlHours]);
