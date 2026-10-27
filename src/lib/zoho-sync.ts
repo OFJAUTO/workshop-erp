@@ -4,7 +4,7 @@ import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, toInvoice, toInvoi
 import { round2 } from "@/lib/money";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoConfigured, zohoFetch, zohoLiveNow, zohoTestOrgId } from "@/lib/zoho";
+import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoBooksNow, zohoConfigured, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
@@ -108,10 +108,19 @@ export function readZohoMap(settings: Settings): ZohoAccountMap {
   return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, bankCharges: raw.bankCharges, advances: raw.advances, advancesRefund: raw.advancesRefund };
 }
 
-/** Where writes go: OFJ TEST until the owner declares go-live (zohoFetch refuses REAL anyway while the switch is off). */
+/** True once the books have EVER gone live (the switch runs once; OFJ TEST is never written again after it). */
+export function wentLiveOf(settings: Settings): boolean {
+  return String(settings.zoho_went_live_at ?? "").trim() !== "";
+}
+
+/**
+ * Where writes go: OFJ TEST until the owner declares go-live, the REAL book while live, and NOWHERE while the owner
+ * has stopped posting after go-live (zohoFetch refuses the wrong book anyway).
+ */
 export async function zohoWriteOrg(): Promise<string | null> {
   const settings = await getSettings();
   if (settings.zoho_live_enabled === true) return ZOHO_REAL_ORG_ID;
+  if (wentLiveOf(settings)) return null;
   return zohoTestOrgId();
 }
 
@@ -123,10 +132,39 @@ export function beforeGoLiveStart(docDate: string, live: boolean, startDate: str
   return docDate < start;
 }
 
-/** The cutover as the handlers see it: whether the books are live, and the first day the REAL book owns. */
+/** The cutover as the handlers see it: whether the books went live (live, or stopped after it), and the first day the REAL book owns. */
 async function cutover(): Promise<{ live: boolean; start: string }> {
   const settings = await getSettings();
-  return { live: settings.zoho_live_enabled === true, start: String(settings.zoho_golive_start_date ?? "").trim() };
+  return { live: settings.zoho_live_enabled === true || wentLiveOf(settings), start: String(settings.zoho_golive_start_date ?? "").trim() };
+}
+
+/**
+ * The parent's row was closed "Done by hand" and the ERP holds no Zoho id for it: nothing can be linked to it
+ * automatically, so a child (a credit note, a refund, a supplier payment or credit) must not wait for it forever.
+ */
+async function parentClosedByHand(kind: ZohoKind, recordId: string): Promise<boolean> {
+  const { data } = await createAdminClient().from("zoho_outbox").select("status, zoho_id, zoho_result").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+  const r = data as { status: string; zoho_id: string | null; zoho_result: { manual?: boolean } | null } | null;
+  return !!r && r.status === "synced" && !r.zoho_id && r.zoho_result?.manual === true;
+}
+
+/**
+ * Did this document already reach a Zoho book? "current" = the current queue posted it (or it was closed by hand);
+ * "opening" = after go-live, it reached OFJ TEST before the start date and so sits in the REAL book's opening
+ * balances. The change hooks (void, bounce, a corrected supplier invoice) flag those for a by-hand correction
+ * instead of re-posting; anything else is simply (re)queued.
+ */
+export async function zohoPostedSomewhere(kinds: ZohoKind | ZohoKind[], recordId: string): Promise<"current" | "opening" | null> {
+  const admin = createAdminClient();
+  const list = Array.isArray(kinds) ? kinds : [kinds];
+  const { data: cur } = await admin.from("zoho_outbox").select("zoho_id, zoho_result").in("kind", list).eq("record_id", recordId).limit(1);
+  const c = ((cur ?? []) as { zoho_id: string | null; zoho_result: { manual?: boolean } | null }[])[0];
+  if (c && (c.zoho_id || c.zoho_result?.manual === true)) return "current";
+  if (!wentLiveOf(await getSettings())) return null;
+  const testOrg = await zohoTestOrgId();
+  if (!testOrg) return null;
+  const { data: arch } = await admin.from("zoho_outbox_archive").select("zoho_id").eq("org", testOrg).in("kind", list).eq("record_id", recordId).eq("status", "synced").not("zoho_id", "is", null).limit(1);
+  return (arch ?? []).length ? "opening" : null;
 }
 
 /** Once live: the start date when this parent document predates it (so it is not, and never will be, in REAL). */
@@ -299,7 +337,16 @@ export async function flagZohoAttention(kind: ZohoKind, recordId: string, reason
  * run picks the addition up instead of losing it. */
 export async function reopenZoho(kind: ZohoKind, recordId: string): Promise<void> {
   try {
-    const { error } = await createAdminClient().from("zoho_outbox").update({ status: "pending", last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
+    const admin = createAdminClient();
+    // A row the accountant closed by hand is not re-posted (with no Zoho id the handler could make a second
+    // document): it turns red so the addition is made in Zoho by hand too.
+    const { data: ex } = await admin.from("zoho_outbox").select("zoho_result").eq("kind", kind).eq("record_id", recordId).maybeSingle();
+    if ((ex as { zoho_result?: { manual?: boolean } | null } | null)?.zoho_result?.manual === true) {
+      const { error } = await admin.from("zoho_outbox").update({ status: "failed", last_error: 'A file or figure was added after this was done by hand: add it in Zoho by hand too, then press "Done by hand".', updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
+      if (error) throw new Error(error.message);
+      return;
+    }
+    const { error } = await admin.from("zoho_outbox").update({ status: "pending", last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("kind", kind).eq("record_id", recordId);
     if (error) throw new Error(error.message);
   } catch (e) {
     await logAppError("zoho_reopen", e, { detail: { kind, recordId } });
@@ -341,7 +388,8 @@ export function zohoOpenUrl(org: string, kind: ZohoKind, zohoId: string): string
   return `https://books.zoho.com/app/${org}#/${section}/${zohoId}`;
 }
 
-type HandlerOut = { zohoId?: string | null; result?: Record<string, unknown>; wait?: string };
+/** attention = the document DID post (its id and figures are kept) but a by-hand step remains: the row shows red. */
+type HandlerOut = { zohoId?: string | null; result?: Record<string, unknown>; wait?: string; attention?: string };
 
 /* ------------------------------------------------------- contacts ------------------------------------------------------- */
 
@@ -666,16 +714,23 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     throw new ZohoError(`The balance differs for ${inv.number}: Zoho says ${after.balance.toFixed(2)}, the ERP expects ${expectedBalance.toFixed(2)} after the payments posted so far.`);
   }
   const appliedNow = applyOut.applied;
-  return {
-    zohoId: z.invoice_id,
-    result: {
-      number: inv.number,
-      zoho: { total: after.total, vat: after.tax_total, balance: after.balance },
-      erp: { total: inv.total_aed, vat: inv.vat_aed, taxable: inv.taxable_aed },
-      applied_payments: appliedNow,
-      line_accounts: incomeCounts,
-    },
+  // Money taken for this invoice BEFORE go-live (a deposit, a proforma payment) sits in OFJ TEST and the REAL
+  // book's opening balances, never in this book: the invoice is right, but it shows that money as still owed until
+  // the accountant applies the opening advance — so the row says exactly that, in red.
+  const { live: cutOn, start } = await cutover();
+  const opening = erpPays.filter((p) => !(p as PaymentRow & { zoho_payment_id?: string | null }).zoho_payment_id && beforeGoLiveStart(dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at), cutOn, start));
+  const result = {
+    number: inv.number,
+    zoho: { total: after.total, vat: after.tax_total, balance: after.balance },
+    erp: { total: inv.total_aed, vat: inv.vat_aed, taxable: inv.taxable_aed },
+    applied_payments: appliedNow,
+    line_accounts: incomeCounts,
   };
+  if (opening.length) {
+    const list = opening.map((p) => `${p.number} (AED ${p.amount_aed.toFixed(2)}, ${dubaiDate(p.received_at)})`).join(", ");
+    return { zohoId: z.invoice_id, result, attention: `${inv.number} is in the REAL book. Money received for it before go-live — ${list} — is in the opening balances, not posted here: apply it to ${inv.number} in Zoho by hand, then press "Done by hand".` };
+  }
+  return { zohoId: z.invoice_id, result };
 }
 
 /* ------------------------------------------------------- payments and deposits ------------------------------------------------------- */
@@ -707,12 +762,17 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   let zohoInvoiceId: string | null = null;
   let preStartNote: string | null = null;
   if (p.invoice_id) {
-    const { data: invRow } = await admin.from("payments").select("invoice:invoices!payments_invoice_id_fkey(zoho_invoice_id, kind, number, issued_at)").eq("id", p.id).maybeSingle();
-    const inv = (invRow as unknown as { invoice: { zoho_invoice_id: string | null; kind: string; number: string; issued_at: string } | null } | null)?.invoice;
+    const { data: invRow } = await admin.from("payments").select("invoice:invoices!payments_invoice_id_fkey(id, zoho_invoice_id, kind, number, issued_at)").eq("id", p.id).maybeSingle();
+    const inv = (invRow as unknown as { invoice: { id: string; zoho_invoice_id: string | null; kind: string; number: string; issued_at: string } | null } | null)?.invoice;
     if (inv?.kind === "tax_invoice") zohoInvoiceId = inv.zoho_invoice_id;
-    // Money received after go-live on an invoice from before it: the payment still posts (it is REAL money), unapplied.
-    if (inv?.kind === "tax_invoice" && !inv.zoho_invoice_id && (await parentBeforeStart(dubaiDate(inv.issued_at)))) {
-      preStartNote = `Posted unapplied: ${inv.number} is dated before the go-live start date (opening balance), so the accountant applies this payment to it by hand.`;
+    // Money received on an invoice the sync can never link (dated before go-live, or settled by hand in Zoho): the
+    // payment still posts — it is real money — unapplied, and the row says in red who applies it.
+    if (inv?.kind === "tax_invoice" && !inv.zoho_invoice_id) {
+      if (await parentBeforeStart(dubaiDate(inv.issued_at))) {
+        preStartNote = `Posted unapplied: ${inv.number} is dated before the go-live start date (opening balance). Apply this payment to it in Zoho by hand, then press "Done by hand".`;
+      } else if (await parentClosedByHand("invoice", inv.id)) {
+        preStartNote = `Posted unapplied: ${inv.number} was settled by hand in Zoho. Apply this payment to it in Zoho by hand, then press "Done by hand".`;
+      }
     }
   } else if (p.is_deposit && p.job_id) {
     const { data: jobInv } = await admin.from("invoices").select("zoho_invoice_id").eq("job_id", p.job_id).eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null).not("zoho_invoice_id", "is", null).limit(1).maybeSingle();
@@ -762,8 +822,8 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
       mode: MODE[p.method],
       kind: p.is_deposit ? "advance" : "payment",
       applied_now: applied,
-      ...(preStartNote ? { note: preStartNote } : {}),
     },
+    ...(preStartNote ? { attention: preStartNote } : {}),
   };
 }
 
@@ -886,6 +946,7 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
   if (!par.zoho_invoice_id) {
     const preStart = await parentBeforeStart(dubaiDate(par.issued_at));
     if (preStart) throw new ZohoError(`${cn.number} credits ${par.number}, which is dated before the go-live start date ${preStart} and so is not in the REAL book (a UAE credit note must name its invoice). ${DONE_BY_HAND}`);
+    if (await parentClosedByHand("invoice", par.id)) throw new ZohoError(`${cn.number} credits ${par.number}, which was settled by hand in Zoho, so the sync cannot attach this credit note to it. ${DONE_BY_HAND}`);
     // The parent posts first; the credit note waits its turn.
     await ensureQueued("invoice", par.id, par.job_id);
     return { wait: `Waiting for ${par.number} to reach Zoho first.` };
@@ -1000,9 +1061,11 @@ export type PoRow = {
   supplier_paid_reference: string | null;
   zoho_bill_id: string | null;
   zoho_billpayment_id: string | null;
+  /** The VAT standing the bill was POSTED with (null until it posts): history never follows a later switch change. */
+  zoho_bill_taxed: boolean | null;
 };
 
-const PO_ZOHO_SELECT = "id, number, kind, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, zoho_bill_id, zoho_billpayment_id";
+const PO_ZOHO_SELECT = "id, number, kind, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, zoho_bill_id, zoho_billpayment_id, zoho_bill_taxed";
 
 export async function poForZoho(poId: string): Promise<PoRow> {
   const { data } = await createAdminClient().from("purchase_orders").select(PO_ZOHO_SELECT).eq("id", poId).maybeSingle();
@@ -1090,7 +1153,8 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
   const useEntered = entered != null && entered > 0 && Math.abs(entered - linesTotal) > 0.05;
   const expectedNet = useEntered ? round2(entered) : linesTotal;
   const partsRate = round2(expectedNet - chargesSum);
-  const taxed = (supRow as { vat_registered?: boolean } | null)?.vat_registered !== false;
+  // A posted bill keeps the standing it was posted with; before that, the supplier's switch decides.
+  const taxed = po.zoho_bill_taxed ?? (supRow as { vat_registered?: boolean } | null)?.vat_registered !== false;
   const gross = taxed ? round2(expectedNet + round2(expectedNet * 0.05)) : expectedNet;
   return { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, taxed, gross };
 }
@@ -1158,11 +1222,13 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
     if (!z) throw new ZohoError("Zoho did not return the new bill.");
   }
   if (!matches(z)) throw new ZohoError(`Totals differ for the bill ${po.supplier_invoice_number} (${po.number}): Zoho has ${z.sub_total.toFixed(2)} before VAT, the ERP has ${expectedNet.toFixed(2)}.`);
-  // The VAT standing too: a bill posted before the supplier's switch moved must not turn green on a Retry.
-  if (taxed !== z.tax_total > 0.005) {
-    throw new ZohoError(`The bill ${po.supplier_invoice_number} (${po.number}) carries ${z.tax_total > 0.005 ? `VAT ${z.tax_total.toFixed(2)}` : "no VAT"} in Zoho, but ${po.supplier_name} is now ${taxed ? "VAT registered" : "NOT VAT registered"} in the ERP: correct the bill in Zoho by hand, then press "Done by hand".`);
+  // The VAT standing: the bill must carry what it was posted with (a re-run never re-judges history by today's
+  // switch); a new bill, what the supplier's switch says now.
+  const postedTaxed = po.zoho_bill_taxed ?? taxed;
+  if (postedTaxed !== z.tax_total > 0.005) {
+    throw new ZohoError(`The bill ${po.supplier_invoice_number} (${po.number}) carries ${z.tax_total > 0.005 ? `VAT ${z.tax_total.toFixed(2)}` : "no VAT"} in Zoho, but it was posted ${postedTaxed ? "with" : "without"} VAT: someone changed it in Zoho. Check it there, then press "Done by hand".`);
   }
-  await admin.from("purchase_orders").update({ zoho_bill_id: z.bill_id }).eq("id", po.id);
+  await admin.from("purchase_orders").update({ zoho_bill_id: z.bill_id, zoho_bill_taxed: postedTaxed }).eq("id", po.id);
 
   // The scan: the first live invoice file on the LPO (stock orders have none - that is fine). Never twice: the
   // bill's own documents list says whether something is already attached.
@@ -1215,6 +1281,7 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
   if (!po.zoho_bill_id) {
     const preStart = await parentBeforeStart(po.supplier_invoice_date ? String(po.supplier_invoice_date) : null);
     if (preStart) throw new ZohoError(`The bill ${po.supplier_invoice_number ?? po.number} (${po.number}) is dated before the go-live start date ${preStart}, so it is not in the REAL book: this supplier payment (${dubaiDate(po.supplier_paid_at)}) cannot post against it. ${DONE_BY_HAND}`);
+    if (await parentClosedByHand("bill", po.id)) throw new ZohoError(`The bill of ${po.number} was settled by hand in Zoho, so this supplier payment (${dubaiDate(po.supplier_paid_at)}) cannot post against it automatically. ${DONE_BY_HAND}`);
     await ensureQueued("bill", po.id, po.job_id);
     return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
   }
@@ -1318,7 +1385,9 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
   if (po && po.kind !== "main" && !po.zoho_bill_id) {
     const preStart = await parentBeforeStart(po.supplier_invoice_date ? String(po.supplier_invoice_date) : null);
     if (preStart) {
-      billNote = `The bill ${po.supplier_invoice_number ?? po.number} is dated before the go-live start date (opening balance): the accountant applies this credit to it by hand.`;
+      billNote = `Posted unapplied: the bill ${po.supplier_invoice_number ?? po.number} is dated before the go-live start date (opening balance). Apply this credit to it in Zoho by hand, then press "Done by hand".`;
+    } else if (await parentClosedByHand("bill", po.id)) {
+      billNote = `Posted unapplied: the bill of ${po.number} was settled by hand in Zoho. Apply this credit to it in Zoho by hand, then press "Done by hand".`;
     } else {
       await ensureQueued("bill", po.id, po.job_id);
       return { wait: `Waiting for the bill of ${po.number} to reach Zoho first: the credit is applied to it.` };
@@ -1402,8 +1471,9 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
       applied_now: appliedNow,
       ...(billBalanceAfter != null ? { bill_balance_after: billBalanceAfter } : {}),
       supplier_credit_note: part.disposition_note ?? "to follow",
-      note: billNote ?? "The credit-note scan stays in the ERP (Zoho vendor credits take no attachments).",
+      note: "The credit-note scan stays in the ERP (Zoho vendor credits take no attachments).",
     },
+    ...(billNote ? { attention: billNote } : {}),
   };
 }
 
@@ -1427,6 +1497,7 @@ async function syncCnRefundRow(org: string, accounts: Resolved, invoiceId: strin
     // A credit note from before go-live never reaches REAL, so its refund would wait forever: it fails instead.
     const preStart = await parentBeforeStart(dubaiDate(cn.issued_at));
     if (preStart) throw new ZohoError(`${cn.number} is dated before the go-live start date ${preStart}, so it is not in the REAL book: this refund of AED ${round2(Number(cn.refund_amount_aed) || cn.total_aed).toFixed(2)} (${cn.refund_method === "cash" ? "cash" : "bank transfer"}, ${dubaiDate(cn.refund_paid_at)}) cannot post against it. ${DONE_BY_HAND}`);
+    if (await parentClosedByHand("creditnote", cn.id)) throw new ZohoError(`${cn.number} was settled by hand in Zoho, so this refund of AED ${round2(Number(cn.refund_amount_aed) || cn.total_aed).toFixed(2)} cannot post against it automatically. ${DONE_BY_HAND}`);
     await ensureQueued("creditnote", cn.id, cn.job_id);
     return { wait: `Waiting for ${cn.number} to reach Zoho first.` };
   }
@@ -1602,21 +1673,24 @@ export type DrainReport = { pushed: number; failed: number; waiting: number; ski
 const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, commission: 10, recovery: 11 };
 
 /**
- * The five-minute worker (and the Sync now button): oldest first, contacts before deposits before invoices before
- * payments, one Zoho call at a time (zohoFetch's own queue), every row's outcome written on the row. A row that
- * cannot run yet (a cheque not cleared, an invoice not in Zoho) stays pending with the reason; a real refusal goes
- * FAILED and shows amber on the accounts' Waiting on you.
+ * The five-minute worker (and the Sync now button): the rows looked at longest ago first (a row that waited goes to
+ * the back, so rows that wait for days can never starve the rest), contacts before deposits before invoices before
+ * payments within a batch, one Zoho call at a time (zohoFetch's own queue), every row's outcome written on the row.
+ * A row that cannot run yet (a cheque not cleared, an invoice not in Zoho) stays pending with the reason; a real
+ * refusal goes FAILED and shows amber on the accounts' Waiting on you; a document that posted but still needs a
+ * by-hand step goes FAILED too, keeping its Zoho id and figures.
  */
 export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
   if (!zohoConfigured()) return { pushed: 0, failed: 0, waiting: 0, skipped: "Zoho is not set up on this server (ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET)." };
   // The organization comes from the switch as it stands NOW (not the request's cached settings).
-  const liveAtStart = await zohoLiveNow();
-  const org = liveAtStart ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
+  const atStart = await zohoBooksNow();
+  if (!atStart.live && atStart.wentLive) return { pushed: 0, failed: 0, waiting: 0, skipped: "Posting to the REAL book is stopped by the owner: documents wait in the queue until Resume (Settings > Zoho Books)." };
+  const org = atStart.live ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
   if (!org) return { pushed: 0, failed: 0, waiting: 0, skipped: "No test organization is picked on Settings > Zoho Books." };
   const admin = createAdminClient();
   // A claim older than ten minutes belongs to a worker that died: the row may be taken again.
   const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const { data } = await admin.from("zoho_outbox").select("id, kind, record_id, attempts, enqueued_at").eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).order("enqueued_at").limit(limit);
+  const { data } = await admin.from("zoho_outbox").select("id, kind, record_id, attempts, enqueued_at").eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).order("updated_at").limit(limit);
   const rows = (data ?? []) as Pick<OutboxRow, "id" | "kind" | "record_id" | "attempts" | "enqueued_at">[];
   const report: DrainReport = { pushed: 0, failed: 0, waiting: 0 };
   if (!rows.length) return report;
@@ -1630,9 +1704,10 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
     const now = new Date().toISOString();
     const { data: claimed } = await admin.from("zoho_outbox").update({ claimed_at: now, attempts: row.attempts + 1, updated_at: now }).eq("id", row.id).eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).select("id");
     if (!claimed?.length) continue;
-    // The go-live switch moved while this run was going: this row now belongs to the other book, whose ids were
-    // just swapped in. Release it and stop; the next run starts on the right organization.
-    if ((await zohoLiveNow()) !== liveAtStart) {
+    // The go-live switch moved (or posting was stopped) while this run was going: release the row and stop; the
+    // next run starts on the right organization — or not at all while stopped.
+    const nowState = await zohoBooksNow();
+    if (nowState.live !== atStart.live || nowState.wentLive !== atStart.wentLive) {
       await admin.from("zoho_outbox").update({ claimed_at: null, attempts: row.attempts }).eq("id", row.id).eq("claimed_at", now);
       report.skipped = "The go-live switch changed during this run; the next run continues on the new organization.";
       break;
@@ -1672,6 +1747,11 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
       if (out.wait) {
         await admin.from("zoho_outbox").update({ last_error: out.wait, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now);
         report.waiting++;
+      } else if (out.attention) {
+        // Posted, with a by-hand step left: red with the words, the Zoho id and figures kept (Done by hand closes it).
+        const { data: s } = await admin.from("zoho_outbox").update({ status: "failed", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: out.attention.slice(0, 500), claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
+        if (s?.length) report.failed++;
+        else report.waiting++;
       } else {
         const { data: s } = await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
         if (s?.length) report.pushed++;
@@ -1702,22 +1782,34 @@ export async function pageAll<T>(fetchPage: (from: number, to: number) => Promis
 
 /**
  * The owner's backfill: everything already in the ERP joins the queue — phase 1 money and phase 2 purchases/expenses.
- * Once LIVE it is the go-live replay: only documents dated on or after the start date (anything earlier never
- * posts to REAL), and no bulk customers or suppliers — the handlers make the contacts each document needs.
+ * Once the books went live it is the go-live replay: only documents dated on or after the start date (anything
+ * earlier never posts to REAL), no bulk customers or suppliers (the handlers make the contacts each document needs),
+ * and every READY document dated before the start date that never reached OFJ TEST — still waiting there at the
+ * flip, or never queued — becomes a red row with the by-hand words: it is in no Zoho book, so it must be seen.
  */
-export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number; creditnotes: number; vendors: number; bills: number; billpayments: number; commissions: number; recoveries: number; vendorcredits: number; cnrefunds: number }> {
+export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number; creditnotes: number; vendors: number; bills: number; billpayments: number; commissions: number; recoveries: number; vendorcredits: number; cnrefunds: number; byHand: number }> {
   const admin = createAdminClient();
-  const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0, creditnotes: 0, vendors: 0, bills: 0, billpayments: 0, commissions: 0, recoveries: 0, vendorcredits: 0, cnrefunds: 0 };
+  const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0, creditnotes: 0, vendors: 0, bills: 0, billpayments: 0, commissions: 0, recoveries: 0, vendorcredits: 0, cnrefunds: 0, byHand: 0 };
   // Read the switch fresh: the go-live flip calls this in the same request that just turned it on.
-  const live = await zohoLiveNow();
+  const state = await zohoBooksNow();
+  const cut = state.live || state.wentLive;
   const startDate = String((await getSettings()).zoho_golive_start_date ?? "").trim();
-  const since = live && /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : null;
-  if (live && !since) throw new Error("The books are live but no start date is set: nothing can be replayed safely.");
-  /** On or after the start date (always true before go-live). Stamps are read as Dubai days. */
-  const onOrAfter = (stamp: string | null | undefined, isDay = false): boolean => !since || (!!stamp && (isDay ? String(stamp).slice(0, 10) : dubaiDate(String(stamp))) >= since);
+  const since = cut && /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : null;
+  if (cut && !since) throw new Error("The books went live but no start date is set: nothing can be replayed safely.");
   const existing = await pageAll<{ kind: string; record_id: string }>((a, b) => admin.from("zoho_outbox").select("kind, record_id").order("enqueued_at").range(a, b));
   const have = new Set(existing.map((r) => `${r.kind}:${r.record_id}`));
   const put: { kind: ZohoKind; record_id: string; job_id: string | null; created_by: string | null }[] = [];
+  const preStart: { kind: ZohoKind; record_id: string; job_id: string | null; day: string }[] = [];
+  /** Queue it when it is new and dated on or after the start date (always, before go-live); remember it when it is earlier. */
+  const consider = (kind: ZohoKind, id: string, jobId: string | null, stamp: string | null | undefined, isDay = false): boolean => {
+    if (have.has(`${kind}:${id}`)) return false;
+    if (!since) return true;
+    const day = stamp ? (isDay ? String(stamp).slice(0, 10) : dubaiDate(String(stamp))) : null;
+    if (day && day >= since) return true;
+    if (day) preStart.push({ kind, record_id: id, job_id: jobId, day });
+    return false;
+  };
+
   const customers = since ? [] : await pageAll<{ id: string }>((a, b) => admin.from("customers").select("id").eq("is_active", true).order("id").range(a, b));
   for (const c of customers) {
     if (have.has(`contact:${c.id}`)) continue;
@@ -1726,16 +1818,15 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
   }
   const invoices = await pageAll<{ id: string; job_id: string | null; issued_at: string }>((a, b) => admin.from("invoices").select("id, job_id, issued_at").eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null).order("id").range(a, b));
   for (const i of invoices) {
-    if (have.has(`invoice:${i.id}`) || !onOrAfter(i.issued_at)) continue;
+    if (!consider("invoice", i.id, i.job_id, i.issued_at)) continue;
     put.push({ kind: "invoice", record_id: i.id, job_id: i.job_id, created_by: by });
     out.invoices++;
   }
   const pays = await pageAll<{ id: string; job_id: string | null; is_deposit: boolean; method: string; cheque_status: string | null; received_at: string; cleared_at: string | null }>((a, b) => admin.from("payments").select("id, job_id, is_deposit, method, cheque_status, received_at, cleared_at").eq("status", "recorded").order("id").range(a, b));
   for (const p of pays) {
     if (p.method === "cheque" && p.cheque_status !== "cleared") continue;
-    if (!onOrAfter(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at)) continue;
     const kind: ZohoKind = p.is_deposit ? "deposit" : "payment";
-    if (have.has(`${kind}:${p.id}`)) continue;
+    if (!consider(kind, p.id, p.job_id, p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at)) continue;
     put.push({ kind, record_id: p.id, job_id: p.job_id, created_by: by });
     if (p.is_deposit) out.deposits++;
     else out.payments++;
@@ -1743,7 +1834,7 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
   // Phase 2: credit notes, vendors, supplier bills and payments, paid commissions, paid recovery months.
   const cns = await pageAll<{ id: string; job_id: string | null; issued_at: string }>((a, b) => admin.from("invoices").select("id, job_id, issued_at").eq("kind", "credit_note").eq("status", "issued").order("id").range(a, b));
   for (const c of cns) {
-    if (have.has(`creditnote:${c.id}`) || !onOrAfter(c.issued_at)) continue;
+    if (!consider("creditnote", c.id, c.job_id, c.issued_at)) continue;
     put.push({ kind: "creditnote", record_id: c.id, job_id: c.job_id, created_by: by });
     out.creditnotes++;
   }
@@ -1757,37 +1848,37 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     admin.from("purchase_orders").select("id, job_id, supplier_paid_at, supplier_invoice_date").neq("kind", "main").not("supplier_name", "ilike", "our stock").eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).not("supplier_invoice_date", "is", null).eq("is_active", true).order("id").range(a, b),
   );
   for (const po of pos) {
-    if (!have.has(`bill:${po.id}`) && onOrAfter(po.supplier_invoice_date, true)) {
+    if (consider("bill", po.id, po.job_id, po.supplier_invoice_date, true)) {
       put.push({ kind: "bill", record_id: po.id, job_id: po.job_id, created_by: by });
       out.bills++;
     }
-    if (po.supplier_paid_at && !have.has(`billpayment:${po.id}`) && onOrAfter(po.supplier_paid_at)) {
+    if (po.supplier_paid_at && consider("billpayment", po.id, po.job_id, po.supplier_paid_at)) {
       put.push({ kind: "billpayment", record_id: po.id, job_id: po.job_id, created_by: by });
       out.billpayments++;
     }
   }
   const vouchers = await pageAll<{ id: string; paid_on: string | null }>((a, b) => admin.from("commission_payments").select("id, paid_on").eq("is_active", true).order("id").range(a, b));
   for (const v of vouchers) {
-    if (have.has(`commission:${v.id}`) || !onOrAfter(v.paid_on, true)) continue;
+    if (!consider("commission", v.id, null, v.paid_on, true)) continue;
     put.push({ kind: "commission", record_id: v.id, job_id: null, created_by: by });
     out.commissions++;
   }
   const payouts = await pageAll<{ id: string; paid_at: string | null }>((a, b) => admin.from("recovery_payouts").select("id, paid_at").order("id").range(a, b));
   for (const r of payouts) {
-    if (have.has(`recovery:${r.id}`) || !onOrAfter(r.paid_at)) continue;
+    if (!consider("recovery", r.id, null, r.paid_at)) continue;
     put.push({ kind: "recovery", record_id: r.id, job_id: null, created_by: by });
     out.recoveries++;
   }
   // Phase 3: parts returned TO THE SUPPLIER (disposition; "back with Parts" alone is not a credit) and customer refunds.
   const returned = await pageAll<{ id: string; job_id: string | null; disposition_at: string | null }>((a, b) => admin.from("part_items").select("id, job_id, disposition_at").eq("is_active", true).eq("disposition", "returned").order("id").range(a, b));
   for (const pt of returned) {
-    if (have.has(`vendorcredit:${pt.id}`) || !onOrAfter(pt.disposition_at)) continue;
+    if (!consider("vendorcredit", pt.id, pt.job_id, pt.disposition_at)) continue;
     put.push({ kind: "vendorcredit", record_id: pt.id, job_id: pt.job_id, created_by: by });
     out.vendorcredits++;
   }
   const refunds = await pageAll<{ id: string; job_id: string | null; refund_paid_at: string }>((a, b) => admin.from("invoices").select("id, job_id, refund_paid_at").eq("kind", "credit_note").not("refund_paid_at", "is", null).order("id").range(a, b));
   for (const rf of refunds) {
-    if (have.has(`cnrefund:${rf.id}`) || !onOrAfter(rf.refund_paid_at)) continue;
+    if (!consider("cnrefund", rf.id, rf.job_id, rf.refund_paid_at)) continue;
     put.push({ kind: "cnrefund", record_id: rf.id, job_id: rf.job_id, created_by: by });
     out.cnrefunds++;
   }
@@ -1796,5 +1887,28 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     const { error } = await admin.from("zoho_outbox").upsert(put.slice(i, i + 200), { onConflict: "kind,record_id", ignoreDuplicates: true });
     if (error) throw new Error(error.message);
   }
+
+  // After go-live: a ready document from before the start date that OFJ TEST never posted is in no Zoho book.
+  if (since && preStart.length) {
+    const testOrg = await zohoTestOrgId();
+    const archived = testOrg
+      ? await pageAll<{ kind: string; record_id: string; status: string; last_error: string | null }>((a, b) => admin.from("zoho_outbox_archive").select("kind, record_id, status, last_error").eq("org", testOrg).order("record_id").range(a, b))
+      : [];
+    const inTest = new Map(archived.map((r) => [`${r.kind}:${r.record_id}`, r]));
+    const red = preStart
+      .filter((d) => inTest.get(`${d.kind}:${d.record_id}`)?.status !== "synced")
+      .map((d) => {
+        const was = inTest.get(`${d.kind}:${d.record_id}`);
+        const why = was ? `it was still ${was.status === "failed" ? "red" : "waiting"} in OFJ TEST at the flip${was.last_error ? ` (${cut100(was.last_error)})` : ""}` : "it never reached OFJ TEST";
+        return { kind: d.kind, record_id: d.record_id, job_id: d.job_id, created_by: by, status: "failed", last_error: `Dated ${d.day}, before the go-live start date ${since}, and ${why}: it is in no Zoho book. ${DONE_BY_HAND}` };
+      });
+    for (let i = 0; i < red.length; i += 200) {
+      const { error } = await admin.from("zoho_outbox").upsert(red.slice(i, i + 200), { onConflict: "kind,record_id", ignoreDuplicates: true });
+      if (error) throw new Error(error.message);
+    }
+    out.byHand = red.length;
+  }
   return out;
 }
+
+const cut100 = (s: string) => (s.length > 100 ? `${s.slice(0, 99)}…` : s);

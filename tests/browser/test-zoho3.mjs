@@ -91,8 +91,15 @@ await section("2 supplier VAT switch", async () => {
     "insert into public.purchase_orders (number, kind, supplier_id, supplier_name, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date) values ('LPO-E2E9-Z3-VAT', 'supplier', $1, 'E2e Novat Supplier', 'received', 100, 'received', 'E2E-Z3-VAT-1', $2) returning id",
     [sup.id, today],
   );
-  await sql("update public.purchase_orders set zoho_bill_id = 'E2E-FAKE-BILL' where id = $1", [po.id]);
+  await sql("update public.purchase_orders set zoho_bill_id = 'E2E-FAKE-BILL', zoho_bill_taxed = true where id = $1", [po.id]);
   await sql("insert into public.zoho_outbox (kind, record_id, status, zoho_id, synced_at) values ('bill', $1, 'synced', 'E2E-FAKE-BILL', now())", [po.id]);
+  // A second bill of theirs posted WITHOUT VAT already matches the new standing: it must be left alone.
+  const [po2] = await sql(
+    "insert into public.purchase_orders (number, kind, supplier_id, supplier_name, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date) values ('LPO-E2E9-Z3-VAT2', 'supplier', $1, 'E2e Novat Supplier', 'received', 50, 'received', 'E2E-Z3-VAT-2', $2) returning id",
+    [sup.id, today],
+  );
+  await sql("update public.purchase_orders set zoho_bill_id = 'E2E-FAKE-BILL-2', zoho_bill_taxed = false where id = $1", [po2.id]);
+  await sql("insert into public.zoho_outbox (kind, record_id, status, zoho_id, synced_at) values ('bill', $1, 'synced', 'E2E-FAKE-BILL-2', now())", [po2.id]);
   const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 1400 } });
   try {
     await go(page, `${base}/parts/suppliers`);
@@ -106,7 +113,9 @@ await section("2 supplier VAT switch", async () => {
     const row = await until(async () => { const r = (await sql("select vat_registered from public.suppliers where name ilike 'e2e novat supplier'"))[0]; return r && r.vat_registered === false ? r : null; });
     check("2: the switch saves (not VAT registered)", row?.vat_registered === false, JSON.stringify(row));
     const flagged = await until(async () => { const r = (await sql("select status, last_error from public.zoho_outbox where kind = 'bill' and record_id = $1", [po.id]))[0]; return r?.status === "failed" ? r : null; });
-    check("2: the bill already in Zoho turns red with the by-hand words", flagged?.status === "failed" && /NOT VAT registered after the bill E2E-Z3-VAT-1/.test(flagged?.last_error ?? "") && /Done by hand/.test(flagged?.last_error ?? ""), JSON.stringify(flagged));
+    check("2: the bill posted WITH VAT turns red: it keeps its VAT, the accountant decides", flagged?.status === "failed" && /now marked NOT VAT registered\. The bill E2E-Z3-VAT-1 .* was posted with VAT and keeps it/.test(flagged?.last_error ?? "") && /Done by hand/.test(flagged?.last_error ?? ""), JSON.stringify(flagged));
+    const untouched = (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [po2.id]))[0];
+    check("2: the bill posted WITHOUT VAT already matches and stays green", untouched?.status === "synced", JSON.stringify(untouched));
   } finally {
     await browser.close();
   }
@@ -180,7 +189,7 @@ await section("5 go-live panel", async () => {
   const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 1800 } });
   try {
     await go(page, `${base}/settings/zoho`);
-    check("5: the panel renders with the six gates", (await page.locator("[data-golive-checklist] [data-golive-item]").count()) === 6);
+    check("5: the panel renders with the six gates (before go-live)", (await page.locator("[data-golive-checklist] [data-golive-item]").count()) === 6 && (await page.locator('[data-golive-panel][data-golive-state="test"]').count()) === 1);
     check("5: at least one gate is red and the switch is LOCKED", (await page.locator('[data-golive-ok="0"]').count()) >= 1 && (await page.locator("[data-golive-flip-btn]").isDisabled()) === true);
     check("5: the owner has no review tick (it belongs to accounts)", (await page.locator("[data-golive-tick]").count()) === 0);
     await page.screenshot({ path: "tests/browser/shots/zoho3-golive-locked.png", fullPage: true });
@@ -256,6 +265,14 @@ await section("7 done by hand", async () => {
   }
 });
 
+/* ---------------- 7b. a late addition to a row closed by hand turns it red (never re-posts) ---------------- */
+await section("7b late addition to a hand-closed row", async () => {
+  // The refund row was closed by hand in section 7: a file added now must not make the handler post a second document.
+  await api("/api/e2e/zoho", { action: "reopen", kind: "cnrefund", recordId: cnId });
+  const r = (await sql("select status, last_error from public.zoho_outbox where kind = 'cnrefund' and record_id = $1", [cnId]))[0];
+  check("7b: the hand-closed row turns red asking for the addition by hand", r?.status === "failed" && /added after this was done by hand/.test(r?.last_error ?? ""), JSON.stringify(r));
+});
+
 /* ---------------- 8. the go-live switch, simulated in a rolled-back transaction ---------------- */
 await section("8 switch simulation (rolled back)", async () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -291,17 +308,25 @@ await section("8 switch simulation (rolled back)", async () => {
       if (one) {
         await q("update public.zoho_outbox set claimed_at = now() where id = $1", [one.id]);
         let refused = "";
-        try { await q("select public.zoho_switch_org($1, $2, false, null)", [testOrg, SIM]); } catch (e) { refused = e.message; }
+        try { await q("select public.zoho_switch_org($1, $2, false, null, null)", [testOrg, SIM]); } catch (e) { refused = e.message; }
         check("8: the switch refuses while a document is being posted", /posting a document right now/.test(refused), refused || "went through");
       }
       await q("rollback to savepoint claimed");
 
-      const r1 = (await q("select public.zoho_switch_org($1, $2, false, null) as r", [testOrg, SIM]))[0].r;
+      // The switch runs once in the life of the books: after go-live it refuses for good (checked under its lock).
+      await q("savepoint once");
+      await q("update public.settings set value = to_jsonb('2026-11-01T00:00:00Z'::text) where key = 'zoho_went_live_at'");
+      let once = "";
+      try { await q("select public.zoho_switch_org($1, $2, false, null, null)", [testOrg, SIM]); } catch (e) { once = e.message; }
+      check("8: once the books went live, the switch refuses to run again", /already went live/.test(once), once || "went through");
+      await q("rollback to savepoint once");
+
+      const r1 = (await q("select public.zoho_switch_org($1, $2, false, null, null) as r", [testOrg, SIM]))[0].r;
       const mid = await snap(testOrg);
       check("8: away from OFJ TEST: its whole queue is archived, the queue is empty, every stored Zoho id cleared", mid.outbox === 0 && mid.archived === before.archived + before.outbox && mid.ids === 0 && r1.archived === before.outbox, JSON.stringify({ before, mid, r1 }));
       check("8: the simulation never turned the books live", mid.live === false, JSON.stringify(mid.live));
 
-      const r2 = (await q("select public.zoho_switch_org($1, $2, false, null) as r", [SIM, testOrg]))[0].r;
+      const r2 = (await q("select public.zoho_switch_org($1, $2, false, null, null) as r", [SIM, testOrg]))[0].r;
       const back = await snap(testOrg);
       const mism = Number((await q(`select (
           (select count(*) from public.customers t join public.zoho_outbox o on o.kind = 'contact' and o.record_id = t.id and o.status = 'synced' and o.zoho_id is not null where t.zoho_contact_id is distinct from o.zoho_id)

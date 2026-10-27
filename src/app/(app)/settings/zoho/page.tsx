@@ -16,7 +16,8 @@ import {
   type ZohoOrg,
 } from "@/lib/zoho";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
-import { disconnectZohoAction, flipGoLive, flipGoLiveBack, mirrorZohoAction, setGoLiveStartDate, setZohoTestOrg } from "./actions";
+import { disconnectZohoAction, finishGoLiveFollowup, flipGoLive, flipGoLiveBack, mirrorZohoAction, resumeGoLive, setGoLiveStartDate, setZohoTestOrg } from "./actions";
+import { wentLiveOf } from "@/lib/zoho-sync";
 import { goLiveChecklist } from "@/lib/zoho-golive";
 import { getSettings } from "@/lib/settings";
 import { Field, Input } from "@/components/ui";
@@ -181,30 +182,48 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
       ))}
 
       {await (async () => {
-        // Phase 4: the go-live panel — the checklist (all green or the switch stays locked), the start date,
-        // the typed confirmation, and the logged way back.
+        // Phase 4: the go-live panel. Before go-live: the checklist (all green or the switch stays locked), the start
+        // date and the typed confirmation. After it (once in the books' life): Stop / Resume posting to the REAL book.
         const checklist = await goLiveChecklist({ checkReal: !!conn });
-        const log = Array.isArray((await getSettings()).zoho_golive_log) ? ((await getSettings()).zoho_golive_log as { action?: string; name?: string; at?: string; reason?: string; start_date?: string }[]) : [];
+        const settings = await getSettings();
+        const wentLive = wentLiveOf(settings);
+        const stopped = wentLive && !checklist.live;
+        const followup = (settings.zoho_golive_followup ?? {}) as { pending?: boolean; since?: string };
+        const log = Array.isArray(settings.zoho_golive_log) ? (settings.zoho_golive_log as { action?: string; name?: string; at?: string; reason?: string; start_date?: string }[]) : [];
+        const logWords = (l: { action?: string; reason?: string; start_date?: string }) =>
+          l.action === "live" ? `LIVE from ${l.start_date}` : l.action === "stop" ? `stopped (${l.reason})` : l.action === "resume" ? "resumed" : `back (${l.reason})`;
         return (
-          <Card className={`flex flex-col gap-3 ${checklist.live ? "border-red-bar" : ""}`} data-golive-panel>
-            <SectionLabel right={checklist.live ? "LIVE" : checklist.allGreen ? "Ready" : "Not yet"}>Go-live</SectionLabel>
+          <Card className={`flex flex-col gap-3 ${checklist.live ? "border-red-bar" : ""}`} data-golive-panel data-golive-state={checklist.live ? "live" : stopped ? "stopped" : "test"}>
+            <SectionLabel right={checklist.live ? "LIVE" : stopped ? "STOPPED" : checklist.allGreen ? "Ready" : "Not yet"}>Go-live</SectionLabel>
+            {followup.pending ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-control bg-red-soft p-3" data-golive-followup>
+                <p className="text-sm font-semibold text-red flex-1 min-w-60">The documents from the start date have not been queued for the REAL book yet. Run it now — nothing is ever queued twice.</p>
+                <form action={finishGoLiveFollowup}>
+                  <Button type="submit" tone="danger" size="md" data-golive-followup-btn>Finish the go-live queue</Button>
+                </form>
+              </div>
+            ) : null}
             {checklist.live ? (
-              <Notice tone="error">The books are LIVE on the REAL organization (942979945). OFJ TEST is closed to writes. Documents from {checklist.startDate || "the start date"} post for real.</Notice>
+              <Notice tone="error">The books are LIVE on the REAL organization (942979945) from {checklist.startDate || "the start date"}. OFJ TEST is closed for good.</Notice>
+            ) : stopped ? (
+              <Notice tone="error">Posting to the REAL book is STOPPED. Nothing posts to any Zoho book; new documents wait in the queue until Resume. OFJ TEST stays closed for good.</Notice>
             ) : (
-              <p className="text-sm text-muted">The switch moves every write from OFJ TEST to the REAL book — only once every line below is green. At the flip, OFJ TEST&apos;s queue is archived and everything dated from the start date is posted again to the REAL book; anything earlier stays in OFJ TEST (the accountant carries it over as opening balances).</p>
+              <p className="text-sm text-muted">The switch moves every write from OFJ TEST to the REAL book, once — only when every line below is green. At the flip, OFJ TEST&apos;s queue is archived and everything dated from the start date is posted to the REAL book; anything earlier stays in OFJ TEST (the accountant carries it over as opening balances), and anything earlier that never reached OFJ TEST shows red for entry by hand.</p>
             )}
-            <ul className="flex flex-col divide-y divide-line" data-golive-checklist>
-              {checklist.items.map((i) => (
-                <li key={i.key} className="py-2 flex flex-col gap-0.5" data-golive-item={i.key} data-golive-ok={i.ok ? "1" : "0"}>
-                  <div className="flex items-center gap-2">
-                    <Badge tone={i.ok ? "green" : "red"}>{i.ok ? "✓" : "✗"}</Badge>
-                    <span className="font-semibold text-sm">{i.label}</span>
-                  </div>
-                  <p className={`text-xs ${i.ok ? "text-muted" : "font-semibold text-red"}`}>{i.detail}</p>
-                </li>
-              ))}
-            </ul>
-            {!checklist.live ? (
+            {!wentLive ? (
+              <ul className="flex flex-col divide-y divide-line" data-golive-checklist>
+                {checklist.items.map((i) => (
+                  <li key={i.key} className="py-2 flex flex-col gap-0.5" data-golive-item={i.key} data-golive-ok={i.ok ? "1" : "0"}>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={i.ok ? "green" : "red"}>{i.ok ? "✓" : "✗"}</Badge>
+                      <span className="font-semibold text-sm">{i.label}</span>
+                    </div>
+                    <p className={`text-xs ${i.ok ? "text-muted" : "font-semibold text-red"}`}>{i.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {!wentLive ? (
               <div className="flex flex-col gap-3">
                 <form action={setGoLiveStartDate} className="flex flex-wrap items-end gap-2">
                   <Field label="Go-live start date" hint="The first day the REAL book owns. The switch unlocks on that day, never before.">
@@ -213,24 +232,31 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
                   <Button type="submit" tone="secondary" size="md" data-golive-date-save>Save the date</Button>
                 </form>
                 <form action={flipGoLive} className="flex flex-wrap items-end gap-2 rounded-control border border-red-bar p-3" data-golive-flip>
-                  <Field label='Type REAL to confirm' hint="Writes re-point to O F J AUTOMOTIVE WORKS LLC (942979945). OFJ TEST closes.">
+                  <Field label='Type REAL to confirm' hint="Once only: writes move to O F J AUTOMOTIVE WORKS LLC (942979945) and OFJ TEST closes for good.">
                     <Input name="confirm" placeholder="REAL" className="w-44" autoComplete="off" />
                   </Field>
                   <Button type="submit" tone="danger" size="md" disabled={!checklist.allGreen} data-golive-flip-btn>Go live on the REAL organization</Button>
                   {!checklist.allGreen ? <span className="text-xs font-semibold text-red">Locked until every line above is green.</span> : null}
                 </form>
               </div>
-            ) : (
+            ) : checklist.live ? (
               <form action={flipGoLiveBack} className="flex flex-wrap items-end gap-2" data-golive-back>
-                <Field label="Reason for going back to OFJ TEST" hint="Logged, and accounts are told.">
+                <Field label="Reason for stopping" hint="Pauses posting to the REAL book (nothing goes to OFJ TEST). Logged, and accounts are told.">
                   <Input name="reason" className="w-80" />
                 </Field>
-                <Button type="submit" tone="danger" size="md" data-golive-back-btn>Back to OFJ TEST</Button>
+                <Button type="submit" tone="danger" size="md" data-golive-back-btn>Stop posting to the REAL book</Button>
+              </form>
+            ) : (
+              <form action={resumeGoLive} className="flex flex-wrap items-end gap-2 rounded-control border border-red-bar p-3" data-golive-resume>
+                <Field label="Type REAL to resume" hint="The waiting documents post to the REAL book in order.">
+                  <Input name="confirm" placeholder="REAL" className="w-44" autoComplete="off" />
+                </Field>
+                <Button type="submit" tone="danger" size="md" data-golive-resume-btn>Resume posting to the REAL book</Button>
               </form>
             )}
             {log.length ? (
               <p className="text-xs text-muted" data-golive-log>
-                History: {log.map((l) => `${String(l.at ?? "").slice(0, 16).replace("T", " ")} ${l.action === "live" ? `LIVE from ${l.start_date}` : `back (${l.reason})`} by ${l.name}`).join(" · ")}
+                History: {log.map((l) => `${String(l.at ?? "").slice(0, 16).replace("T", " ")} ${logWords(l)} by ${l.name}`).join(" · ")}
               </p>
             ) : null}
           </Card>

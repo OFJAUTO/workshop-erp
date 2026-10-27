@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ZOHO_REAL_ORG_ID, ZohoError, zohoFetch } from "@/lib/zoho";
-import { beforeGoLiveStart, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
+import { beforeGoLiveStart, readZohoMap, reopenZoho, zohoWriteOrg, type ZohoKind } from "@/lib/zoho-sync";
 import { goLiveChecklist, reconGate, startDateGate } from "@/lib/zoho-golive";
 import { reconDue, reconOrgFor } from "@/lib/zoho-reconcile";
 import { validMonth } from "@/lib/zoho-close";
@@ -47,6 +47,13 @@ export async function POST(request: NextRequest) {
     // The PURE start-date rule, with injected values: the flip itself is never simulated against REAL.
     const cases = (body as { cases?: { docDate: string; live: boolean; startDate: string }[] }).cases ?? [];
     return NextResponse.json({ results: cases.map((c) => beforeGoLiveStart(c.docDate, c.live, c.startDate)) });
+  }
+  if (body.action === "reopen") {
+    // The hook a late file upload calls: a row closed by hand must turn red, never re-post.
+    const b = body as { kind?: ZohoKind; recordId?: string };
+    if (!b.kind || !b.recordId) return NextResponse.json({ error: "kind and recordId" }, { status: 400 });
+    await reopenZoho(b.kind, b.recordId);
+    return NextResponse.json({ ok: true });
   }
   if (body.action === "pure_rules") {
     // The review round's pure rules, with injected values (no Zoho, no flip).

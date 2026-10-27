@@ -142,9 +142,20 @@ export async function zohoAccessToken(): Promise<string> {
  * check must see a flip the moment it lands.
  */
 export async function zohoLiveNow(): Promise<boolean> {
-  const { data, error } = await createAdminClient().from("settings").select("value").eq("key", "zoho_live_enabled").maybeSingle();
+  return (await zohoBooksNow()).live;
+}
+
+/**
+ * The books' state read fresh: live (posting to REAL), and whether they EVER went live. The switch runs once:
+ * after it OFJ TEST is never written again, and "stop" only pauses posting to the REAL book (live false, wentLive true).
+ */
+export async function zohoBooksNow(): Promise<{ live: boolean; wentLive: boolean }> {
+  const { data, error } = await createAdminClient().from("settings").select("key, value").in("key", ["zoho_live_enabled", "zoho_went_live_at"]);
   if (error) throw new ZohoError(`The go-live switch could not be read: ${error.message}`);
-  return (data as { value?: unknown } | null)?.value === true;
+  const rows = (data ?? []) as { key: string; value: unknown }[];
+  const live = rows.find((r) => r.key === "zoho_live_enabled")?.value === true;
+  const went = rows.find((r) => r.key === "zoho_went_live_at")?.value;
+  return { live, wentLive: typeof went === "string" && went.trim() !== "" };
 }
 
 export async function zohoTestOrgId(): Promise<string | null> {
@@ -181,11 +192,11 @@ export async function zohoFetch<T = Record<string, unknown>>(path: string, opts:
     // organization is closed to writes too (the books live in ONE place at a time). The rule lives here, not in
     // the callers.
     if (!opts.org) throw new ZohoError("A write needs its organization.");
-    const live = await zohoLiveNow();
+    const { live, wentLive } = await zohoBooksNow();
     if (opts.org === ZOHO_REAL_ORG_ID) {
-      if (!live) throw new ZohoError("Refused: the REAL Zoho organization is read-only until the owner declares go-live. Writes go to OFJ TEST.");
-    } else if (live) {
-      throw new ZohoError("Refused: the books are LIVE on the REAL organization — OFJ TEST is closed to writes.");
+      if (!live) throw new ZohoError(wentLive ? "Refused: posting to the REAL book is stopped by the owner (Resume on Settings > Zoho Books)." : "Refused: the REAL Zoho organization is read-only until the owner declares go-live. Writes go to OFJ TEST.");
+    } else if (live || wentLive) {
+      throw new ZohoError("Refused: the books went LIVE on the REAL organization — OFJ TEST is closed to writes for good.");
     }
   }
   const run = chain.then(async () => {

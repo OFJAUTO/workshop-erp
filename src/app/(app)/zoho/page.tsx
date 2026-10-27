@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { zohoOpenUrl, zohoWriteOrg, type OutboxRow, type ZohoKind } from "@/lib/zoho-sync";
+import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow, type ZohoKind } from "@/lib/zoho-sync";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
 import { backfillZoho, markZohoDoneByHand, retryZohoRow, syncZohoNow, tickGoLiveReview } from "./actions";
 
@@ -76,7 +76,7 @@ function resultWords(row: OutboxRow): string | null {
   }
   const amount = typeof r.amount === "number" ? aed(r.amount) : null;
   const charge = typeof r.bank_charges === "number" && r.bank_charges > 0 ? ` · bank charge ${aed(r.bank_charges)}` : "";
-  return amount ? `${r.kind === "advance" ? "Advance" : "Payment"} in Zoho: ${amount}${charge}` : null;
+  return amount ? `${r.kind === "advance" ? "Advance" : "Payment"} in Zoho: ${amount}${charge}` : typeof r.note === "string" ? r.note : null;
 }
 
 export default async function ZohoSyncPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string }> }) {
@@ -128,12 +128,14 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   const counts = Object.fromEntries(FILTERS.map((f) => [f.key, f.key === "all" ? rows.length : rows.filter((r) => r.status === f.key).length]));
   const filtered = show === "all" ? rows : rows.filter((r) => r.status === show);
   const live = settings.zoho_live_enabled === true;
+  const stopped = !live && wentLiveOf(settings);
+  const followupPending = (settings.zoho_golive_followup as { pending?: boolean } | undefined)?.pending === true;
 
   return (
     <>
       <PageHeader
         title="Zoho Books sync"
-        subtitle={`One-way: the ERP posts customers, deposits, tax invoices and payments to Zoho. ${live ? "LIVE: writes go to the REAL organization." : `Writes go to OFJ TEST only (${org ?? "no test organization picked"}); the REAL book (${ZOHO_REAL_ORG_ID}) stays read-only until go-live.`}`}
+        subtitle={`One-way: the ERP posts its documents to Zoho. ${live ? "LIVE: writes go to the REAL organization." : stopped ? "STOPPED by the owner: nothing posts to any Zoho book until Resume; documents wait in the queue." : `Writes go to OFJ TEST only (${org ?? "no test organization picked"}); the REAL book (${ZOHO_REAL_ORG_ID}) stays read-only until go-live.`}`}
         actions={
           <span className="flex flex-wrap gap-2">
             <LinkButton href="/zoho/reconciliation" tone="secondary">Reconciliation</LinkButton>
@@ -144,6 +146,11 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {followupPending ? (
+        <div data-zoho-followup-warning>
+          <Notice tone="error">The go-live queue is not finished: the documents from the start date are not all queued for the REAL book yet. The owner presses &quot;Finish the go-live queue&quot; on Settings &gt; Zoho Books.</Notice>
+        </div>
+      ) : null}
 
       <Card className="flex flex-wrap items-center gap-2" data-zoho-controls>
         {!staff.viewingAs ? (

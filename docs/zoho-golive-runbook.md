@@ -1,70 +1,114 @@
 # Zoho Books go-live runbook — who does what, in order
 
 For Omar (owner) and Mathew (accounts). Today every document posts to **OFJ TEST** (organization 944122733).
-Go-live means new documents start posting to the **REAL** book (organization 942979945) instead. Nothing is
-re-typed: the ERP keeps doing the posting; this runbook is only about flipping where it posts.
+Go-live means new documents post to the **REAL** book (O F J AUTOMOTIVE WORKS LLC, organization 942979945)
+instead. Nothing is re-typed: the ERP keeps doing the posting. This runbook is only about moving where it posts.
+
+The one idea to keep in mind: **the start date is the line between the two books.** Everything dated before it
+stays in OFJ TEST's history (and reaches the REAL book only as Mathew's opening balances). Everything dated on or
+after it posts to the REAL book by itself.
 
 ---
 
 ## Step 1 — Mathew prepares the REAL book (in Zoho itself)
 
 1. Sign in to Zoho Books and open the **real OFJ organization** (not OFJ TEST).
-2. Open the ERP at **Settings → Zoho Books → Account mapping**. Every name shown on that page must exist in the
-   REAL book's chart of accounts **with the same spelling** (Sales - Labour, Sales - Parts, the deposit accounts,
-   Parts purchases, Courier, Commission, Recovery, the paid-from bank, and so on). Create any that are missing
-   in Zoho: Accountant → Chart of Accounts → New Account.
-3. Make sure the **5% VAT tax** exists in the REAL book (it does by default in a UAE organization).
-4. Do **not** create customers, invoices or bills by hand — the ERP creates those itself after the flip.
+2. In the ERP open **Settings → Zoho Books → Account mapping**. Every name on that page must exist in the REAL
+   chart of accounts **spelt the same** (Sales - Labour, Sales - Parts, the deposit-to accounts, Parts purchases,
+   Courier, Commission, Recovery, the paid-from bank, the refund account, and so on). Create any that are missing in
+   Zoho: Accountant → Chart of Accounts → New Account.
+3. The **5% VAT tax** must exist in the REAL book (it does by default in a UAE organization).
+4. Check the **numbering**: the ERP posts its own numbers (INV-…, CN-…, the supplier's invoice number on bills).
+   If the REAL book already holds hand-made documents with the same numbers, those rows turn red ("already exists
+   … the accountant checks it") — nothing is ever overwritten. Tell Omar before the flip if that is likely.
+5. Do **not** create customers, invoices or bills by hand for anything from the start date on — the ERP does that.
 
 ## Step 2 — Mathew checks the TEST books are clean (in the ERP)
 
-1. Open **/zoho** (the Zoho Books sync page). The red "Failed" filter must show **zero** rows. Every red row says
-   in plain words what to fix (for example a supplier's missing TRN on Parts → Suppliers) — fix it, press **Retry**.
-2. Open **Parts → Suppliers**: every supplier has their 15-digit TRN. A supplier who genuinely charges no VAT
-   gets the **"VAT registered"** box unticked instead (then no TRN is needed).
-3. Open **/zoho/reconciliation**. Press **"Check the missing days"** until the whole period is covered (it does up
-   to 40 days per press). The last **seven days must all be green**. A red day shows the exact difference —
-   usually a failed sync; fix it on /zoho, then press **Re-check** on that day.
-4. Open **/zoho/close** for the last full month. Every line should be green, or understood (for example invoices
-   that are genuinely still unpaid). The **Excel export** button gives the accountant a copy.
-5. When the TEST books match and Mathew is satisfied, he presses **"I have reviewed the TEST books"** on the
-   /zoho page — **from his own login**. (The button only appears for accounts; Omar cannot tick it for him.)
+1. Open **/zoho** (the Zoho Books sync page). The **Failed** filter must show **zero** rows. Each red row says in
+   plain words what to fix (often a supplier's TRN on **Parts → Suppliers**, or the "VAT registered" tick for a
+   supplier who charges no VAT) — fix it and press **Retry**. A row that was settled in Zoho by hand (a void, a
+   correction) is closed with **"Done by hand in Zoho…"**: type what was done, press **Close the row**.
+2. Open **/zoho/reconciliation**. Press **"Check every missing day"** until every day is covered (40 days per
+   press). **The last seven calendar days must all be green.** A red day names the exact difference — usually a
+   failed row on /zoho; fix it, then press **Re-check** on that day.
+3. Open **/zoho/close** for the last full month. Every line should be green or understood (invoices genuinely still
+   unpaid, for example). **Excel export** gives the accountant a copy.
+4. When the TEST books match and he is satisfied, Mathew presses **"The review is done"** on /zoho — **from his own
+   login** (the button only exists for accounts). *Mathew ticked this on 27 October 2026 at 09:16.*
 
-## Step 3 — Omar flips the switch (in the ERP)
+## Step 3 — Omar chooses the start date (in the ERP)
 
-1. Open **Settings → Zoho Books**, the **Go-live** panel. Six lines must all be green:
-   - Mathew's review tick,
-   - the mapping is complete,
-   - every mapped name exists in the REAL book (checked live when the panel loads),
-   - no failed syncs,
-   - the last seven reconciliation days are green,
-   - a start date is chosen.
-2. Pick the **start date** — normally the 1st of the coming month. **Documents dated before the start date never
-   post to the REAL book** (they stay in OFJ TEST, which keeps its history). So pick the date the real books
-   should begin, agreed with Mathew.
-3. Type **REAL** in the confirm box and press the button. It stays locked until every line above is green, and
-   the server checks all six gates again at the moment of the press.
-4. From that moment: new documents (dated on or after the start date) post to the REAL organization only, and
-   **OFJ TEST is closed to writes**. The flip is logged with who and when, and accounts get a bell.
+1. Open **Settings → Zoho Books**, the **Go-live** panel.
+2. Under **Go-live start date** pick the first day the REAL book owns — normally the **1st of a month** — and press
+   **Save the date**. Agree it with Mathew: it is the date of his opening balances.
+3. The switch stays **locked until that day arrives** (a flip before it would leave the days in between in neither
+   book). Flipping a few days *after* the start date is fine: the flip posts everything from the start date that was
+   already made in the ERP into the REAL book.
 
-## Step 4 — the first days after the flip (Mathew)
+## Step 4 — Omar flips the switch (on the start date, or after it)
 
-- Watch **/zoho** daily. A red row says what to fix in plain words, then Retry.
-- **/zoho/reconciliation** checks yesterday by itself every morning: red = the exact difference plus a bell to
-  Omar and Mathew. It should be green every day.
-- Before closing a month in Zoho, open **/zoho/close** for that month and clear every red line.
+1. On the same panel, six lines must all be green:
+   - Mathew's review tick;
+   - the mapping is complete;
+   - every mapped name exists in the REAL book (checked live when the panel opens);
+   - no failed syncs;
+   - the last seven calendar days reconciled green;
+   - the start date is chosen and has arrived.
+2. Type **REAL** in the confirm box and press **Go live on the REAL organization**. The server checks all six lines
+   again at that moment, and refuses if the sync is posting a document right then ("try again in a minute").
+3. What the button does — **once in the life of the books**, in one step that cannot half-happen:
+   - OFJ TEST's queue is put away (archived — nothing is lost), and every Zoho reference the ERP held (all of them
+     OFJ TEST's) is cleared, so nothing from the trial book can leak into the real one;
+   - the day-by-day comparisons from the start date are cleared (they were made against OFJ TEST; those days now
+     belong to the REAL book and are checked again);
+   - the switch turns on: from now on only the REAL book is written, and **OFJ TEST is closed for good**;
+   - every document dated from the start date is queued for the REAL book (the message says how many), and the
+     five-minute sync posts them — customers and suppliers are created (or found) in the REAL book as each document
+     needs them;
+   - every document dated **before** the start date that never reached OFJ TEST (it was still waiting there, for
+     example a supplier credit waiting for a bill) is shown **red** on /zoho, to be entered by hand.
+4. The flip is logged with who and when, and Omar and Mathew get a bell. If the queuing part ever fails, the panel
+   and the sync page show a red line and a button **"Finish the go-live queue"** — press it (nothing is ever queued
+   twice).
+5. When the sync page shows nothing waiting (usually within the hour), Mathew opens **/zoho/reconciliation** and
+   presses **"Check every missing day"**: the days from the start date are compared with the REAL book.
+
+## Step 5 — Mathew, on the start date and the days after
+
+1. **Opening balances.** Documents dated before the start date never post automatically. Open **/zoho/close** for
+   the month before the start date: its **unpaid tax invoices**, **deposits held on open jobs** and **supplier bills
+   unpaid** are exactly the opening balances to enter by hand in the REAL book.
+2. **Red rows on /zoho are the by-hand list.** Each says what to do in Zoho; once done, press **"Done by hand in
+   Zoho…"**, type what was done, **Close the row**. The cases:
+   - a payment received after go-live on an invoice from before it — it DID post (unapplied): apply it to the
+     opening-balance invoice in Zoho;
+   - an invoice from after go-live whose deposit was taken before it — the invoice DID post: apply the opening
+     advance to it in Zoho (otherwise the REAL book shows that money as still owed);
+   - a supplier credit on a bill from before go-live — it DID post (unapplied): apply it to the opening bill;
+   - a credit note, refund or supplier payment against a document from before go-live, a supplier invoice typed late
+     with an old date, or anything dated before the start that never reached OFJ TEST — nothing posted: enter it by
+     hand;
+   - a void, a bounced cheque or a corrected supplier invoice on a document from before go-live — it sits in the
+     opening balances: correct it there by hand.
+3. Watch **/zoho** daily. **/zoho/reconciliation** checks yesterday by itself every morning (from 00:30, once the
+   queue has caught up), re-checks a red day every hour, and compares each day with the book that owns it — OFJ TEST
+   before the start date, REAL from it. A day that turns red rings one bell.
+4. Before closing a month in Zoho, open **/zoho/close** for it and clear every red line.
 
 ## If something goes wrong (Omar)
 
-On the same Go-live panel there is **"Back to OFJ TEST"** — it needs a written reason and is logged. The sync
-stops writing to the REAL book immediately; documents that already posted stay there (nothing is deleted).
-Fix the problem, then flip forward again the same way (all six gates must be green again).
+On the same panel, **"Stop posting to the REAL book"** needs a written reason and is logged; accounts get a bell.
+It is a pause: nothing is written to any Zoho book (OFJ TEST stays closed — the go-live switch runs only once), and
+every new document waits in the queue. **Nothing already posted is removed.** When the problem is fixed, type
+**REAL** and press **"Resume posting to the REAL book"**: the waiting documents post in order.
 
 ---
 
 ### What nobody needs to do
 
 - No numbers are re-typed: the ERP's invoice, credit-note and receipt numbers are used as they are.
-- Deposits stay unapplied in Zoho until their invoice exists, then the invoice takes them — automatic.
-- Supplier bills carry the invoice's own figures, the courier as its own line, and the scan attached — automatic.
-- The hourly sync runs by itself on the live server; **"Sync now"** on /zoho is only for impatience.
+- Deposits stay unapplied in Zoho until their invoice exists; then the invoice takes them.
+- Supplier bills carry the supplier's own figures, the courier as its own line and the scan attached; a supplier
+  credit (a part returned to the supplier) waits for its bill and is applied to it.
+- The sync runs by itself every five minutes on the live server; **Sync now** on /zoho is only for impatience.

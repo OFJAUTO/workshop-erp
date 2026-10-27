@@ -4,7 +4,7 @@ import { round2 } from "@/lib/money";
 import { notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ZOHO_REAL_ORG_ID, zohoFetch, zohoLiveNow, zohoTestOrgId } from "@/lib/zoho";
+import { ZOHO_REAL_ORG_ID, zohoBooksNow, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
 import { beforeGoLiveStart, billErpFigures, poForZoho } from "@/lib/zoho-sync";
 
 /**
@@ -44,15 +44,15 @@ function dayBounds(day: string): { from: string; to: string } {
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
-/** PURE: the book that owns a day — REAL once live from the start date on, OFJ TEST for everything else. */
-export function reconOrgFor(day: string, live: boolean, startDate: string, testOrg: string | null): string | null {
-  return live && !beforeGoLiveStart(day, live, startDate) ? ZOHO_REAL_ORG_ID : testOrg;
+/** PURE: the book that owns a day — REAL from the start date on once the books went live (posting or stopped), OFJ TEST for everything else. */
+export function reconOrgFor(day: string, wentLive: boolean, startDate: string, testOrg: string | null): string | null {
+  return wentLive && !beforeGoLiveStart(day, wentLive, startDate) ? ZOHO_REAL_ORG_ID : testOrg;
 }
 
 /** The organization for a day, with the go-live switch read fresh. */
 async function orgForDay(day: string): Promise<string | null> {
-  const [live, settings, testOrg] = await Promise.all([zohoLiveNow(), getSettings(), zohoTestOrgId()]);
-  return reconOrgFor(day, live, String(settings.zoho_golive_start_date ?? ""), testOrg);
+  const [state, settings, testOrg] = await Promise.all([zohoBooksNow(), getSettings(), zohoTestOrgId()]);
+  return reconOrgFor(day, state.live || state.wentLive, String(settings.zoho_golive_start_date ?? ""), testOrg);
 }
 
 /**
@@ -93,7 +93,9 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
   const admin = createAdminClient();
   const { from, to } = dayBounds(day);
   // The outbox rows of the organization being compared: the live queue for the current book, the archive for the other.
-  const currentOrg = (await zohoLiveNow()) ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
+  // After go-live the current queue holds the REAL book's rows (posting or stopped).
+  const books = await zohoBooksNow();
+  const currentOrg = books.live || books.wentLive ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
   const outboxRow = async (kind: string, recordId: string): Promise<{ status: string; zoho_result: Record<string, unknown> | null } | null> => {
     const q = org === currentOrg ? admin.from("zoho_outbox").select("status, zoho_result") : admin.from("zoho_outbox_archive").select("status, zoho_result").eq("org", org);
     const { data } = await q.eq("kind", kind).eq("record_id", recordId).maybeSingle();

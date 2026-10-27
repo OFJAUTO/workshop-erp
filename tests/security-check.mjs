@@ -49,7 +49,7 @@ for (const t of SERVER_ONLY) {
 }
 
 // 4b. The go-live switch (archives the Zoho queue, clears every stored Zoho id, flips the books) runs for the server only.
-const switchFn = await q(`select has_function_privilege('authenticated', 'public.zoho_switch_org(text, text, boolean, uuid)', 'execute') as auth, has_function_privilege('anon', 'public.zoho_switch_org(text, text, boolean, uuid)', 'execute') as anon`);
+const switchFn = await q(`select has_function_privilege('authenticated', 'public.zoho_switch_org(text, text, boolean, uuid, date)', 'execute') as auth, has_function_privilege('anon', 'public.zoho_switch_org(text, text, boolean, uuid, date)', 'execute') as anon`);
 check("the Zoho go-live switch cannot be run by a browser session", switchFn[0] && !switchFn[0].auth && !switchFn[0].anon, JSON.stringify(switchFn[0]));
 
 // 5. Live probe as anon: sensitive tables and columns give nothing away.

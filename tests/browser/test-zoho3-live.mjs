@@ -34,6 +34,7 @@ async function settled(kind, recordId, tries = 4) {
 }
 const enqueue = (kind, recordId, jobId = null) => sql("insert into public.zoho_outbox (kind, record_id, job_id) values ($1, $2, $3) on conflict (kind, record_id) do update set status = 'pending', last_error = null, claimed_at = null", [kind, recordId, jobId]);
 const RUN = Date.now().toString(36);
+const STARTED = new Date().toISOString();
 const TODAY = new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
 
 let jobId = null;
@@ -110,6 +111,8 @@ await section("b2 credit before the bill", async () => {
   );
   await enqueue("vendorcredit", part.id, jobId);
   await cron();
+  // The bill row is made DURING that run, so it gets its first look (and its reason) on the next one.
+  await cron();
   const waiting = await row("vendorcredit", part.id);
   check("b2: the credit waits for the bill (nothing posted alone)", waiting?.status === "pending" && /Waiting for the bill of LPO-E2E9-/.test(waiting?.last_error ?? "") && !waiting?.zoho_id, JSON.stringify(waiting)?.slice(0, 220));
   const billRow = await row("bill", po2.id);
@@ -168,6 +171,31 @@ await section("c customer refund", async () => {
   check("c: the refund id is stored", !!stored?.zoho_refund_id, JSON.stringify(stored));
 });
 
+/* ---------------- (e) children of an invoice that was closed "Done by hand" never wait forever ---------------- */
+await section("e children of a hand-closed invoice", async () => {
+  const [inv] = await sql(
+    "insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, token, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed) values ($1, 'tax_invoice', $2, $3, $4, $5, 400, 0, 400, 20, 420) returning id, number",
+    [`TINV-${RUN}-H`, jobId, customerId, vehicleId, `e2e${RUN}hh`],
+  );
+  // The accountant settled it by hand in Zoho: the row is closed with no Zoho id in the ERP.
+  await sql("insert into public.zoho_outbox (kind, record_id, job_id, status, synced_at, zoho_result) values ('invoice', $1, $2, 'synced', now(), $3::jsonb)", [inv.id, jobId, JSON.stringify({ manual: true, name: "E2e", at: new Date().toISOString(), note: "E2e: entered by hand" })]);
+  const [cn] = await sql(
+    "insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, credit_of, token, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed) values ($1, 'credit_note', $2, $3, $4, $5, $6, 100, 0, 100, 5, 105) returning id",
+    [`TCN-${RUN}-H`, jobId, customerId, vehicleId, inv.id, `e2e${RUN}hc`],
+  );
+  await sql("insert into public.invoice_lines (invoice_id, position, section, description, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed) values ($1, 0, 'services', 'E2e credit', 1, 100, 100, 5, 105, 0)", [cn.id]);
+  await enqueue("creditnote", cn.id, jobId);
+  const cnRow = await settled("creditnote", cn.id);
+  check("e: a credit note on it turns red with the by-hand words (no endless wait)", cnRow?.status === "failed" && /settled by hand in Zoho/.test(cnRow?.last_error ?? "") && !cnRow?.zoho_id, JSON.stringify(cnRow)?.slice(0, 260));
+  const [pay] = await sql(
+    "insert into public.payments (number, job_id, invoice_id, customer_id, method, amount_aed, bank_charge_aed, is_deposit, status, received_at) values ($1, $2, $3, $4, 'cash', 420, 0, false, 'recorded', now()) returning id",
+    [`TRCT-${RUN}-H`, jobId, inv.id, customerId],
+  );
+  await enqueue("payment", pay.id, jobId);
+  const payRow = await settled("payment", pay.id);
+  check("e: a payment on it still POSTS (real money), unapplied, and shows red for the by-hand application", payRow?.status === "failed" && !!payRow?.zoho_id && payRow?.zoho_result?.amount === 420 && /Posted unapplied: TINV-.*settled by hand/.test(payRow?.last_error ?? ""), JSON.stringify(payRow)?.slice(0, 300));
+});
+
 /* ---------------- (d) the reconciliation catches a broken day, then goes back once fixed ---------------- */
 // On a test day Zoho TEST already holds documents whose ERP rows earlier suites cleaned away, so the day's
 // baseline may be red by itself. The proof is therefore count-based: breaking the day moves the ERP count up by
@@ -181,6 +209,11 @@ await section("d reconciliation", async () => {
   check("d: today reconciles after the seeds (baseline)", base1.ok === true && ["green", "red"].includes(base1.status), JSON.stringify(base1));
   const base = await invSectionOf();
   const gap0 = (base.s?.zoho?.count ?? 0) - (base.s?.erp?.count ?? 0);
+  // A test day is red by itself (Zoho TEST keeps what earlier cleanups removed from the ERP), and a day that is
+  // ALREADY red rings nothing new. So the day is marked green first: turning red must then ring exactly once.
+  await sql("update public.zoho_reconciliation set status = 'green' where day = $1", [TODAY]);
+  const bells = async () => Number((await sql("select count(*)::int as n from public.notifications where type = 'zoho_reconciliation' and title like $1 and created_at >= $2", [`%${TODAY}`, STARTED]))[0]?.n ?? 0);
+  const bellsBefore = await bells();
   // Break the day: a tax invoice that exists ONLY in the ERP (never queued).
   const [ghost] = await sql(
     "insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, token, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed) values ($1, 'tax_invoice', $2, $3, $4, $5, 1000, 0, 1000, 50, 1050) returning id",
@@ -193,8 +226,10 @@ await section("d reconciliation", async () => {
   check("d: the row names the exact difference on tax invoices", after.s?.ok === false && /in the ERP vs .* in Zoho/.test(after.s?.diff ?? ""), JSON.stringify(after.s));
   const [orgRow] = await sql("select details->>'org' as org, details->>'orgLabel' as label from public.zoho_reconciliation where day = $1", [TODAY]);
   check("d: the day is compared against the book that owns it (OFJ TEST)", orgRow?.org === "944122733" && orgRow?.label === "OFJ TEST", JSON.stringify(orgRow));
-  const bell = (await sql("select id from public.notifications where type = 'zoho_reconciliation' and created_at > now() - interval '10 minutes' limit 1"))[0];
-  check("d: a red day rang the bell (owner + accounts)", !!bell, JSON.stringify(bell));
+  const bellsRed = await bells();
+  check("d: turning red rang the bell (owner + accounts)", bellsRed > bellsBefore, `${bellsBefore} -> ${bellsRed}`);
+  await cron(`?reconcile=${TODAY}`);
+  check("d: still red on a re-check: no second bell (one per red episode)", (await bells()) === bellsRed, `${bellsRed} -> ${await bells()}`);
   // Fix it: the missing invoice posts, the day re-checks and the gap returns to the baseline.
   await enqueue("invoice", ghost.id, jobId);
   const ghostRow = await settled("invoice", ghost.id);
@@ -215,5 +250,6 @@ if (process.env.KEEP) {
 }
 cleanupDb();
 await cron(`?reconcile=${TODAY}`);
-await sql("delete from public.notifications where type = 'zoho_reconciliation' and created_at > now() - interval '2 hours'").catch(() => null);
+// Only the bells this run caused (today's title, created since it started) leave; a real one never does.
+await sql("delete from public.notifications where type = 'zoho_reconciliation' and title like $1 and created_at >= $2", [`%${TODAY}`, STARTED]).catch(() => null);
 process.exit(summary() ? 1 : 0);

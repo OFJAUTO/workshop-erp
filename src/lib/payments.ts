@@ -10,7 +10,7 @@ import { depositState } from "./deposits";
 import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 import { createAdminClient } from "./supabase/admin";
-import { flagZohoAttention, tryEnqueueZoho } from "./zoho-sync";
+import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "./zoho-sync";
 
 /** Who records: a staff member, or the payment gateway (no id). */
 export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
@@ -173,8 +173,18 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   const p = toPayment(raw as Record<string, unknown>);
   if (p.status === "voided") return { error: "Already voided." };
   await admin.from("payments").update({ status: "voided", void_reason: clean, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
-  // A receipt that already reached Zoho cannot be unposted from here: the row turns red for accounts to fix by hand.
-  if ((raw as Record<string, unknown>).zoho_payment_id) await flagZohoAttention(p.is_deposit ? "deposit" : "payment", paymentId, `${p.number} was voided in the ERP after it reached Zoho: remove the payment in Zoho by hand. Reason: ${clean}`);
+  // A receipt that already reached a Zoho book cannot be unposted from here: the row turns red for accounts to fix
+  // by hand — including, after go-live, one that sits in the REAL book's opening balances.
+  const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId);
+  if (where) {
+    await flagZohoAttention(
+      p.is_deposit ? "deposit" : "payment",
+      paymentId,
+      where === "opening"
+        ? `${p.number} was voided after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand". Reason: ${clean}`
+        : `${p.number} was voided in the ERP after it reached Zoho: remove the payment in Zoho by hand, then press "Done by hand". Reason: ${clean}`,
+    );
+  }
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) voided by ${actor.display_name}: ${clean}`, created_by: actor.id });
   if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
   await notifyRoles(["owner"], { type: "payment_void", title: `Receipt voided · ${p.number}`, body: `${money(p.amount_aed)} voided by ${actor.display_name}: ${clean}`, jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });

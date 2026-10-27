@@ -27,15 +27,21 @@ function readDiscounts(formData: FormData): { default_discount_percent: number; 
   return { default_discount_percent: pct(formData.get("discount_default")) ?? 0, discount_by_type: byType };
 }
 
-/** The supplier's VAT switch moved: every bill of theirs already posted to Zoho is flagged for a by-hand correction. */
+/**
+ * The supplier's VAT switch moved. Bills already in Zoho keep the VAT they were posted with (the ERP never
+ * re-figures history), but one posted under the OTHER standing may be wrong — if the switch was wrong then — so
+ * each such bill turns red for the accountant to look at. A bill posted under the new standing is left alone.
+ */
 async function flagBillsAfterVatChange(supplierId: string, name: string, nowRegistered: boolean) {
   const admin = createAdminClient();
-  const { data: pos } = await admin.from("purchase_orders").select("id, number, supplier_invoice_number").eq("supplier_id", supplierId).not("zoho_bill_id", "is", null);
-  for (const po of (pos ?? []) as { id: string; number: string; supplier_invoice_number: string | null }[]) {
+  const { data: pos } = await admin.from("purchase_orders").select("id, number, supplier_invoice_number, zoho_bill_taxed").eq("supplier_id", supplierId).not("zoho_bill_id", "is", null);
+  for (const po of (pos ?? []) as { id: string; number: string; supplier_invoice_number: string | null; zoho_bill_taxed: boolean | null }[]) {
+    if (po.zoho_bill_taxed === nowRegistered) continue;
+    const posted = po.zoho_bill_taxed == null ? "under the earlier standing" : po.zoho_bill_taxed ? "with VAT" : "without VAT";
     await flagZohoAttention(
       "bill",
       po.id,
-      `${name} was marked ${nowRegistered ? "VAT registered" : "NOT VAT registered"} after the bill ${po.supplier_invoice_number ?? po.number} (${po.number}) posted ${nowRegistered ? "without" : "with"} VAT: correct its VAT in Zoho by hand, then press "Done by hand".`,
+      `${name} is now marked ${nowRegistered ? "VAT registered" : "NOT VAT registered"}. The bill ${po.supplier_invoice_number ?? po.number} (${po.number}) was posted ${posted} and keeps it. If that was wrong for this bill, correct it in Zoho by hand; either way press "Done by hand".`,
     );
   }
 }

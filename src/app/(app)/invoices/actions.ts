@@ -19,7 +19,7 @@ import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, methodsFor } from "@/lib/money-
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { flagZohoAttention, tryEnqueueZoho } from "@/lib/zoho-sync";
+import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 
 function refresh(jobId: string | null, invoiceId?: string) {
   revalidatePath("/invoices");
@@ -232,7 +232,18 @@ export async function setChequeStatus(paymentId: string, formData: FormData) {
   await admin.from("payments").update(status === "cleared" ? { cheque_status: "cleared", cleared_at: now, updated_by: staff.id } : { cheque_status: "bounced", status: "reversed", reversed_at: now, reversed_reason: "Cheque bounced", updated_by: staff.id }).eq("id", paymentId);
   // Zoho Books (one-way): a cheque counts the day it clears; a bounce after it reached Zoho turns red for accounts.
   if (status === "cleared") await tryEnqueueZoho(p.is_deposit ? "deposit" : "payment", paymentId, p.job_id, staff.id);
-  else if ((raw as Record<string, unknown>).zoho_payment_id) await flagZohoAttention(p.is_deposit ? "deposit" : "payment", paymentId, `${p.number} bounced in the ERP after it reached Zoho: remove the payment in Zoho by hand.`);
+  else {
+    const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId);
+    if (where) {
+      await flagZohoAttention(
+        p.is_deposit ? "deposit" : "payment",
+        paymentId,
+        where === "opening"
+          ? `${p.number} bounced after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand".`
+          : `${p.number} bounced in the ERP after it reached Zoho: remove the payment in Zoho by hand, then press "Done by hand".`,
+      );
+    }
+  }
   if (p.job_id) {
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: cheque ${p.cheque_number ?? ""} ${status} (${staff.display_name})`, created_by: staff.id });
     if (p.invoice_id) await settleJob(p.job_id, p.invoice_id, staff.id);

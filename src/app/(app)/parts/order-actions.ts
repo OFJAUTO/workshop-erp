@@ -18,7 +18,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
-import { flagZohoAttention, tryEnqueueZoho } from "@/lib/zoho-sync";
+import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 import { ensureWorkLines } from "@/lib/work-data";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -278,11 +278,23 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
   // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
   // already posted cannot be re-posted (never twice): the row turns red for the accountant instead.
+  // After go-live a bill from before the start date sits in the REAL book's opening balances: it is never queued
+  // again (a moved date could post it twice), a correction to it turns red instead.
   const { data: zpo } = await admin.from("purchase_orders").select("zoho_bill_id").eq("id", po.id).maybeSingle();
-  const changed = po.supplier_invoice_number && number && (po.supplier_invoice_number !== number.slice(0, 80) || (po.supplier_invoice_amount ?? null) !== (Number.isFinite(amount) && amount > 0 ? amount : null));
-  if ((zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id && changed) {
-    await flagZohoAttention("bill", po.id, `The supplier invoice on ${po.number} was changed after its bill reached Zoho (now ${number}): fix the bill in Zoho by hand.`);
-  } else {
+  const where = (zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id ? "current" : await zohoPostedSomewhere("bill", po.id);
+  const changed =
+    po.supplier_invoice_number &&
+    number &&
+    (po.supplier_invoice_number !== number.slice(0, 80) || (po.supplier_invoice_amount ?? null) !== (Number.isFinite(amount) && amount > 0 ? amount : null) || String(po.supplier_invoice_date ?? "").slice(0, 10) !== String(invoiceDate ?? "").slice(0, 10));
+  if (where && changed) {
+    await flagZohoAttention(
+      "bill",
+      po.id,
+      where === "opening"
+        ? `The supplier invoice on ${po.number} was changed after go-live (now ${number}, ${invoiceDate}); its bill reached OFJ TEST before the start date and sits in the REAL book's opening balances: correct it there by hand, then press "Done by hand".`
+        : `The supplier invoice on ${po.number} was changed after its bill reached Zoho (now ${number}, ${invoiceDate}): fix the bill in Zoho by hand, then press "Done by hand".`,
+    );
+  } else if (where !== "opening") {
     await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
   }
   return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };

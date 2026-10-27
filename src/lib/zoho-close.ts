@@ -3,7 +3,9 @@ import { payableCommissions } from "@/lib/commissions";
 import { PAYMENT_SELECT, invoiceBalance, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { ReconDetails } from "@/lib/zoho-reconcile";
+import { getSettings } from "@/lib/settings";
+import { zohoBooksNow, zohoTestOrgId } from "@/lib/zoho";
+import { reconOrgFor, type ReconDetails } from "@/lib/zoho-reconcile";
 import { billErpFigures, pageAll, poForZoho } from "@/lib/zoho-sync";
 
 /**
@@ -45,7 +47,13 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
 
   // 1. Per-method totals, summed from the stored daily reconciliation.
   const { data: reconRows } = await admin.from("zoho_reconciliation").select("day, status, details").gte("day", monthStart).lt("day", monthEnd);
-  const recon = ((reconRows ?? []) as { day: string; status: string; details: ReconDetails }[]).map((r) => ({ ...r, day: String(r.day).slice(0, 10) }));
+  // A day counts only when it was compared with the book that OWNS it (a row checked against OFJ TEST for a day the
+  // REAL book owns proves nothing about the REAL book). Rows from before the book was recorded were all OFJ TEST.
+  const [books, settings, testOrg] = await Promise.all([zohoBooksNow(), getSettings(), zohoTestOrgId()]);
+  const ownerOf = (day: string) => reconOrgFor(day, books.live || books.wentLive, String(settings.zoho_golive_start_date ?? ""), testOrg);
+  const allRows = ((reconRows ?? []) as { day: string; status: string; details: ReconDetails }[]).map((r) => ({ ...r, day: String(r.day).slice(0, 10) }));
+  const recon = allRows.filter((r) => (r.details?.org ?? testOrg) === ownerOf(r.day));
+  const otherBook = allRows.filter((r) => !recon.includes(r)).map((r) => r.day);
   const byMode: Record<string, { erp: number; zoho: number; ok: boolean }> = {};
   for (const r of recon) {
     for (const [mode, m] of Object.entries(r.details?.paymentsByMode ?? {})) {
@@ -59,7 +67,7 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
     key: "days",
     label: "Every day of the month reconciled, all green",
     ok: daysCovered >= daysInMonth && !redDays.length,
-    detail: daysCovered < daysInMonth ? `${daysCovered} of ${daysInMonth} day${daysInMonth === 1 ? "" : "s"} checked — backfill on the Reconciliation page.` : redDays.length ? `Red: ${redDays.join(", ")}` : `${daysCovered} day${daysCovered === 1 ? "" : "s"}, all green.`,
+    detail: daysCovered < daysInMonth ? `${daysCovered} of ${daysInMonth} day${daysInMonth === 1 ? "" : "s"} checked — backfill on the Reconciliation page${otherBook.length ? ` (${otherBook.join(", ")} were compared with the other book: press Re-check)` : ""}.` : redDays.length ? `Red: ${redDays.join(", ")}` : `${daysCovered} day${daysCovered === 1 ? "" : "s"}, all green.`,
   });
   const modesOk = Object.values(byMode).every((m) => m.ok);
   lines.push({
