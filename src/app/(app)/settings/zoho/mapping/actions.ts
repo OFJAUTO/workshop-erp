@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, type ZohoAccountMap } from "@/lib/zoho-sync";
+import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, SUPPLIER_PAY_METHODS, type ZohoAccountMap } from "@/lib/zoho-sync";
 
 const back = (kind: "message" | "error", text: string): never => redirect(`/settings/zoho/mapping?${kind}=${encodeURIComponent(text)}`);
 
@@ -30,6 +30,11 @@ export async function saveZohoMapping(formData: FormData) {
   }
   const paidFrom = String(formData.get("map__paid_from") ?? "").trim();
   if (paidFrom) map.paidFrom = paidFrom.slice(0, 200);
+  map.paidFromBy = {};
+  for (const m of SUPPLIER_PAY_METHODS) {
+    const v = String(formData.get(`map__paid_by__${m.key}`) ?? "").trim();
+    if (v) map.paidFromBy[m.key] = v.slice(0, 200);
+  }
   const bank = String(formData.get("map__bank_charges") ?? "").trim();
   const adv = String(formData.get("map__advances") ?? "").trim();
   const advRefund = String(formData.get("map__advances_refund") ?? "").trim();
@@ -61,6 +66,7 @@ export async function useSuggestedMapping() {
     purchases: { ...SUGGESTED_MAP.purchases, ...(stored.purchases ?? {}) },
     expense: { ...SUGGESTED_MAP.expense, ...(stored.expense ?? {}) },
     paidFrom: stored.paidFrom || SUGGESTED_MAP.paidFrom,
+    paidFromBy: { ...SUGGESTED_MAP.paidFromBy, ...(stored.paidFromBy ?? {}) },
     bankCharges: stored.bankCharges || SUGGESTED_MAP.bankCharges,
     advances: stored.advances || SUGGESTED_MAP.advances,
     advancesRefund: stored.advancesRefund || SUGGESTED_MAP.advancesRefund,

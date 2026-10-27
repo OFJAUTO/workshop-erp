@@ -60,7 +60,7 @@ function resultWords(row: OutboxRow): string | null {
     return `Bill in Zoho: ${aed(z.net ?? 0)} + VAT ${aed(z.vat ?? 0)} = ${aed(z.total ?? 0)} · due ${aed(z.balance ?? 0)}${r.attached ? " · scan attached" : ""}${r.price_flags ? ` · ${r.price_flags} price flag(s) in the notes` : ""} — matches the ERP to the fils`;
   }
   if (row.kind === "billpayment") {
-    return `Paid in Zoho${typeof r.amount === "number" ? `: ${aed(r.amount)}` : ""} · the bill shows ${aed(Number(r.bill_balance_after) || 0)} due`;
+    return `Paid in Zoho${typeof r.amount === "number" ? `: ${aed(r.amount)}` : ""}${typeof r.method === "string" ? ` · ${r.method}${r.paid_from ? ` from ${String(r.paid_from)}` : ""}` : ""} · the bill shows ${aed(Number(r.bill_balance_after) || 0)} due${typeof r.proof === "string" ? ` · proof ${r.proof}` : ""}`;
   }
   if (row.kind === "vendorcredit") {
     const z = r.zoho as { total?: number; unapplied?: number } | undefined;

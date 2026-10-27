@@ -2,7 +2,9 @@ import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { approvedQuotations } from "@/lib/quote-data";
 import { notFound } from "next/navigation";
-import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
+import { SupplierProofUpload } from "./SupplierProofUpload";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
@@ -59,6 +61,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const { data: invFileRows } = !isMain && po.job_id ? await admin.from("job_files").select("id, storage_path, content_type, caption").eq("job_id", po.job_id).eq("kind", "supplier_invoice").eq("ref_id", po.id).is("removed_at", null).order("created_at") : { data: [] };
   const invUrls = await signJobFiles(((invFileRows ?? []) as { storage_path: string }[]).map((r) => r.storage_path));
   const invoiceFiles = ((invFileRows ?? []) as { id: string; storage_path: string; content_type: string | null; caption: string | null }[]).map((r) => ({ id: r.id, path: r.storage_path, url: invUrls[r.storage_path] ?? null, caption: r.caption, contentType: r.content_type }));
+  // Supplier payments: the account each method pays from (the mapping; empty = the general paid-from) and the proof.
+  const zmap = readZohoMap(settings);
+  const paidFromWords = SUPPLIER_PAY_METHODS.map((m) => `${m.label}: ${zmap.paidFromBy?.[m.key] || zmap.paidFrom || "not mapped yet"}`).join(" · ");
+  const paidMethodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === po.supplier_paid_method)?.label ?? "Bank transfer";
+  const proofUrl = po.supplier_paid_proof_path ? (await signJobFiles([po.supplier_paid_proof_path]))[po.supplier_paid_proof_path] : null;
   const payMissing: string[] = [];
   if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number) payMissing.push("the invoice number");
   if (!po.supplier_invoice_date) payMissing.push("the invoice date");
@@ -248,14 +255,32 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               <SectionLabel>Invoice files &amp; payment</SectionLabel>
               <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canManage || canPay} />
               {po.supplier_paid_at ? (
-                <p className="text-sm font-semibold" data-paid-line>Paid to {po.supplier_name} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}</p>
+                <div className="flex flex-wrap items-center gap-2" data-paid-line>
+                  <p className="text-sm font-semibold">Paid to {po.supplier_name} · {paidMethodLabel} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}</p>
+                  {proofUrl ? (
+                    <a href={proofUrl} target="_blank" rel="noreferrer" className="text-sm font-bold text-green underline underline-offset-4" data-paid-proof>Proof ✓</a>
+                  ) : (
+                    <span className="inline-flex items-center gap-2" data-paid-proof-missing>
+                      <Badge tone="amber">Proof missing</Badge>
+                      {canPay ? <SupplierProofUpload poId={po.id} /> : null}
+                    </span>
+                  )}
+                </div>
               ) : canPay ? (
                 payMissing.length ? (
                   <p className="text-sm font-semibold text-amber-bar" data-pay-blocked>Cannot be marked paid yet: {payMissing.join(", ")} first. No payment without the full invoice on file.</p>
                 ) : (
-                  <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-wrap items-end gap-2" data-pay-form>
-                    <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
-                    <Button type="submit" size="md" data-mark-supplier-paid>Paid to supplier</Button>
+                  <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-col gap-3" data-pay-form>
+                    <div data-pay-method>
+                      <span className="text-xs font-semibold text-muted">How was it paid?</span>
+                      <ChoiceButtons name="method" defaultValue="transfer" columns={4} options={SUPPLIER_PAY_METHODS.map((m) => ({ value: m.key, label: m.label }))} />
+                      <p className="text-xs text-muted pt-1">Paid from in Zoho — {paidFromWords}</p>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
+                      <label className="flex flex-col gap-1 min-w-40"><span className="text-xs font-semibold text-muted">Proof: bank slip, card slip, signed receipt or cheque copy</span><input type="file" name="proof" accept="image/*,application/pdf" className="text-sm min-h-11" data-pay-proof /></label>
+                      <Button type="submit" size="md" data-mark-supplier-paid>Paid to supplier</Button>
+                    </div>
                   </form>
                 )
               ) : (

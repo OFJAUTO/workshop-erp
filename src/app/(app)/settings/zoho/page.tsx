@@ -192,6 +192,11 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
         const stopped = wentLive && !checklist.live;
         const followup = (settings.zoho_golive_followup ?? {}) as { pending?: boolean; since?: string };
         const log = Array.isArray(settings.zoho_golive_log) ? (settings.zoho_golive_log as { action?: string; name?: string; at?: string; reason?: string; start_date?: string }[]) : [];
+        // A live Zoho test leaves its documents in OFJ TEST (those days stay red): none in the 7 days before the flip.
+        const lastLiveTest = String(settings.zoho_last_live_test_at ?? "").trim();
+        // eslint-disable-next-line react-hooks/purity
+        const liveTestAgeDays = lastLiveTest ? (Date.now() - Date.parse(lastLiveTest)) / 86400000 : Infinity;
+        const liveTestClearOn = lastLiveTest ? new Date(Date.parse(lastLiveTest) + 7 * 86400000 + 4 * 3600000).toISOString().slice(0, 10) : "";
         const logWords = (l: { action?: string; reason?: string; start_date?: string }) =>
           l.action === "live" ? `LIVE from ${l.start_date}` : l.action === "stop" ? `stopped (${l.reason})` : l.action === "resume" ? "resumed" : `back (${l.reason})`;
         return (
@@ -203,6 +208,11 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
                 <form action={finishGoLiveFollowup}>
                   <Button type="submit" tone="danger" size="md" data-golive-followup-btn>Finish the go-live queue</Button>
                 </form>
+              </div>
+            ) : null}
+            {!wentLive && liveTestAgeDays < 7 ? (
+              <div data-golive-live-test-warning>
+                <Notice tone="error">A live Zoho test ran on {new Date(Date.parse(lastLiveTest) + 4 * 3600000).toISOString().slice(0, 10)}. Its documents stay in OFJ TEST and keep those days red: do not go live before {liveTestClearOn}.</Notice>
               </div>
             ) : null}
             {checklist.live ? (

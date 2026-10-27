@@ -1,7 +1,7 @@
 import "server-only";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ZOHO_REAL_ORG_ID, listAccounts, listTaxes, zohoConfigured, zohoConnection } from "@/lib/zoho";
+import { ZOHO_REAL_ORG_ID, listAccounts, listTaxes, zohoConfigured, zohoConnection, zohoFetch } from "@/lib/zoho";
 import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, readZohoMap } from "@/lib/zoho-sync";
 
 /**
@@ -37,7 +37,8 @@ export function reconGate(rows: { day: string; status: string; checked_at: strin
 
 /** PURE gate 6: a start date, and not in the future — between a flip and a future start date nothing could post anywhere. */
 export function startDateGate(start: string, today: string): { ok: boolean; detail: string } {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return { ok: false, detail: "Pick the first day the REAL book owns." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return { ok: false, detail: "Pick the first day the REAL book owns (the 1st of a month)." };
+  if (start.slice(8) !== "01") return { ok: false, detail: `${start} is not the 1st of a month: the opening balances are taken as of the 1st.` };
   if (start > today) return { ok: false, detail: `${start} is still ahead: flip on that day or after it (the flip replays everything from the start date into the REAL book).` };
   return { ok: true, detail: `Documents from ${start} post to REAL (those already in OFJ TEST are replayed at the flip); anything earlier never posts.` };
 }
@@ -51,6 +52,8 @@ function mappedNames(settings: Settings): { name: string; label: string }[] {
   for (const p of PURCHASE_TYPES) out.push({ name: map.purchases[p.key] ?? "", label: p.label });
   for (const e of EXPENSE_TYPES) out.push({ name: map.expense[e.key] ?? "", label: e.label });
   out.push({ name: map.paidFrom ?? "", label: "Paid-from account" });
+  // Per-method supplier-payment accounts are optional (empty = the paid-from account), but any that are named must exist.
+  for (const name of Object.values(map.paidFromBy ?? {})) if (name?.trim()) out.push({ name, label: "Supplier payments by method" });
   out.push({ name: map.advancesRefund ?? "", label: "Advance refunds paid from" });
   return out;
 }
@@ -102,6 +105,25 @@ export async function goLiveChecklist(opts: { checkReal?: boolean } = {}): Promi
     }
   } else {
     items.push({ key: "real_chart", label: "The mapped names exist in the REAL organization", ok: false, detail: "Checked live on the Settings > Zoho Books page." });
+  }
+
+  // 3b. Zoho's own invoice numbering must not use INV- (the ERP posts its INV- numbers; a clash would be refused).
+  const prefixLabel = "Zoho's own invoice prefix is not INV-";
+  if (opts.checkReal && zohoConfigured() && (await zohoConnection())) {
+    try {
+      const j = await zohoFetch<{ invoice_settings?: { prefix_string?: string; prefix?: string } }>("/settings/invoices", { org: ZOHO_REAL_ORG_ID });
+      const prefix = String(j.invoice_settings?.prefix_string ?? j.invoice_settings?.prefix ?? "").trim();
+      items.push({
+        key: "invoice_prefix",
+        label: prefixLabel,
+        ok: !!prefix && !/^inv-/i.test(prefix),
+        detail: !prefix ? "Zoho did not say its invoice prefix: the accountant checks Settings > Invoices in Zoho." : /^inv-/i.test(prefix) ? `Zoho's own invoices start with "${prefix}": the accountant changes it (for example to "Z-").` : `Zoho's own invoices start with "${prefix}".`,
+      });
+    } catch (e) {
+      items.push({ key: "invoice_prefix", label: prefixLabel, ok: false, detail: `Could not read it from Zoho: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  } else {
+    items.push({ key: "invoice_prefix", label: prefixLabel, ok: false, detail: "Checked live on the Settings > Zoho Books page." });
   }
 
   // 4. Nothing red in the queue.

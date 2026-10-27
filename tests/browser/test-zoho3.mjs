@@ -29,6 +29,7 @@ let cnId = null;
 const DAY = 86400000;
 const today = new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
 const dayPlus = (n) => new Date(Date.parse(`${today}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+const nextFirst = (() => { const d = new Date(`${today.slice(0, 7)}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); })();
 
 /* ---------------- 1. guards and the pure rules ---------------- */
 await section("1 guards and the pure rules", async () => {
@@ -43,7 +44,7 @@ await section("1 guards and the pure rules", async () => {
   ] });
   check("1: the start-date gate refuses only pre-start documents, only once live", JSON.stringify(d.json?.results) === JSON.stringify([true, false, false, false, false]), JSON.stringify(d.json));
   const c = await api("/api/e2e/zoho", { action: "golive_checklist" });
-  check("1: the go-live checklist evaluates six gates and is NOT all green", Array.isArray(c.json?.items) && c.json.items.length === 6 && c.json.allGreen === false, JSON.stringify(c.json?.items?.map((i) => `${i.key}:${i.ok ? 1 : 0}`)));
+  check("1: the go-live checklist evaluates seven gates (with Zoho's invoice prefix) and is NOT all green", Array.isArray(c.json?.items) && c.json.items.length === 7 && c.json.items.some((i) => i.key === "invoice_prefix") && c.json.allGreen === false, JSON.stringify(c.json?.items?.map((i) => `${i.key}:${i.ok ? 1 : 0}`)));
 
   // Gate 5: the SEVEN CALENDAR DAYS before today, each green and checked after its day ended.
   const after = (day) => new Date(Date.parse(`${day}T00:00:00+04:00`) + DAY + 3600000).toISOString();
@@ -58,7 +59,7 @@ await section("1 guards and the pure rules", async () => {
   const p = await api("/api/e2e/zoho", {
     action: "pure_rules",
     reconGate: [{ rows: seven, today }, { rows: old, today }, { rows: oneRed, today }, { rows: early, today }],
-    startGate: [{ start: today, today }, { start: dayPlus(1), today }, { start: "", today }, { start: dayPlus(-30), today }],
+    startGate: [{ start: `${today.slice(0, 7)}-01`, today }, { start: nextFirst, today }, { start: "", today }, { start: today.slice(8) === "15" ? `${today.slice(0, 7)}-14` : `${today.slice(0, 7)}-15`, today }],
     reconOrg: [
       { day: "2026-10-31", live: false, start: "2026-11-01", testOrg: "944122733" },
       { day: "2026-10-31", live: true, start: "2026-11-01", testOrg: "944122733" },
@@ -77,7 +78,7 @@ await section("1 guards and the pure rules", async () => {
   });
   const j = p.json ?? {};
   check("1: gate 5 needs the last seven CALENDAR days (old rows, a red day or a mid-day check all block)", JSON.stringify((j.reconGate ?? []).map((x) => x.ok)) === JSON.stringify([true, false, false, false]), JSON.stringify(j.reconGate));
-  check("1: gate 6 refuses a start date in the future (and a blank one)", JSON.stringify((j.startGate ?? []).map((x) => x.ok)) === JSON.stringify([true, false, false, true]), JSON.stringify(j.startGate));
+  check("1: gate 6 wants the 1st of a month, today or earlier (a future 1st, a blank and a mid-month day all block)", JSON.stringify((j.startGate ?? []).map((x) => x.ok)) === JSON.stringify([true, false, false, false]), JSON.stringify(j.startGate));
   check("1: each day is reconciled against the book that owns it", JSON.stringify(j.reconOrg) === JSON.stringify(["944122733", "944122733", "942979945"]), JSON.stringify(j.reconOrg));
   check("1: yesterday's check waits for a busy queue and 00:30, re-checks a mid-day row, and a red day hourly", JSON.stringify(j.reconDue) === JSON.stringify([false, false, true, true, false, true, false]), JSON.stringify(j.reconDue));
   check("1: only real months pass", JSON.stringify(j.months) === JSON.stringify([true, false, false, false]), JSON.stringify(j.months));
@@ -189,7 +190,13 @@ await section("5 go-live panel", async () => {
   const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 1800 } });
   try {
     await go(page, `${base}/settings/zoho`);
-    check("5: the panel renders with the six gates (before go-live)", (await page.locator("[data-golive-checklist] [data-golive-item]").count()) === 6 && (await page.locator('[data-golive-panel][data-golive-state="test"]').count()) === 1);
+    check("5: the panel renders with the seven gates (before go-live)", (await page.locator("[data-golive-checklist] [data-golive-item]").count()) === 7 && (await page.locator('[data-golive-panel][data-golive-state="test"]').count()) === 1);
+    // A live Zoho test in the last 7 days shows a warning (the stamp is put back exactly as it was).
+    const stampBefore = (await sql("select value from public.settings where key = 'zoho_last_live_test_at'"))[0]?.value ?? "";
+    await sql("update public.settings set value = to_jsonb(now()::text) where key = 'zoho_last_live_test_at'");
+    await go(page, `${base}/settings/zoho`);
+    check("5: a live test in the last 7 days shows the warning with the first safe day", /do not go live before \d{4}-\d{2}-\d{2}/.test((await page.locator("[data-golive-live-test-warning]").textContent().catch(() => "")) ?? ""));
+    await sql("update public.settings set value = to_jsonb($1::text) where key = 'zoho_last_live_test_at'", [String(stampBefore)]);
     check("5: at least one gate is red and the switch is LOCKED", (await page.locator('[data-golive-ok="0"]').count()) >= 1 && (await page.locator("[data-golive-flip-btn]").isDisabled()) === true);
     check("5: the owner has no review tick (it belongs to accounts)", (await page.locator("[data-golive-tick]").count()) === 0);
     await page.screenshot({ path: "tests/browser/shots/zoho3-golive-locked.png", fullPage: true });
@@ -271,6 +278,34 @@ await section("7b late addition to a hand-closed row", async () => {
   await api("/api/e2e/zoho", { action: "reopen", kind: "cnrefund", recordId: cnId });
   const r = (await sql("select status, last_error from public.zoho_outbox where kind = 'cnrefund' and record_id = $1", [cnId]))[0];
   check("7b: the hand-closed row turns red asking for the addition by hand", r?.status === "failed" && /added after this was done by hand/.test(r?.last_error ?? ""), JSON.stringify(r));
+});
+
+/* ---------------- 7e. paying a supplier: the method, the reference and the proof ---------------- */
+await section("7e supplier payment method and proof", async () => {
+  const [sup] = await sql("insert into public.suppliers (name, phone) values ('E2e Pay Supplier', '+971500000094') returning id");
+  const [po] = await sql(
+    "insert into public.purchase_orders (number, kind, job_id, supplier_id, supplier_name, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date) values ('LPO-E2E9-Z3-PAY', 'supplier', $1, $2, 'E2e Pay Supplier', 'received', 120, 'received', 'E2E-PAY-1', $3) returning id",
+    [jobId, sup.id, today],
+  );
+  await sql("insert into public.job_files (job_id, kind, ref_id, storage_path, content_type) values ($1, 'supplier_invoice', $2, $3, 'application/pdf')", [jobId, po.id, `${jobId}/e2e-z3-pay-scan.pdf`]);
+  const { browser, page } = await browserFor("accounts", { viewport: { width: 1440, height: 1400 } });
+  try {
+    await go(page, `${base}/parts/orders/${po.id}`);
+    check("7e: the pay form asks how it was paid (bank transfer by default) and shows the account each method pays from", (await page.locator("[data-pay-method] input[value=transfer]").isChecked()) && /Paid from in Zoho — Bank transfer: /.test((await page.locator("[data-pay-method]").textContent()) ?? ""));
+    await page.locator("[data-pay-method] label", { hasText: "Cash" }).click();
+    await page.locator('[data-pay-form] input[name="reference"]').fill("Receipt 77");
+    await page.locator("[data-pay-proof]").setInputFiles({ name: "receipt.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
+    await page.locator("[data-mark-supplier-paid]").click();
+    await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    const row = await until(async () => { const r = (await sql("select supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path from public.purchase_orders where id = $1", [po.id]))[0]; return r?.supplier_paid_method === "cash" ? r : null; });
+    check("7e: paid by cash, with the reference and the proof stored", row?.supplier_paid_method === "cash" && row?.supplier_paid_reference === "Receipt 77" && /^supplier-payments\//.test(row?.supplier_paid_proof_path ?? ""), JSON.stringify(row));
+    await park("billpayment", po.id);
+    await park("bill", po.id);
+    check("7e: the LPO shows Cash and the proof link", /Cash/.test((await page.locator("[data-paid-line]").textContent()) ?? "") && (await page.locator("[data-paid-proof]").count()) === 1);
+    if (row?.supplier_paid_proof_path) await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/job-files/${row.supplier_paid_proof_path}`, { method: "DELETE", headers: { authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, apikey: process.env.SUPABASE_SERVICE_ROLE_KEY } }).catch(() => null);
+  } finally {
+    await browser.close();
+  }
 });
 
 /* ---------------- 7c. a by-hand-only row (opening balances) is never re-run ---------------- */

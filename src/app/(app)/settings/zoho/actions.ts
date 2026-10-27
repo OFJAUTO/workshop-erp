@@ -67,6 +67,7 @@ export async function setGoLiveStartDate(formData: FormData) {
   if (books.live || books.wentLive) return back("error", "The books went live: the start date is fixed for good.");
   const date = String(formData.get("start_date") ?? "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return back("error", "Pick the go-live start date.");
+  if (date.slice(8) !== "01") return back("error", "The start date is the 1st of a month (the opening balances are taken as of the 1st).");
   const admin = createAdminClient();
   const { error } = await admin.from("settings").update({ value: date, updated_by: staff.id }).eq("key", "zoho_golive_start_date");
   if (error) return back("error", error.message);

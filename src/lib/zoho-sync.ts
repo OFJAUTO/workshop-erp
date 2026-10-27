@@ -58,6 +58,15 @@ export const EXPENSE_TYPES = [
 ] as const;
 export type ExpenseKey = (typeof EXPENSE_TYPES)[number]["key"];
 
+/** How a supplier was paid (chosen by accounts on the LPO); each method may have its own paid-from account. */
+export const SUPPLIER_PAY_METHODS = [
+  { key: "transfer", label: "Bank transfer" },
+  { key: "card", label: "Card" },
+  { key: "cash", label: "Cash" },
+  { key: "cheque", label: "Cheque" },
+] as const;
+export type SupplierPayKey = (typeof SUPPLIER_PAY_METHODS)[number]["key"];
+
 /** Zoho account NAMES (not ids): the same mapping reads in OFJ TEST today and in the REAL book at go-live. */
 export type ZohoAccountMap = {
   income: Partial<Record<IncomeKey, string>>;
@@ -66,6 +75,8 @@ export type ZohoAccountMap = {
   expense: Partial<Record<ExpenseKey, string>>;
   /** The cash/bank account supplier payments and expenses are PAID FROM. */
   paidFrom?: string;
+  /** Per supplier-payment method; an empty one falls back to paidFrom. */
+  paidFromBy?: Partial<Record<SupplierPayKey, string>>;
   bankCharges?: string;
   advances?: string;
   /** Reference only (no ERP refund records yet): where a credit-note refund would be paid from. */
@@ -73,7 +84,7 @@ export type ZohoAccountMap = {
 };
 
 /** The pre-fill when the live chart has no better match; also what "Create the suggested accounts" makes in OFJ TEST. */
-export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; bankCharges: string; advances: string; advancesRefund: string } = {
+export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; advances: string; advancesRefund: string } = {
   income: {
     labour: "Mechanical labour income",
     parts: "Spare parts income",
@@ -98,6 +109,7 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
     recovery: "Recovery and transport",
   },
   paidFrom: "Bank - AED",
+  paidFromBy: { transfer: "Bank - AED", card: "Company card", cash: "Petty Cash", cheque: "Bank - AED" },
   bankCharges: "Bank Fees and Charges",
   advances: "Customer advances",
   advancesRefund: "Bank - AED",
@@ -105,7 +117,7 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
 
 export function readZohoMap(settings: Settings): ZohoAccountMap {
   const raw = (settings.zoho_account_map ?? {}) as ZohoAccountMap;
-  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, bankCharges: raw.bankCharges, advances: raw.advances, advancesRefund: raw.advancesRefund };
+  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, advances: raw.advances, advancesRefund: raw.advancesRefund };
 }
 
 /** True once the books have EVER gone live (the switch runs once; OFJ TEST is never written again after it). */
@@ -209,6 +221,9 @@ type Resolved = {
   expenseError?: string;
   paidFrom?: string;
   paidFromError?: string;
+  /** Supplier payments by method (resolved softly: a missing one falls back to paidFrom). */
+  paidFromBy?: Partial<Record<SupplierPayKey, string>>;
+  paidFromByError?: Partial<Record<SupplierPayKey, string>>;
   /** Where credit-note refunds are paid from (functional since phase 3). */
   advancesRefund?: string;
   advancesRefundError?: string;
@@ -290,6 +305,17 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap): Promi
     out.paidFrom = await resolve(map.paidFrom, "Paid-from account (supplier payments and expenses)", "bank");
   } catch (e) {
     out.paidFromError = e instanceof Error ? e.message : String(e);
+  }
+  out.paidFromBy = {};
+  out.paidFromByError = {};
+  for (const m of SUPPLIER_PAY_METHODS) {
+    const name = map.paidFromBy?.[m.key];
+    if (!name?.trim()) continue;
+    try {
+      out.paidFromBy[m.key] = await resolve(name, `Supplier payments by ${m.label.toLowerCase()}`, m.key === "cash" ? "cash" : "bank");
+    } catch (e) {
+      out.paidFromByError[m.key] = e instanceof Error ? e.message : String(e);
+    }
   }
   try {
     out.advancesRefund = await resolve(map.advancesRefund, "Advance refunds paid from", "bank");
@@ -1092,13 +1118,15 @@ export type PoRow = {
   supplier_invoice_path: string | null;
   supplier_paid_at: string | null;
   supplier_paid_reference: string | null;
+  supplier_paid_method: string | null;
+  supplier_paid_proof_path: string | null;
   zoho_bill_id: string | null;
   zoho_billpayment_id: string | null;
   /** The VAT standing the bill was POSTED with (null until it posts): history never follows a later switch change. */
   zoho_bill_taxed: boolean | null;
 };
 
-const PO_ZOHO_SELECT = "id, number, kind, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, zoho_bill_id, zoho_billpayment_id, zoho_bill_taxed";
+const PO_ZOHO_SELECT = "id, number, kind, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, supplier_paid_method, supplier_paid_proof_path, zoho_bill_id, zoho_billpayment_id, zoho_bill_taxed";
 
 export async function poForZoho(poId: string): Promise<PoRow> {
   const { data } = await createAdminClient().from("purchase_orders").select(PO_ZOHO_SELECT).eq("id", poId).maybeSingle();
@@ -1303,7 +1331,11 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   };
 }
 
-/** The supplier marked paid: one Zoho vendor payment settling the bill in full, from the mapped paid-from account. */
+/**
+ * The supplier marked paid: one Zoho vendor payment settling the bill in full, by the method accounts chose
+ * (bank transfer / card / cash / cheque) from the account the mapping names for it (else the general paid-from),
+ * with the proof attached when Zoho takes it.
+ */
 async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const po = await poForZoho(poId);
@@ -1324,8 +1356,13 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
     const j = await zohoFetch<{ vendorpayments?: { payment_id: string; reference_number?: string }[] }>(`/vendorpayments?reference_number=${encodeURIComponent(po.number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
     zid = j.vendorpayments?.find((x) => x.reference_number === po.number)?.payment_id ?? null;
   }
+  const method: SupplierPayKey = (SUPPLIER_PAY_METHODS.find((m) => m.key === po.supplier_paid_method)?.key ?? "transfer") as SupplierPayKey;
+  const methodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === method)!.label;
   let amount = 0;
   if (!zid) {
+    const methodError = accounts.paidFromByError?.[method];
+    if (methodError) throw new ZohoError(methodError);
+    const paidThrough = accounts.paidFromBy?.[method] ?? needAccounts(accounts.paidFrom, accounts.paidFromError);
     const bill = await zohoBillById(org, po.zoho_bill_id);
     if (!bill) throw new ZohoError(`The Zoho bill of ${po.number} cannot be read back.`);
     if (bill.balance <= 0.005) {
@@ -1339,10 +1376,10 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
         vendor_id: vendorId,
         amount,
         date: dubaiDate(po.supplier_paid_at),
-        payment_mode: "banktransfer",
-        paid_through_account_id: needAccounts(accounts.paidFrom, accounts.paidFromError),
+        payment_mode: MODE[method],
+        paid_through_account_id: paidThrough,
         reference_number: po.number,
-        description: cut(`${po.number}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}`, 200),
+        description: cut(`${po.number} · ${methodLabel}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}`, 200),
         bills: [{ bill_id: po.zoho_bill_id, amount_applied: amount }],
       },
     });
@@ -1360,7 +1397,32 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
   const after = await zohoBillById(org, po.zoho_bill_id);
   if (after && after.balance > 0.005) throw new ZohoError(`${po.number} is marked paid in the ERP but the Zoho bill still shows ${after.balance.toFixed(2)} due: the accountant checks it in Zoho.`);
   await admin.from("purchase_orders").update({ zoho_billpayment_id: zid }).eq("id", po.id);
-  return { zohoId: zid, result: { lpo: po.number, bill: po.supplier_invoice_number, amount: amount || null, bill_balance_after: after?.balance ?? 0 } };
+
+  // The proof (bank slip, card slip, signed receipt or cheque copy), once per payment: on the payment when Zoho takes
+  // it there, else on the bill it settles; a refusal is written on the row (the proof always stays in the ERP).
+  const { data: prev } = await admin.from("zoho_outbox").select("zoho_result").eq("kind", "billpayment").eq("record_id", po.id).maybeSingle();
+  const prevProof = ((prev as { zoho_result?: { proof?: string } | null } | null)?.zoho_result?.proof ?? "") as string;
+  let proof = prevProof.startsWith("attached") ? prevProof : po.supplier_paid_proof_path ? "" : "none uploaded yet";
+  if (!proof && po.supplier_paid_proof_path) {
+    const file = await bucketFile("job-files", po.supplier_paid_proof_path);
+    if (!file) throw new ZohoError(`The payment of ${po.number} posted but its proof could not be read from storage: press Retry to attach it.`);
+    if (!BILL_ATTACH_EXTS.has(file.ext)) proof = "kept in the ERP (Zoho takes pdf, jpg, png, gif or bmp)";
+    else {
+      try {
+        await zohoFetch(`/vendorpayments/${zid}/attachment`, { org, method: "POST", upload: { field: "attachment", filename: file.name, contentType: file.contentType, data: file.data } });
+        proof = "attached to the payment";
+      } catch {
+        try {
+          await zohoFetch(`/bills/${po.zoho_bill_id}/attachment`, { org, method: "POST", upload: { field: "attachment", filename: `payment-${file.name}`, contentType: file.contentType, data: file.data } });
+          proof = "attached to the bill it settles";
+        } catch (e) {
+          proof = `kept in the ERP (Zoho refused it: ${cut(e instanceof Error ? e.message : String(e), 120)})`;
+        }
+      }
+    }
+  }
+  const zmap = readZohoMap(await getSettings());
+  return { zohoId: zid, result: { lpo: po.number, bill: po.supplier_invoice_number, amount: amount || null, mode: MODE[method], method, paid_from: zmap.paidFromBy?.[method] || zmap.paidFrom || null, bill_balance_after: after?.balance ?? 0, proof } };
 }
 
 /* ----------------------------------------------------------- vendor credits (returned parts) ----------------------------------------------------------- */

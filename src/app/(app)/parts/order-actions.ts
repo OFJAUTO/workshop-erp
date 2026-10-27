@@ -18,7 +18,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
-import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
+import { SUPPLIER_PAY_METHODS, flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 import { ensureWorkLines } from "@/lib/work-data";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -364,9 +364,26 @@ export async function markSupplierPaid(poId: string, formData: FormData) {
   if (!hasFile && po.job_id) missing.push("the scan or photo of the invoice");
   if (missing.length) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: enter ${missing.join(", ")} first. No payment without the full invoice on file.`)}`);
   const reference = blankToNull(formData.get("reference"));
+  // How it was paid (bank transfer unless chosen otherwise) — the Zoho payment uses this method and its mapped account.
+  const methodRaw = String(formData.get("method") ?? "transfer");
+  const method = SUPPLIER_PAY_METHODS.some((m) => m.key === methodRaw) ? methodRaw : "transfer";
+  const methodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === method)!.label;
+  // The proof (bank slip, card slip, signed receipt or cheque copy): with the payment, or uploaded on the LPO later.
+  const proof = formData.get("proof");
+  let proofPath: string | null = null;
+  if (proof instanceof File && proof.size > 0) {
+    if (proof.size > 15 * 1024 * 1024) redirect(`${back}?error=${encodeURIComponent("The proof is over 15 MB. Take a smaller photo.")}`);
+    const ext = (proof.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
+    proofPath = `supplier-payments/${poId}/${Date.now()}.${ext}`;
+    const { error: upErr } = await admin.storage.from("job-files").upload(proofPath, Buffer.from(await proof.arrayBuffer()), { contentType: proof.type || "application/octet-stream", upsert: true });
+    if (upErr) redirect(`${back}?error=${encodeURIComponent("Couldn't save the proof – nothing was recorded. Try again.")}`);
+  }
   const now = new Date().toISOString();
-  await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: staff.id, supplier_paid_reference: reference ? reference.slice(0, 120) : null, updated_by: staff.id }).eq("id", poId);
-  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: paid to ${po.supplier_name}${reference ? ` (${reference})` : ""} by ${staff.display_name}`, created_by: staff.id });
+  await admin
+    .from("purchase_orders")
+    .update({ supplier_paid_at: now, supplier_paid_by: staff.id, supplier_paid_reference: reference ? reference.slice(0, 120) : null, supplier_paid_method: method, ...(proofPath ? { supplier_paid_proof_path: proofPath, supplier_paid_proof_at: now, supplier_paid_proof_by: staff.id } : {}), updated_by: staff.id })
+    .eq("id", poId);
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: paid to ${po.supplier_name} by ${methodLabel.toLowerCase()}${reference ? ` (${reference})` : ""} — ${staff.display_name}`, created_by: staff.id });
   // Zoho Books phase 2: the payment settles the supplier's bill (which posts first if it has not yet).
   await tryEnqueueZoho("billpayment", poId, po.job_id, staff.id);
   refresh(po.job_id, poId);

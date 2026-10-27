@@ -2,7 +2,7 @@ import { Button, Card, Field, LinkButton, Notice, PageHeader, SectionLabel, Sele
 import { requirePermission } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { listAccounts, zohoConfigured, zohoConnection, type ZohoAccount } from "@/lib/zoho";
-import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
+import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, SUPPLIER_PAY_METHODS, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
 import { saveZohoMapping, useSuggestedMapping } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -139,6 +139,11 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
             <Field label="Paid from" hint="The cash/bank account supplier payments and expenses are paid from.">
               {box("map__paid_from", bestMatch(map.paidFrom, SUGGESTED_MAP.paidFrom, depositable, MATCH_WORDS.paid_from), depositable)}
             </Field>
+            {SUPPLIER_PAY_METHODS.map((m) => (
+              <Field key={m.key} label={`Supplier payments by ${m.label.toLowerCase()}`} hint="Where the money left from when accounts pick this method on the LPO. Empty = the Paid-from account above.">
+                {box(`map__paid_by__${m.key}`, map.paidFromBy?.[m.key] ?? "", depositable)}
+              </Field>
+            ))}
           </div>
         </Card>
 

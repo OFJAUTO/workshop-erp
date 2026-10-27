@@ -12,6 +12,8 @@ const LIVE = process.env.LIVE_BASE ?? "https://erp.ofjauto.com";
 const CRON = process.env.CRON_SECRET ?? "";
 if (!CRON) { console.log("CRON_SECRET missing from .env.local"); process.exit(1); }
 cleanupDb();
+// The go-live panel warns when a live test ran in the last 7 days (its documents stay in OFJ TEST).
+await sql("update public.settings set value = to_jsonb(now()::text) where key = 'zoho_last_live_test_at'");
 
 async function section(name, fn) {
   console.log(`\n== ${name}`);

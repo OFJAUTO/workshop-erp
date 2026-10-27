@@ -11,6 +11,8 @@ const LIVE = process.env.LIVE_BASE ?? "https://erp.ofjauto.com";
 const CRON = process.env.CRON_SECRET ?? "";
 if (!CRON) { console.log("CRON_SECRET missing"); process.exit(1); }
 cleanupDb();
+// The go-live panel warns when a live test ran in the last 7 days (its documents stay in OFJ TEST).
+await sql("update public.settings set value = to_jsonb(now()::text) where key = 'zoho_last_live_test_at'");
 
 async function section(name, fn) {
   console.log(`\n== ${name}`);
@@ -127,10 +129,24 @@ await section("b2 credit before the bill", async () => {
 
 /* ---------------- (b3) a supplier payment adopted after a crash reports its OWN amount ---------------- */
 await section("b3 supplier payment adopt", async () => {
-  await sql("update public.purchase_orders set supplier_paid_at = now(), supplier_paid_reference = 'E2E-PAY' where id = $1", [po.id]);
-  await enqueue("billpayment", po.id, jobId);
-  const paid = await settled("billpayment", po.id);
+  // Paid by CASH from the account the mapping names for cash, with a proof (the mapping is put back exactly after).
+  const [mapRow] = await sql("select value from public.settings where key = 'zoho_account_map'");
+  const mapBefore = mapRow?.value ?? {};
+  await sql("update public.settings set value = $1::jsonb where key = 'zoho_account_map'", [JSON.stringify({ ...mapBefore, paidFromBy: { ...(mapBefore.paidFromBy ?? {}), cash: "Petty Cash" } })]);
+  const proofPath = `supplier-payments/${po.id}/e2e-proof.pdf`;
+  await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/job-files/${proofPath}`, { method: "POST", headers: { authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, "content-type": "application/pdf", "x-upsert": "true" }, body: Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n") });
+  let paid = null;
+  try {
+    await sql("update public.purchase_orders set supplier_paid_at = now(), supplier_paid_reference = 'E2E-PAY', supplier_paid_method = 'cash', supplier_paid_proof_path = $2 where id = $1", [po.id, proofPath]);
+    await enqueue("billpayment", po.id, jobId);
+    paid = await settled("billpayment", po.id);
+  } finally {
+    await sql("update public.settings set value = $1::jsonb where key = 'zoho_account_map'", [JSON.stringify(mapBefore)]);
+  }
   check("b3: the payment settles the bill after the credit (250, not 400)", paid?.status === "synced" && paid?.zoho_result?.amount === 250 && paid?.zoho_result?.bill_balance_after === 0, JSON.stringify(paid?.zoho_result));
+  check("b3: it posts as CASH from the cash account the mapping names", paid?.zoho_result?.mode === "cash" && paid?.zoho_result?.paid_from === "Petty Cash", JSON.stringify(paid?.zoho_result));
+  check("b3: the proof went to Zoho (on the payment, or on the bill it settles)", /^attached/.test(String(paid?.zoho_result?.proof ?? "")), String(paid?.zoho_result?.proof));
+  await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/job-files/${proofPath}`, { method: "DELETE", headers: { authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, apikey: process.env.SUPABASE_SERVICE_ROLE_KEY } }).catch(() => null);
   // A run that died after creating the payment: the stored id and the result are gone, the row is pending again.
   await sql("update public.purchase_orders set zoho_billpayment_id = null where id = $1", [po.id]);
   await sql("update public.zoho_outbox set status = 'pending', zoho_id = null, zoho_result = null, last_error = null, claimed_at = null where kind = 'billpayment' and record_id = $1", [po.id]);
