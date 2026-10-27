@@ -1293,6 +1293,8 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
   if (!z) {
     const body = {
       vendor_id: vendorId,
+      // OFJ TEST has no auto-numbering for vendor credits, so the number is given (same as the reference).
+      vendor_credit_number: reference,
       date: dubaiDate(part.disposition_at ?? new Date().toISOString()),
       reference_number: reference,
       notes: cut([po ? `ERP ${po.number}` : null, part.disposition_note ? `Supplier credit note: ${part.disposition_note}` : "Supplier credit note to follow", "The scan stays in the ERP (Zoho vendor credits take no attachments)."].filter(Boolean).join("\n"), 2000),
@@ -1300,7 +1302,7 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
       line_items: [{ name: cut(`${part.description} · returned`, 100), quantity: qty, rate, account_id: needAccounts(accounts.purchases, accounts.purchasesError).parts, ...(taxed ? { tax_id: accounts.taxId } : {}) }],
     };
     try {
-      const j = await zohoFetch<{ vendor_credit?: ZohoVendorCredit }>("/vendorcredits", { org, method: "POST", body });
+      const j = await zohoFetch<{ vendor_credit?: ZohoVendorCredit }>("/vendorcredits?ignore_auto_number_generation=true", { org, method: "POST", body });
       z = j.vendor_credit ?? null;
     } catch (e) {
       const again = await zohoFetch<{ vendorcredits?: ZohoVendorCredit[] }>(`/vendorcredits?reference_number=${encodeURIComponent(reference)}`, { org });

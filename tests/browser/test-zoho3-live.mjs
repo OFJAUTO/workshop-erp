@@ -117,37 +117,50 @@ await section("c customer refund", async () => {
   check("c: the refund id is stored", !!stored?.zoho_refund_id, JSON.stringify(stored));
 });
 
-/* ---------------- (d) the reconciliation catches a broken day, then goes green ---------------- */
+/* ---------------- (d) the reconciliation catches a broken day, then goes back once fixed ---------------- */
+// On a test day Zoho TEST already holds documents whose ERP rows earlier suites cleaned away, so the day's
+// baseline may be red by itself. The proof is therefore count-based: breaking the day moves the ERP count up by
+// one against the same Zoho count; posting the missing invoice moves Zoho up by one too, back to the baseline gap.
 await section("d reconciliation", async () => {
+  const invSectionOf = async () => {
+    const [r] = await sql("select status, details from public.zoho_reconciliation where day = $1", [TODAY]);
+    return { status: r?.status, s: (r?.details?.sections ?? []).find((x) => x.label === "Tax invoices") };
+  };
   const base1 = await cron(`?reconcile=${TODAY}`);
-  check("d: today reconciles after the seeds (baseline)", base1.ok === true && !!base1.status, JSON.stringify(base1));
-  const baseline = base1.status;
+  check("d: today reconciles after the seeds (baseline)", base1.ok === true && ["green", "red"].includes(base1.status), JSON.stringify(base1));
+  const base = await invSectionOf();
+  const gap0 = (base.s?.zoho?.count ?? 0) - (base.s?.erp?.count ?? 0);
   // Break the day: a tax invoice that exists ONLY in the ERP (never queued).
   const [ghost] = await sql(
     "insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, token, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed) values ($1, 'tax_invoice', $2, $3, $4, $5, 1000, 0, 1000, 50, 1050) returning id",
     [`TINV-${RUN}-GHOST`, jobId, customerId, vehicleId, `e2e${RUN}gh`],
   );
+  await sql("insert into public.invoice_lines (invoice_id, position, section, description, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed) values ($1, 0, 'services', 'Ghost service', 1, 1000, 1000, 50, 1050, 0)", [ghost.id]);
   const broken = await cron(`?reconcile=${TODAY}`);
-  check("d: the broken day turns RED", broken.status === "red", JSON.stringify(broken));
-  const [reconRow] = await sql("select status, details from public.zoho_reconciliation where day = $1", [TODAY]);
-  const invSection = (reconRow?.details?.sections ?? []).find((s) => s.label === "Tax invoices");
-  check("d: the row names the exact difference on tax invoices", reconRow?.status === "red" && invSection?.ok === false && /in the ERP vs .* in Zoho/.test(invSection?.diff ?? ""), JSON.stringify(invSection));
+  const after = await invSectionOf();
+  check("d: the broken day is RED with the ERP one invoice ahead", broken.status === "red" && after.status === "red" && (after.s?.erp?.count ?? 0) === (base.s?.erp?.count ?? 0) + 1 && (after.s?.zoho?.count ?? 0) === (base.s?.zoho?.count ?? 0), JSON.stringify({ base: base.s, after: after.s }));
+  check("d: the row names the exact difference on tax invoices", after.s?.ok === false && /in the ERP vs .* in Zoho/.test(after.s?.diff ?? ""), JSON.stringify(after.s));
   const bell = (await sql("select id from public.notifications where type = 'zoho_reconciliation' and created_at > now() - interval '10 minutes' limit 1"))[0];
-  check("d: the red day rang the bell (owner + accounts)", !!bell, JSON.stringify(bell));
-  // Fix it: the ghost posts, the day re-checks.
+  check("d: a red day rang the bell (owner + accounts)", !!bell, JSON.stringify(bell));
+  // Fix it: the missing invoice posts, the day re-checks and the gap returns to the baseline.
   await enqueue("invoice", ghost.id, jobId);
   const ghostRow = await settled("invoice", ghost.id);
   check("d: the missing invoice posts on Retry", ghostRow?.status === "synced", JSON.stringify(ghostRow)?.slice(0, 160));
   const fixed = await cron(`?reconcile=${TODAY}`);
-  check("d: the day goes back to the baseline once fixed", fixed.status === baseline, `baseline ${baseline}, now ${fixed.status}`);
+  const done = await invSectionOf();
+  const gap1 = (done.s?.zoho?.count ?? 0) - (done.s?.erp?.count ?? 0);
+  check("d: the gap goes back to the baseline once fixed", fixed.ok === true && gap1 === gap0, `gap before ${gap0}, after ${gap1} (status ${fixed.status})`);
 });
 
-/* ---------------- clean up (today's recon row too: the ERP rows leave, Zoho TEST keeps its documents) ---------------- */
+/* ---------------- clean up ---------------- */
+// The ERP rows leave; Zoho TEST keeps its documents, so a test day's books genuinely differ. The recon row STAYS
+// (re-checked after the cleanup so it tells the truth, and tomorrow's automatic check sees red → red: no new
+// bell); only the bells this run caused are removed.
 if (process.env.KEEP) {
-  console.log("\nKEEP=1: rows stay for screenshots - run npm run test:cleanup and delete today's recon row after.");
+  console.log("\nKEEP=1: rows stay for screenshots - run npm run test:cleanup after.");
   process.exit(summary() ? 1 : 0);
 }
-await sql("delete from public.zoho_reconciliation where day = $1", [TODAY]).catch(() => null);
-await sql("delete from public.notifications where type = 'zoho_reconciliation' and created_at > now() - interval '2 hours'").catch(() => null);
 cleanupDb();
+await cron(`?reconcile=${TODAY}`);
+await sql("delete from public.notifications where type = 'zoho_reconciliation' and created_at > now() - interval '2 hours'").catch(() => null);
 process.exit(summary() ? 1 : 0);
