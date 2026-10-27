@@ -10,6 +10,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { toSnapshot } from "@/lib/packages";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 type LinePatch = {
   package_key?: string | null;
@@ -165,9 +166,15 @@ export async function POST(request: NextRequest) {
     }
     if (p.title !== undefined) {
       if (current?.part_item_id && !isOwner) return "A listed part keeps the name Parts gave it. Ask Parts to change it.";
-      out.title = String(p.title).trim().slice(0, 200);
+      const t = String(p.title).trim();
+      if (t.length > LINE_TEXT_MAX) return tooLongWords(t.length);
+      out.title = t;
     }
-    if (p.details !== undefined) out.details = p.details ? String(p.details).trim().slice(0, 1000) : null;
+    if (p.details !== undefined) {
+      const d = p.details ? String(p.details).trim() : "";
+      if (d.length > LINE_TEXT_MAX) return tooLongWords(d.length);
+      out.details = d || null;
+    }
     if (p.group_label !== undefined) out.group_label = p.group_label ? String(p.group_label).trim().slice(0, 200) : null;
     if (p.source_type !== undefined) out.source_type = p.source_type && ["request", "item", "tyre", "manual"].includes(p.source_type) ? p.source_type : null;
     if (p.source_key !== undefined) out.source_key = p.source_key ? String(p.source_key).slice(0, 120) : null;
@@ -356,7 +363,8 @@ export async function POST(request: NextRequest) {
       const { data: same } = await admin.from("quotation_lines").select("id").eq("client_key", String(body.opId).slice(0, 80)).maybeSingle();
       if (same) return NextResponse.json({ ok: true, id: same.id });
     }
-    const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", client_key: body.opId ? String(body.opId).slice(0, 80) : null, created_by: staff.id, ...stamp, title: String(a.title ?? "").trim().slice(0, 200), group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
+    if (String(a.title ?? "").trim().length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(String(a.title ?? "").trim().length) }, { status: 400 });
+    const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", client_key: body.opId ? String(body.opId).slice(0, 80) : null, created_by: staff.id, ...stamp, title: String(a.title ?? "").trim(), group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
     // Parts a service asks for; they go to the Parts desk once the line is safely in.
     let linked: { rows: Record<string, unknown>[]; name: string } | null = null;
     if (a.service_id) {

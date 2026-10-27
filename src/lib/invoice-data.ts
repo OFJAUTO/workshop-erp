@@ -137,8 +137,10 @@ function num<T extends Record<string, unknown>>(row: T, keys: (keyof T)[]): T {
 export const toInvoice = (r: Record<string, unknown>) => num(r as unknown as InvoiceRow, ["subtotal_aed", "discount_aed", "taxable_aed", "vat_aed", "total_aed", "agreed_total_aed", "warranty_credit_aed"]);
 export const toInvoiceLine = (r: Record<string, unknown>) => {
   const l = num(r as unknown as InvoiceLineRow, ["position", "quantity", "unit_price", "amount_aed", "vat_aed", "total_aed", "cost_aed"]);
-  // Hours ride in the details as "1.5 h" when the line is labour; the builder sets the quantity to the hours.
-  return { ...l, hours: l.section === "services" && /^\d+(\.\d)? h$/.test(String(l.details ?? "")) ? l.quantity : null };
+  // Hours ride at the end of the details as "1.5 h" when the line is labour (after any positions); the builder sets the
+  // quantity to the hours. Labour with no hours has quantity 0 and no "h": it counts as 0 hours (nothing printed).
+  const labour = l.section === "services" && (/(^|\s·\s)\d+(\.\d)? h$/.test(String(l.details ?? "")) || Number(l.quantity) === 0);
+  return { ...l, hours: labour ? l.quantity : null };
 };
 export const toPayment = (r: Record<string, unknown>) => num(r as unknown as PaymentRow, ["amount_aed", "bank_charge_aed", "actual_fee_aed"]);
 

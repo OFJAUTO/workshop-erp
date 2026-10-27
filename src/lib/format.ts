@@ -37,3 +37,14 @@ export function formatDayTime(iso: string | null | undefined) {
   if (!iso) return "";
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Dubai" }).format(new Date(iso));
 }
+
+/** Labour hours for a quantity column: "1.5 h", or nothing at all when the line has no hours (complimentary work). */
+export function hoursQty(hours: number | null | undefined): string {
+  return hours && hours > 0 ? `${(Math.round(hours * 10) / 10).toFixed(1)} h` : "";
+}
+
+/** An invoice line's details without the trailing "1.5 h" the labour lines carry (positions and notes stay). */
+export function detailsWithoutHours(details: string | null | undefined): string | null {
+  const d = (details ?? "").replace(/(^|\s·\s)\d+(\.\d)? h$/, "").trim();
+  return d || null;
+}

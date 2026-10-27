@@ -9,6 +9,7 @@ import { round2 } from "./quotes";
 import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 import { tryEnqueueZoho } from "./zoho-sync";
+import { LINE_TEXT_MAX, tooLongWords } from "./text-limits";
 
 type Actor = { id: string; display_name: string } | null;
 
@@ -217,7 +218,8 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, gated_in_by").eq("id", jobId).maybeSingle();
   if (!job) return { error: "Job not found." };
-  const description = charge.description.trim().slice(0, 200);
+  const description = charge.description.trim();
+  if (description.length > LINE_TEXT_MAX) return { error: tooLongWords(description.length) };
   const amount = round2(charge.amount);
   if (!description || !(amount > 0)) return { error: "Give the charge a name and an amount." };
   const vatPercent = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;

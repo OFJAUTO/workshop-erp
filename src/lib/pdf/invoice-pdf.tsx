@@ -2,7 +2,7 @@ import "server-only";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import type { ReactNode } from "react";
 import { Image, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { detailsWithoutHours, formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, type InvoiceBundle, type InvoiceLineRow, type PaymentRow } from "@/lib/invoice-data";
 import { amountInWords, round2 } from "@/lib/money";
 import type { PoBundle } from "@/lib/parts-data";
@@ -29,7 +29,7 @@ function docLine(l: InvoiceLineRow): SectionLine {
   const disc = Number(l.discount_percent) || 0;
   return {
     description: l.description,
-    details: l.hours !== null ? null : l.details,
+    details: l.hours !== null ? detailsWithoutHours(l.details) : l.details,
     qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
     rate: l.unit_price,
     amount: l.amount_aed,

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import { Document, Font, Image, Link, Page, Path, Polygon, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
 import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
+import { hoursQty } from "@/lib/format";
 import { cleanDocTitle } from "@/lib/quotes";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -584,7 +585,7 @@ export function Tag({ text, color }: { text: string; color: string }) {
 
 /** The line's quantity text: "1.5 h" for labour, otherwise the number. */
 export function qtyText(quantity: number, hours?: number | null) {
-  if (hours !== null && hours !== undefined) return `${(Math.round(hours * 10) / 10).toFixed(1)} h`;
+  if (hours !== null && hours !== undefined) return hoursQty(hours);
   return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(2);
 }
 
@@ -642,7 +643,8 @@ export function SectionBox({ title, lines, subtotalLabel }: { title: string; lin
         </View>
       ) : null}
       {lines.map((l, i) => (
-        <View key={i} style={sec.row} wrap={false}>
+        // A short row stays in one piece; a very long description may continue on the next page (never clipped).
+        <View key={i} style={sec.row} wrap={l.description.length + (l.details?.length ?? 0) > 600}>
           <Text style={sec.no}>{i + 1}</Text>
           <View style={sec.desc}>
             <Text style={styles.lineTitle}>{cleanDocTitle(l.description)}</Text>

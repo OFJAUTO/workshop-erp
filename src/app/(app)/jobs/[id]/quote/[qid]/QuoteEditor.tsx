@@ -1,6 +1,8 @@
 "use client";
 
 import type { QuoteLock } from "@/lib/quote-lock";
+import { TextCounter } from "@/components/TextCounter";
+import { LINE_TEXT_MAX } from "@/lib/text-limits";
 import { LockedQuote } from "./LockedQuote";
 import { lineIsTint } from "@/lib/tint";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
@@ -518,6 +520,18 @@ export function QuoteEditor({
   const patch = (id: string, fields: Partial<QuoteLine>, immediate = false) => {
     setDirty((s) => (s.has(id) ? s : new Set(s).add(id)));
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...fields } : l)));
+    // Above the limit the box keeps every character but NOTHING is saved (a waiting shorter save is dropped too),
+    // so a long description is never stored half; the counter under the box says by how much to shorten it.
+    const tooLong = (["title", "details"] as const).find((k) => typeof fields[k] === "string" && (fields[k] as string).trim().length > LINE_TEXT_MAX);
+    if (tooLong) {
+      for (const key of Object.keys(timers.current)) {
+        if (key.startsWith(`line-${id}-`) && key.includes(tooLong)) {
+          clearTimeout(timers.current[key]);
+          delete timers.current[key];
+        }
+      }
+      return;
+    }
     const op = () => ({ patchLine: { id, ...fields } });
     if (immediate) save(op());
     else debounced(`line-${id}-${Object.keys(fields).join(",")}`, op);
@@ -681,6 +695,8 @@ export function QuoteEditor({
     if (lowProfitOk) skips.current.lowProfitOk = true;
     if (skipParts) skips.current.skipParts = true;
     if (skipDeposit) skips.current.skipDeposit = true;
+    const long = lines.find((l) => l.title.trim().length > LINE_TEXT_MAX || (l.details ?? "").trim().length > LINE_TEXT_MAX);
+    if (long) return { ok: false, error: `Not complete yet: a description is longer than ${LINE_TEXT_MAX.toLocaleString("en-GB")} characters and is not saved. Shorten it first (the red counter under it says by how much).` };
     const r = await completeQuotation(quotation.id, { ...skips.current });
     if (r.ask === "low_profit") { setLowAsk(r.message ?? "This profit is very low. Are you sure you want to send?"); return { ok: true }; }
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
@@ -894,7 +910,7 @@ export function QuoteEditor({
                 {positions.length ? <span className="font-semibold uppercase" data-line-positions>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "FRONT AND REAR" : positionsWords(positions)}</span> : null}
                 {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
                 {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
-                {l.details ? <Badge tone="outline">Note: {l.details.length > 36 ? `${l.details.slice(0, 34)}…` : l.details}</Badge> : null}
+                {l.details ? <span className="whitespace-pre-wrap break-words rounded-full border border-line-strong px-2 font-semibold" data-line-note>Note: {l.details}</span> : null}
                 {(l.discount_percent ?? 0) > 0 ? <span>Discount {l.discount_percent}%</span> : null}
                 {estSuspect ? <span className="font-semibold text-amber" data-estimate-warning>Check Est. h: {num(l.hours_estimate)} is not hours (the rate is {num(l.labour_rate)} AED/h). Labour at cost uses the quoted {hoursText(l.hours)} until it is fixed.</span> : null}
               </span>
@@ -1005,7 +1021,7 @@ export function QuoteEditor({
         ) : null}
         {noteOpen && !disabled ? (
           <div className="flex flex-col gap-1.5 px-2 pb-2">
-            <label className={boxLabel}>Note for the customer<Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} placeholder="Shown under the line on the customer's page" textCase="sentence" className="min-h-16" autoFocus /></label>
+            <label className={boxLabel}>Note for the customer<Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} placeholder="Shown under the line on the customer's page" textCase="sentence" className="min-h-16" autoFocus /><TextCounter length={(l.details ?? "").trim().length} /></label>
             <button type="button" onClick={() => closeKey(`note-${l.id}`)} className="self-start min-h-9 rounded-control border border-line-strong bg-white px-3 text-xs font-bold">Done</button>
           </div>
         ) : null}
@@ -1110,7 +1126,7 @@ export function QuoteEditor({
           {!disabled ? <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 px-2 text-xs font-bold text-red self-center" aria-label="Remove">×</button> : null}
         </div>
         {!disabled ? <button type="button" onClick={() => setOpenRows((s) => { const n = new Set(s); const k = `details-${l.id}`; if (n.has(k)) n.delete(k); else n.add(k); return n; })} className="self-start text-[11px] font-semibold text-muted underline underline-offset-4">{l.details ? "Note shown to the customer" : "Add a note for the customer"}</button> : null}
-        {openRows.has(`details-${l.id}`) ? <Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} aria-label="Note for the customer" className="min-h-16" /> : null}
+        {openRows.has(`details-${l.id}`) ? <><Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} aria-label="Note for the customer" className="min-h-16" /><TextCounter length={(l.details ?? "").trim().length} /></> : null}
         {hidden ? <span className="text-xs text-muted">Internal cost only: never on the customer&apos;s documents; costs us {aed(lineCost(l))}, counted in the profit.</span> : null}
       </div>
     );
@@ -2052,11 +2068,12 @@ function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, on
         />
         {!disabled ? <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onArrow} aria-label={kind === "labour" ? "Open the labour jobs list" : "Open the services list"} className="min-h-10 min-w-10 border-l border-line text-sm font-bold hover:bg-canvas">▾</button> : null}
       </div>
+      <TextCounter length={value.trim().length} />
       {shown.length ? (
         <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-card border border-line bg-white shadow-xl">
           {shown.map((j) => (
             <button key={j.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onPick(j)} className="flex w-full min-h-10 items-center justify-between gap-2 px-3 text-left text-sm hover:bg-canvas">
-              <span className="font-semibold truncate">{j.title}</span>
+              <span className="font-semibold">{j.title}</span>
               <span className="shrink-0 text-[11px] text-muted">{j.hint}</span>
             </button>
           ))}

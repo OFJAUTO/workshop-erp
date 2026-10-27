@@ -3,7 +3,7 @@ import { signJobFiles } from "@/lib/work-data";
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { detailsWithoutHours, formatDate, formatDateTime, hoursQty } from "@/lib/format";
 import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice, nextDocumentNumber } from "@/lib/invoice-data";
 import { methodsFor } from "@/lib/money-steps";
 import { paymentLinksOf } from "@/lib/payment-links";
@@ -164,8 +164,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                   <ul className="divide-y divide-line text-sm">
                     {ls.map((l) => (
                       <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-3">
-                        <span className="flex-1 min-w-48 font-semibold uppercase">{l.description}{l.part_number ? <span className="text-muted font-normal"> · {l.part_number}</span> : null}{l.details && l.hours === null ? <span className="block text-xs text-muted font-normal">{l.details}</span> : null}</span>
-                        <span className="text-muted w-20 text-right">{l.hours !== null ? `${l.hours.toFixed(1)} h` : `× ${l.quantity}`}</span>
+                        <span className="flex-1 min-w-48 font-semibold uppercase">{l.description}{l.part_number ? <span className="text-muted font-normal"> · {l.part_number}</span> : null}{(l.hours === null ? l.details : detailsWithoutHours(l.details)) ? <span className="block text-xs text-muted font-normal whitespace-pre-line">{l.hours === null ? l.details : detailsWithoutHours(l.details)}</span> : null}</span>
+                        <span className="text-muted w-20 text-right">{l.hours !== null ? hoursQty(l.hours) : `× ${l.quantity}`}</span>
                         <span className="w-24 text-right">{m(l.unit_price)}</span>
                         <span className="w-28 text-right font-semibold">{l.amount_aed === 0 ? "Complimentary" : `AED ${m(l.amount_aed)}`}</span>
                         {seesCost && l.cost_aed ? <span className="w-24 text-right text-xs text-muted">cost {m(l.cost_aed)}</span> : null}
