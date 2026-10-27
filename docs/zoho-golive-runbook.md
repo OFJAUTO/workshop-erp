@@ -90,7 +90,10 @@ after it posts to the REAL book by itself.
      with an old date, or anything dated before the start that never reached OFJ TEST — nothing posted: enter it by
      hand;
    - a void, a bounced cheque or a corrected supplier invoice on a document from before go-live — it sits in the
-     opening balances: correct it there by hand.
+     opening balances: correct it there by hand (these rows refuse Retry on purpose: re-running could post the
+     document a second time);
+   - closing an invoice with "Done by hand" also turns red every payment of it that had already posted (unapplied):
+     apply each to the invoice in Zoho by hand.
 3. Watch **/zoho** daily. **/zoho/reconciliation** checks yesterday by itself every morning (from 00:30, once the
    queue has caught up), re-checks a red day every hour, and compares each day with the book that owns it — OFJ TEST
    before the start date, REAL from it. A day that turns red rings one bell.

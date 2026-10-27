@@ -225,7 +225,27 @@ function needAccounts<T>(group: T | undefined, error: string | undefined): T {
  * words; a mapped name missing from the chart is CREATED in OFJ TEST (never in REAL - there the accountant makes
  * it first and the row fails with the account's name).
  */
+/**
+ * The resolved accounts, kept for 30 minutes per organization AND mapping (a saved mapping is a new key): every
+ * five-minute run with a waiting row would otherwise read the chart again — two calls a run, up to ~600 a day, more
+ * than half of OFJ TEST's 1,000-call daily allowance. Dropped on any account error so the next run reads it afresh.
+ */
+const accountsCache = new Map<string, { at: number; value: Resolved }>();
+const ACCOUNTS_TTL_MS = 30 * 60 * 1000;
+export function forgetZohoAccounts(): void {
+  accountsCache.clear();
+}
+
 async function resolveZohoAccounts(org: string, map: ZohoAccountMap): Promise<Resolved> {
+  const key = `${org}|${JSON.stringify(map)}`;
+  const hit = accountsCache.get(key);
+  if (hit && Date.now() - hit.at < ACCOUNTS_TTL_MS) return hit.value;
+  const value = await resolveZohoAccountsFresh(org, map);
+  accountsCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap): Promise<Resolved> {
   const [taxes, chart] = await Promise.all([listTaxes(org), listAccounts(org)]);
   const tax = taxes.find((t) => Number(t.tax_percentage) === 5);
   if (!tax) throw new ZohoError("No 5% tax exists in this Zoho organization. Run the mirror on Settings > Zoho Books.");
@@ -1772,6 +1792,8 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
       }
     } catch (e) {
       const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+      // An account Zoho no longer knows (renamed or removed there): the next run reads the chart afresh.
+      if (/account|tax/i.test(msg)) forgetZohoAccounts();
       const { data: f } = await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
       if (f?.length) report.failed++;
       else report.waiting++;

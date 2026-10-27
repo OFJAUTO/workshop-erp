@@ -172,3 +172,32 @@ moves to “not registered”). `npm run test:zoho3live` against OFJ TEST adds: 
 red without waiting, and a payment on it posts unapplied and shows red. The paths that only exist after a real flip
 (the replay, the orphan rows, the opening-balance hooks) are covered by the rolled-back simulation, the pure rules
 and the code review — the REAL book is never touched by a test.
+
+## Third review check (27 October 2026, evening)
+
+A third adversarial pass over the second round confirmed 3 findings; 4 more that its verifiers could not finish (the
+review agents ran out of allowance) were traced by hand and also hold. All fixed (commit 36f5da9, migration
+`20261123170000_zoho_switch_bill_taxed.sql`):
+
+- “In the opening balances” now means dated **before** the start date and posted to OFJ TEST (a Zoho id there). A
+  document from the start date whose REAL replay has not posted yet is simply re-queued — never sent to the opening
+  balances with the wrong instructions.
+- Red rows about opening-balance documents are **by hand only**: Retry refuses them, and re-queues or late additions
+  leave them red (a re-run could have posted a re-dated bill a second time, or erased the instruction).
+- “Done by hand” on an invoice that never reached Zoho turns every payment of it already posted there (unapplied)
+  red, to be applied by hand.
+- The switch clears the VAT snapshot of bills dated from the start date (they post again in REAL as new bills, with
+  the supplier’s standing as it is then); older bills keep theirs.
+- A document reopened at the flip (a late scan) still counts as having reached OFJ TEST: only its change is the
+  by-hand item. The test organization is fixed once the books went live.
+- Proof: `npm run test:zoho3` 47 local checks (adds Retry refused on a by-hand-only row, Done by hand on an invoice
+  turning its posted payment red, and the VAT-snapshot clearing inside the rolled-back switch simulation).
+
+**Zoho’s daily allowance.** The last live run stopped half-way with “The API call for this organization has exceeded
+the maximum call rate limit of 1,000”: OFJ TEST allows **1,000 calls a day**, and today’s live test runs plus the
+27-day reconciliation backfill used them up. The sync behaved exactly as designed (every row waited with the reason;
+nothing failed, nothing posted twice) and resumes by itself when Zoho’s day turns. Two consequences:
+- The resolved chart of accounts is now kept for 30 minutes (per organization and mapping; dropped on any account
+  error): a waiting row no longer costs two calls every five minutes (up to ~600 a day).
+- `npm run test:zoho3live` must be re-run once the allowance is back (the second-round run passed 26/26 before it ran
+  out). The REAL organization’s plan allowance should be checked before go-live (see questions).
