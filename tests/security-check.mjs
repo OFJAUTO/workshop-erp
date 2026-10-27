@@ -42,11 +42,15 @@ const ownerViews = await q(`select c.relname from pg_class c join pg_namespace n
 check("no view runs as its owner (RLS bypass)", ownerViews.length === 0, ownerViews.map((r) => r.relname).join(", "));
 
 // 4. Server-only token tables: dark to both API roles.
-const SERVER_ONLY = ["short_links", "payment_requests", "payment_links", "setup_links", "quick_codes", "google_mailbox_tokens", "staff_private", "background_jobs", "app_errors", "zoho_tokens", "zoho_outbox", "zoho_reconciliation"];
+const SERVER_ONLY = ["short_links", "payment_requests", "payment_links", "setup_links", "quick_codes", "google_mailbox_tokens", "staff_private", "background_jobs", "app_errors", "zoho_tokens", "zoho_outbox", "zoho_reconciliation", "zoho_outbox_archive"];
 for (const t of SERVER_ONLY) {
   const g = await q(`select coalesce(string_agg(distinct grantee || ':' || privilege_type, ','), '') as g from information_schema.role_table_grants where table_schema = 'public' and table_name = '${t}' and grantee in ('anon'${t === "staff_private" ? "" : ",'authenticated'"})`);
   check(`${t} is not reachable by ${t === "staff_private" ? "anon" : "anon or authenticated"}`, !g[0]?.g, g[0]?.g);
 }
+
+// 4b. The go-live switch (archives the Zoho queue, clears every stored Zoho id, flips the books) runs for the server only.
+const switchFn = await q(`select has_function_privilege('authenticated', 'public.zoho_switch_org(text, text, boolean, uuid)', 'execute') as auth, has_function_privilege('anon', 'public.zoho_switch_org(text, text, boolean, uuid)', 'execute') as anon`);
+check("the Zoho go-live switch cannot be run by a browser session", switchFn[0] && !switchFn[0].auth && !switchFn[0].anon, JSON.stringify(switchFn[0]));
 
 // 5. Live probe as anon: sensitive tables and columns give nothing away.
 const PROBES = [

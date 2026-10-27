@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { Badge, Button, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { zohoOpenUrl, zohoWriteOrg, type OutboxRow, type ZohoKind } from "@/lib/zoho-sync";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
-import { backfillZoho, retryZohoRow, syncZohoNow, tickGoLiveReview } from "./actions";
+import { backfillZoho, markZohoDoneByHand, retryZohoRow, syncZohoNow, tickGoLiveReview } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +42,7 @@ const aed = (n: number) => `AED ${Number(n).toLocaleString("en-GB", { minimumFra
 function resultWords(row: OutboxRow): string | null {
   const r = row.zoho_result as Record<string, unknown> | null;
   if (!r) return null;
+  if (r.manual === true) return `Done by hand by ${String(r.name ?? "accounts")} on ${String(r.at ?? "").slice(0, 10)}: ${String(r.note ?? "")}`;
   if (typeof r.skipped === "string") return r.skipped;
   if (row.kind === "invoice") {
     const z = r.zoho as { total?: number; vat?: number; balance?: number } | undefined;
@@ -222,6 +223,17 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                       </form>
                     ) : null}
                   </div>
+                  {r.status === "failed" && !staff.viewingAs ? (
+                    <details className="text-sm" data-zoho-by-hand>
+                      <summary className="cursor-pointer font-bold min-h-11 inline-flex items-center">Done by hand in Zoho…</summary>
+                      <form action={markZohoDoneByHand.bind(null, r.id)} className="flex flex-wrap items-end gap-2 pt-1">
+                        <span className="flex-1 min-w-60">
+                          <Input name="note" placeholder="What was done in Zoho (e.g. entered by hand as INV-123)" aria-label="What was done in Zoho" data-zoho-by-hand-note />
+                        </span>
+                        <Button type="submit" size="md" data-zoho-by-hand-save>Close the row</Button>
+                      </form>
+                    </details>
+                  ) : null}
                 </li>
               );
             })}

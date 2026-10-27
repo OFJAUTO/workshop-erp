@@ -14,6 +14,34 @@ import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, readZohoM
 export type ChecklistItem = { key: string; label: string; ok: boolean; detail: string };
 export type GoLiveChecklist = { items: ChecklistItem[]; allGreen: boolean; live: boolean; startDate: string };
 
+const DAY = 24 * 3600 * 1000;
+const dubaiToday = () => new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+const listDays = (days: string[]) => (days.length > 4 ? `${days.slice(0, 4).join(", ")} and ${days.length - 4} more` : days.join(", "));
+
+/**
+ * PURE gate 5: each of the SEVEN CALENDAR DAYS before today has a row, written after that day ended, and green.
+ * (The seven newest rows are not enough: a cron outage leaves the freshest days unchecked while old green rows remain.)
+ */
+export function reconGate(rows: { day: string; status: string; checked_at: string }[], today: string): { ok: boolean; detail: string } {
+  const need: string[] = [];
+  for (let i = 7; i >= 1; i--) need.push(new Date(Date.parse(`${today}T00:00:00Z`) - i * DAY).toISOString().slice(0, 10));
+  const byDay = new Map(rows.map((r) => [String(r.day).slice(0, 10), r]));
+  const missing = need.filter((d) => !byDay.has(d));
+  const red = need.filter((d) => byDay.has(d) && byDay.get(d)!.status !== "green");
+  const early = need.filter((d) => byDay.has(d) && byDay.get(d)!.status === "green" && Date.parse(byDay.get(d)!.checked_at) < Date.parse(`${d}T00:00:00+04:00`) + DAY);
+  if (missing.length) return { ok: false, detail: `Not checked yet: ${listDays(missing)} (press "Check every missing day" on the Reconciliation page).` };
+  if (red.length) return { ok: false, detail: `Red: ${listDays(red)}.` };
+  if (early.length) return { ok: false, detail: `Checked before the day was over: ${listDays(early)} (press Re-check on those days).` };
+  return { ok: true, detail: `Seven green days: ${need[0]} to ${need[6]}.` };
+}
+
+/** PURE gate 6: a start date, and not in the future — between a flip and a future start date nothing could post anywhere. */
+export function startDateGate(start: string, today: string): { ok: boolean; detail: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return { ok: false, detail: "Pick the first day the REAL book owns." };
+  if (start > today) return { ok: false, detail: `${start} is still ahead: flip on that day or after it (the flip replays everything from the start date into the REAL book).` };
+  return { ok: true, detail: `Documents from ${start} post to REAL (those already in OFJ TEST are replayed at the flip); anything earlier never posts.` };
+}
+
 /** Every mapped account name, flat, with its group label (for the REAL-chart check). */
 function mappedNames(settings: Settings): { name: string; label: string }[] {
   const map = readZohoMap(settings);
@@ -80,25 +108,17 @@ export async function goLiveChecklist(opts: { checkReal?: boolean } = {}): Promi
   const { count: failed } = await admin.from("zoho_outbox").select("id", { count: "exact", head: true }).eq("status", "failed");
   items.push({ key: "no_failed", label: "No failed syncs", ok: (failed ?? 0) === 0, detail: failed ? `${failed} red row${failed === 1 ? "" : "s"} on the sync page.` : "The queue is clean." });
 
-  // 5. The last seven reconciliation days are green.
-  const { data: recon } = await admin.from("zoho_reconciliation").select("day, status").order("day", { ascending: false }).limit(7);
-  const rows = (recon ?? []) as { day: string; status: string }[];
-  const reds = rows.filter((r) => r.status !== "green");
-  items.push({
-    key: "recon",
-    label: "Reconciliation green for the last 7 days",
-    ok: rows.length >= 7 && !reds.length,
-    detail: rows.length < 7 ? `Only ${rows.length} day${rows.length === 1 ? "" : "s"} checked so far (backfill on the Reconciliation page).` : reds.length ? `Red: ${reds.map((r) => String(r.day).slice(0, 10)).join(", ")}` : "Seven green days.",
-  });
+  // 5. The last seven calendar days reconciled green.
+  const today = dubaiToday();
+  const from = new Date(Date.parse(`${today}T00:00:00Z`) - 7 * DAY).toISOString().slice(0, 10);
+  const { data: recon } = await admin.from("zoho_reconciliation").select("day, status, checked_at").gte("day", from).lt("day", today);
+  const gate5 = reconGate((recon ?? []) as { day: string; status: string; checked_at: string }[], today);
+  items.push({ key: "recon", label: "Reconciliation green for the last 7 days", ok: gate5.ok, detail: gate5.detail });
 
-  // 6. The start date is chosen.
+  // 6. The start date is chosen, and not in the future.
   const startDate = String(settings.zoho_golive_start_date ?? "").trim();
-  items.push({
-    key: "start_date",
-    label: "Go-live start date chosen",
-    ok: /^\d{4}-\d{2}-\d{2}$/.test(startDate),
-    detail: /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? `Documents from ${startDate} post to REAL; anything earlier never posts.` : "Pick the first day the REAL book owns.",
-  });
+  const gate6 = startDateGate(startDate, today);
+  items.push({ key: "start_date", label: "Go-live start date chosen (today or earlier)", ok: gate6.ok, detail: gate6.detail });
 
   return { items, allGreen: items.every((i) => i.ok), live: settings.zoho_live_enabled === true, startDate };
 }

@@ -25,6 +25,29 @@ export async function retryZohoRow(id: string, formData: FormData) {
   return back("message", words, "failed");
 }
 
+/**
+ * A red row the accountant settled in Zoho by hand (a void, a document from before go-live, a VAT correction):
+ * it closes as posted, with who did it, when, the words they typed and the reason it was red — never silently.
+ */
+export async function markZohoDoneByHand(id: string, formData: FormData) {
+  const staff = await requirePermission("zohoSync");
+  if (staff.viewingAs) return back("error", "Viewing only.", "failed");
+  const note = String(formData.get("note") ?? "").trim().slice(0, 300);
+  if (note.length < 3) return back("error", "Write what was done in Zoho (for example: entered by hand as INV-123, or voided).", "failed");
+  const admin = createAdminClient();
+  const { data: row } = await admin.from("zoho_outbox").select("id, status, last_error").eq("id", id).maybeSingle();
+  if (!row || row.status !== "failed") return back("error", "Only a red row can be closed by hand.", "failed");
+  const now = new Date().toISOString();
+  const { data: done } = await admin
+    .from("zoho_outbox")
+    .update({ status: "synced", synced_at: now, last_error: null, claimed_at: null, zoho_result: { manual: true, by: staff.id, name: staff.display_name, at: now, note, reason: row.last_error ?? null }, updated_at: now })
+    .eq("id", id)
+    .eq("status", "failed")
+    .select("id");
+  if (!done?.length) return back("error", "The row changed meanwhile: look at it again.", "failed");
+  return back("message", "Closed as done by hand. The row keeps who did it and why.", "failed");
+}
+
 /** The whole queue runs now instead of waiting for the five-minute cron. */
 export async function syncZohoNow() {
   const staff = await requirePermission("zohoSync");

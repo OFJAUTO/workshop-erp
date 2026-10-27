@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ZOHO_REAL_ORG_ID, ZohoError, zohoFetch } from "@/lib/zoho";
 import { beforeGoLiveStart, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
-import { goLiveChecklist } from "@/lib/zoho-golive";
+import { goLiveChecklist, reconGate, startDateGate } from "@/lib/zoho-golive";
+import { reconDue, reconOrgFor } from "@/lib/zoho-reconcile";
+import { validMonth } from "@/lib/zoho-close";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +47,23 @@ export async function POST(request: NextRequest) {
     // The PURE start-date rule, with injected values: the flip itself is never simulated against REAL.
     const cases = (body as { cases?: { docDate: string; live: boolean; startDate: string }[] }).cases ?? [];
     return NextResponse.json({ results: cases.map((c) => beforeGoLiveStart(c.docDate, c.live, c.startDate)) });
+  }
+  if (body.action === "pure_rules") {
+    // The review round's pure rules, with injected values (no Zoho, no flip).
+    const b = body as {
+      reconGate?: { rows: { day: string; status: string; checked_at: string }[]; today: string }[];
+      startGate?: { start: string; today: string }[];
+      reconOrg?: { day: string; live: boolean; start: string; testOrg: string | null }[];
+      reconDue?: { row: { status: string; checked_at: string } | null; day: string; nowMs: number; saturated: boolean }[];
+      months?: string[];
+    };
+    return NextResponse.json({
+      reconGate: (b.reconGate ?? []).map((c) => reconGate(c.rows, c.today)),
+      startGate: (b.startGate ?? []).map((c) => startDateGate(c.start, c.today)),
+      reconOrg: (b.reconOrg ?? []).map((c) => reconOrgFor(c.day, c.live, c.start, c.testOrg)),
+      reconDue: (b.reconDue ?? []).map((c) => reconDue(c.row, c.day, c.nowMs, c.saturated)),
+      months: (b.months ?? []).map((m) => validMonth(m)),
+    });
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }

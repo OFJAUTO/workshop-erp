@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Badge, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { loadMonthlyClose } from "@/lib/zoho-close";
+import { loadMonthlyClose, validMonth } from "@/lib/zoho-close";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -24,7 +24,7 @@ export default async function ZohoClosePage({ searchParams }: { searchParams: Pr
   await requirePermission("zohoSync");
   const { month: rawMonth, message, error } = await searchParams;
   const months = monthsBack(6);
-  const month = rawMonth && /^\d{4}-\d{2}$/.test(rawMonth) ? rawMonth : months[0];
+  const month = rawMonth && validMonth(rawMonth) ? rawMonth : months[0];
   const data = await loadMonthlyClose(month);
   const allGreen = data.lines.every((l) => l.ok);
 

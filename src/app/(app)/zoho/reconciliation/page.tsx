@@ -1,5 +1,6 @@
 import { Badge, Button, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { formatDateTime } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ReconDetails } from "@/lib/zoho-reconcile";
 import { backfillReconciliation, recheckDay } from "./actions";
@@ -36,14 +37,14 @@ export default async function ZohoReconciliationPage({ searchParams }: { searchP
           <form action={backfillReconciliation}>
             <Button type="submit" size="md" data-recon-backfill>Check every missing day</Button>
           </form>
-          <span className="text-xs text-muted">The first sync run after midnight checks the new day by itself.</span>
+          <span className="text-xs text-muted">Each morning the sync checks yesterday by itself once the queue has caught up, and re-checks it hourly while it is red. Every day is compared with the book that owns it.</span>
         </Card>
       ) : null}
 
       <Card className="flex flex-col gap-1" data-recon-rows>
         <SectionLabel right={String(rows.length)}>Days</SectionLabel>
         {!rows.length ? (
-          <Empty title="No days checked yet">Press &quot;Check every missing day&quot; to compare the whole OFJ TEST period.</Empty>
+          <Empty title="No days checked yet">Press &quot;Check every missing day&quot; to compare everything from the month of the first document.</Empty>
         ) : (
           <ul className="divide-y divide-line">
             {rows.map((r) => {
@@ -54,6 +55,7 @@ export default async function ZohoReconciliationPage({ searchParams }: { searchP
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold">{r.day}</span>
                     {r.status === "green" ? <Badge tone="green">Identical ✓</Badge> : <Badge tone="red">Differs</Badge>}
+                    <span className="text-xs text-muted" data-recon-org>against {r.details?.orgLabel ?? "OFJ TEST"} · checked {formatDateTime(r.checked_at)}</span>
                     <span className="flex-1" />
                     {!staff.viewingAs ? (
                       <form action={recheckDay.bind(null, r.day)}>

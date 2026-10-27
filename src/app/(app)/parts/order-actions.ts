@@ -423,7 +423,10 @@ export async function returnPart(partId: string, formData: FormData) {
   const note = blankToNull(formData.get("note"));
   const stage = String(formData.get("stage") ?? "to_return");
   if (stage === "returned") {
-    await admin.from("part_items").update({ return_status: "returned", returned_qty: p.received_qty || p.quantity, final_cost_aed: 0, issue_status: "none", issued_qty: 0, updated_by: staff.id }).eq("id", partId);
+    // disposition "returned" is THE mark of a return to the supplier (return_status alone only means "back with
+    // Parts"): the part reads "Returned to supplier", leaves the no-home list, and becomes a supplier credit.
+    const now = new Date().toISOString();
+    await admin.from("part_items").update({ return_status: "returned", returned_qty: p.received_qty || p.quantity, final_cost_aed: 0, issue_status: "none", issued_qty: 0, disposition: "returned", disposition_at: now, disposition_by: staff.id, disposition_note: note, updated_by: staff.id }).eq("id", partId);
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "part_returned", note: `${p.description} returned to the supplier by ${staff.display_name}; cost taken off the job`, created_by: staff.id });
     // Zoho Books phase 3: the return becomes a vendor credit against the supplier's bill.
     await tryEnqueueZoho("vendorcredit", partId, p.job_id, staff.id);

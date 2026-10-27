@@ -7,6 +7,7 @@ import { blankToNull } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { supplierDiscount, type SupplierOption } from "@/lib/parts-rows";
 import { syncLineForPart } from "../actions";
+import { flagZohoAttention } from "@/lib/zoho-sync";
 
 const back = (msg: string, ok: boolean) => redirect(`/parts/suppliers?${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
 
@@ -24,6 +25,19 @@ function readDiscounts(formData: FormData): { default_discount_percent: number; 
     if (n !== null) byType[k.slice("discount__".length)] = n;
   }
   return { default_discount_percent: pct(formData.get("discount_default")) ?? 0, discount_by_type: byType };
+}
+
+/** The supplier's VAT switch moved: every bill of theirs already posted to Zoho is flagged for a by-hand correction. */
+async function flagBillsAfterVatChange(supplierId: string, name: string, nowRegistered: boolean) {
+  const admin = createAdminClient();
+  const { data: pos } = await admin.from("purchase_orders").select("id, number, supplier_invoice_number").eq("supplier_id", supplierId).not("zoho_bill_id", "is", null);
+  for (const po of (pos ?? []) as { id: string; number: string; supplier_invoice_number: string | null }[]) {
+    await flagZohoAttention(
+      "bill",
+      po.id,
+      `${name} was marked ${nowRegistered ? "VAT registered" : "NOT VAT registered"} after the bill ${po.supplier_invoice_number ?? po.number} (${po.number}) posted ${nowRegistered ? "without" : "with"} VAT: correct its VAT in Zoho by hand, then press "Done by hand".`,
+    );
+  }
 }
 
 function read(formData: FormData) {
@@ -68,10 +82,13 @@ export async function updateSupplier(id: string, formData: FormData) {
   const staff = await requirePermission("manageSuppliers");
   const row = read(formData);
   const admin = createAdminClient();
-  const { data: before } = await admin.from("suppliers").select("name, default_discount_percent, discount_by_type").eq("id", id).maybeSingle();
+  const { data: before } = await admin.from("suppliers").select("name, default_discount_percent, discount_by_type, vat_registered").eq("id", id).maybeSingle();
   const discounts = readDiscounts(formData);
   const { error } = await admin.from("suppliers").update({ ...row, ...(discounts ?? {}), updated_by: staff.id }).eq("id", id);
   if (error) back(error.message, false);
+  // Bills already in Zoho carry the VAT standing they were posted with: a change now makes each of them wrong,
+  // so each turns red on the Zoho page for the accountant to correct (never silently re-figured).
+  if (before && (before.vat_registered !== false) !== row.vat_registered) await flagBillsAfterVatChange(id, row.name, row.vat_registered);
   // LPOs carry the supplier's name at the time; the ones not yet sent follow a rename.
   await admin.from("purchase_orders").update({ supplier_name: row.name, updated_by: staff.id }).eq("supplier_id", id).in("status", ["pending_approval", "approved"]);
   revalidatePath("/parts/suppliers");

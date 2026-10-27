@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
 import { buildXlsx, xlsxResponse, type XlsxSheet } from "@/lib/xlsx";
-import { loadMonthlyClose } from "@/lib/zoho-close";
+import { loadMonthlyClose, validMonth } from "@/lib/zoho-close";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff || !can(staff.role_id as RoleId, "zohoSync")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const month = request.nextUrl.searchParams.get("month") ?? "";
-  if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "Pick a month (yyyy-mm)." }, { status: 400 });
+  if (!validMonth(month)) return NextResponse.json({ error: "Pick a month (yyyy-mm)." }, { status: 400 });
   const data = await loadMonthlyClose(month);
   const sheets: XlsxSheet[] = [
     {

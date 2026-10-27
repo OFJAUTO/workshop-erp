@@ -136,6 +136,17 @@ export async function zohoAccessToken(): Promise<string> {
 }
 
 /** The chosen test organization (OFJ TEST), set on Settings > Zoho Books. */
+/**
+ * The go-live switch read from the database NOW. getSettings() is cached for a whole request, so a drain that
+ * started before the flip would keep the old answer for its whole run; the write guard and the drain's per-row
+ * check must see a flip the moment it lands.
+ */
+export async function zohoLiveNow(): Promise<boolean> {
+  const { data, error } = await createAdminClient().from("settings").select("value").eq("key", "zoho_live_enabled").maybeSingle();
+  if (error) throw new ZohoError(`The go-live switch could not be read: ${error.message}`);
+  return (data as { value?: unknown } | null)?.value === true;
+}
+
 export async function zohoTestOrgId(): Promise<string | null> {
   const settings = await getSettings();
   const id = String(settings.zoho_org_test ?? "").trim();
@@ -170,10 +181,10 @@ export async function zohoFetch<T = Record<string, unknown>>(path: string, opts:
     // organization is closed to writes too (the books live in ONE place at a time). The rule lives here, not in
     // the callers.
     if (!opts.org) throw new ZohoError("A write needs its organization.");
-    const settings = await getSettings();
+    const live = await zohoLiveNow();
     if (opts.org === ZOHO_REAL_ORG_ID) {
-      if (settings.zoho_live_enabled !== true) throw new ZohoError("Refused: the REAL Zoho organization is read-only until the owner declares go-live. Writes go to OFJ TEST.");
-    } else if (settings.zoho_live_enabled === true) {
+      if (!live) throw new ZohoError("Refused: the REAL Zoho organization is read-only until the owner declares go-live. Writes go to OFJ TEST.");
+    } else if (live) {
       throw new ZohoError("Refused: the books are LIVE on the REAL organization — OFJ TEST is closed to writes.");
     }
   }

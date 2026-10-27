@@ -4,7 +4,7 @@ import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, toInvoice, toInvoi
 import { round2 } from "@/lib/money";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoConfigured, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
+import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoConfigured, zohoFetch, zohoLiveNow, zohoTestOrgId } from "@/lib/zoho";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
@@ -123,13 +123,36 @@ export function beforeGoLiveStart(docDate: string, live: boolean, startDate: str
   return docDate < start;
 }
 
-/** Once live, a document from before the start date stays in OFJ TEST's history and never posts to REAL. */
-async function startDateSkip(docDate: string): Promise<HandlerOut | null> {
+/** The cutover as the handlers see it: whether the books are live, and the first day the REAL book owns. */
+async function cutover(): Promise<{ live: boolean; start: string }> {
   const settings = await getSettings();
-  if (beforeGoLiveStart(docDate, settings.zoho_live_enabled === true, String(settings.zoho_golive_start_date ?? ""))) {
-    return { result: { skipped: `Dated ${docDate}, before the go-live start date: it stays in OFJ TEST's history and never posts to the REAL book.` } };
-  }
-  return null;
+  return { live: settings.zoho_live_enabled === true, start: String(settings.zoho_golive_start_date ?? "").trim() };
+}
+
+/** Once live: the start date when this parent document predates it (so it is not, and never will be, in REAL). */
+async function parentBeforeStart(docDate: string | null | undefined): Promise<string | null> {
+  if (!docDate) return null;
+  const { live, start } = await cutover();
+  return beforeGoLiveStart(docDate.slice(0, 10), live, start) ? start : null;
+}
+
+const DONE_BY_HAND = 'The accountant enters it by hand in the REAL book (with the opening balances), then presses "Done by hand" here.';
+
+/**
+ * Once live, a document dated before the start date never posts to REAL. When OFJ TEST's archived queue holds it
+ * as posted, that is simply its home. When it never reached OFJ TEST (it arrived, or was dated back, after the
+ * flip) it sits in NO Zoho book — so it fails in plain words instead of turning green, and the accountant closes
+ * it with "Done by hand".
+ */
+async function startDateSkip(docDate: string, kinds: ZohoKind | ZohoKind[], recordId: string): Promise<HandlerOut | null> {
+  const { live, start } = await cutover();
+  if (!beforeGoLiveStart(docDate, live, start)) return null;
+  const testOrg = await zohoTestOrgId();
+  const { data } = testOrg
+    ? await createAdminClient().from("zoho_outbox_archive").select("status").eq("org", testOrg).in("kind", Array.isArray(kinds) ? kinds : [kinds]).eq("record_id", recordId).eq("status", "synced").limit(1)
+    : { data: [] };
+  if ((data ?? []).length) return { result: { skipped: `Dated ${docDate}, before the go-live start date ${start}: it stays in OFJ TEST's history and never posts to the REAL book.` } };
+  throw new ZohoError(`Dated ${docDate}, before the go-live start date ${start}, and it never reached OFJ TEST: it is in no Zoho book. ${DONE_BY_HAND}`);
 }
 
 type Resolved = {
@@ -496,7 +519,7 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
   if (inv.deposit_for_quotation_id) return { result: { skipped: "A deposit document: the advance itself goes to Zoho as a payment." } };
   if (inv.status === "cancelled" && !inv.zoho_invoice_id) return { result: { skipped: "Cancelled in the ERP before it was posted. Nothing went to Zoho." } };
   if (inv.status === "cancelled") throw new ZohoError(`${inv.number} was cancelled in the ERP after it reached Zoho: the accountant voids it in Zoho by hand.`);
-  const invGate = await startDateSkip(dubaiDate(inv.issued_at));
+  const invGate = await startDateSkip(dubaiDate(inv.issued_at), "invoice", inv.id);
   if (invGate) return invGate;
 
   const [{ data: lineRows }, { data: payRows }, job] = await Promise.all([
@@ -668,7 +691,7 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   if ((p.status === "voided" || p.status === "reversed") && !p.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it was posted. Nothing went to Zoho." } };
   if (p.status === "voided" || p.status === "reversed") throw new ZohoError(`${p.number} was ${p.status} in the ERP after it reached Zoho: the accountant removes it in Zoho by hand.`);
   if (p.method === "cheque" && p.cheque_status !== "cleared") return { wait: "Waiting for the cheque to clear." };
-  const payGate = await startDateSkip(dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at));
+  const payGate = await startDateSkip(dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at), ["deposit", "payment"], p.id);
   if (payGate) return payGate;
 
   const contactId = await ensureContact(org, p.customer_id);
@@ -682,10 +705,15 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   }
   // When the tax invoice is already in Zoho, the payment can be applied the moment it is created.
   let zohoInvoiceId: string | null = null;
+  let preStartNote: string | null = null;
   if (p.invoice_id) {
-    const { data: invRow } = await admin.from("payments").select("invoice:invoices!payments_invoice_id_fkey(zoho_invoice_id, kind)").eq("id", p.id).maybeSingle();
-    const inv = (invRow as unknown as { invoice: { zoho_invoice_id: string | null; kind: string } | null } | null)?.invoice;
+    const { data: invRow } = await admin.from("payments").select("invoice:invoices!payments_invoice_id_fkey(zoho_invoice_id, kind, number, issued_at)").eq("id", p.id).maybeSingle();
+    const inv = (invRow as unknown as { invoice: { zoho_invoice_id: string | null; kind: string; number: string; issued_at: string } | null } | null)?.invoice;
     if (inv?.kind === "tax_invoice") zohoInvoiceId = inv.zoho_invoice_id;
+    // Money received after go-live on an invoice from before it: the payment still posts (it is REAL money), unapplied.
+    if (inv?.kind === "tax_invoice" && !inv.zoho_invoice_id && (await parentBeforeStart(dubaiDate(inv.issued_at)))) {
+      preStartNote = `Posted unapplied: ${inv.number} is dated before the go-live start date (opening balance), so the accountant applies this payment to it by hand.`;
+    }
   } else if (p.is_deposit && p.job_id) {
     const { data: jobInv } = await admin.from("invoices").select("zoho_invoice_id").eq("job_id", p.job_id).eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null).not("zoho_invoice_id", "is", null).limit(1).maybeSingle();
     zohoInvoiceId = (jobInv as { zoho_invoice_id: string | null } | null)?.zoho_invoice_id ?? null;
@@ -734,6 +762,7 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
       mode: MODE[p.method],
       kind: p.is_deposit ? "advance" : "payment",
       applied_now: applied,
+      ...(preStartNote ? { note: preStartNote } : {}),
     },
   };
 }
@@ -845,16 +874,18 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
   if (cn.status === "cancelled" && !cn.zoho_creditnote_id) return { result: { skipped: "Cancelled in the ERP before it was posted. Nothing went to Zoho." } };
   if (cn.status === "cancelled") throw new ZohoError(`${cn.number} was cancelled in the ERP after it reached Zoho: the accountant voids it in Zoho by hand.`);
   if (!cn.credit_of) throw new ZohoError(`${cn.number} has no parent invoice in the ERP.`);
-  const cnGate = await startDateSkip(dubaiDate(cn.issued_at));
+  const cnGate = await startDateSkip(dubaiDate(cn.issued_at), "creditnote", cn.id);
   if (cnGate) return cnGate;
   const [{ data: parent }, { data: lineRows }, job] = await Promise.all([
-    admin.from("invoices").select("id, number, job_id, zoho_invoice_id").eq("id", cn.credit_of).maybeSingle(),
+    admin.from("invoices").select("id, number, job_id, zoho_invoice_id, issued_at").eq("id", cn.credit_of).maybeSingle(),
     admin.from("invoice_lines").select(INVOICE_LINE_SELECT).eq("invoice_id", cn.id).eq("is_active", true).order("position"),
     cn.job_id ? admin.from("jobs").select("department").eq("id", cn.job_id).maybeSingle().then((r) => r.data as { department: string | null } | null) : Promise.resolve(null),
   ]);
-  const par = parent as { id: string; number: string; job_id: string | null; zoho_invoice_id: string | null } | null;
+  const par = parent as { id: string; number: string; job_id: string | null; zoho_invoice_id: string | null; issued_at: string } | null;
   if (!par) throw new ZohoError(`${cn.number}: the invoice it credits no longer exists in the ERP.`);
   if (!par.zoho_invoice_id) {
+    const preStart = await parentBeforeStart(dubaiDate(par.issued_at));
+    if (preStart) throw new ZohoError(`${cn.number} credits ${par.number}, which is dated before the go-live start date ${preStart} and so is not in the REAL book (a UAE credit note must name its invoice). ${DONE_BY_HAND}`);
     // The parent posts first; the credit note waits its turn.
     await ensureQueued("invoice", par.id, par.job_id);
     return { wait: `Waiting for ${par.number} to reach Zoho first.` };
@@ -1077,7 +1108,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number || !po.supplier_invoice_date) {
     return { wait: "Waiting for the supplier invoice to be entered on the LPO." };
   }
-  const billGate = await startDateSkip(String(po.supplier_invoice_date).slice(0, 10));
+  const billGate = await startDateSkip(String(po.supplier_invoice_date).slice(0, 10), "bill", po.id);
   if (billGate) return billGate;
   const vendor = await poVendor(org, po);
   const taxed = await vendorVatRegistered(org, po, vendor);
@@ -1127,6 +1158,10 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
     if (!z) throw new ZohoError("Zoho did not return the new bill.");
   }
   if (!matches(z)) throw new ZohoError(`Totals differ for the bill ${po.supplier_invoice_number} (${po.number}): Zoho has ${z.sub_total.toFixed(2)} before VAT, the ERP has ${expectedNet.toFixed(2)}.`);
+  // The VAT standing too: a bill posted before the supplier's switch moved must not turn green on a Retry.
+  if (taxed !== z.tax_total > 0.005) {
+    throw new ZohoError(`The bill ${po.supplier_invoice_number} (${po.number}) carries ${z.tax_total > 0.005 ? `VAT ${z.tax_total.toFixed(2)}` : "no VAT"} in Zoho, but ${po.supplier_name} is now ${taxed ? "VAT registered" : "NOT VAT registered"} in the ERP: correct the bill in Zoho by hand, then press "Done by hand".`);
+  }
   await admin.from("purchase_orders").update({ zoho_bill_id: z.bill_id }).eq("id", po.id);
 
   // The scan: the first live invoice file on the LPO (stock orders have none - that is fine). Never twice: the
@@ -1175,9 +1210,11 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
   const po = await poForZoho(poId);
   if (/^our stock$/i.test(po.supplier_name.trim())) return { result: { skipped: "An Our-stock LPO is internal (our own shelf): no supplier payment." } };
   if (!po.supplier_paid_at) return { wait: "Waiting for the LPO to be marked paid." };
-  const bpGate = await startDateSkip(dubaiDate(po.supplier_paid_at));
+  const bpGate = await startDateSkip(dubaiDate(po.supplier_paid_at), "billpayment", po.id);
   if (bpGate) return bpGate;
   if (!po.zoho_bill_id) {
+    const preStart = await parentBeforeStart(po.supplier_invoice_date ? String(po.supplier_invoice_date) : null);
+    if (preStart) throw new ZohoError(`The bill ${po.supplier_invoice_number ?? po.number} (${po.number}) is dated before the go-live start date ${preStart}, so it is not in the REAL book: this supplier payment (${dubaiDate(po.supplier_paid_at)}) cannot post against it. ${DONE_BY_HAND}`);
     await ensureQueued("bill", po.id, po.job_id);
     return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
   }
@@ -1212,12 +1249,18 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
     zid = j.vendorpayment?.payment_id ?? null;
     if (!zid) throw new ZohoError("Zoho did not return the new vendor payment.");
   }
+  // An adopted payment (a run that died after creating it) reports ITS OWN amount: the reconciliation trusts this
+  // figure, and the bill's total would be wrong whenever a supplier credit was applied first.
+  if (!amount) {
+    const vp = await zohoFetch<{ vendorpayment?: { amount?: number } }>(`/vendorpayments/${zid}`, { org });
+    amount = round2(Number(vp.vendorpayment?.amount) || 0);
+  }
   // The id is stored only once the bill really shows 0 due: an adopted foreign/partial payment must fail loudly
   // WITHOUT locking creation out on the next run.
   const after = await zohoBillById(org, po.zoho_bill_id);
   if (after && after.balance > 0.005) throw new ZohoError(`${po.number} is marked paid in the ERP but the Zoho bill still shows ${after.balance.toFixed(2)} due: the accountant checks it in Zoho.`);
   await admin.from("purchase_orders").update({ zoho_billpayment_id: zid }).eq("id", po.id);
-  return { zohoId: zid, result: { lpo: po.number, bill: po.supplier_invoice_number, amount: amount || after?.total || null, bill_balance_after: after?.balance ?? 0 } };
+  return { zohoId: zid, result: { lpo: po.number, bill: po.supplier_invoice_number, amount: amount || null, bill_balance_after: after?.balance ?? 0 } };
 }
 
 /* ----------------------------------------------------------- vendor credits (returned parts) ----------------------------------------------------------- */
@@ -1248,10 +1291,12 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
     .maybeSingle();
   const part = data as { id: string; job_id: string | null; description: string; quantity: number; confirmed_quantity: number | null; received_qty: number | null; returned_qty: number | null; cost_aed: number | null; final_cost_aed: number | null; supplier: string | null; po_id: string | null; disposition: string | null; disposition_note: string | null; disposition_at: string | null; return_status: string | null; zoho_vendorcredit_id: string | null } | null;
   if (!part) throw new ZohoError("The part no longer exists in the ERP.");
-  if (part.disposition !== "returned" && part.return_status !== "returned") {
+  // ONLY a return to the supplier is a supplier credit. return_status "returned" alone means "back with Parts"
+  // (a part handed back, later kept in stock, scrapped or fitted as goodwill) — never money from the supplier.
+  if (part.disposition !== "returned") {
     return { result: { skipped: "The part is not recorded as returned to the supplier. Nothing posted." } };
   }
-  const vcGate = await startDateSkip(dubaiDate(part.disposition_at ?? new Date().toISOString()));
+  const vcGate = await startDateSkip(dubaiDate(part.disposition_at ?? new Date().toISOString()), "vendorcredit", part.id);
   if (vcGate) return vcGate;
 
   // The supplier: through the part's LPO, else by the name on the part.
@@ -1266,6 +1311,19 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
   }
   if (!supplierId) throw new ZohoError(`The returned part "${part.description}" has no supplier record in the ERP: pick the supplier on the Parts page, then press Retry.`);
   if (/^our stock$/i.test(supplierName.trim())) return { result: { skipped: "Returned to our own shelf: no supplier credit." } };
+  // The credit belongs on the part's bill: when the supplier's invoice is not in Zoho yet, it waits for it, so the
+  // same facts post the same money whichever was typed first (a credit posted alone would never be applied, and
+  // the supplier payment would then pay the bill in full).
+  let billNote: string | null = null;
+  if (po && po.kind !== "main" && !po.zoho_bill_id) {
+    const preStart = await parentBeforeStart(po.supplier_invoice_date ? String(po.supplier_invoice_date) : null);
+    if (preStart) {
+      billNote = `The bill ${po.supplier_invoice_number ?? po.number} is dated before the go-live start date (opening balance): the accountant applies this credit to it by hand.`;
+    } else {
+      await ensureQueued("bill", po.id, po.job_id);
+      return { wait: `Waiting for the bill of ${po.number} to reach Zoho first: the credit is applied to it.` };
+    }
+  }
   const vendorId = await ensureVendor(org, supplierId);
   const { data: sRow } = await admin2.from("suppliers").select("trn, vat_registered").eq("id", supplierId).maybeSingle();
   const sup = sRow as { trn: string | null; vat_registered: boolean } | null;
@@ -1344,7 +1402,7 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
       applied_now: appliedNow,
       ...(billBalanceAfter != null ? { bill_balance_after: billBalanceAfter } : {}),
       supplier_credit_note: part.disposition_note ?? "to follow",
-      note: "The credit-note scan stays in the ERP (Zoho vendor credits take no attachments).",
+      note: billNote ?? "The credit-note scan stays in the ERP (Zoho vendor credits take no attachments).",
     },
   };
 }
@@ -1363,12 +1421,15 @@ async function syncCnRefundRow(org: string, accounts: Resolved, invoiceId: strin
   const cn = toInvoice(raw as Record<string, unknown>) as InvoiceRow & { zoho_creditnote_id: string | null; zoho_refund_id: string | null; refund_paid_at: string | null; refund_method: string | null; refund_reference: string | null; refund_amount_aed: number | null };
   if (cn.kind !== "credit_note") return { result: { skipped: "Not a credit note." } };
   if (!cn.refund_paid_at) return { wait: "Waiting for the refund to be recorded on the credit note." };
+  const rfGate = await startDateSkip(dubaiDate(cn.refund_paid_at), "cnrefund", cn.id);
+  if (rfGate) return rfGate;
   if (!cn.zoho_creditnote_id) {
+    // A credit note from before go-live never reaches REAL, so its refund would wait forever: it fails instead.
+    const preStart = await parentBeforeStart(dubaiDate(cn.issued_at));
+    if (preStart) throw new ZohoError(`${cn.number} is dated before the go-live start date ${preStart}, so it is not in the REAL book: this refund of AED ${round2(Number(cn.refund_amount_aed) || cn.total_aed).toFixed(2)} (${cn.refund_method === "cash" ? "cash" : "bank transfer"}, ${dubaiDate(cn.refund_paid_at)}) cannot post against it. ${DONE_BY_HAND}`);
     await ensureQueued("creditnote", cn.id, cn.job_id);
     return { wait: `Waiting for ${cn.number} to reach Zoho first.` };
   }
-  const rfGate = await startDateSkip(dubaiDate(cn.refund_paid_at));
-  if (rfGate) return rfGate;
   const amount = round2(Number(cn.refund_amount_aed) || cn.total_aed);
   const reference = `RF-${cn.number}`;
   const fromAccount = needAccounts(accounts.advancesRefund, accounts.advancesRefundError);
@@ -1463,7 +1524,7 @@ async function syncCommissionRow(org: string, accounts: Resolved, paymentId: str
   const v = data as { id: string; number: string; recipient: string; method: string; paid_on: string; amount_aed: number; reference: string | null; proof_path: string | null; is_active: boolean; zoho_expense_id: string | null } | null;
   if (!v) throw new ZohoError("The commission voucher no longer exists in the ERP.");
   if (!v.is_active) return { result: { skipped: "The voucher is inactive in the ERP. Nothing posted." } };
-  const commGate = await startDateSkip(String(v.paid_on).slice(0, 10));
+  const commGate = await startDateSkip(String(v.paid_on).slice(0, 10), "commission", v.id);
   if (commGate) return commGate;
   const amount = round2(Number(v.amount_aed) || 0);
   let z = v.zoho_expense_id ? await zohoExpenseById(org, v.zoho_expense_id) : null;
@@ -1492,7 +1553,7 @@ async function syncRecoveryRow(org: string, accounts: Resolved, payoutId: string
   const { data } = await admin.from("recovery_payouts").select("id, who, month, total_aed, trip_count, paid_at, zoho_expense_id").eq("id", payoutId).maybeSingle();
   const p = data as { id: string; who: string; month: string; total_aed: number; trip_count: number; paid_at: string; zoho_expense_id: string | null } | null;
   if (!p) throw new ZohoError("The recovery payout no longer exists in the ERP.");
-  const recGate = await startDateSkip(dubaiDate(p.paid_at));
+  const recGate = await startDateSkip(dubaiDate(p.paid_at), "recovery", p.id);
   if (recGate) return recGate;
   const amount = round2(Number(p.total_aed) || 0);
   const reference = cut(`RECOV ${p.month} ${p.who}`, 100);
@@ -1548,7 +1609,9 @@ const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2
  */
 export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
   if (!zohoConfigured()) return { pushed: 0, failed: 0, waiting: 0, skipped: "Zoho is not set up on this server (ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET)." };
-  const org = await zohoWriteOrg();
+  // The organization comes from the switch as it stands NOW (not the request's cached settings).
+  const liveAtStart = await zohoLiveNow();
+  const org = liveAtStart ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
   if (!org) return { pushed: 0, failed: 0, waiting: 0, skipped: "No test organization is picked on Settings > Zoho Books." };
   const admin = createAdminClient();
   // A claim older than ten minutes belongs to a worker that died: the row may be taken again.
@@ -1567,6 +1630,13 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
     const now = new Date().toISOString();
     const { data: claimed } = await admin.from("zoho_outbox").update({ claimed_at: now, attempts: row.attempts + 1, updated_at: now }).eq("id", row.id).eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).select("id");
     if (!claimed?.length) continue;
+    // The go-live switch moved while this run was going: this row now belongs to the other book, whose ids were
+    // just swapped in. Release it and stop; the next run starts on the right organization.
+    if ((await zohoLiveNow()) !== liveAtStart) {
+      await admin.from("zoho_outbox").update({ claimed_at: null, attempts: row.attempts }).eq("id", row.id).eq("claimed_at", now);
+      report.skipped = "The go-live switch changed during this run; the next run continues on the new organization.";
+      break;
+    }
     try {
       let out: HandlerOut;
       if (row.kind === "contact") out = { zohoId: await ensureContact(org, row.record_id) };
@@ -1619,7 +1689,7 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
 }
 
 /** Reads a whole table page by page: PostgREST caps one answer at 1,000 rows, which would blind the backfill. */
-async function pageAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+export async function pageAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = [];
   const size = 1000;
   for (let from = 0; ; from += size) {
@@ -1630,28 +1700,40 @@ async function pageAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{
   }
 }
 
-/** The owner's backfill: everything already in the ERP joins the queue — phase 1 money and phase 2 purchases/expenses. */
+/**
+ * The owner's backfill: everything already in the ERP joins the queue — phase 1 money and phase 2 purchases/expenses.
+ * Once LIVE it is the go-live replay: only documents dated on or after the start date (anything earlier never
+ * posts to REAL), and no bulk customers or suppliers — the handlers make the contacts each document needs.
+ */
 export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number; creditnotes: number; vendors: number; bills: number; billpayments: number; commissions: number; recoveries: number; vendorcredits: number; cnrefunds: number }> {
   const admin = createAdminClient();
   const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0, creditnotes: 0, vendors: 0, bills: 0, billpayments: 0, commissions: 0, recoveries: 0, vendorcredits: 0, cnrefunds: 0 };
+  // Read the switch fresh: the go-live flip calls this in the same request that just turned it on.
+  const live = await zohoLiveNow();
+  const startDate = String((await getSettings()).zoho_golive_start_date ?? "").trim();
+  const since = live && /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? startDate : null;
+  if (live && !since) throw new Error("The books are live but no start date is set: nothing can be replayed safely.");
+  /** On or after the start date (always true before go-live). Stamps are read as Dubai days. */
+  const onOrAfter = (stamp: string | null | undefined, isDay = false): boolean => !since || (!!stamp && (isDay ? String(stamp).slice(0, 10) : dubaiDate(String(stamp))) >= since);
   const existing = await pageAll<{ kind: string; record_id: string }>((a, b) => admin.from("zoho_outbox").select("kind, record_id").order("enqueued_at").range(a, b));
   const have = new Set(existing.map((r) => `${r.kind}:${r.record_id}`));
   const put: { kind: ZohoKind; record_id: string; job_id: string | null; created_by: string | null }[] = [];
-  const customers = await pageAll<{ id: string }>((a, b) => admin.from("customers").select("id").eq("is_active", true).order("id").range(a, b));
+  const customers = since ? [] : await pageAll<{ id: string }>((a, b) => admin.from("customers").select("id").eq("is_active", true).order("id").range(a, b));
   for (const c of customers) {
     if (have.has(`contact:${c.id}`)) continue;
     put.push({ kind: "contact", record_id: c.id, job_id: null, created_by: by });
     out.contacts++;
   }
-  const invoices = await pageAll<{ id: string; job_id: string | null }>((a, b) => admin.from("invoices").select("id, job_id").eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null).order("id").range(a, b));
+  const invoices = await pageAll<{ id: string; job_id: string | null; issued_at: string }>((a, b) => admin.from("invoices").select("id, job_id, issued_at").eq("kind", "tax_invoice").eq("status", "issued").is("deposit_for_quotation_id", null).order("id").range(a, b));
   for (const i of invoices) {
-    if (have.has(`invoice:${i.id}`)) continue;
+    if (have.has(`invoice:${i.id}`) || !onOrAfter(i.issued_at)) continue;
     put.push({ kind: "invoice", record_id: i.id, job_id: i.job_id, created_by: by });
     out.invoices++;
   }
-  const pays = await pageAll<{ id: string; job_id: string | null; is_deposit: boolean; method: string; cheque_status: string | null }>((a, b) => admin.from("payments").select("id, job_id, is_deposit, method, cheque_status").eq("status", "recorded").order("id").range(a, b));
+  const pays = await pageAll<{ id: string; job_id: string | null; is_deposit: boolean; method: string; cheque_status: string | null; received_at: string; cleared_at: string | null }>((a, b) => admin.from("payments").select("id, job_id, is_deposit, method, cheque_status, received_at, cleared_at").eq("status", "recorded").order("id").range(a, b));
   for (const p of pays) {
     if (p.method === "cheque" && p.cheque_status !== "cleared") continue;
+    if (!onOrAfter(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at)) continue;
     const kind: ZohoKind = p.is_deposit ? "deposit" : "payment";
     if (have.has(`${kind}:${p.id}`)) continue;
     put.push({ kind, record_id: p.id, job_id: p.job_id, created_by: by });
@@ -1659,53 +1741,53 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     else out.payments++;
   }
   // Phase 2: credit notes, vendors, supplier bills and payments, paid commissions, paid recovery months.
-  const cns = await pageAll<{ id: string; job_id: string | null }>((a, b) => admin.from("invoices").select("id, job_id").eq("kind", "credit_note").eq("status", "issued").order("id").range(a, b));
+  const cns = await pageAll<{ id: string; job_id: string | null; issued_at: string }>((a, b) => admin.from("invoices").select("id, job_id, issued_at").eq("kind", "credit_note").eq("status", "issued").order("id").range(a, b));
   for (const c of cns) {
-    if (have.has(`creditnote:${c.id}`)) continue;
+    if (have.has(`creditnote:${c.id}`) || !onOrAfter(c.issued_at)) continue;
     put.push({ kind: "creditnote", record_id: c.id, job_id: c.job_id, created_by: by });
     out.creditnotes++;
   }
-  const vendors = await pageAll<{ id: string }>((a, b) => admin.from("suppliers").select("id").eq("is_active", true).order("id").range(a, b));
+  const vendors = since ? [] : await pageAll<{ id: string }>((a, b) => admin.from("suppliers").select("id").eq("is_active", true).order("id").range(a, b));
   for (const s of vendors) {
     if (have.has(`vendor:${s.id}`)) continue;
     put.push({ kind: "vendor", record_id: s.id, job_id: null, created_by: by });
     out.vendors++;
   }
-  const pos = await pageAll<{ id: string; job_id: string | null; supplier_paid_at: string | null }>((a, b) =>
-    admin.from("purchase_orders").select("id, job_id, supplier_paid_at").neq("kind", "main").not("supplier_name", "ilike", "our stock").eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).not("supplier_invoice_date", "is", null).eq("is_active", true).order("id").range(a, b),
+  const pos = await pageAll<{ id: string; job_id: string | null; supplier_paid_at: string | null; supplier_invoice_date: string | null }>((a, b) =>
+    admin.from("purchase_orders").select("id, job_id, supplier_paid_at, supplier_invoice_date").neq("kind", "main").not("supplier_name", "ilike", "our stock").eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).not("supplier_invoice_date", "is", null).eq("is_active", true).order("id").range(a, b),
   );
   for (const po of pos) {
-    if (!have.has(`bill:${po.id}`)) {
+    if (!have.has(`bill:${po.id}`) && onOrAfter(po.supplier_invoice_date, true)) {
       put.push({ kind: "bill", record_id: po.id, job_id: po.job_id, created_by: by });
       out.bills++;
     }
-    if (po.supplier_paid_at && !have.has(`billpayment:${po.id}`)) {
+    if (po.supplier_paid_at && !have.has(`billpayment:${po.id}`) && onOrAfter(po.supplier_paid_at)) {
       put.push({ kind: "billpayment", record_id: po.id, job_id: po.job_id, created_by: by });
       out.billpayments++;
     }
   }
-  const vouchers = await pageAll<{ id: string }>((a, b) => admin.from("commission_payments").select("id").eq("is_active", true).order("id").range(a, b));
+  const vouchers = await pageAll<{ id: string; paid_on: string | null }>((a, b) => admin.from("commission_payments").select("id, paid_on").eq("is_active", true).order("id").range(a, b));
   for (const v of vouchers) {
-    if (have.has(`commission:${v.id}`)) continue;
+    if (have.has(`commission:${v.id}`) || !onOrAfter(v.paid_on, true)) continue;
     put.push({ kind: "commission", record_id: v.id, job_id: null, created_by: by });
     out.commissions++;
   }
-  const payouts = await pageAll<{ id: string }>((a, b) => admin.from("recovery_payouts").select("id").order("id").range(a, b));
+  const payouts = await pageAll<{ id: string; paid_at: string | null }>((a, b) => admin.from("recovery_payouts").select("id, paid_at").order("id").range(a, b));
   for (const r of payouts) {
-    if (have.has(`recovery:${r.id}`)) continue;
+    if (have.has(`recovery:${r.id}`) || !onOrAfter(r.paid_at)) continue;
     put.push({ kind: "recovery", record_id: r.id, job_id: null, created_by: by });
     out.recoveries++;
   }
-  // Phase 3: returned parts and recorded customer refunds.
-  const returned = await pageAll<{ id: string; job_id: string | null }>((a, b) => admin.from("part_items").select("id, job_id").eq("is_active", true).or("disposition.eq.returned,return_status.eq.returned").order("id").range(a, b));
+  // Phase 3: parts returned TO THE SUPPLIER (disposition; "back with Parts" alone is not a credit) and customer refunds.
+  const returned = await pageAll<{ id: string; job_id: string | null; disposition_at: string | null }>((a, b) => admin.from("part_items").select("id, job_id, disposition_at").eq("is_active", true).eq("disposition", "returned").order("id").range(a, b));
   for (const pt of returned) {
-    if (have.has(`vendorcredit:${pt.id}`)) continue;
+    if (have.has(`vendorcredit:${pt.id}`) || !onOrAfter(pt.disposition_at)) continue;
     put.push({ kind: "vendorcredit", record_id: pt.id, job_id: pt.job_id, created_by: by });
     out.vendorcredits++;
   }
-  const refunds = await pageAll<{ id: string; job_id: string | null }>((a, b) => admin.from("invoices").select("id, job_id").eq("kind", "credit_note").not("refund_paid_at", "is", null).order("id").range(a, b));
+  const refunds = await pageAll<{ id: string; job_id: string | null; refund_paid_at: string }>((a, b) => admin.from("invoices").select("id, job_id, refund_paid_at").eq("kind", "credit_note").not("refund_paid_at", "is", null).order("id").range(a, b));
   for (const rf of refunds) {
-    if (have.has(`cnrefund:${rf.id}`)) continue;
+    if (have.has(`cnrefund:${rf.id}`) || !onOrAfter(rf.refund_paid_at)) continue;
     put.push({ kind: "cnrefund", record_id: rf.id, job_id: rf.job_id, created_by: by });
     out.cnrefunds++;
   }

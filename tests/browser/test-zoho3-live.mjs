@@ -84,6 +84,57 @@ await section("b vendor credit", async () => {
   check("b: the vendor-credit id is stored on the part", !!pt?.zoho_vendorcredit_id, JSON.stringify(pt));
 });
 
+/* ---------------- (b0) a part merely back with Parts (kept in stock) is never a supplier credit ---------------- */
+await section("b0 not a supplier return", async () => {
+  const [part] = await sql(
+    "insert into public.part_items (job_id, description, quantity, confirmed_quantity, cost_aed, supplier, availability, po_id, return_status, returned_qty, disposition, disposition_at, not_needed_at) values ($1, 'E2e mount (kept in stock)', 1, 1, 80, $2, 'to_order', $3, 'returned', 1, 'stock', now(), now()) returning id",
+    [jobId, `E2e Novat Zoho ${RUN}`, po.id],
+  );
+  await enqueue("vendorcredit", part.id, jobId);
+  const r = await settled("vendorcredit", part.id);
+  check("b0: kept in stock = nothing posted (skipped, no Zoho id)", r?.status === "synced" && !r?.zoho_id && /not recorded as returned to the supplier/.test(String(r?.zoho_result?.skipped ?? "")), JSON.stringify(r)?.slice(0, 260));
+});
+
+/* ---------------- (b2) a credit recorded BEFORE the supplier's invoice waits for the bill, then applies ---------------- */
+await section("b2 credit before the bill", async () => {
+  const [po2] = await sql(
+    `insert into public.purchase_orders (number, kind, job_id, supplier_id, supplier_name, status, total_cost_aed, supplier_invoice_status)
+     values ($1, 'supplier', $2, $3, $4, 'received', 300, 'to_follow') returning id, number`,
+    [`LPO-E2E9-${RUN}-2`, jobId, supplierId, `E2e Novat Zoho ${RUN}`],
+  );
+  const [part1] = await sql("select id from public.part_items where job_id = $1 limit 1", [jobId]);
+  await sql("insert into public.purchase_order_lines (po_id, part_item_id, description, quantity, unit_cost) values ($1, $2, 'Wiper motor', 3, 100)", [po2.id, part1.id]);
+  const [part] = await sql(
+    "insert into public.part_items (job_id, description, quantity, confirmed_quantity, cost_aed, supplier, availability, po_id, disposition, disposition_note, disposition_at, not_needed_at) values ($1, 'E2e wiper motor (wrong one)', 1, 1, 100, $2, 'to_order', $3, 'returned', 'SCN-B2', now(), now()) returning id",
+    [jobId, `E2e Novat Zoho ${RUN}`, po2.id],
+  );
+  await enqueue("vendorcredit", part.id, jobId);
+  await cron();
+  const waiting = await row("vendorcredit", part.id);
+  check("b2: the credit waits for the bill (nothing posted alone)", waiting?.status === "pending" && /Waiting for the bill of LPO-E2E9-/.test(waiting?.last_error ?? "") && !waiting?.zoho_id, JSON.stringify(waiting)?.slice(0, 220));
+  const billRow = await row("bill", po2.id);
+  check("b2: the bill joined the queue, waiting for the supplier's invoice", billRow?.status === "pending" && /Waiting for the supplier invoice/.test(billRow?.last_error ?? ""), JSON.stringify(billRow)?.slice(0, 200));
+  // The supplier's paper arrives.
+  await sql("update public.purchase_orders set supplier_invoice_status = 'received', supplier_invoice_number = $2, supplier_invoice_date = $3, supplier_invoice_amount = 300, supplier_invoice_at = now() where id = $1", [po2.id, `E2ENV-${RUN}-2`, TODAY]);
+  const bill = await settled("bill", po2.id);
+  check("b2: the bill posts (300 flat)", bill?.status === "synced" && bill?.zoho_result?.zoho?.total === 300, JSON.stringify(bill)?.slice(0, 220));
+  const credit = await settled("vendorcredit", part.id);
+  check("b2: the credit then posts AND applies: the bill shows 200 due", credit?.status === "synced" && credit?.zoho_result?.applied_now === 100 && credit?.zoho_result?.bill_balance_after === 200, JSON.stringify(credit?.zoho_result));
+});
+
+/* ---------------- (b3) a supplier payment adopted after a crash reports its OWN amount ---------------- */
+await section("b3 supplier payment adopt", async () => {
+  await sql("update public.purchase_orders set supplier_paid_at = now(), supplier_paid_reference = 'E2E-PAY' where id = $1", [po.id]);
+  await enqueue("billpayment", po.id, jobId);
+  const paid = await settled("billpayment", po.id);
+  check("b3: the payment settles the bill after the credit (250, not 400)", paid?.status === "synced" && paid?.zoho_result?.amount === 250 && paid?.zoho_result?.bill_balance_after === 0, JSON.stringify(paid?.zoho_result));
+  // A run that died after creating the payment: the stored id and the result are gone, the row is pending again.
+  await sql("update public.purchase_orders set zoho_billpayment_id = null where id = $1", [po.id]);
+  await sql("update public.zoho_outbox set status = 'pending', zoho_id = null, zoho_result = null, last_error = null, claimed_at = null where kind = 'billpayment' and record_id = $1", [po.id]);
+  const adopted = await settled("billpayment", po.id);
+  check("b3: the retry ADOPTS the payment and records its own amount (250, never the bill's 400)", adopted?.status === "synced" && adopted?.zoho_result?.amount === 250 && adopted?.zoho_id === paid?.zoho_id, JSON.stringify({ first: paid?.zoho_id, again: adopted?.zoho_id, result: adopted?.zoho_result }));
+});
+
 /* ---------------- (c) a customer refund against a credit note ---------------- */
 await section("c customer refund", async () => {
   const [inv] = await sql(
@@ -140,6 +191,8 @@ await section("d reconciliation", async () => {
   const after = await invSectionOf();
   check("d: the broken day is RED with the ERP one invoice ahead", broken.status === "red" && after.status === "red" && (after.s?.erp?.count ?? 0) === (base.s?.erp?.count ?? 0) + 1 && (after.s?.zoho?.count ?? 0) === (base.s?.zoho?.count ?? 0), JSON.stringify({ base: base.s, after: after.s }));
   check("d: the row names the exact difference on tax invoices", after.s?.ok === false && /in the ERP vs .* in Zoho/.test(after.s?.diff ?? ""), JSON.stringify(after.s));
+  const [orgRow] = await sql("select details->>'org' as org, details->>'orgLabel' as label from public.zoho_reconciliation where day = $1", [TODAY]);
+  check("d: the day is compared against the book that owns it (OFJ TEST)", orgRow?.org === "944122733" && orgRow?.label === "OFJ TEST", JSON.stringify(orgRow));
   const bell = (await sql("select id from public.notifications where type = 'zoho_reconciliation' and created_at > now() - interval '10 minutes' limit 1"))[0];
   check("d: a red day rang the bell (owner + accounts)", !!bell, JSON.stringify(bell));
   // Fix it: the missing invoice posts, the day re-checks and the gap returns to the baseline.

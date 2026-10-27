@@ -191,7 +191,7 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
             {checklist.live ? (
               <Notice tone="error">The books are LIVE on the REAL organization (942979945). OFJ TEST is closed to writes. Documents from {checklist.startDate || "the start date"} post for real.</Notice>
             ) : (
-              <p className="text-sm text-muted">The switch moves every write from OFJ TEST to the REAL book — only once every line below is green.</p>
+              <p className="text-sm text-muted">The switch moves every write from OFJ TEST to the REAL book — only once every line below is green. At the flip, OFJ TEST&apos;s queue is archived and everything dated from the start date is posted again to the REAL book; anything earlier stays in OFJ TEST (the accountant carries it over as opening balances).</p>
             )}
             <ul className="flex flex-col divide-y divide-line" data-golive-checklist>
               {checklist.items.map((i) => (
@@ -207,7 +207,7 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
             {!checklist.live ? (
               <div className="flex flex-col gap-3">
                 <form action={setGoLiveStartDate} className="flex flex-wrap items-end gap-2">
-                  <Field label="Go-live start date" hint="Documents dated before it never post to the REAL book.">
+                  <Field label="Go-live start date" hint="The first day the REAL book owns. The switch unlocks on that day, never before.">
                     <Input name="start_date" type="date" defaultValue={checklist.startDate} className="w-44" />
                   </Field>
                   <Button type="submit" tone="secondary" size="md" data-golive-date-save>Save the date</Button>

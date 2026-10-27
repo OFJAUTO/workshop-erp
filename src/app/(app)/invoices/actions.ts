@@ -317,8 +317,11 @@ export async function recordCnRefund(invoiceId: string, formData: FormData) {
   if (method !== "cash" && method !== "transfer") redirect(`${back}?error=${encodeURIComponent("Pick cash or bank transfer.")}`);
   if (method === "transfer" && !reference) redirect(`${back}?error=${encodeURIComponent("A transfer needs its reference.")}`);
   const now = new Date().toISOString();
-  const { error } = await admin.from("invoices").update({ refund_paid_at: now, refund_paid_by: staff.id, refund_method: method, refund_reference: reference, refund_amount_aed: amount, updated_by: staff.id }).eq("id", invoiceId).is("refund_paid_at", null);
+  // Once only: the update matches only while no refund is stored, and a second submit that loses the race is told
+  // so — it writes no history line, queues nothing and never claims its own figure was recorded.
+  const { data: won, error } = await admin.from("invoices").update({ refund_paid_at: now, refund_paid_by: staff.id, refund_method: method, refund_reference: reference, refund_amount_aed: amount, updated_by: staff.id }).eq("id", invoiceId).is("refund_paid_at", null).select("id");
   if (error) redirect(`${back}?error=${encodeURIComponent(error.message)}`);
+  if (!won?.length) redirect(`${back}?message=${encodeURIComponent("The refund was already recorded by someone else: the card shows what was stored.")}`);
   if (bundle.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle.invoice.job_id, event_type: "payment", note: `${bundle.invoice.number}: AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} refunded to the customer by ${staff.display_name} (${method === "cash" ? "cash" : `bank transfer${reference ? `, ref ${reference}` : ""}`})`, created_by: staff.id });
   await tryEnqueueZoho("cnrefund", invoiceId, bundle.invoice.job_id, staff.id);
   refresh(bundle.invoice.job_id, invoiceId);

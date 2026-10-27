@@ -1,10 +1,10 @@
 import "server-only";
 import { payableCommissions } from "@/lib/commissions";
-import { PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "@/lib/invoice-data";
+import { PAYMENT_SELECT, invoiceBalance, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ReconDetails } from "@/lib/zoho-reconcile";
-import { billErpFigures, poForZoho } from "@/lib/zoho-sync";
+import { billErpFigures, pageAll, poForZoho } from "@/lib/zoho-sync";
 
 /**
  * The monthly close (phase 4): everything Mathew ticks before calling a month done, each line green or red.
@@ -25,7 +25,14 @@ export type CloseData = {
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
+/** PURE: a real month (2026-10, never 2026-13 or 2026-00). */
+export function validMonth(month: string): boolean {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  return !!m && Number(m[1]) >= 2000 && Number(m[1]) <= 2100 && Number(m[2]) >= 1 && Number(m[2]) <= 12;
+}
+
 export async function loadMonthlyClose(month: string): Promise<CloseData> {
+  if (!validMonth(month)) throw new Error(`"${month}" is not a month: pick one as yyyy-mm.`);
   const admin = createAdminClient();
   const monthStart = `${month}-01`;
   const nextMonth = new Date(new Date(`${monthStart}T00:00:00Z`).getTime());
@@ -63,12 +70,20 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
   });
 
   // 2. Unpaid tax invoices, as of now.
-  const { data: invRaw } = await admin.from("invoices").select("id, number, total_aed").eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).is("deposit_for_quotation_id", null);
-  const invoices = ((invRaw ?? []) as { id: string; number: string; total_aed: number }[]);
+  // Every row, page by page: PostgREST answers at most 1,000 rows, and a silently shorter list would read "all paid".
+  const invoices = await pageAll<{ id: string; number: string; total_aed: number }>((a, b) =>
+    admin.from("invoices").select("id, number, total_aed").eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).is("deposit_for_quotation_id", null).order("id").range(a, b),
+  );
+  const payRaw = await pageAll<Record<string, unknown>>((a, b) => admin.from("payments").select(PAYMENT_SELECT).not("invoice_id", "is", null).eq("is_active", true).order("id").range(a, b));
+  const paysByInvoice = new Map<string, PaymentRow[]>();
+  for (const raw of payRaw) {
+    const p = toPayment(raw) as PaymentRow;
+    if (!p.invoice_id) continue;
+    paysByInvoice.set(p.invoice_id, [...(paysByInvoice.get(p.invoice_id) ?? []), p]);
+  }
   const unpaidInvoices: CloseData["unpaidInvoices"] = [];
   for (const inv of invoices) {
-    const { data: payRaw } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", inv.id).eq("is_active", true);
-    const bal = invoiceBalance(toInvoice(inv as unknown as Record<string, unknown>) as InvoiceRow, ((payRaw ?? []) as Record<string, unknown>[]).map(toPayment) as PaymentRow[]);
+    const bal = invoiceBalance({ total_aed: Number(inv.total_aed) }, paysByInvoice.get(inv.id) ?? []);
     if (bal.balance > 0.005) unpaidInvoices.push({ number: inv.number, total: Number(inv.total_aed), balance: bal.balance });
   }
   lines.push({
@@ -80,8 +95,8 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
   });
 
   // 3. Deposits held on open jobs (money received before the tax invoice).
-  const { data: depRaw } = await admin.from("payments").select("amount_aed, method, cheque_status, job:jobs!payments_job_id_fkey(is_open)").eq("is_deposit", true).eq("status", "recorded").eq("is_active", true);
-  const heldRows = ((depRaw ?? []) as unknown as { amount_aed: number; method: string; cheque_status: string | null; job: { is_open: boolean } | null }[]).filter((p) => p.job?.is_open && (p.method !== "cheque" || p.cheque_status === "cleared"));
+  const depRaw = await pageAll<Record<string, unknown>>((a, b) => admin.from("payments").select("id, amount_aed, method, cheque_status, job:jobs!payments_job_id_fkey(is_open)").eq("is_deposit", true).eq("status", "recorded").eq("is_active", true).order("id").range(a, b));
+  const heldRows = (depRaw as unknown as { amount_aed: number; method: string; cheque_status: string | null; job: { is_open: boolean } | null }[]).filter((p) => p.job?.is_open && (p.method !== "cheque" || p.cheque_status === "cleared"));
   lines.push({
     key: "deposits_held",
     label: "Deposits held on open jobs",
@@ -91,8 +106,10 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
   });
 
   // 4. Supplier bills unpaid.
-  const { data: poRaw } = await admin.from("purchase_orders").select("id, number, supplier_name, supplier_invoice_number").neq("kind", "main").eq("is_active", true).eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).is("supplier_paid_at", null);
-  const unpaidPos = ((poRaw ?? []) as { id: string; number: string; supplier_name: string; supplier_invoice_number: string }[]).filter((p) => !/^our stock$/i.test(p.supplier_name.trim()));
+  const poRaw = await pageAll<Record<string, unknown>>((a, b) =>
+    admin.from("purchase_orders").select("id, number, supplier_name, supplier_invoice_number").neq("kind", "main").eq("is_active", true).eq("supplier_invoice_status", "received").not("supplier_invoice_number", "is", null).is("supplier_paid_at", null).order("id").range(a, b),
+  );
+  const unpaidPos = (poRaw as unknown as { id: string; number: string; supplier_name: string; supplier_invoice_number: string }[]).filter((p) => !/^our stock$/i.test(p.supplier_name.trim()));
   const unpaidBills: CloseData["unpaidBills"] = [];
   for (const p of unpaidPos) {
     const gross = (await billErpFigures(await poForZoho(p.id))).gross;
@@ -117,9 +134,9 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
   });
 
   // 6. Recovery: the month's trips all approved/paid and each driver's month marked paid.
-  const { data: tripRaw } = await admin.from("recovery_trips").select("company, driver_name, status, delivered_at, created_at, price_aed").eq("is_active", true);
+  const tripRaw = await pageAll<Record<string, unknown>>((a, b) => admin.from("recovery_trips").select("id, company, driver_name, status, delivered_at, created_at, price_aed").eq("is_active", true).order("id").range(a, b));
   const whoOf = (t: { company: string | null; driver_name: string | null }) => t.company ?? (t.driver_name ? `Our truck · ${t.driver_name}` : "Our truck");
-  const inMonth = ((tripRaw ?? []) as { company: string | null; driver_name: string | null; status: string; delivered_at: string | null; created_at: string; price_aed: number | null }[]).filter((t) => String(t.delivered_at ?? t.created_at).slice(0, 7) === month);
+  const inMonth = ((tripRaw as unknown) as { company: string | null; driver_name: string | null; status: string; delivered_at: string | null; created_at: string; price_aed: number | null }[]).filter((t) => String(t.delivered_at ?? t.created_at).slice(0, 7) === month);
   const byWho = new Map<string, { open: number; total: number }>();
   for (const t of inMonth) {
     const g = byWho.get(whoOf(t)) ?? { open: 0, total: 0 };

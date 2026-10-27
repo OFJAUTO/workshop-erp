@@ -3,7 +3,6 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { reconcileDay, reconcileMissingDays } from "@/lib/zoho-reconcile";
-import { zohoWriteOrg } from "@/lib/zoho-sync";
 
 const back = (kind: "message" | "error", text: string): never => redirect(`/zoho/reconciliation?${kind}=${encodeURIComponent(text)}`);
 
@@ -16,9 +15,7 @@ export async function recheckDay(day: string, formData: FormData) {
   let kind: "message" | "error";
   let words: string;
   try {
-    const org = await zohoWriteOrg();
-    if (!org) throw new Error("No organization to reconcile against.");
-    const { status } = await reconcileDay(org, day);
+    const { status } = await reconcileDay(day);
     kind = "message";
     words = `${day} re-checked: ${status === "green" ? "identical on both sides" : "a difference remains (the row says exactly where)"}.`;
   } catch (e) {
