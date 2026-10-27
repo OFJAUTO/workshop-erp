@@ -5,6 +5,7 @@ import { PAYMENT_SELECT, toPayment } from "./invoice-data";
 import { round2 } from "./money";
 import type { ExtraWaiting } from "@/components/WaitingPanel";
 import { createAdminClient } from "./supabase/admin";
+import { loadUnsettled } from "./card-settlements";
 import { formatPlate } from "./types";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
@@ -170,8 +171,19 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       : z.kind === "recovery" ? "Recovery month"
       : z.kind === "vendorcredit" ? "Supplier credit"
       : z.kind === "cnrefund" ? "Customer refund"
+      : z.kind === "settlement" ? "Card settlement"
       : "Payment";
     out.push({ jobId: `zoho:${z.id}`, plate: "Zoho Books", car: null, what: `${kindWord}: ${(z.last_error ?? "see the sync page").slice(0, 140)}`, amount: null, actionLabel: "Open the sync page", href: "/zoho?show=failed", always: true, urgency: "amber", since: z.enqueued_at });
+  }
+
+  // 8. Card and payment-link money still in the clearing account three working days after it was taken: the bank
+  // should have paid it out; record the settlement (27 October 2026). One amber row per method.
+  const late = (await loadUnsettled()).filter((p) => p.late);
+  for (const method of ["card", "link"] as const) {
+    const mine = late.filter((p) => p.method === method);
+    if (!mine.length) continue;
+    const total = round2(mine.reduce((a, p) => a + p.amount, 0));
+    out.push({ jobId: `settle:${method}`, plate: method === "card" ? "Card machine" : "Payment link", car: null, what: `${mine.length} ${method === "card" ? "card" : "payment-link"} payment${mine.length === 1 ? "" : "s"} not settled after 3 working days`, amount: aed(total), actionLabel: "Record the settlement", href: `/card-settlements?method=${method}`, always: true, urgency: "amber", since: mine[0].receivedAt, hint: "Match the bank's payout on the statement, then record what actually came in: the real fee replaces the estimate on each job." });
   }
 
   // 7. A red reconciliation day (phase 4): the books differ somewhere until someone looks.

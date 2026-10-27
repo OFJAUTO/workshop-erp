@@ -95,6 +95,9 @@ export type PaymentRow = {
   cheque_status: "pending" | "cleared" | "bounced" | null;
   cleared_at: string | null;
   bank_charge_aed: number;
+  /** Card and payment-link payments: the bank's ACTUAL fee share once the settlement is recorded (null = estimate stands). */
+  actual_fee_aed?: number | null;
+  settlement_id?: string | null;
   is_deposit: boolean;
   /** A deposit: the approved quotation it was asked for on, and the deposit tax invoice when Settings ask for one. */
   deposit_quotation_id?: string | null;
@@ -119,7 +122,7 @@ export type PaymentRow = {
 
 export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, converted_from, converted_to, issue_reason, deposit_for_quotation_id, created_at";
 export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id, price_display, discount_percent, package_items, cut_method, cut_note";
-export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, deposit_quotation_id, deposit_invoice_number, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at, proof_path, client_key";
+export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, deposit_quotation_id, deposit_invoice_number, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at, proof_path, client_key, settlement_id, actual_fee_aed";
 
 export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque", transfer: "Bank transfer" };
 
@@ -137,7 +140,7 @@ export const toInvoiceLine = (r: Record<string, unknown>) => {
   // Hours ride in the details as "1.5 h" when the line is labour; the builder sets the quantity to the hours.
   return { ...l, hours: l.section === "services" && /^\d+(\.\d)? h$/.test(String(l.details ?? "")) ? l.quantity : null };
 };
-export const toPayment = (r: Record<string, unknown>) => num(r as unknown as PaymentRow, ["amount_aed", "bank_charge_aed"]);
+export const toPayment = (r: Record<string, unknown>) => num(r as unknown as PaymentRow, ["amount_aed", "bank_charge_aed", "actual_fee_aed"]);
 
 /** How much is paid against an invoice; cheques count only once cleared. */
 export function invoiceBalance(invoice: Pick<InvoiceRow, "total_aed">, payments: PaymentRow[]) {

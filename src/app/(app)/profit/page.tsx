@@ -235,7 +235,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
                   <td className="px-3 py-2 align-top text-right">{n0(r.partsCost)}</td>
                   <td className="px-3 py-2 align-top text-right whitespace-nowrap">{n0(r.labourCost)} <span className="text-xs text-muted">({(r.labourMinutes / 60).toFixed(1)} h)</span></td>
                   <td className="px-3 py-2 align-top text-right">{n0(other)}</td>
-                  <td className="px-3 py-2 align-top text-right">{n0(r.bankCharges)}</td>
+                  <td className="px-3 py-2 align-top text-right whitespace-nowrap">{n0(r.bankCharges)}{r.bankCharges > 0 ? <span className={`ml-1 text-xs font-semibold ${r.bankChargesActual ? "text-green" : "text-muted"}`} data-fee-mark={r.bankChargesActual ? "actual" : "estimate"}>{r.bankChargesActual ? "actual" : "est."}</span> : null}</td>
                   <td className={`px-3 py-2 align-top text-right font-extrabold ${r.profit < 0 ? "text-red" : ""}`}>{n0(r.profit)}</td>
                   <td className="px-3 py-2 align-top text-right"><span className={`inline-flex min-h-6 items-center rounded-full px-2 text-xs font-bold ${pill(m)}`} data-margin-pill>{m.toFixed(1)}%</span></td>
                 </tr>

@@ -94,6 +94,7 @@ function replayWords(r: Awaited<ReturnType<typeof enqueueBackfill>>): string {
     [r.recoveries, "recovery month"],
     [r.vendorcredits, "supplier credit"],
     [r.cnrefunds, "customer refund"],
+    [r.settlements, "card settlement"],
   ].filter(([n]) => Number(n) > 0) as [number, string][];
   const queued = parts.length ? parts.map(([n, w]) => `${n} ${w}${n === 1 ? "" : "s"}`).join(", ") : "nothing";
   return r.byHand ? `${queued}; ${r.byHand} older document${r.byHand === 1 ? "" : "s"} that reached no book shown red for entry by hand` : queued;

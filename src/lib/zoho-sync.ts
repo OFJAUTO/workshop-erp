@@ -227,6 +227,9 @@ type Resolved = {
   /** Where credit-note refunds are paid from (functional since phase 3). */
   advancesRefund?: string;
   advancesRefundError?: string;
+  /** Card/link settlements: the bank's actual fee goes here (resolved softly). */
+  bankCharges?: string;
+  bankChargesError?: string;
 };
 
 /** The account a handler needs, or its group's plain-words reason. */
@@ -322,12 +325,17 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap): Promi
   } catch (e) {
     out.advancesRefundError = e instanceof Error ? e.message : String(e);
   }
+  try {
+    out.bankCharges = await resolve(map.bankCharges, "Bank charges (card and link fees)", "expense");
+  } catch (e) {
+    out.bankChargesError = e instanceof Error ? e.message : String(e);
+  }
   return out;
 }
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -443,7 +451,9 @@ export function zohoOpenUrl(org: string, kind: ZohoKind, zohoId: string): string
     : kind === "cnrefund" ? "creditnotes"
     : kind === "billpayment" ? "paymentsmade"
     : kind === "commission" || kind === "recovery" ? "expenses"
+    : kind === "settlement" ? "banking"
     : "paymentsreceived";
+  if (kind === "settlement") return `https://books.zoho.com/app/${org}#/banking`;
   return `https://books.zoho.com/app/${org}#/${section}/${zohoId}`;
 }
 
@@ -845,7 +855,9 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
       date: dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at),
       reference_number: p.number,
       description: p.is_deposit ? `Advance payment (deposit)${p.deposit_invoice_number ? ` · ${p.deposit_invoice_number}` : ""}` : `Payment in the ERP (${p.number})`,
-      ...(p.bank_charge_aed > 0 ? { bank_charges: p.bank_charge_aed } : {}),
+      // Card and payment-link money lands in its clearing account at the FULL amount; the bank's actual fee
+      // reaches Zoho only with the settlement (27 October 2026). Other methods keep their recorded charge.
+      ...(p.bank_charge_aed > 0 && p.method !== "card" && p.method !== "link" ? { bank_charges: p.bank_charge_aed } : {}),
       account_id: accounts.depositTo[p.method],
     };
     try {
@@ -877,7 +889,7 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
     result: {
       receipt: p.number,
       amount: p.amount_aed,
-      bank_charges: p.bank_charge_aed,
+      bank_charges: p.method === "card" || p.method === "link" ? 0 : p.bank_charge_aed,
       mode: MODE[p.method],
       kind: p.is_deposit ? "advance" : "payment",
       applied_now: applied,
@@ -1761,11 +1773,66 @@ async function syncRecoveryRow(org: string, accounts: Resolved, payoutId: string
   return { zohoId: z.expense_id, result: { month: p.month, who: p.who, amount, trips: p.trip_count, receipt } };
 }
 
+/* ------------------------------------------------------- card and link settlements ------------------------------------------------------- */
+
+type ZohoBankTxn = { transaction_id: string; reference_number?: string; amount?: number; transaction_type?: string };
+
+/**
+ * A card/link settlement (STL-xxxxx) = the money leaving the clearing account: a transfer clearing -> bank for what
+ * the bank actually paid in, and the actual fee as an expense on the bank charges account paid through the clearing
+ * account. Both carry the settlement number and the statement reference; each is searched before it is created.
+ */
+async function syncSettlementRow(org: string, accounts: Resolved, settlementId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, is_active, zoho_transfer_id, zoho_fee_id").eq("id", settlementId).maybeSingle();
+  const st = data as { id: string; number: string; method: "card" | "link"; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; is_active: boolean; zoho_transfer_id: string | null; zoho_fee_id: string | null } | null;
+  if (!st) throw new ZohoError("The settlement no longer exists in the ERP.");
+  if (!st.is_active) {
+    if (st.zoho_transfer_id || st.zoho_fee_id) throw new ZohoError(`${st.number} was undone in the ERP after it reached Zoho: the accountant removes the transfer and the fee in Zoho by hand.`);
+    return { result: { skipped: "Undone in the ERP before it was posted. Nothing went to Zoho." } };
+  }
+  const gate = await startDateSkip(String(st.settled_on).slice(0, 10), "settlement", st.id);
+  if (gate) return gate;
+  const received = round2(Number(st.received_aed) || 0);
+  const fee = round2(Number(st.fee_aed) || 0);
+  const clearing = accounts.depositTo[st.method];
+  const bank = accounts.depositTo.transfer;
+  const date = String(st.settled_on).slice(0, 10);
+  const reference = cut(`${st.number}${st.statement_ref ? ` · ${st.statement_ref}` : ""}`, 100);
+  const what = st.method === "card" ? "Card machine" : "Payment link";
+
+  let transferId = st.zoho_transfer_id;
+  if (!transferId && received > 0) {
+    const found = await zohoFetch<{ banktransactions?: ZohoBankTxn[] }>(`/banktransactions?account_id=${encodeURIComponent(clearing)}&reference_number=${encodeURIComponent(reference)}`, { org });
+    const same = (found.banktransactions ?? []).find((t) => t.reference_number === reference) ?? null;
+    if (same && !near(Number(same.amount), received)) throw new ZohoError(`A transfer with the reference ${reference} already exists in Zoho with a different amount (${Number(same.amount).toFixed(2)} there, ${received.toFixed(2)} here): the accountant checks it in Zoho.`);
+    transferId = same?.transaction_id ?? null;
+    if (!transferId) {
+      const j = await zohoFetch<{ banktransaction?: ZohoBankTxn }>("/banktransactions", {
+        org,
+        method: "POST",
+        body: { transaction_type: "transfer_fund", from_account_id: clearing, to_account_id: bank, amount: received, date, reference_number: reference, description: cut(`${what} settlement ${st.number} · ${st.payment_count} payment${st.payment_count === 1 ? "" : "s"}`, 100) },
+      });
+      transferId = j.banktransaction?.transaction_id ?? null;
+      if (!transferId) throw new ZohoError("Zoho did not return the new transfer.");
+    }
+    await admin.from("card_settlements").update({ zoho_transfer_id: transferId }).eq("id", st.id);
+  }
+  let feeId = st.zoho_fee_id;
+  if (!feeId && fee > 0) {
+    const z = await createExpense(org, { accountId: needAccounts(accounts.bankCharges, accounts.bankChargesError), paidThroughId: clearing, date, amount: fee, reference, description: `${what} fees · ${st.number}` });
+    if (!near(z.total, fee)) throw new ZohoError(`Totals differ for the fee of ${st.number}: Zoho has ${z.total.toFixed(2)}, the ERP has ${fee.toFixed(2)}.`);
+    feeId = z.expense_id;
+    await admin.from("card_settlements").update({ zoho_fee_id: feeId }).eq("id", st.id);
+  }
+  return { zohoId: transferId ?? feeId, result: { settlement: st.number, method: st.method, gross: round2(Number(st.gross_aed) || 0), received, fee, transfer_id: transferId, fee_expense_id: feeId, reference } };
+}
+
 /* ------------------------------------------------------- the worker ------------------------------------------------------- */
 
 export type DrainReport = { pushed: number; failed: number; waiting: number; skipped?: string };
 
-const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, commission: 10, recovery: 11 };
+const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, commission: 10, recovery: 11, settlement: 12 };
 
 /**
  * The five-minute worker (and the Sync now button): the rows looked at longest ago first (a row that waited goes to
@@ -1834,6 +1901,7 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
             : row.kind === "recovery" ? await syncRecoveryRow(org, accounts, row.record_id)
             : row.kind === "vendorcredit" ? await syncVendorCreditRow(org, accounts, row.record_id)
             : row.kind === "cnrefund" ? await syncCnRefundRow(org, accounts, row.record_id)
+            : row.kind === "settlement" ? await syncSettlementRow(org, accounts, row.record_id)
             : await syncPaymentRow(org, accounts, row.record_id);
         }
       }
@@ -1884,9 +1952,9 @@ export async function pageAll<T>(fetchPage: (from: number, to: number) => Promis
  * and every READY document dated before the start date that never reached OFJ TEST — still waiting there at the
  * flip, or never queued — becomes a red row with the by-hand words: it is in no Zoho book, so it must be seen.
  */
-export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number; creditnotes: number; vendors: number; bills: number; billpayments: number; commissions: number; recoveries: number; vendorcredits: number; cnrefunds: number; byHand: number }> {
+export async function enqueueBackfill(by: string | null): Promise<{ contacts: number; deposits: number; invoices: number; payments: number; creditnotes: number; vendors: number; bills: number; billpayments: number; commissions: number; recoveries: number; vendorcredits: number; cnrefunds: number; settlements: number; byHand: number }> {
   const admin = createAdminClient();
-  const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0, creditnotes: 0, vendors: 0, bills: 0, billpayments: 0, commissions: 0, recoveries: 0, vendorcredits: 0, cnrefunds: 0, byHand: 0 };
+  const out = { contacts: 0, deposits: 0, invoices: 0, payments: 0, creditnotes: 0, vendors: 0, bills: 0, billpayments: 0, commissions: 0, recoveries: 0, vendorcredits: 0, cnrefunds: 0, settlements: 0, byHand: 0 };
   // Read the switch fresh: the go-live flip calls this in the same request that just turned it on.
   const state = await zohoBooksNow();
   const cut = state.live || state.wentLive;
@@ -1978,6 +2046,12 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     if (!consider("cnrefund", rf.id, rf.job_id, rf.refund_paid_at)) continue;
     put.push({ kind: "cnrefund", record_id: rf.id, job_id: rf.job_id, created_by: by });
     out.cnrefunds++;
+  }
+  const settlements = await pageAll<{ id: string; settled_on: string }>((a, b) => admin.from("card_settlements").select("id, settled_on").eq("is_active", true).order("id").range(a, b));
+  for (const st of settlements) {
+    if (!consider("settlement", st.id, null, st.settled_on, true)) continue;
+    put.push({ kind: "settlement", record_id: st.id, job_id: null, created_by: by });
+    out.settlements++;
   }
   for (let i = 0; i < put.length; i += 200) {
     // ignoreDuplicates: a row enqueued by a hook mid-backfill never aborts the rest.

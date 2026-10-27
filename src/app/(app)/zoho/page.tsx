@@ -35,6 +35,7 @@ const KIND_WORDS: Record<ZohoKind, string> = {
   recovery: "Recovery month",
   vendorcredit: "Supplier credit",
   cnrefund: "Customer refund",
+  settlement: "Card settlement",
 };
 
 const aed = (n: number) => `AED ${Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
@@ -70,6 +71,9 @@ function resultWords(row: OutboxRow): string | null {
   if (row.kind === "cnrefund") {
     return `Refund in Zoho${typeof r.refund === "number" ? `: ${aed(r.refund)}` : ""}${typeof r.cn_unapplied_after === "number" ? ` · ${aed(r.cn_unapplied_after)} of the credit left unapplied` : ""}`;
   }
+  if (row.kind === "settlement") {
+    return `Transfer to the bank ${aed(Number(r.received ?? 0))}${typeof r.fee === "number" && r.fee > 0 ? ` · bank charges ${aed(r.fee)}` : ""}`;
+  }
   if (row.kind === "commission" || row.kind === "recovery") {
     const amount = typeof r.amount === "number" ? aed(r.amount) : "";
     return `Expense in Zoho: ${amount}${r.receipt ? " · proof attached" : typeof r.note === "string" ? ` · ${r.note}` : ""}`;
@@ -103,6 +107,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   const payoutIds = idsOf("recovery");
   const partIds = idsOf("vendorcredit");
   const refundIds = idsOf("cnrefund");
+  const settlementIds = idsOf("settlement");
   if (invoiceIds.length)
     for (const i of (await admin.from("invoices").select("id, number, total_aed").in("id", invoiceIds)).data ?? []) {
       names.set(`invoice:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
@@ -124,6 +129,8 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   if (payoutIds.length) for (const r of (await admin.from("recovery_payouts").select("id, who, month, total_aed").in("id", payoutIds)).data ?? []) names.set(`recovery:${r.id}`, `${r.month} · ${r.who} · ${aed(Number(r.total_aed))}`);
   if (partIds.length) for (const pt of (await admin.from("part_items").select("id, description, supplier").in("id", partIds)).data ?? []) names.set(`vendorcredit:${pt.id}`, `${pt.description}${pt.supplier ? ` · ${pt.supplier}` : ""}`);
   if (refundIds.length) for (const rf of (await admin.from("invoices").select("id, number, refund_amount_aed, total_aed").in("id", refundIds)).data ?? []) names.set(`cnrefund:${rf.id}`, `${rf.number} · ${aed(Number(rf.refund_amount_aed ?? rf.total_aed))}`);
+
+  if (settlementIds.length) for (const st of (await admin.from("card_settlements").select("id, number, method, gross_aed").in("id", settlementIds)).data ?? []) names.set(`settlement:${st.id}`, `${st.number} · ${st.method === "card" ? "card machine" : "payment link"} · ${aed(Number(st.gross_aed))}`);
 
   const counts = Object.fromEntries(FILTERS.map((f) => [f.key, f.key === "all" ? rows.length : rows.filter((r) => r.status === f.key).length]));
   const filtered = show === "all" ? rows : rows.filter((r) => r.status === show);

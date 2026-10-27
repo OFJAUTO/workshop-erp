@@ -1,4 +1,5 @@
 import "server-only";
+import { clearingOpenAt } from "@/lib/card-settlements";
 import { logAppError } from "@/lib/app-errors";
 import { round2 } from "@/lib/money";
 import { notifyRoles } from "@/lib/notifications";
@@ -29,6 +30,8 @@ export type ReconDetails = {
   org?: string;
   orgLabel?: string;
   note?: string;
+  /** Card/link money still in the clearing accounts at the end of the day (ERP side; returns to zero as the bank settles). */
+  clearing?: { card: { count: number; total: number; oldest: string | null }; link: { count: number; total: number; oldest: string | null } };
 };
 export type ReconRow = { day: string; status: "green" | "red"; details: ReconDetails; checked_at: string };
 
@@ -154,15 +157,17 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
   }
   const erpVendorPayments: ReconSide = { count: erpVpCount, total: erpVpTotal };
 
-  // Expenses: commission vouchers by paid_on, recovery months by paid_at.
-  const [{ data: commRows }, { data: recRows }] = await Promise.all([
+  // Expenses: commission vouchers by paid_on, recovery months by paid_at, card/link settlement fees by settled_on.
+  const [{ data: commRows }, { data: recRows }, { data: feeRows }] = await Promise.all([
     admin.from("commission_payments").select("amount_aed").eq("is_active", true).eq("paid_on", day),
     admin.from("recovery_payouts").select("total_aed").gte("paid_at", from).lt("paid_at", to),
+    admin.from("card_settlements").select("fee_aed").eq("is_active", true).eq("settled_on", day).gt("fee_aed", 0),
   ]);
   const erpExpenses: ReconSide = {
-    count: (commRows ?? []).length + (recRows ?? []).length,
-    total: round2((commRows ?? []).reduce((a, r) => a + Number(r.amount_aed), 0) + (recRows ?? []).reduce((a, r) => a + Number(r.total_aed), 0)),
+    count: (commRows ?? []).length + (recRows ?? []).length + (feeRows ?? []).length,
+    total: round2((commRows ?? []).reduce((a, r) => a + Number(r.amount_aed), 0) + (recRows ?? []).reduce((a, r) => a + Number(r.total_aed), 0) + (feeRows ?? []).reduce((a, r) => a + Number(r.fee_aed), 0)),
   };
+  const clearing = await clearingOpenAt(day);
 
   /* ---------------- Zoho's side ---------------- */
   const [zInv, zCn, zPay, zBill, zVp, zExp] = [
@@ -211,6 +216,7 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
       deposits,
       org,
       orgLabel: org === ZOHO_REAL_ORG_ID ? "the REAL book" : "OFJ TEST",
+      clearing,
       note: "Deposits are ordinary payments in Zoho (shown inside Payments). Supplier credits and customer refunds show inside the bills' and credit notes' balances.",
     },
   };

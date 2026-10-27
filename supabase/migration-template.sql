@@ -35,6 +35,8 @@ grant all on public.example_things to service_role;
 
 -- A table that only server code touches (tokens, links, secrets): NO policies and NO grants
 -- to anon or authenticated at all — only: grant all ... to service_role;
+-- The platform still hands new tables default grants, so say it explicitly:
+--   revoke all on public.example_things from anon, authenticated;  (test:security fails the batch otherwise)
 
 -- 4. Housekeeping triggers this project expects on business tables:
 -- create trigger example_things_audit  after insert or update on public.example_things for each row execute function write_audit_log();

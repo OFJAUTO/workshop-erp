@@ -22,7 +22,11 @@ after it posts to the REAL book by itself.
    **Z-**). The ERP posts its own INV- numbers; the go-live panel checks this live.
 5. On the mapping page, the four **"Supplier payments by bank transfer / card / cash / cheque"** boxes say which
    account each supplier payment leaves from (an empty box uses the general "Paid from" account).
-6. Do **not** create customers, invoices or bills by hand for anything from the start date on — the ERP does that.
+6. The two clearing accounts (**Card machine clearing**, **Payment link clearing**) must be created as **Bank**
+   accounts in Zoho (Banking → Add Bank or Credit Card): card and link money lands there at its full amount, and each
+   card settlement moves what arrived to the bank with a transfer (Zoho only transfers between bank-type accounts)
+   and books the actual fee on **Bank Fees and Charges**.
+7. Do **not** create customers, invoices or bills by hand for anything from the start date on — the ERP does that.
 
 ## Step 2 — Mathew checks the TEST books are clean (in the ERP)
 

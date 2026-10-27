@@ -1,4 +1,5 @@
 import "server-only";
+import { clearingOpenAt, loadUnsettled } from "@/lib/card-settlements";
 import { payableCommissions } from "@/lib/commissions";
 import { PAYMENT_SELECT, invoiceBalance, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
@@ -160,6 +161,22 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
     label: "Recovery month settled (every driver/company paid)",
     ok: byWho.size === 0 || openWho.length === 0,
     detail: openWho.length ? `Open: ${openWho.map(([who, g]) => `${who} (${g.open ? `${g.open} trip${g.open === 1 ? "" : "s"} not approved` : "month not marked paid"})`).join(", ")}` : byWho.size ? "Every month is marked paid." : "No trips this month.",
+  });
+
+  // 6b. Card and payment-link clearing: every payment of the month paid out by the bank (the clearing returns to zero).
+  const lastOfMonth = new Date(Date.parse(`${monthEnd}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const [atEnd, unsettledNow] = await Promise.all([clearingOpenAt(lastOfMonth), loadUnsettled()]);
+  const dayOf = (iso: string) => new Date(Date.parse(iso) + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const stillOpen = unsettledNow.filter((p) => dayOf(p.receivedAt) < monthEnd);
+  const endTotal = round2(atEnd.card.total + atEnd.link.total);
+  lines.push({
+    key: "card_clearing",
+    label: "Card and payment-link clearing settled",
+    ok: stillOpen.length === 0,
+    amount: round2(stillOpen.reduce((a, p) => a + p.amount, 0)),
+    detail: stillOpen.length
+      ? `${stillOpen.length} payment${stillOpen.length === 1 ? "" : "s"} (${aed(round2(stillOpen.reduce((a, p) => a + p.amount, 0)))}) still not settled by the bank: record them on Card settlements.`
+      : endTotal > 0 ? `${aed(endTotal)} was in clearing at month end; every payment is settled since.` : "Clearing was at zero at month end.",
   });
 
   // 7. "Invoice to follow" still open.

@@ -4,6 +4,7 @@ import { INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, toInvoice, toPayment } f
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildXlsx, xlsxResponse } from "@/lib/xlsx";
+import { feeOf } from "@/lib/card-settlement-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
     const job = r.job as { job_number: string } | null;
     const inv = r.invoice as { number: string } | null;
     const c = r.customer as { full_name: string; company_name: string | null } | null;
-    return { number: p.number, date: day(p.received_at), method: METHOD_LABELS[p.method], amount: p.amount_aed, charge: p.bank_charge_aed, invoice: inv?.number ?? "", job: job?.job_number ?? "", customer: c?.company_name ?? c?.full_name ?? "", reference: p.reference ?? "", chequeNo: p.cheque_number ?? "", chequeBank: p.cheque_bank ?? "", chequeDate: day(p.cheque_date), chequeStatus: p.cheque_status ?? "", status: p.status, deposit: p.is_deposit ? "yes" : "" };
+    return { number: p.number, date: day(p.received_at), method: METHOD_LABELS[p.method], amount: p.amount_aed, charge: feeOf(p).fee, chargeKind: feeOf(p).fee > 0 ? (feeOf(p).actual ? "actual" : "estimate") : "", invoice: inv?.number ?? "", job: job?.job_number ?? "", customer: c?.company_name ?? c?.full_name ?? "", reference: p.reference ?? "", chequeNo: p.cheque_number ?? "", chequeBank: p.cheque_bank ?? "", chequeDate: day(p.cheque_date), chequeStatus: p.cheque_status ?? "", status: p.status, deposit: p.is_deposit ? "yes" : "" };
   });
   const buffer = await buildXlsx([
     {
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
       name: "Payments",
       columns: [
         { header: "Receipt", key: "number", width: 12 }, { header: "Date", key: "date", width: 12 }, { header: "Method", key: "method", width: 12 },
-        { header: "Amount", key: "amount", width: 12, numFmt: money }, { header: "Bank charge", key: "charge", width: 12, numFmt: money },
+        { header: "Amount", key: "amount", width: 12, numFmt: money }, { header: "Bank charge", key: "charge", width: 12, numFmt: money }, { header: "Charge is", key: "chargeKind", width: 10 },
         { header: "Invoice", key: "invoice", width: 12 }, { header: "Job card", key: "job", width: 10 }, { header: "Customer", key: "customer", width: 26 },
         { header: "Reference", key: "reference", width: 14 }, { header: "Cheque no.", key: "chequeNo", width: 12 }, { header: "Cheque bank", key: "chequeBank", width: 14 },
         { header: "Cheque date", key: "chequeDate", width: 12 }, { header: "Cheque status", key: "chequeStatus", width: 12 }, { header: "Status", key: "status", width: 12 },

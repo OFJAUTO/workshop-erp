@@ -107,7 +107,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       <span className="text-muted">{p.method === "cheque" ? [p.cheque_number, p.cheque_bank, p.cheque_date].filter(Boolean).join(" · ") : p.reference}</span>
                       <span className="text-muted">by {nameOf.get(p.received_by ?? "") ?? ""}</span>
                       <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
-                      {p.bank_charge_aed && seesCost ? <span className="text-xs text-muted">charge {m(p.bank_charge_aed)}</span> : null}
+                      {(p.actual_fee_aed ?? p.bank_charge_aed) && seesCost ? <span className="text-xs text-muted" data-fee-line>{p.settlement_id && p.actual_fee_aed !== null && p.actual_fee_aed !== undefined ? `bank fee ${m(p.actual_fee_aed)} (actual)` : `charge ${m(p.bank_charge_aed)}${p.method === "card" || p.method === "link" ? " (est.)" : ""}`}</span> : null}
                       {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
                       {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
                     </div>

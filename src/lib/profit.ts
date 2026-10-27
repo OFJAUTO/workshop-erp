@@ -5,6 +5,7 @@ import { isHidden, isUnchosen, lineCost, type LineType } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { chargeTotalsByJob } from "./supplier-charges";
+import { feeOf, isClearing } from "./card-settlement-rules";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { LINE_SELECT, toLine, toQuote } from "./quote-data";
 import { quoteTotals } from "./quotes";
@@ -29,6 +30,8 @@ export type JobProfit = {
   labourMinutes: number;
   labourCost: number;
   bankCharges: number;
+  /** True when the bank charges are the bank's ACTUAL fee (every card/link payment settled); false while estimated. */
+  bankChargesActual: boolean;
   /** The real recovery cost: the drivers' prices on the job's trips; the quotation's recovery lines until one exists. */
   recoveryCost: number;
   /** Commissions the owner approved on the job's quotations. */
@@ -116,9 +119,13 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const labourCost = round2((minutes / 60) * costRateFor(settings, job?.department));
     const stockCost = round2(((stock ?? []) as { job_id: string; quantity: number | string; unit_cost: number | string }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + Number(s.quantity) * Number(s.unit_cost), 0));
     const pays = ((payments ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.invoice_id === invoice.id);
-    // The real bank charge once a payment is recorded; until then the quotation's estimated charge.
+    // The bank charge: the quotation's estimate until a payment is recorded; then each payment's estimate, replaced
+    // by its share of the bank's ACTUAL fee once accounts record the card/link settlement (27 October 2026).
     const recorded = pays.filter((p) => p.status === "recorded");
-    const bankCharges = recorded.length ? round2(recorded.reduce((a, p) => a + p.bank_charge_aed, 0)) : feeEstimate;
+    const fees = recorded.map(feeOf);
+    const bankCharges = recorded.length ? round2(fees.reduce((a, f) => a + f.fee, 0)) : feeEstimate;
+    const unsettledCards = recorded.filter((p, i) => isClearing(p.method) && !fees[i].actual).length;
+    const bankChargesActual = recorded.length > 0 && unsettledCards === 0;
     const credited = round2(((credits ?? []) as { credit_of: string; taxable_aed: number | string }[]).filter((c) => c.credit_of === invoice.id).reduce((a, c) => a + Number(c.taxable_aed), 0));
     const revenue = round2(invoice.taxable_aed - credited);
     const openPos = ((pos ?? []) as { job_id: string; supplier_invoice_status: string; status: string }[]).filter((p) => p.job_id === invoice.job_id && p.status !== "cancelled" && p.supplier_invoice_status !== "received");
@@ -127,6 +134,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     if (openPos.length) why.push(`${openPos.length} supplier invoice${openPos.length === 1 ? "" : "s"} to follow`);
     if (pending.length) why.push("cheque pending clearance");
     if (!recorded.length && feeEstimate > 0) why.push("bank charge estimated until payment");
+    if (unsettledCards) why.push("card fee estimated until the bank settles");
     if (jobTrips.some((t) => t.delivered_at && t.price_aed === null)) why.push("the driver's recovery price to come");
     const bal = invoiceBalance(invoice, pays);
     const profit = round2(revenue - partsCost - otherCost - stockCost - labourCost - bankCharges - recoveryCost - commission - materialsCost);
@@ -145,6 +153,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       labourMinutes: minutes,
       labourCost,
       bankCharges,
+      bankChargesActual,
       recoveryCost,
       commission,
       materialsCost,

@@ -1,0 +1,196 @@
+import "server-only";
+import { checkSettlement, CLEARING_LABEL, isClearing, preTicked, SETTLE_AFTER_WORKING_DAYS, splitFee, type ClearingMethod } from "./card-settlement-rules";
+import { logAppError, SAVE_FAILED } from "./app-errors";
+import { workingTimeOf } from "./jobs";
+import { round2 } from "./money";
+import { addWorkingDays } from "./planning";
+import { getSettings } from "./settings";
+import { createAdminClient } from "./supabase/admin";
+import { formatPlate } from "./types";
+import { tryEnqueueZoho } from "./zoho-sync";
+
+/** A card or payment-link payment still in the clearing account (no settlement yet). */
+export type UnsettledPayment = {
+  id: string;
+  number: string;
+  method: ClearingMethod;
+  amount: number;
+  estimate: number;
+  receivedAt: string;
+  jobId: string | null;
+  plate: string;
+  isDeposit: boolean;
+  /** Received on a day before the given settlement day: pre-ticked on the screen. */
+  preTicked?: boolean;
+  /** Older than three working days: amber (the bank should have paid it out by now). */
+  late: boolean;
+};
+
+export type SettlementRow = {
+  id: string;
+  number: string;
+  method: ClearingMethod;
+  settledOn: string;
+  count: number;
+  gross: number;
+  received: number;
+  fee: number;
+  statementRef: string | null;
+  note: string | null;
+  createdAt: string;
+  createdByName: string | null;
+  zohoStatus: string | null;
+};
+
+const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
+const dubaiDay = (iso: string) => new Date(Date.parse(iso) + 4 * 3600 * 1000).toISOString().slice(0, 10);
+export const dubaiToday = () => dubaiDay(new Date().toISOString());
+
+/** The card/link payments the bank has not paid out yet, oldest first. */
+export async function loadUnsettled(settledOn?: string): Promise<UnsettledPayment[]> {
+  const admin = createAdminClient();
+  const settings = await getSettings();
+  const wt = workingTimeOf(settings);
+  const today = dubaiToday();
+  const { data } = await admin
+    .from("payments")
+    .select(`id, number, method, amount_aed, bank_charge_aed, received_at, job_id, is_deposit, job:jobs!payments_job_id_fkey(job_number, vehicle:vehicles(${PLATE_SELECT}))`)
+    .eq("is_active", true)
+    .eq("status", "recorded")
+    .in("method", ["card", "link"])
+    .is("settlement_id", null)
+    .order("received_at", { ascending: true })
+    .limit(500);
+  return ((data ?? []) as unknown as { id: string; number: string; method: string; amount_aed: number | string; bank_charge_aed: number | string; received_at: string; job_id: string | null; is_deposit: boolean; job: { job_number: string; vehicle: Parameters<typeof formatPlate>[0] | null } | null }[])
+    .filter((p) => isClearing(p.method))
+    .map((p) => ({
+      id: p.id,
+      number: p.number,
+      method: p.method as ClearingMethod,
+      amount: round2(Number(p.amount_aed) || 0),
+      estimate: round2(Number(p.bank_charge_aed) || 0),
+      receivedAt: p.received_at,
+      jobId: p.job_id,
+      plate: p.job?.vehicle ? formatPlate(p.job.vehicle) : (p.job?.job_number ?? "No job"),
+      isDeposit: p.is_deposit,
+      ...(settledOn ? { preTicked: preTicked(p.received_at, settledOn) } : {}),
+      late: addWorkingDays(dubaiDay(p.received_at), SETTLE_AFTER_WORKING_DAYS, wt) < today,
+    }));
+}
+
+export async function loadSettlements(limit = 40): Promise<SettlementRow[]> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, note, created_at, created_by").eq("is_active", true).order("created_at", { ascending: false }).limit(limit);
+  const rows = (data ?? []) as { id: string; number: string; method: ClearingMethod; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; note: string | null; created_at: string; created_by: string | null }[];
+  const ids = rows.map((r) => r.id);
+  const staffIds = Array.from(new Set(rows.map((r) => r.created_by).filter((x): x is string => !!x)));
+  const [{ data: ob }, { data: people }] = await Promise.all([
+    ids.length ? admin.from("zoho_outbox").select("record_id, status").eq("kind", "settlement").in("record_id", ids) : Promise.resolve({ data: [] as { record_id: string; status: string }[] }),
+    staffIds.length ? admin.from("staff").select("id, full_name").in("id", staffIds) : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+  ]);
+  const zoho = new Map(((ob ?? []) as { record_id: string; status: string }[]).map((o) => [o.record_id, o.status]));
+  const names = new Map(((people ?? []) as { id: string; full_name: string }[]).map((p) => [p.id, p.full_name]));
+  return rows.map((r) => ({
+    id: r.id,
+    number: r.number,
+    method: r.method,
+    settledOn: r.settled_on,
+    count: r.payment_count,
+    gross: Number(r.gross_aed),
+    received: Number(r.received_aed),
+    fee: Number(r.fee_aed),
+    statementRef: r.statement_ref,
+    note: r.note,
+    createdAt: r.created_at,
+    createdByName: r.created_by ? (names.get(r.created_by) ?? null) : null,
+    zohoStatus: zoho.get(r.id) ?? null,
+  }));
+}
+
+async function nextNumber(): Promise<string> {
+  const { data } = await createAdminClient().from("card_settlements").select("number").like("number", "STL-%").order("number", { ascending: false }).limit(1);
+  const last = Number(String((data?.[0] as { number: string } | undefined)?.number ?? "STL-0").slice(4)) || 0;
+  return `STL-${String(last + 1).padStart(5, "0")}`;
+}
+
+export type SettleInput = { method: string; settledOn: string; paymentIds: string[]; received: number | null; statementRef: string | null; note: string | null; confirmed: boolean };
+export type SettleResult = { ok: true; number: string; fee: number; count: number } | { ok: false; error: string; askAgain?: string };
+
+/**
+ * Records one settlement: the ticked payments (one method, all still unsettled), the amount the bank actually paid
+ * in, the fee split over the payments in proportion, then the Zoho transfer queued. Nothing half-done: a payment
+ * settled by someone else in the meantime undoes the whole settlement.
+ */
+export async function recordSettlement(input: SettleInput, actorId: string): Promise<SettleResult> {
+  if (!isClearing(input.method)) return { ok: false, error: "Pick Card machine or Payment link." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.settledOn)) return { ok: false, error: "Pick the settlement date (the day the money reached the bank)." };
+  if (input.settledOn > dubaiToday()) return { ok: false, error: "The settlement date cannot be in the future." };
+  const ids = Array.from(new Set(input.paymentIds.filter(Boolean)));
+  if (!ids.length) return { ok: false, error: "Tick the payments this settlement paid out." };
+  const admin = createAdminClient();
+  const { data: rows } = await admin.from("payments").select("id, number, method, amount_aed, status, is_active, settlement_id").in("id", ids);
+  const pays = (rows ?? []) as { id: string; number: string; method: string; amount_aed: number | string; status: string; is_active: boolean; settlement_id: string | null }[];
+  if (pays.length !== ids.length) return { ok: false, error: "One of the ticked payments no longer exists. Reload the page." };
+  const wrong = pays.find((p) => p.method !== input.method);
+  if (wrong) return { ok: false, error: `${wrong.number} is not a ${CLEARING_LABEL[input.method].toLowerCase()} payment. One settlement covers one method.` };
+  const gone = pays.find((p) => p.settlement_id || p.status !== "recorded" || !p.is_active);
+  if (gone) return { ok: false, error: `${gone.number} is ${gone.settlement_id ? "already in another settlement" : "voided"}. Reload the page.` };
+  const amounts = pays.map((p) => ({ id: p.id, amount: round2(Number(p.amount_aed) || 0) }));
+  const check = checkSettlement(amounts.reduce((a, p) => a + p.amount, 0), input.received);
+  if (!check.ok) return { ok: false, error: check.error ?? "Check the figures." };
+  if (check.askAgain && !input.confirmed) return { ok: false, error: check.askAgain, askAgain: check.askAgain };
+
+  const shares = splitFee(amounts, check.fee);
+  let number = await nextNumber();
+  let made: { id: string; number: string } | null = null;
+  for (let attempt = 0; attempt < 2 && !made; attempt++) {
+    const { data, error } = await admin
+      .from("card_settlements")
+      .insert({ number, method: input.method, settled_on: input.settledOn, payment_count: pays.length, gross_aed: check.gross, received_aed: round2(check.gross - check.fee), fee_aed: check.fee, statement_ref: input.statementRef, note: input.note, created_by: actorId, updated_by: actorId })
+      .select("id, number")
+      .single();
+    if (data) made = data as { id: string; number: string };
+    else if (error && /duplicate|unique/i.test(error.message)) number = await nextNumber();
+    else {
+      await logAppError("card_settlement_insert", error ?? "no row", { staffId: actorId, detail: { number, ids } });
+      return { ok: false, error: SAVE_FAILED };
+    }
+  }
+  if (!made) return { ok: false, error: SAVE_FAILED };
+
+  // Each payment takes its share; the guard makes sure no one else settled it in the meantime.
+  let done = 0;
+  for (const p of amounts) {
+    const { data: upd, error } = await admin.from("payments").update({ settlement_id: made.id, actual_fee_aed: shares.get(p.id) ?? 0, updated_by: actorId }).eq("id", p.id).is("settlement_id", null).select("id");
+    if (error) await logAppError("card_settlement_payment", error, { staffId: actorId, detail: { settlement: made.number, payment: p.id } });
+    if (upd?.length) done++;
+  }
+  if (done !== amounts.length) {
+    await admin.from("payments").update({ settlement_id: null, actual_fee_aed: null, updated_by: actorId }).eq("settlement_id", made.id);
+    await admin.from("card_settlements").update({ is_active: false, note: `Undone: a payment was settled by someone else at the same time.`, updated_by: actorId }).eq("id", made.id);
+    return { ok: false, error: "Someone else settled one of these payments at the same time. Nothing was recorded: reload the page and try again." };
+  }
+  await tryEnqueueZoho("settlement", made.id, null, actorId);
+  return { ok: true, number: made.number, fee: check.fee, count: pays.length };
+}
+
+/** The clearing accounts' open balance at the end of a Dubai day (ERP side): card/link money not yet paid out. */
+export async function clearingOpenAt(day: string): Promise<Record<ClearingMethod, { count: number; total: number; oldest: string | null }>> {
+  const admin = createAdminClient();
+  const end = new Date(Date.parse(`${day}T00:00:00+04:00`) + 24 * 3600 * 1000).toISOString();
+  const [{ data: pays }, { data: sets }] = await Promise.all([
+    admin.from("payments").select("method, amount_aed, received_at, settlement_id").eq("is_active", true).eq("status", "recorded").in("method", ["card", "link"]).lt("received_at", end),
+    admin.from("card_settlements").select("id, settled_on").eq("is_active", true).lte("settled_on", day),
+  ]);
+  const settledBy = new Set(((sets ?? []) as { id: string }[]).map((s) => s.id));
+  const out: Record<ClearingMethod, { count: number; total: number; oldest: string | null }> = { card: { count: 0, total: 0, oldest: null }, link: { count: 0, total: 0, oldest: null } };
+  for (const p of (pays ?? []) as { method: string; amount_aed: number | string; received_at: string; settlement_id: string | null }[]) {
+    if (!isClearing(p.method) || (p.settlement_id && settledBy.has(p.settlement_id))) continue;
+    const o = out[p.method];
+    o.count++;
+    o.total = round2(o.total + (Number(p.amount_aed) || 0));
+    const d = dubaiDay(p.received_at);
+    if (!o.oldest || d < o.oldest) o.oldest = d;
+  }
+  return out;
+}
