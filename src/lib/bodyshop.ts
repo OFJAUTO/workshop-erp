@@ -13,7 +13,7 @@ import { newToken } from "./media";
 import { jobAdvisorIds, notifyStaff } from "./notifications";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
 import { isUnchosen, round2, type QuoteLine } from "./quotes";
-import { bankChargePercentFor, type Settings } from "./settings";
+import { expectedFeeCost, type Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { rowMissing, stageAsks, warrantyCardOf } from "./warranty-data";
@@ -902,7 +902,7 @@ export async function bodyshopMonth(settings: Settings, fromIso: string, toIso: 
     const materials = Number(qrow?.materials_cost_aed) || 0;
     const commission = Number(qrow?.commission_aed) || 0;
     const method = String(qrow?.expected_payment_method ?? "");
-    const bank = ["card", "link", "transfer"].includes(method) ? round2((Number(qrow?.total_aed) || 0) * (bankChargePercentFor(settings, method) / 100)) : 0;
+    const bank = ["card", "link", "transfer"].includes(method) ? expectedFeeCost(settings, method, Number(qrow?.total_aed) || 0) : 0;
     const labour = await bodyshopLabourCost(j.id, settings);
     cars.push({ jobId: j.id, jobNumber: j.job_number, plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number, price: net, materials, labour: labour.cost, commission, bank, profit: round2(net - materials - labour.cost - commission - bank) });
   }

@@ -231,16 +231,17 @@ await section("F1 proforma", async () => {
   await go(page, `${base}/jobs/${jobId}/invoice`);
   const b = await page.textContent("body");
   check("payment box shows Full amount and Part payment (A8)", /Full amount/.test(b ?? "") && /Part payment/.test(b ?? ""));
-  check("bank charge note under the method buttons (F2)", /No bank charge/.test(b ?? ""));
+  check("bank fee note under the method buttons (F2)", /No bank fee/.test(b ?? ""));
   await page.getByRole("button", { name: "Card", exact: true }).first().click();
   await sleep(200);
-  check("card shows its 2.26% charge (F2)", /Bank charge 2\.26% on card/.test(await page.textContent("body")));
+  // 29 October 2026: the card machine is 2.15% before VAT (the old 2.26% included the VAT).
+  check("card shows its 2.15% + VAT fee (F2)", /Bank fee 2\.15% \+ VAT 5% on card/.test(await page.textContent("body")));
   await page.locator("[data-amount-partial]").first().click();
   await page.locator("label:has-text('Amount received') input").first().fill("100");
   await page.getByRole("button", { name: /^Record/ }).first().click();
   await submitted(page);
   let rows = await sql("select method, amount_aed::float as amount, bank_charge_aed::float as charge, status from public.payments where job_id = $1 order by created_at", [jobId]);
-  check("card payment recorded with 2.26% charge (F2)", rows.length === 1 && Math.abs(rows[0].charge - 2.26) < 0.01, JSON.stringify(rows));
+  check("card payment recorded with its 2.15% fee, before VAT (F2)", rows.length === 1 && Math.abs(rows[0].charge - 2.15) < 0.01, JSON.stringify(rows));
   await go(page, `${base}/jobs/${jobId}/invoice`);
   await page.getByRole("button", { name: "Cash", exact: true }).first().click();
   await page.locator("[data-amount-full]").first().click();

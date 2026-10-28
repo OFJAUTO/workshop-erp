@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { createAdminClient } from "./supabase/admin";
 import { DEFAULT_CHECKLIST, type ChecklistSection } from "./inspection";
+import { bankFeesFrom, feesFor, type BankFees, type FeeRule } from "./bank-fees";
 
 export type Branch = { name: string; address: string };
 
@@ -82,12 +83,19 @@ const DEFAULTS = {
   /** Supplier LPOs by email go out from this Google Workspace mailbox (the service account must be allowed to send as it). */
   supplier_lpo_from_email: "peter@ofjauto.com",
   supplier_lpo_email_text: "Dear [supplier],\n\nPlease find attached our purchase order [number]. Kindly confirm availability and the delivery date.\n\nThank you,\nOFJ Automotive, Parts",
-  bank_charge_card_percent: 2.26,
+  /** The bank's fee per method (29 October 2026, src/lib/bank-fees.ts): MSF % BEFORE VAT, a fixed fee per transaction, VAT on both. */
+  bank_charge_card_percent: 2.15,
   bank_charge_link_percent: 1.75,
   bank_charge_cash_percent: 0,
   bank_charge_cheque_percent: 0,
   bank_charge_transfer_percent: 0,
-  bank_charge_fee_percent: 2.26,
+  bank_charge_fee_percent: 2.15,
+  bank_fee_card_txn_aed: 0,
+  bank_fee_link_txn_aed: 1,
+  bank_fee_vat_percent: 5,
+  /** Terminal IDs on Network International's reports, to tell the card machine from the payment link. */
+  bank_terminal_ids_card: "",
+  bank_terminal_ids_link: "",
   quick_remarks: ["Noise", "Crack", "Broken", "Leak", "Worn", "Loose", "Missing", "Corroded"] as string[],
   advisor_labour_discount: false,
   customer_documents_uppercase: false,
@@ -334,7 +342,40 @@ export const getSettings = cache(async (): Promise<Settings> => {
   return result as Settings;
 });
 
-/** The bank charge kept by each payment method, in percent. */
+/** Every method's fee rule (MSF %, fee per transaction, VAT, terminals): the ONE source for payments, quotations and settlements. */
+export function bankFeesOf(settings: Settings): BankFees {
+  return bankFeesFrom(settings as unknown as Record<string, unknown>);
+}
+
+/** The fee rule a quotation assumes from the way the customer is expected to pay ("Not sure" = the card machine). */
+export function expectedFeeRule(settings: Settings, method: string | null | undefined): FeeRule {
+  const m = method && method !== "not_sure" ? method : "card";
+  return bankFeesOf(settings)[m] ?? { msfPercent: 0, txnFee: 0, vatPercent: 0, terminals: [] };
+}
+
+/** The bank fee a quotation counts as cost on its total (MSF + transaction fee, without the reclaimable VAT). */
+export function expectedFeeCost(settings: Settings, method: string | null | undefined, total: number): number {
+  return feesFor(total, expectedFeeRule(settings, method)).cost;
+}
+
+/** The figures the bank fee settings box starts from. */
+export function bankFeeValuesOf(settings: Settings) {
+  const f = bankFeesOf(settings);
+  return {
+    cardMsf: f.card.msfPercent,
+    cardTxn: f.card.txnFee,
+    cardTerminals: f.card.terminals.join(", "),
+    linkMsf: f.link.msfPercent,
+    linkTxn: f.link.txnFee,
+    linkTerminals: f.link.terminals.join(", "),
+    vat: Number(settings.bank_fee_vat_percent) || 0,
+    cash: f.cash.msfPercent,
+    cheque: f.cheque.msfPercent,
+    transfer: f.transfer.msfPercent,
+  };
+}
+
+/** The MSF percentage (before VAT) of each payment method. */
 export function bankChargePercentFor(settings: Settings, method: string): number {
   const key = method === "card" ? "bank_charge_card_percent" : method === "link" ? "bank_charge_link_percent" : method === "cash" ? "bank_charge_cash_percent" : method === "cheque" ? "bank_charge_cheque_percent" : method === "transfer" ? "bank_charge_transfer_percent" : null;
   return key ? Number(settings[key]) || 0 : 0;

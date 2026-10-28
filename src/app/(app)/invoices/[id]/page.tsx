@@ -9,7 +9,7 @@ import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice, nextD
 import { methodsFor } from "@/lib/money-steps";
 import { paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
-import { getSettings } from "@/lib/settings";
+import { getSettings, bankFeesOf } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
 import { ReasonChips } from "@/components/ReasonChips";
 import { getSiteUrl } from "@/lib/site";
@@ -51,7 +51,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   // A proforma takes payments until it becomes the tax invoice.
   const payable = isTax || (invoice.kind === "proforma" && !invoice.converted_to);
   const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
-  const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
+  const bankCharges = bankFeesOf(settings);
 
   // The card slips and transfer proofs, signed for one hour.
 

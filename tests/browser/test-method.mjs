@@ -59,8 +59,11 @@ check("5: the Pay-now row says paid online, not the provider", /paid online \(Pa
 
 /* ---------------- 4. Every payment's bank charge agrees with its actual method ---------------- */
 const rates = Object.fromEntries((await sql("select key, value from public.settings where key like 'bank_charge_%_percent'")).map((r) => [r.key, Number(r.value)]));
-check("6: the rates are the agreed ones", rates.bank_charge_cash_percent === 0 && rates.bank_charge_transfer_percent === 0 && rates.bank_charge_card_percent === 2.26 && rates.bank_charge_link_percent === 1.75, JSON.stringify(rates));
-const bad = await sql("select p.number, p.method, p.amount_aed, p.bank_charge_aed from public.payments p where p.is_active and round(p.bank_charge_aed::numeric, 2) <> round((p.amount_aed * (case p.method when 'card' then $1 when 'link' then $2 else 0 end)::numeric / 100), 2)", [rates.bank_charge_card_percent, rates.bank_charge_link_percent]);
+// 29 October 2026: MSF % before VAT (card machine 2.15%, payment link 1.75%) plus the link's AED 1.00 per transaction.
+check("6: the rates are the agreed ones", rates.bank_charge_cash_percent === 0 && rates.bank_charge_transfer_percent === 0 && rates.bank_charge_card_percent === 2.15 && rates.bank_charge_link_percent === 1.75, JSON.stringify(rates));
+const linkFee = Number((await sql("select value #>> '{}' as v from public.settings where key = 'bank_fee_link_txn_aed'"))[0]?.v) || 0;
+// A payment carrying the split estimate (recorded or recalculated since the change) agrees with its method.
+const bad = await sql("select p.number, p.method, p.amount_aed, p.bank_charge_aed from public.payments p where p.is_active and p.fee_msf_aed is not null and round(p.bank_charge_aed::numeric, 2) <> round(round((p.amount_aed * (case p.method when 'card' then $1 when 'link' then $2 else 0 end)::numeric / 100), 2) + (case p.method when 'link' then $3 else 0 end)::numeric, 2)", [rates.bank_charge_card_percent, rates.bank_charge_link_percent, linkFee]);
 check("6: no payment in the book disagrees with its method (RCT-00091 included)", bad.length === 0, JSON.stringify(bad).slice(0, 200));
 const rct = (await sql("select bank_charge_aed, method from public.payments where number = 'RCT-00091'"))[0];
 check("6: RCT-00091 is cash with zero charge", !rct || (rct.method === "cash" && Number(rct.bank_charge_aed) === 0), JSON.stringify(rct ?? {}));

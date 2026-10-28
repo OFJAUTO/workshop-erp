@@ -6,6 +6,7 @@ import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { Button, Input } from "@/components/ui";
 import { EXPECTED_METHODS, EXPECTED_METHOD_LABELS } from "@/lib/money-steps";
 import { markInvoiceSent, markReadySent, prepareProformaSend } from "@/app/(app)/invoices/actions";
+import { feeRuleWords, type BankFees } from "@/lib/bank-fees";
 
 /**
  * "Your car is ready" with the proforma link, or the tax invoice once paid. For the proforma the window first asks
@@ -51,7 +52,7 @@ export function ReadySendControl({
   /** "Add Pay now and resend": the window opens with the switch on. */
   startWithPayNow?: boolean;
   /** Bank charge per method, shown next to the choice. */
-  charges?: Record<string, number>;
+  charges?: BankFees;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -122,7 +123,7 @@ export function ReadySendControl({
                   {EXPECTED_METHODS.map((m) => (
                     <button key={m} type="button" onClick={() => setExpected(m)} aria-pressed={expected === m} data-expected={m} className={`min-h-12 rounded-control border-2 px-2 text-sm font-bold flex flex-col items-center justify-center ${expected === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
                       <span>{EXPECTED_METHOD_LABELS[m]}</span>
-                      {charges[m] ? <span className={`text-[11px] font-semibold ${expected === m ? "text-white/80" : "text-muted"}`}>{charges[m]}% bank charge</span> : null}
+                      {feeRuleWords(charges[m]) !== "no bank fee" ? <span className={`text-[11px] font-semibold ${expected === m ? "text-white/80" : "text-muted"}`}>fee {feeRuleWords(charges[m])}</span> : null}
                     </button>
                   ))}
                 </div>

@@ -126,6 +126,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           bankChargePercent: highestBankCharge(settings),
           bankRateCard: Number(settings.bank_charge_card_percent) || 0,
           bankRateLink: Number(settings.bank_charge_link_percent) || 0,
+          bankFixedCard: Number(settings.bank_fee_card_txn_aed) || 0,
+          bankFixedLink: Number(settings.bank_fee_link_txn_aed) || 0,
           advisorDiscount: settings.advisor_labour_discount === true,
           depositThreshold: Number(settings.deposit_threshold_aed) || 0,
           depositPercent: Number(settings.deposit_percent) || 50,

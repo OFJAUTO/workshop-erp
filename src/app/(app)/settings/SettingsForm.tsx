@@ -409,20 +409,8 @@ export function SettingsForm({
               <Field label="Quote sent after pricing (hours)" hint="Working hours for the advisor to send once the parts are priced.">
                 <Input name="quote_send_target_hours" defaultValue={v.quote_send_target_hours} inputMode="numeric" required />
               </Field>
-              <Field label="Bank charge, card machine (%)" hint="Of the total including VAT. Internal cost only, never shown to the customer.">
-                <Input name="bank_charge_card_percent" defaultValue={v.bank_charge_card_percent} inputMode="decimal" required />
-              </Field>
-              <Field label="Bank charge, payment link (%)" hint="Of the total including VAT. Internal cost only, never shown to the customer.">
-                <Input name="bank_charge_link_percent" defaultValue={v.bank_charge_link_percent} inputMode="decimal" required />
-              </Field>
-              <Field label="Bank charge, cash (%)" hint="Normally 0.">
-                <Input name="bank_charge_cash_percent" defaultValue={v.bank_charge_cash_percent ?? "0"} inputMode="decimal" required />
-              </Field>
-              <Field label="Bank charge, cheque (%)" hint="Normally 0. The quotation's hidden Fee line follows the way the customer is expected to pay; the real charge is taken at payment.">
-                <Input name="bank_charge_cheque_percent" defaultValue={v.bank_charge_cheque_percent ?? "0"} inputMode="decimal" required />
-              </Field>
-              <Field label="Bank charge, bank transfer (%)" hint="Normally 0.">
-                <Input name="bank_charge_transfer_percent" defaultValue={v.bank_charge_transfer_percent ?? "0"} inputMode="decimal" required />
+              <Field label="Bank fees per payment method" hint="MSF % before VAT, the fee per transaction, the VAT and the terminal IDs: set by the owner or accounts on Card settlements.">
+                <a href="/card-settlements#fees" className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold" data-settings-bank-fees-link>Open the bank fees</a>
               </Field>
               <Field label="Remind Parts after (minutes)" hint="The advisor's Remind Parts button opens after this wait.">
                 <Input name="parts_remind_minutes" defaultValue={v.parts_remind_minutes} inputMode="numeric" required />

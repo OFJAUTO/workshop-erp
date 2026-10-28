@@ -4,7 +4,7 @@ import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type Inspecti
 import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
 import { cleanPartsList, mergePartsList, positionsWords } from "./parts-list";
 import { ownerApprovalReasons, quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
-import { expectedChargePercent, type Settings } from "./settings";
+import { expectedFeeCost, type Settings } from "./settings";
 import { newToken } from "./media";
 import { dubaiDate } from "./jobs";
 import { loadPricingRows, valuesOfPart, PRICING_PART_SELECT, type PricingPart } from "./parts-pricing";
@@ -309,9 +309,9 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   // The automatic bank charge: one hidden Fee line at the set percentage of the total including VAT.
   // Never shown to the customer, counted as a cost against profit, corrected by the real charge at payment.
   if (q.status === "draft" || q.status === "pending_owner") {
-    const feePercent = expectedChargePercent(settings, String(q.expected_payment_method ?? "not_sure"));
+    // MSF % + the fee per transaction, before the reclaimable VAT (bank-fees.ts).
     const others = ls.filter((l) => l.fee_kind !== "bank_charge");
-    const fee = feePercent > 0 ? round2(quoteTotals(others, qArgs).total * (feePercent / 100)) : 0;
+    const fee = expectedFeeCost(settings, String(q.expected_payment_method ?? "not_sure"), quoteTotals(others, qArgs).total);
     const existing = ls.filter((l) => l.fee_kind === "bank_charge");
     if (existing.length === 0 && fee > 0) {
       const { data: created } = await admin.from("quotation_lines").insert({ quotation_id: quotationId, position: 9999, line_type: "fee", fee_kind: "bank_charge", title: "Bank charge (card or payment link)", details: null, group_label: null, source_type: "manual", quantity: 1, unit_cost: fee, unit_price: 0, markup_percent: 0, discount_percent: 0, visible_to_customer: false, line_total: 0, created_by: stamp, updated_by: stamp }).select(LINE_SELECT).single();

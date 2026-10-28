@@ -269,9 +269,10 @@ await section("5-6-7 quotation access, lock, payment method", async () => {
   check("cash: the estimated bank charge is 0 (6)", (await feeOf()) === 0, String(await feeOf()));
   await api("/api/quote/save", { quotationId, header: { expected_payment_method: "link" } }, mineCookie);
   const fee = await feeOf();
-  check("payment link: 1.75% of the total with VAT (6)", Math.abs(fee - Math.round(total * 1.75) / 100) < 0.02, `${fee} vs ${total} × 1.75%`);
+  // 29 October 2026: the payment link is 1.75% + AED 1.00 per transaction, before VAT.
+  check("payment link: 1.75% of the total with VAT + AED 1.00 (6)", Math.abs(fee - (Math.round(total * 1.75) / 100 + 1)) < 0.02, `${fee} vs ${total} × 1.75% + 1`);
   await api("/api/quote/save", { quotationId, header: { expected_payment_method: "not_sure" } }, mineCookie);
-  check("not sure: the card rate (6)", Math.abs((await feeOf()) - Math.round(total * 2.26) / 100) < 0.02, String(await feeOf()));
+  check("not sure: the card rate, 2.15% before VAT (6)", Math.abs((await feeOf()) - Math.round(total * 2.15) / 100) < 0.02, String(await feeOf()));
   const bad = await api("/api/quote/save", { quotationId, header: { expected_payment_method: "gold" } }, mineCookie);
   check("an unknown method is refused (6)", bad.status === 400);
   // 7: fast typing lands: three quick markup changes in a row, the last value wins.

@@ -40,7 +40,7 @@ import { aed, quoteState } from "@/lib/quotes";
 import { ROAD_TEST_CHOICES, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
 import { newQuotation, startQuotation } from "../../quotes/actions";
 import { can, type RoleId } from "@/lib/roles";
-import { getSettings } from "@/lib/settings";
+import { getSettings, bankFeesOf } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
 import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
@@ -247,7 +247,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     waitingHours: Number(settings.payment_waiting_hours) || 24,
   });
   const payNowOn = money.live ? !!currentPaymentLink(await paymentLinksOf(money.live.id)) : false;
-  const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
+  const bankCharges = bankFeesOf(settings);
   const inspectionMinutes = insp ? inspectionWorkingMinutes(insp, wt) : 0;
   const inspectionOver = !!insp && insp.status === "in_progress" && inspectionOverTarget(insp, wt);
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";

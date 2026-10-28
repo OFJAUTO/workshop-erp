@@ -422,22 +422,4 @@ export async function markInvoiceSent(jobId: string, method: string): Promise<{ 
   return { ok: true };
 }
 
-/** Accounts or the owner change the bank charge per payment method; the quotation's hidden charge follows the highest. */
-export async function updateBankCharges(formData: FormData) {
-  const staff = await requirePermission("issueInvoices");
-  const admin = createAdminClient();
-  const keys = ["bank_charge_card_percent", "bank_charge_link_percent", "bank_charge_cash_percent", "bank_charge_cheque_percent", "bank_charge_transfer_percent"] as const;
-  const values: Record<string, number> = {};
-  for (const k of keys) {
-    const n = Number(String(formData.get(k) ?? "").trim().replace(",", "."));
-    if (!Number.isFinite(n) || n < 0 || n > 20) redirect(`/invoices?error=${encodeURIComponent("Each bank charge is a number between 0 and 20.")}`);
-    values[k] = Math.round(n * 100) / 100;
-  }
-  values.bank_charge_fee_percent = Math.max(...keys.map((k) => values[k]));
-  for (const [key, value] of Object.entries(values)) await admin.from("settings").update({ value }).eq("key", key);
-  await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { bank_charges: values, by: staff.display_name } }).then(() => null, () => null);
-  revalidatePath("/invoices");
-  revalidatePath("/settings");
-  redirect(`/invoices?message=${encodeURIComponent("Bank charges saved: card " + values.bank_charge_card_percent + "%, link " + values.bank_charge_link_percent + "%, cash " + values.bank_charge_cash_percent + "%, cheque " + values.bank_charge_cheque_percent + "%.")}`);
-}
 

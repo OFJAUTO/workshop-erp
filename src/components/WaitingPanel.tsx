@@ -1,10 +1,11 @@
 import type { CurrentStaff } from "@/lib/auth";
 import { setChequeStatus, verifyPaymentAction } from "@/app/(app)/invoices/actions";
-import { getSettings } from "@/lib/settings";
+import { getSettings, bankFeesOf } from "@/lib/settings";
 import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { loadWaitingOnYou, type Urgency, type WaitingItem } from "@/lib/waiting";
 import { RecordDeposit, type RecordDepositData } from "./RecordDeposit";
 import { Button, Card, LinkButton } from "./ui";
+import type { BankFees } from "@/lib/bank-fees";
 
 export type ExtraWaiting = {
   jobId: string;
@@ -35,7 +36,7 @@ const URGENCY_WORD: Record<Urgency, string> = { red: "Urgent", amber: "Today", g
 const URGENCY_CHIP: Record<Urgency, string> = { red: "bg-red-bar text-white", amber: "bg-amber-soft text-ink border border-amber-bar", grey: "bg-chip text-muted" };
 const ORDER: Record<Urgency, number> = { red: 0, amber: 1, grey: 2 };
 
-function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: Record<string, number> }) {
+function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankFees }) {
   return (
     <li className={`py-2 pl-3 border-l-4 ${URGENCY_BAR[i.urgency]} flex flex-wrap items-center gap-x-3 gap-y-1 text-sm`} title={i.hint} data-waiting-row data-urgency={i.urgency}>
       <span className={`inline-flex min-h-6 items-center rounded-control px-1.5 text-[10px] font-bold uppercase tracking-[0.06em] ${URGENCY_CHIP[i.urgency]}`}>{URGENCY_WORD[i.urgency]}</span>
@@ -73,7 +74,7 @@ export async function WaitingPanel({ staff, extra = [] }: { staff: CurrentStaff;
   const settings = await getSettings();
   const items = await loadWaitingOnYou(staff, settings);
   const owner = staff.role_id === "owner";
-  const charges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
+  const charges = bankFeesOf(settings);
   const wt = workingTimeOf(settings);
   const now = new Date();
   const replaced = new Set(extra.filter((e) => e.replaces).map((e) => e.jobId));

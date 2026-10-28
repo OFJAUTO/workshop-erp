@@ -3,7 +3,9 @@ import { requirePermission } from "@/lib/auth";
 import { CLEARING_LABEL } from "@/lib/card-settlement-rules";
 import { dubaiToday, loadSettlements, loadUnsettled } from "@/lib/card-settlements";
 import { formatDate, formatDayTime } from "@/lib/format";
-import { recordSettlementAction, undoSettlementAction } from "./actions";
+import { recordSettlementAction, saveBankFeesAction, undoSettlementAction } from "./actions";
+import { BankFeeSettings } from "./BankFeeSettings";
+import { bankFeeValuesOf, getSettings } from "@/lib/settings";
 import { SettlementForm, UndoSettlement } from "./SettlementForm";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +15,7 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
 export default async function CardSettlementsPage({ searchParams }: { searchParams: Promise<{ method?: string }> }) {
   const staff = await requirePermission("cardSettlements");
   const sp = await searchParams;
-  const [rows, history] = await Promise.all([loadUnsettled(), loadSettlements()]);
+  const [rows, history, settings] = await Promise.all([loadUnsettled(), loadSettlements(), getSettings()]);
   const today = dubaiToday();
   const initialMethod = sp.method === "link" ? "link" : sp.method === "card" ? "card" : rows.some((r) => r.method === "card") || !rows.length ? "card" : "link";
   const open = { card: rows.filter((r) => r.method === "card"), link: rows.filter((r) => r.method === "link") };
@@ -73,6 +75,11 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
         ) : (
           <p className="text-sm text-muted">None yet.</p>
         )}
+      </Card>
+
+      <Card className="flex flex-col gap-3" id="fees">
+        <SectionLabel>Bank fees per payment method</SectionLabel>
+        <BankFeeSettings values={bankFeeValuesOf(settings)} action={saveBankFeesAction} canSave={!staff.viewingAs} />
       </Card>
     </div>
   );

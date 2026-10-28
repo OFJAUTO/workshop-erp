@@ -4,7 +4,8 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
 import { notifyRoles, notifyStaff } from "./notifications";
-import { bankChargePercentFor, getSettings, type Settings } from "./settings";
+import { bankFeesOf, getSettings, type Settings } from "./settings";
+import { feesFor } from "./bank-fees";
 import { convertProformaIfPaid, createDepositInvoice } from "./invoice-flow";
 import { depositState } from "./deposits";
 import { approvedQuotations } from "./quote-data";
@@ -99,8 +100,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const isOwner = actor.role_id === "owner";
   if (over && !isOwner) {
     // Staff cannot record more than the balance: it waits for the owner.
-    const pct = bankChargePercentFor(settings, method);
-    const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
+    const fees = feesFor(amount, bankFeesOf(settings)[method]);
+    const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
     if (error || !created) {
       await logAppError("record payment: insert (above balance)", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
       return { error: SAVE_FAILED };
@@ -109,10 +110,11 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method} is above the balance of ${money(balance ?? 0)}; waiting for the owner's approval (asked by ${actor.display_name})`, created_by: actor.id });
     return { ok: true, pendingOwner: true, number: created.number, paymentId: created.id, message: `${created.number} is above the balance. The owner has been asked to approve it.` };
   }
-  const pct = bankChargePercentFor(settings, method);
+  // The bank's fee as estimated at recording (bank-fees.ts): MSF, fee per transaction and VAT apart; the job's cost is MSF + fee.
+  const fees = feesFor(amount, bankFeesOf(settings)[method]);
   const verifies = actor.role_id === "owner" || actor.role_id === "accounts";
   const now = new Date().toISOString();
-  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: round2(amount * (pct / 100)), is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
+  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (error || !created) {
     await logAppError("record payment: insert", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
     return { error: SAVE_FAILED };

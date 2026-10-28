@@ -6,6 +6,7 @@ import { Button, Input } from "@/components/ui";
 import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { newUuid } from "@/lib/uuid";
+import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -42,7 +43,8 @@ export function PaymentForm({
   balance: number | null;
   action: (formData: FormData) => void;
   /** Bank charge per method, in percent. */
-  charges: Record<string, number>;
+  /** The bank's fee rule per method (bank-fees.ts). */
+  charges: BankFees;
   /** The methods this person may record. */
   methods: string[];
   expected?: string | null;
@@ -62,7 +64,7 @@ export function PaymentForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [clientKey] = useState(newUuid);
   const [proofs, setProofs] = useState<JobFile[]>([]);
-  const charge = charges[method] ?? 0;
+  const rule = charges[method];
   const value = mode === "full" && balance ? balance : Number(amount) || 0;
   const over = balance !== null && value > balance + 0.005;
   const settles = balance !== null && balance > 0 && value >= balance - 0.005 && !over;
@@ -124,7 +126,7 @@ export function PaymentForm({
           </label>
         ) : null}
         <p className="text-xs text-muted">
-          {charge > 0 ? `Bank charge ${charge}% on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (${money((value * charge) / 100)})` : ""}, internal, never shown to the customer.` : "No bank charge on this method."}
+          {feeRuleWords(rule) !== "no bank fee" ? `Bank fee ${feeRuleWords(rule)} on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (estimated ${money(feesFor(value, rule).cost)}${feesFor(value, rule).vat > 0 ? ` + VAT ${money(feesFor(value, rule).vat)}` : ""})` : ""}, internal, never shown to the customer.` : "No bank fee on this method."}
           {method === "cheque" ? " A cheque counts as unpaid until it is marked cleared." : ""}
         </p>
         {over ? <p className="text-sm font-semibold text-amber">{isOwner ? "More than the balance: recorded as the owner." : "More than the balance: the owner is asked to approve it before it counts."}</p> : null}

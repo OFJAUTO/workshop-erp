@@ -13,7 +13,7 @@ import { PAYMENT_METHOD_LABELS, methodsFor, moneyState, type MoneyInvoice, type 
 import { ngeniusConfigured } from "@/lib/ngenius";
 import { currentPaymentLink, paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
-import { getSettings } from "@/lib/settings";
+import { getSettings, bankFeesOf } from "@/lib/settings";
 import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
 import { shortFor } from "@/lib/short-links";
 import { greetingNameOf } from "@/lib/messages";
@@ -120,7 +120,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name).replaceAll("[name]", greetingNameOf(customer)).replaceAll("[bank]", "");
   const readyTemplate = fillCar(settings.whatsapp_ready_template);
   const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? ""));
-  const bankCharges = { cash: Number(settings.bank_charge_cash_percent) || 0, card: Number(settings.bank_charge_card_percent) || 0, link: Number(settings.bank_charge_link_percent) || 0, cheque: Number(settings.bank_charge_cheque_percent) || 0, transfer: Number(settings.bank_charge_transfer_percent) || 0 };
+  const bankCharges = bankFeesOf(settings);
   const services = draft.lines.filter((l) => l.section !== "parts");
   const parts = draft.lines.filter((l) => l.section === "parts");
   const here = `/jobs/${id}/invoice`;

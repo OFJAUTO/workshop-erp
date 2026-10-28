@@ -8,6 +8,7 @@ import { SendLinkDialog } from "./SendLinkDialog";
 import { Button, Input } from "./ui";
 import { newUuid } from "@/lib/uuid";
 import { reloadIfStale } from "@/lib/app-version";
+import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const METHODS = [
@@ -40,7 +41,7 @@ function todayDubai() {
  * receipt number with Send receipt right there. More than asked is kept as an advance on the job and
  * said in plain words.
  */
-export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d: RecordDepositData; charges: Record<string, number>; label?: string }) {
+export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d: RecordDepositData; charges: BankFees; label?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState("cash");
@@ -62,7 +63,8 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
   const value = Number(amount.replace(/[^\d.]/g, "")) || 0;
   const overBy = Math.max(0, Math.round((value - d.outstanding) * 100) / 100);
   const needsProof = method === "card" || method === "transfer";
-  const charge = charges[method] ?? 0;
+  const rule = charges[method];
+  const fee = feesFor(value, rule);
 
   const close = () => {
     setOpen(false);
@@ -142,7 +144,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                     <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} data-deposit-method={v} className={`min-h-11 rounded-control border-2 px-1 text-xs font-bold ${method === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{l}</button>
                   ))}
                 </div>
-                {charge > 0 ? <p className="text-xs text-muted">{charge}% bank charge on {METHODS.find(([v]) => v === method)?.[1].toLowerCase()} (internal, counted against profit).</p> : null}
+                {feeRuleWords(rule) !== "no bank fee" ? <p className="text-xs text-muted" data-deposit-fee>Bank fee {feeRuleWords(rule)} on {METHODS.find(([v]) => v === method)?.[1].toLowerCase()}{value > 0 ? ` (estimated ${fee.cost.toFixed(2)}${fee.vat > 0 ? ` + VAT ${fee.vat.toFixed(2)}` : ""})` : ""}: internal, counted against profit without the reclaimable VAT.</p> : null}
                 {method === "cheque" ? (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input value={chequeNo} onChange={(e) => setChequeNo(e.target.value)} /></label>

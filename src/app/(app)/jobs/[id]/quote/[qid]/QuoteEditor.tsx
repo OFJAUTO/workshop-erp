@@ -153,6 +153,9 @@ export type EditorSettings = {
   /** The card and payment-link rates: the expected payment method picks one of them, live on the screen. */
   bankRateCard?: number;
   bankRateLink?: number;
+  /** The fixed fee per transaction (AED, before VAT) of the card machine and the payment link. */
+  bankFixedCard?: number;
+  bankFixedLink?: number;
   /** Settings: advisors see a small discount column on labour and service lines. */
   advisorDiscount?: boolean;
   depositThreshold: number;
@@ -672,7 +675,8 @@ export function QuoteEditor({
   // The estimated bank charge follows how the customer is expected to pay: card or "not sure" at the card rate, the payment link at its rate, cash, cheque and bank transfer at nothing.
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0 });
+  const liveFixed = expectedMethod === "link" ? (settings.bankFixedLink ?? 0) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankFixedCard ?? 0);
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0 });
   const countedForDiscount = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off);
   const discountBases = {
     labour: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour" }).base,
@@ -1733,7 +1737,7 @@ export function QuoteEditor({
                   );
                 })()}
                 <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
-                <dt className="text-muted">Bank charge ({liveRate}% of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
+                <dt className="text-muted" data-bank-fee-label>Bank fee ({liveRate}%{liveFixed > 0 ? ` + AED ${liveFixed.toFixed(2)}` : ""} of the total with VAT, before VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
                 <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totals.totalCost)}</dd>
                 <dt className="font-bold">Profit before VAT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
                 <dt className="text-muted">Labour margin</dt><dd className="text-right">{aed(totals.labourMargin)}</dd>

@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { terminalList } from "@/lib/bank-fees";
 import { requirePermission } from "@/lib/auth";
 import { recordSettlement, undoSettlement } from "@/lib/card-settlements";
 import { formValues, type FormState } from "@/lib/form-state";
@@ -31,6 +33,49 @@ export async function recordSettlementAction(_prev: FormState, formData: FormDat
   if (!res.ok) return { error: res.error, values: { ...values, ...(res.askAgain ? { ask: "1" } : {}) } };
   revalidatePath("/card-settlements");
   return { success: `${res.number} recorded: ${res.count} payment${res.count === 1 ? "" : "s"}, bank fee AED ${res.fee.toFixed(2)}. Each job now shows the actual fee, and Zoho gets the transfer and the bank charges.` };
+}
+
+/** THE bank fee settings save (owner and accounts): MSF % before VAT, fee per transaction, VAT on the fees, terminal IDs. */
+export async function saveBankFeesAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePermission("cardSettlements");
+  const values = formValues(formData);
+  if (staff.viewingAs) return { error: "You are viewing as someone else: switch back to change the bank fees.", values };
+  const LIMITS: [string, number, number, string][] = [
+    ["bank_charge_card_percent", 0, 20, "Card machine MSF %"],
+    ["bank_fee_card_txn_aed", 0, 100, "Card machine transaction fee"],
+    ["bank_charge_link_percent", 0, 20, "Payment link MSF %"],
+    ["bank_fee_link_txn_aed", 0, 100, "Payment link transaction fee"],
+    ["bank_fee_vat_percent", 0, 20, "VAT on the fees"],
+    ["bank_charge_cash_percent", 0, 20, "Cash %"],
+    ["bank_charge_cheque_percent", 0, 20, "Cheque %"],
+    ["bank_charge_transfer_percent", 0, 20, "Bank transfer %"],
+  ];
+  const updates: { key: string; value: unknown }[] = [];
+  for (const [key, min, max, label] of LIMITS) {
+    const raw = String(formData.get(key) ?? "").trim().replace(",", ".");
+    const v = Number(raw);
+    if (!raw || !Number.isFinite(v) || v < min || v > max) return { error: `${label} must be a number between ${min} and ${max}.`, values };
+    updates.push({ key, value: Math.round(v * 1000) / 1000 });
+  }
+  const card = terminalList(formData.get("bank_terminal_ids_card"));
+  const link = terminalList(formData.get("bank_terminal_ids_link"));
+  const both = card.find((t) => link.includes(t));
+  if (both) return { error: `Terminal ${both} is listed for both methods. Each terminal belongs to one method.`, values };
+  updates.push({ key: "bank_terminal_ids_card", value: card.join(", ") });
+  updates.push({ key: "bank_terminal_ids_link", value: link.join(", ") });
+  // The old single "highest rate" (kept for anything still reading it).
+  updates.push({ key: "bank_charge_fee_percent", value: Math.max(...updates.filter((u) => /^bank_charge_\w+_percent$/.test(u.key)).map((u) => Number(u.value) || 0)) });
+  const admin = createAdminClient();
+  for (const u of updates) {
+    const { error } = await admin.from("settings").update({ value: u.value, updated_by: staff.id }).eq("key", u.key);
+    if (error) return { error: "Couldn't save the bank fees. Try again.", values };
+  }
+  await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { bank_fees: Object.fromEntries(updates.map((u) => [u.key, u.value])), by: staff.display_name } }).then(() => null, () => null);
+  revalidatePath("/card-settlements");
+  revalidatePath("/invoices");
+  revalidatePath("/settings");
+  const g = (k: string) => updates.find((u) => u.key === k)?.value;
+  return { success: `Bank fees saved: card machine ${g("bank_charge_card_percent")}% + AED ${Number(g("bank_fee_card_txn_aed")).toFixed(2)}, payment link ${g("bank_charge_link_percent")}% + AED ${Number(g("bank_fee_link_txn_aed")).toFixed(2)}, VAT ${g("bank_fee_vat_percent")}% on the fees.` };
 }
 
 export async function undoSettlementAction(settlementId: string, _prev: FormState, formData: FormData): Promise<FormState> {

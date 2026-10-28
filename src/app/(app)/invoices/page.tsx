@@ -6,9 +6,11 @@ import { requirePermission } from "@/lib/auth";
 import { dubaiDate } from "@/lib/jobs";
 import { loadMoneyRows, loadMoneyTiles } from "@/lib/money-data";
 import { can, type RoleId } from "@/lib/roles";
-import { getSettings } from "@/lib/settings";
+import { getSettings, bankFeeValuesOf, bankFeesOf } from "@/lib/settings";
 import { CounterPaymentsCard, MoneyTilesRow } from "@/app/(app)/dashboard/AccountsDashboard";
-import { updateBankCharges } from "./actions";
+import { saveBankFeesAction } from "../card-settlements/actions";
+import { BankFeeSettings } from "../card-settlements/BankFeeSettings";
+import { feeRuleWords } from "@/lib/bank-fees";
 
 export const dynamic = "force-dynamic";
 
@@ -95,16 +97,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         {filtered.length === 0 ? <Empty title="Nothing here" /> : filtered.map((r) => <MoneyRow key={r.jobId} r={r} />)}
       </section>
 
-      {can(role, "issueInvoices") && !staff.viewingAs ? (
-        <details className="rounded-card border border-line bg-white px-5 py-3">
-          <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">Bank charges: card {Number(settings.bank_charge_card_percent) || 0}% · link {Number(settings.bank_charge_link_percent) || 0}% · cash {Number(settings.bank_charge_cash_percent) || 0}% · cheque {Number(settings.bank_charge_cheque_percent) || 0}% · transfer {Number(settings.bank_charge_transfer_percent) || 0}%</summary>
-          <form action={updateBankCharges} className="mt-2 grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
-            {([["bank_charge_card_percent", "Card %"], ["bank_charge_link_percent", "Payment link %"], ["bank_charge_cash_percent", "Cash %"], ["bank_charge_cheque_percent", "Cheque %"], ["bank_charge_transfer_percent", "Transfer %"]] as const).map(([k, l]) => (
-              <label key={k} className="flex flex-col gap-1 text-xs font-semibold text-muted">{l}<Input name={k} defaultValue={String(settings[k] ?? 0)} inputMode="decimal" required /></label>
-            ))}
-            <Button type="submit" tone="secondary" size="md">Save</Button>
-            <p className="col-span-full text-xs text-muted">Taken off each payment as it is recorded (split payments each at their own rate). Quotations assume the highest rate until the money comes in.</p>
-          </form>
+      {can(role, "cardSettlements") ? (
+        <details className="rounded-card border border-line bg-white px-5 py-3" data-bank-fees-fold>
+          <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">Bank fees: card machine {feeRuleWords(bankFeesOf(settings).card)} · payment link {feeRuleWords(bankFeesOf(settings).link)}</summary>
+          <div className="mt-2"><BankFeeSettings values={bankFeeValuesOf(settings)} action={saveBankFeesAction} canSave={!staff.viewingAs} /></div>
         </details>
       ) : null}
     </>
