@@ -8,6 +8,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { issueStock } from "../order-actions";
 import { adjustStock, countStock, createStockOrder, saveStockItemDetails } from "./actions";
+import { pickablePeople } from "@/lib/staff-picker";
+import { groupByTeam } from "@/lib/teams";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const [{ data: itemsRaw }, { data: jobs }, { data: techs }, { data: suppliers }, { data: moves }, { data: openOrders }] = await Promise.all([
     admin.from("stock_items").select(STOCK_ITEM_SELECT).eq("is_active", true).order("name"),
     admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).in("status", ["in_work", "waiting_parts", "pending_qc"]).order("job_number"),
-    admin.from("staff").select("id, display_name").eq("role_id", "technician").eq("is_active", true).order("display_name"),
+    pickablePeople(settings, ["mechanical", "bodyshop"]).then((data) => ({ data })),
     admin.from("suppliers").select("id, name").eq("is_active", true).order("name"),
     admin.from("stock_movements").select("id, stock_item_id, kind, quantity, unit_cost, quantity_after, note, created_at, job:jobs(job_number), po:purchase_orders(number), by:staff!stock_movements_created_by_fkey(display_name)").eq("is_active", true).order("created_at", { ascending: false }).limit(40),
     admin.from("purchase_orders").select("id, number, supplier_name, status, total_cost_aed").eq("kind", "stock").eq("is_active", true).in("status", ["pending_approval", "approved", "ordered", "partly_received"]).order("created_at", { ascending: false }),
@@ -201,7 +203,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
             </label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Quantity</span><Input name="quantity" inputMode="decimal" required /></label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician</span>
-              <Select name="technician" required><option value="">Choose…</option>{(techs ?? []).map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}</Select>
+              <Select name="technician" required><option value="">Choose…</option>{groupByTeam(techs ?? [], ["mechanical", "bodyshop"]).map((g) => <optgroup key={`${g.side}-${g.team.key}`} label={g.team.label}>{g.members.map((t) => <option key={t.id} value={t.id}>{t.display_name}{t.isLeader ? " (leader)" : ""}</option>)}</optgroup>)}</Select>
             </label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician&apos;s PIN <span className="font-medium">(needed above AED {Number(settings.pin_needed_above_aed) || 0})</span></span><Input name="pin" inputMode="numeric" maxLength={4} className="max-w-32" /></label>
             <Button type="submit" size="md">Issue</Button>

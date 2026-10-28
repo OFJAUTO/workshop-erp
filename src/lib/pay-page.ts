@@ -29,7 +29,7 @@ export function validateGatewayUrl(url: string, settings: Settings): { ok: true;
   } catch {
     return { ok: false, error: "This doesn't look like a payment link." };
   }
-  const allowed = ((settings.payment_gateway_domains ?? []) as string[]).map((d) => String(d).toLowerCase().trim()).filter(Boolean);
+  const allowed = ((settings.payment_gateway_domains ?? []) as string[]).flatMap((d) => String(d).toLowerCase().split(/[\s,;]+/)).map((d) => d.trim()).filter(Boolean);
   const list = allowed.length ? allowed : DEFAULT_GATEWAY_DOMAINS;
   const host = u.hostname.toLowerCase();
   if (u.protocol !== "https:" || !list.some((d) => host === d || host.endsWith(`.${d}`))) {

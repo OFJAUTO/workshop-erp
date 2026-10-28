@@ -40,3 +40,21 @@ export function knownWordsFromPage(): string[] {
   const content = meta?.getAttribute("content") ?? "";
   return content.split("|").map((w) => w.trim()).filter(Boolean);
 }
+
+/** Known words that are also ordinary English: never raised to capitals in a sentence ("the light led to"). */
+const KNOWN_WORDS_SKIP = new Set(["led", "mot", "aux", "vat", "abs", "ids"]);
+
+/**
+ * A known abbreviation typed in the wrong case is written the way Settings > Known words spells it: "Ppf" and "ppf"
+ * become "PPF", "a/c" becomes "A/C". Whole words of three or more characters only, so "is", "ok" or "es" in a sentence
+ * are never touched; anything else stays exactly as typed (capitals included).
+ */
+export function knownWordsUp(text: string, known: string[]): string {
+  let out = text;
+  for (const w of known) {
+    if (w.length < 3 || KNOWN_WORDS_SKIP.has(w.toLowerCase())) continue;
+    const esc = w.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    out = out.replace(new RegExp("(?<![A-Za-z0-9])" + esc + "(?![A-Za-z0-9])", "gi"), w);
+  }
+  return out;
+}

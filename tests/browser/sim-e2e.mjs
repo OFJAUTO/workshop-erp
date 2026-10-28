@@ -6,7 +6,7 @@
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
 // g recovery delivery · h commission approve → pay.
 import { mkdirSync } from "node:fs";
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
@@ -46,14 +46,6 @@ async function nextScreen(step, who, url, mustSee, shotName, opts = {}) {
 }
 
 /* ---- Shared moves (used by several paths) ---- */
-async function tickTech(page, box) {
-  if (await box.isChecked()) return;
-  await box.click({ force: true });
-  await sleep(250);
-  const yes = page.getByRole("button", { name: "Yes, assign" });
-  if (await yes.count()) { await yes.first().click(); await sleep(250); }
-  if (!(await box.isChecked())) await box.check({ force: true });
-}
 
 /** Parts price EVERY open row on the job (the seed carries its own request too): the completion gate
  *  "N part requests still with Parts" only clears when nothing is left unpriced. */
@@ -231,7 +223,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     // The rebuilt board (batch 21 Oct, section 6): tap the car, tick the person, pick the road test, Assign.
     await page.locator(`[data-assign-car="${jobId}"]`).click();
     await sleep(500);
-    await page.locator(`[data-assign-person="${techId}"]`).click();
+    await pickPerson(page, techId);
     await page.getByText("Road test first", { exact: true }).click();
     await page.locator("[data-assign-submit]").click();
     await submitted(page);
@@ -439,8 +431,8 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}`);
-    const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    if (await box.count()) await tickTech(page, box);
+    // THE staff picker (28 Oct, B1): tick the technician in the workshop release form.
+    await pickPerson(page.locator('[data-release-form="mechanical"]'), techId);
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(today);
     const force = page.locator("input[name='force']");
@@ -568,7 +560,9 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   // a22. Gate-out closes the job.
   m = await mark();
   await gateOutCollect(jobId, advisorId, "a22");
-  await told("a22", m, jobId, [{ role: "owner", label: "the owner" }]);
+  // Since 21 October the closing job report stays off the owner's bell (OWNER_QUIET_TYPES "owner_report"): he reads
+  // it on Reports. Nobody else is told at gate-out, so there is no R3 check here.
+  void m;
 });
 
 /* ================================================================================================= */
@@ -591,8 +585,8 @@ await section("b", "stock parts + cash", async () => {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}`);
-    const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    if (await box.count()) await tickTech(page, box);
+    // THE staff picker (28 Oct, B1): tick the technician in the workshop release form.
+    await pickPerson(page.locator('[data-release-form="mechanical"]'), techId);
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(today);
     const force = page.locator("input[name='force']");
@@ -798,8 +792,8 @@ await section("f", "mixed mechanical + bodyshop line", async () => {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}`);
-    const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    if (await box.count()) await tickTech(page, box);
+    // THE staff picker (28 Oct, B1): tick the technician in the workshop release form.
+    await pickPerson(page.locator('[data-release-form="mechanical"]'), techId);
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(today);
     const force = page.locator("input[name='force']");

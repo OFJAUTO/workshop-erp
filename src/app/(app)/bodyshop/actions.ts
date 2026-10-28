@@ -13,6 +13,7 @@ import { verifyPin } from "@/lib/pin";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { bodyshopScopeOf, mayPickPerson } from "@/lib/team-scope";
 
 const enc = encodeURIComponent;
 function refresh(jobId?: string | null) {
@@ -74,6 +75,8 @@ export async function requestDepositAction(jobId: string, formData: FormData) {
 /** "Start the work" by hand (the gate-in normally starts it by itself once the photos are in). */
 export async function startWorkAction(jobId: string) {
   const staff = await requirePermission("manageBodyshop");
+  const { data: jp } = await createAdminClient().from("jobs").select("status").eq("id", jobId).maybeSingle();
+  if (jp && ["approved", "waiting_parts"].includes(String(jp.status))) back(jobId, { error: "This car is in planning: release it from the Planning card on the job card (Release to bodyshop)." }, "");
   const r = await startBodyshopWork(jobId, staff, await getSettings());
   refresh(jobId);
   back(jobId, r, r.started ? "The stages are set and the first section has been told." : "The work had already started.");
@@ -131,6 +134,11 @@ export async function assignAction(jobId: string, formData: FormData) {
   const staff = await leader();
   const staffId = String(formData.get("staff_id") ?? "");
   const off = formData.get("off") === "1";
+  const refusal = await personRefusal(staff, jobId, staffId);
+  if (refusal) {
+    if (String(formData.get("from") ?? "") === "mine") redirect(`/bodyshop/mine?error=${enc(refusal)}`);
+    back(jobId, { error: refusal }, "", "#people");
+  }
   const r = off ? await unassignPerson(jobId, staffId, staff) : await assignPerson(jobId, staffId, staff);
   refresh(jobId);
   const from = String(formData.get("from") ?? "");
@@ -143,6 +151,8 @@ export async function assignAction(jobId: string, formData: FormData) {
 export async function clockAction(jobId: string, formData: FormData) {
   const staff = await leader();
   const staffId = String(formData.get("staff_id") ?? "");
+  const refusal = await personRefusal(staff, jobId, staffId);
+  if (refusal) back(jobId, { error: refusal }, "", "#people");
   const out = formData.get("out") === "1";
   if (out) await clockOut(staffId, staff.id);
   else await clockIn(jobId, staffId, "leader", staff.id);
@@ -224,4 +234,18 @@ export async function electricalDoneAction(jobId: string, stageId: string) {
   const r = await setStageDone(stageId, staff, await getSettings());
   refresh(jobId);
   redirect(`/assign?${r.error ? `error=${enc(r.error)}` : `message=${enc("Electrical reset done; the bodyshop has been told.")}`}`);
+}
+
+/** The one server check for putting a person on a car or clocking them: an open job, and a person the actor may pick. */
+async function personRefusal(staff: { role_id: string; department_id?: string | null; team?: string | null; viewingAs?: unknown }, jobId: string, staffId: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const [{ data: job }, { data: person }] = await Promise.all([
+    admin.from("jobs").select("is_open").eq("id", jobId).maybeSingle(),
+    admin.from("staff").select("role_id, department_id, team, is_active").eq("id", staffId).maybeSingle(),
+  ]);
+  if (!job?.is_open) return "This job is closed.";
+  if (!person?.is_active) return "Person not found.";
+  const scope = bodyshopScopeOf(staff);
+  if (!mayPickPerson(scope, person)) return scope.kind === "team" ? "You can put only your own team on a car." : "Only bodyshop people go on the bodyshop board.";
+  return null;
 }

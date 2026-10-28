@@ -3,6 +3,8 @@ import type { JobStatus, Priority, Stage } from "./jobs";
 
 export type StaffRow = {
   id: string;
+  /** The person's team inside their side (teams.ts). */
+  team?: string | null;
   full_name: string;
   display_name: string;
   role_id: RoleId;
@@ -233,6 +235,11 @@ export type JobRow = {
   plan_released_at: string | null;
   plan_released_by: string | null;
   plan_release_note: string | null;
+  /** The bodyshop side of the job released by the bodyshop manager (28 October 2026). */
+  plan_bodyshop_released_at?: string | null;
+  plan_bodyshop_released_by?: string | null;
+  plan_bodyshop_start_date?: string | null;
+  bodyshop_started_at?: string | null;
   plan_date_confirmed_at: string | null;
   plan_date_confirmed_by: string | null;
   plan_reminded_at: string | null;

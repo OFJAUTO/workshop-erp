@@ -11,6 +11,8 @@ import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { ensureQrLink } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { knownWordsUp } from "@/lib/text-case";
+import { getSettings } from "@/lib/settings";
 
 type ItemInput = { item_type: string; description: string | null; quantity: number; notes: string | null; photo: File | null };
 
@@ -42,7 +44,8 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
     if (it.photo && !["image/jpeg", "image/png", "image/webp"].includes(it.photo.type)) return { error: "Item photos must be JPG, PNG or WebP.", values };
     if (it.photo && it.photo.size > 15 * 1024 * 1024) return { error: "An item photo must be under 15 MB.", values };
   }
-  const requests = get("requests").split(/\r?\n/).map((r) => r.trim()).filter(Boolean).slice(0, 50);
+  const known = ((await getSettings()).known_words ?? []) as string[];
+  const requests = get("requests").split(/\r?\n/).map((r) => knownWordsUp(r.trim(), known)).filter(Boolean).slice(0, 50);
   if (requests.length === 0) return { error: "Write what the customer wants, one line per request.", values };
   const department = get("department") === "bodyshop" ? "bodyshop" : "mechanical";
   const priority = ["high", "normal", "low"].includes(get("priority")) ? get("priority") : "normal";

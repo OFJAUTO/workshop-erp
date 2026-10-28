@@ -43,7 +43,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const side = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
   const settings = await getSettings();
   const supabase = await createClient();
-  const [{ data: jobs }, , { data: load }, { data: requestRows }] = await Promise.all([
+  const [{ data: jobs }, { data: load }, { data: requestRows }] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_number, status, stage, stage_entered_at, department, priority, promised_at, is_open, gated_in_at, first_approval_at, assigned_to, customer_id, assignment_note, assignment_note_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), gate_in:gate_ins(is_complete, condition, customer_requests, notes), note_by:staff!jobs_assignment_note_by_fkey(display_name)")
@@ -51,7 +51,6 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
       .is("assigned_to", null)
       .in("status", ["gate_in_pending", "pending_approval", "pending_inspection"])
       .order("gated_in_at"),
-    supabase.from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name"),
     supabase.from("jobs").select("assigned_to").eq("is_open", true).not("assigned_to", "is", null),
     supabase.from("job_requests").select("job_id, position, text").eq("is_active", true).order("position"),
   ]);

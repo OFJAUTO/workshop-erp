@@ -25,7 +25,7 @@ export type NextStepInput = {
   /** The quotation's plain-word state, when the job is at or past the quote. */
   quote?: QuoteState | null;
   /** Later stages: parts, work, QC, wash, invoice, delivery. */
-  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; invoiceKind?: "proforma" | "tax_invoice" | "credit_note" | null; invoiceSent?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null; planningOn?: "parts" | "workshop" | "advisor" | null; workFinishedAt?: string | null; washSentAt?: string | null; technicianNames?: string[]; /** The live parts picture (partsLiveOf): with it, the parts step is said from the rows, never a stored flag. */ parts?: { hasParts: boolean; toOrder: number; orderNow?: number; missing: number; late: number; readyDate: string | null; pendingLpo: boolean } | null; /** The advance payment step: asked on the approved quotation, short while unpaid, stamped when the advisor sends the request. */ deposit?: { required: number; received: number; short: boolean; requestedAt: string | null } | null } | null;
+  extra?: { partsState?: string; partsLate?: number; workDone?: number; workTotal?: number; qcRound?: number; readyToInvoice?: boolean; invoiced?: boolean; invoiceKind?: "proforma" | "tax_invoice" | "credit_note" | null; invoiceSent?: boolean; balanceDue?: number; readySent?: boolean; deliveryAddress?: string | null; planningOn?: "parts" | "workshop" | "bodyshop" | "both_sides" | "advisor" | null; workFinishedAt?: string | null; washSentAt?: string | null; technicianNames?: string[]; /** The live parts picture (partsLiveOf): with it, the parts step is said from the rows, never a stored flag. */ parts?: { hasParts: boolean; toOrder: number; orderNow?: number; missing: number; late: number; readyDate: string | null; pendingLpo: boolean } | null; /** The advance payment step: asked on the approved quotation, short while unpaid, stamped when the advisor sends the request. */ deposit?: { required: number; received: number; short: boolean; requestedAt: string | null } | null } | null;
 };
 
 export type NextStep = {
@@ -40,6 +40,8 @@ export type NextStep = {
   action: { label: string; href: string } | null;
   /** The moment the wait started. */
   since: string;
+  /** A manager's step that belongs to one side only (the bodyshop or the workshop release of a mixed car). */
+  side?: "mechanical" | "bodyshop";
   /** Short line for list cards: "Pending quote, waiting on Adarsh". */
   line: string;
 };
@@ -110,7 +112,11 @@ export function nextStepOf(jobId: string, j: NextStepInput): NextStep {
     const p = x.parts ?? null;
     const release: NextStep = { done: { label: p?.hasParts ? "Every part is here" : "Quotation approved by the customer", by: null }, next: `${j.managerLabel} picks the start day and the technicians, then releases the work.`, waitingOn: j.managerLabel, actorRole: "workshop_manager", action: { label: "Release work", href: `/jobs/${jobId}#planning` }, since, line: `Planning, waiting on ${j.managerLabel} to release the work` };
     const on = x.planningOn ?? (p ? (p.pendingLpo || p.toOrder > 0 || p.missing > 0 ? "parts" : "workshop") : "parts");
-    if (on === "workshop") return release;
+    // One side at a time on a mixed car: each manager releases their own side.
+    const sideWho = (side: "mechanical" | "bodyshop") => (/ or |the (workshop|bodyshop) manager/.test(j.managerLabel) ? (side === "bodyshop" ? "the bodyshop manager" : "the workshop manager") : j.managerLabel);
+    if (on === "bodyshop") return { ...release, next: `${sideWho("bodyshop")} picks the start day and the bodyshop team, then releases the car to the bodyshop.`, waitingOn: sideWho("bodyshop"), action: { label: "Release to bodyshop", href: `/jobs/${jobId}#planning` }, line: `Planning, waiting on ${sideWho("bodyshop")} to release the car to the bodyshop`, side: "bodyshop" };
+    if (on === "both_sides") return { ...release, next: "The workshop manager and the bodyshop manager each pick the start day and their people, then release their side.", waitingOn: "the workshop and bodyshop managers", line: "Planning, waiting on the workshop and bodyshop managers to release the work" };
+    if (on === "workshop") return { ...release, next: `${sideWho("mechanical")} picks the start day and the technicians, then releases the work.`, waitingOn: sideWho("mechanical"), line: `Planning, waiting on ${sideWho("mechanical")} to release the work`, side: "mechanical" };
     if (on === "advisor") return { done: { label: "Released to the workshop", by: null }, next: `${advisor} confirms the finish date and tells the customer.`, waitingOn: advisor, actorRole: "service_advisor", action: { label: "Confirm the date", href: `/jobs/${jobId}#planning` }, since, line: `Waiting on ${advisor} to confirm the finish date` };
     // Waiting on Parts: with the live picture, say exactly where the parts stand.
     if (p) {

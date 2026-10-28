@@ -28,7 +28,11 @@ export type PartsStepsInput = {
   toOrder?: number | null;
 };
 
-const QUOTE_STAGES = ["gate_in_pending", "pending_assignment", "pending_road_test", "in_inspection", "pending_approval", "pending_quote", "pending_customer_approval"];
+/** The statuses from the Parts step on (STATUS_STAGE in jobs.ts at "parts" or later): the customer has approved the work. */
+const PAST_QUOTE = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"];
+const NO_PARTS = "No parts on this car";
+/** True when the steps say the car needs no parts at all (approved, nothing to order). */
+export const noPartsNeeded = (steps: PartsStep[]) => steps[0]?.detail === NO_PARTS;
 const ORDERED = ["ordered", "partly_received", "received"];
 
 export const STEP_LABELS: Record<PartsStepKey, string> = { pricing: "Pricing", approval: "Request approval", lpo: "LPO for vendor", received: "Parts received", handover: "Handover" };
@@ -36,7 +40,7 @@ export const STEP_LABELS: Record<PartsStepKey, string> = { pricing: "Pricing", a
 export function partsSteps(i: PartsStepsInput): PartsStep[] {
   const approved = i.parts.filter((p) => p.is_active && !!p.order_status && p.order_status !== "none" && p.return_status !== "returned");
   const nonStock = approved.filter((p) => !p.from_stock);
-  const pastQuote = !QUOTE_STAGES.includes(i.jobStatus);
+  const pastQuote = PAST_QUOTE.includes(i.jobStatus);
   const pricingDone = !i.pricingReopenedAt && (!!i.pricingDoneAt || approved.length > 0 || pastQuote);
   const needLpo = nonStock.length > 0;
   const toOrder = i.toOrder ?? nonStock.filter((p) => !p.po_id && !ORDERED.includes(p.order_status ?? "")).length;
@@ -51,7 +55,7 @@ export function partsSteps(i: PartsStepsInput): PartsStep[] {
   const noParts = pastQuote && approved.length === 0 && pricingDone;
   const done = noParts ? [true, true, true, true, true] : [pricingDone, approvalDone, orderedDone, receivedDone, handedDone];
   const details: (string | null)[] = noParts
-    ? ["No parts on this car", null, null, null, null]
+    ? [NO_PARTS, null, null, null, null]
     : [
         pricingDone ? "Priced" : "Price every part, then Pricing done",
         approvalDone ? (needLpo ? "LPO approved" : "From stock, no LPO needed") : i.mainLpoStatus === "pending_approval" ? "Waiting for the owner or accounts" : approved.length ? "Send the LPO for approval" : "Waiting for the customer's approval",

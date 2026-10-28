@@ -12,6 +12,8 @@ import { LINE_SELECT, PART_SELECT, logQuoteEvent, refreshQuoteTotals, toLine, to
 import { aed, isUnchosen, type QuoteLine, type QuoteRow } from "./quotes";
 import { getSettings } from "./settings";
 import { formatPlate } from "./types";
+import { releaseWords } from "./job-sides";
+import { extendBodyshopStages } from "./bodyshop";
 
 /** Everyone who should hear about a customer's answer: the advisor(s) of the job and the person who sent it. */
 export async function advisorsOf(q: Pick<QuoteRow, "job_id" | "created_by" | "sent_by">): Promise<string[]> {
@@ -83,7 +85,7 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
     return { status };
   }
   if (!q.job_id) return { status };
-  const { data: job } = await admin.from("jobs").select("id, job_number, status, department, assigned_to").eq("id", q.job_id).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("id, job_number, status, department, assigned_to, bodyshop_started_at").eq("id", q.job_id).maybeSingle();
   if (!job) return { status };
 
   // A package with "Complimentary pick-up & drop-off" approved: both recovery trips are made at once
@@ -156,16 +158,17 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   const extra = ["in_work", "pending_qc", "pending_wash"].includes(job.status);
   const toStatus = revisionKeepsStage ? job.status : extra ? "in_work" : "waiting_parts";
   if (revisionKeepsStage) await admin.from("jobs").update({ inspection_fee_due: false }).eq("id", job.id);
-  else await admin.from("jobs").update({ status: toStatus, stage: extra ? "work" : "parts", stage_entered_at: now, inspection_fee_due: false, ...(extra ? {} : { plan_parts_done_at: null, plan_released_at: null, plan_date_confirmed_at: null, plan_start_date: null }) }).eq("id", job.id);
+  else await admin.from("jobs").update({ status: toStatus, stage: extra ? "work" : "parts", stage_entered_at: now, inspection_fee_due: false, ...(extra ? {} : { plan_parts_done_at: null, plan_released_at: null, plan_date_confirmed_at: null, plan_start_date: null, plan_bodyshop_released_at: null, plan_bodyshop_released_by: null, plan_bodyshop_start_date: null }) }).eq("id", job.id);
   const madeLines = extra ? await ensureWorkLines(job.id, answer.by ?? null) : 0;
+  const newStages = extra && job.bodyshop_started_at ? (await extendBodyshopStages(job.id, { id: (answer.by ?? null) as unknown as string, display_name: answer.name })).added : [];
   // No parts on the approved work: the Parts circle is done at once and the workshop manager plans the work.
   const noParts = !extra && !lines.some((l) => l.line_type === "part") && !parts.some((p) => p.order_status !== "none");
   if (noParts) await admin.from("jobs").update({ plan_parts_done_at: now, plan_parts_by: null, plan_parts_ready_date: now.slice(0, 10) }).eq("id", job.id);
   await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: toStatus, note: `Quotation ${q.number} approved by ${answer.name}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${totalText} with VAT${extra ? ` (additional work, ${madeLines} new line${madeLines === 1 ? "" : "s"} on the work order)` : " · planning starts with Parts"}`, created_by: answer.by ?? null });
-  const body = `${answer.name} approved ${q.number} (${totalText}). ${extra ? "Additional work: the new lines are on the work order." : "Planning: Parts first, then the workshop manager, then the advisor."}`;
+  const body = `${answer.name} approved ${q.number} (${totalText}). ${extra ? [madeLines ? "Additional work: the new lines are on the work order." : "", newStages.length ? `New bodyshop stages: ${newStages.join(", ")}.` : ""].filter(Boolean).join(" ") || "Additional work approved." : "Planning: Parts first, then the managers, then the advisor."}`;
   await notifyStaff(advisors, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   await notifyManagers(job.department ?? null, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
-  if (!extra && noParts) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${answer.name} approved ${q.number}; no parts needed. Pick the start day and the technicians, then Release to workshop.`, jobId: job.id, href: `/jobs/${job.id}#planning` });
+  if (!extra && noParts) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${answer.name} approved ${q.number}; no parts needed. ${releaseWords(job.department)}`, jobId: job.id, href: `/jobs/${job.id}#planning` });
   else if (!extra && !needsOrder) {
     // Every approved part is from our stock: nothing to order, the workshop manager plans the work; Parts hear so the parts are ready for the handover.
     await finishPartsPlanning(job.id, null);

@@ -17,6 +17,9 @@ import { bankChargePercentFor, type Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { rowMissing, stageAsks, warrantyCardOf } from "./warranty-data";
+import { kindsOfLine, type SideLine } from "./job-sides";
+import { workSidesOf } from "./staff-picker";
+import { SECTION_OF_TEAM, teamOf } from "./teams";
 
 export type Actor = { id: string; display_name: string; role_id?: string; department_id?: string | null };
 
@@ -66,9 +69,14 @@ export async function approvedKinds(jobId: string): Promise<{ kinds: string[]; l
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", quotes.map((q) => q.id)).eq("is_active", true);
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isUnchosen(l));
   const serviceIds = Array.from(new Set(lines.map((l) => l.service_id).filter((x): x is string => !!x)));
-  const { data: svcs } = serviceIds.length ? await admin.from("services").select("id, bodyshop_kind").in("id", serviceIds) : { data: [] as { id: string; bodyshop_kind: string | null }[] };
-  const kindOf = new Map((svcs ?? []).map((s) => [s.id, s.bodyshop_kind as string | null]));
-  const kinds = Array.from(new Set(lines.map((l) => (l.service_id ? kindOf.get(l.service_id) : null)).filter((k): k is string => !!k)));
+  const { data: svcs } = serviceIds.length ? await admin.from("services").select("id, bodyshop_kind, department").in("id", serviceIds) : { data: [] as { id: string; bodyshop_kind: string | null; department: string | null }[] };
+  const svcOf = new Map((svcs ?? []).map((s) => [s.id as string, s]));
+  let kinds = Array.from(new Set(lines.flatMap((l) => kindsOfLine(l as unknown as SideLine, l.service_id ? svcOf.get(l.service_id) : null))));
+  // A bodyshop job's own work (labour or a service with no package kind behind it) still runs through stages.
+  if (!kinds.length && lines.some((l) => l.line_type === "labour" || l.line_type === "package" || l.line_type === "other")) {
+    const { data: j } = await admin.from("jobs").select("department").eq("id", jobId).maybeSingle();
+    if (j?.department === "bodyshop") kinds = ["other"];
+  }
   const filmLine = lines.find((l) => l.film_colour || l.film_code);
   const tintLine = lines.find((l) => l.tint_percent);
   return { kinds, lines, film: filmLine ? { colour: filmLine.film_colour ?? null, code: filmLine.film_code ?? null } : null, tintPercent: tintLine?.tint_percent ?? null, quotationId: quotes[0].id };
@@ -247,7 +255,7 @@ export async function bookedJobOf(appointmentId: string | null, vehicleId: strin
  * The gate-in is complete on a bodyshop car with an approved quotation: the stages are built from the packages,
  * their due dates spread back from the promised handover, the first stage goes active and its section is told.
  */
-export async function startBodyshopWork(jobId: string, actor: Actor | null, settings: Settings): Promise<{ error?: string; started?: boolean }> {
+export async function startBodyshopWork(jobId: string, actor: Actor | null, settings: Settings, opts: { start?: string | null; keepStatus?: boolean } = {}): Promise<{ error?: string; started?: boolean }> {
   const admin = createAdminClient();
   const { data: jobRaw } = await admin.from("jobs").select(JOB_SELECT).eq("id", jobId).maybeSingle();
   const job = jobRaw as unknown as BodyshopJobRow | null;
@@ -257,16 +265,26 @@ export async function startBodyshopWork(jobId: string, actor: Actor | null, sett
   if (!kinds.length) return { error: "No approved bodyshop packages on this car yet." };
   const keys = stageKeysFor(kinds);
   const defs = keys.map((k) => stageDef(k)!).filter(Boolean);
-  const today = dubaiDate();
+  // The start day picked at the release spreads the due dates (today when started from the gate-in).
+  const today = opts.start && opts.start > dubaiDate() ? opts.start : dubaiDate();
   const workingDays = (settings.working_days ?? []) as string[];
   const totalHours = defs.reduce((a, d) => a + d.hours, 0);
-  const promised = job.promised_at ?? addDaysIso(today, Math.max(1, Math.ceil(totalHours / 8) + 1));
+  const promised = job.promised_at && job.promised_at >= today ? job.promised_at : addDaysIso(today, Math.max(1, Math.ceil(totalHours / 8) + 1));
   const dues = spreadDueDates(defs.map((d) => d.hours), today, promised, workingDays);
   const now = new Date().toISOString();
   const rows = defs.map((d, i) => ({ job_id: jobId, position: i + 1, key: d.key, label: stageLabelFor(d.key, kinds), section: d.section, est_hours: d.hours, due_date: dues[i], status: i === 0 ? "active" : "pending", started_at: i === 0 ? now : null, created_by: actor?.id ?? null, updated_by: actor?.id ?? null }));
   await admin.from("bodyshop_stages").insert(rows);
-  await admin.from("jobs").update({ status: "in_work", stage: "work", stage_entered_at: now, bodyshop_started_at: now, work_started_at: now, promised_at: promised, bodyshop_handover_token: job.bodyshop_handover_token ?? randomBytes(18).toString("hex"), updated_by: actor?.id ?? null }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: job.status, to_status: "in_work", note: `Bodyshop work started: ${defs.map((d) => stageLabelFor(d.key, kinds)).join(" → ")}; handover ${formatDate(promised)}${actor ? ` (${actor.display_name})` : ""}`, created_by: actor?.id ?? null });
+  // The job's status moves to In work only from before the work; a car already in work, or a mixed car whose
+  // mechanical side is still in planning, keeps its status and its clocks.
+  const keep = !!opts.keepStatus || !["gate_in_pending", "pending_approval", "approved", "waiting_parts", "booked"].includes(job.status);
+  const route = defs.map((d) => stageLabelFor(d.key, kinds)).join(" → ");
+  if (keep) {
+    await admin.from("jobs").update({ bodyshop_started_at: now, promised_at: promised, bodyshop_handover_token: job.bodyshop_handover_token ?? randomBytes(18).toString("hex"), updated_by: actor?.id ?? null }).eq("id", jobId);
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `Bodyshop stages started: ${route}; handover ${formatDate(promised)}${actor ? ` (${actor.display_name})` : ""}`, created_by: actor?.id ?? null });
+  } else {
+    await admin.from("jobs").update({ status: "in_work", stage: "work", stage_entered_at: now, bodyshop_started_at: now, work_started_at: now, promised_at: promised, bodyshop_handover_token: job.bodyshop_handover_token ?? randomBytes(18).toString("hex"), updated_by: actor?.id ?? null }).eq("id", jobId);
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: job.status, to_status: "in_work", note: `Bodyshop work started: ${route}; handover ${formatDate(promised)}${actor ? ` (${actor.display_name})` : ""}`, created_by: actor?.id ?? null });
+  }
   const stages = await loadStages(jobId);
   const first = stages[0];
   if (first) await tellSection(job, first, `${shortCar(job.vehicle)} is in: ${first.label} first, due ${formatDate(first.due_date)}.`);
@@ -348,7 +366,17 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
   }
   // The work is finished when QC is done (or nothing but the handover is left): the car is Ready and the proforma prepares itself.
   const left = stages.filter((s) => s.id !== stageId && s.status !== "done" && s.status !== "skipped" && s.key !== "handover");
-  if (!left.length && job.status === "in_work") {
+  // A mixed car: the bodyshop finishing never moves the job to Ready on its own; the mechanical side carries the car
+  // through its own QC and wash. The release sign-off is still asked now.
+  const mixed = job.department === "both" && (await workSidesOf(job.id, job.department)).includes("mechanical");
+  if (!left.length && mixed) {
+    const handover = stages.find((s) => s.key === "handover");
+    if (handover && handover.status === "pending") await admin.from("bodyshop_stages").update({ status: "active", started_at: now, updated_by: actor.id }).eq("id", handover.id);
+    await admin.from("job_events").insert({ job_id: job.id, event_type: "bodyshop_stage", note: `Bodyshop side complete (${actor.display_name}); the mechanical side takes the car through QC to Ready`, created_by: actor.id });
+    const needed = neededSignoffs(stages.map((s) => s.section));
+    await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The bodyshop work is complete; the mechanical work carries on. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
+  }
+  if (!left.length && job.status === "in_work" && !mixed) {
     await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, updated_by: actor.id }).eq("id", job.id);
     await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: "in_work", to_status: "ready", note: `Bodyshop work complete (${actor.display_name}); waiting for the release sign-off`, created_by: actor.id });
     try {
@@ -494,11 +522,13 @@ export async function tickRefitted(itemId: string, on: boolean, actor: Actor) {
 
 export async function assignPerson(jobId: string, staffId: string, actor: Actor): Promise<{ error?: string }> {
   const admin = createAdminClient();
-  const { data: s } = await admin.from("staff").select("id, display_name, department_id").eq("id", staffId).eq("is_active", true).maybeSingle();
+  const { data: s } = await admin.from("staff").select("id, display_name, department_id, team, role_id").eq("id", staffId).eq("is_active", true).maybeSingle();
   if (!s) return { error: "Person not found." };
+  const section = SECTION_OF_TEAM[teamOf(s)] ?? sectionOfDepartment(s.department_id);
+  if (!section) return { error: `${s.display_name} is not in a bodyshop team.` };
   const { data: existing } = await admin.from("bodyshop_assignments").select("id").eq("job_id", jobId).eq("staff_id", staffId).is("removed_at", null).eq("is_active", true).maybeSingle();
   if (existing) return {};
-  await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: staffId, section: sectionOfDepartment(s.department_id) ?? "strip_refit", assigned_by: actor.id, created_by: actor.id, updated_by: actor.id });
+  await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: staffId, section, assigned_by: actor.id, created_by: actor.id, updated_by: actor.id });
   if (staffId !== actor.id) await notifyStaff([staffId], { type: "bodyshop_heads_up", title: `You are on a car`, body: `${actor.display_name} put you on a car in the bodyshop.`, jobId, href: `/bodyshop/${jobId}` });
   return {};
 }
@@ -517,8 +547,8 @@ export async function clockIn(jobId: string, staffId: string, source: "tablet" |
   // Clocking on counts as being on the car.
   const { data: existing } = await admin.from("bodyshop_assignments").select("id").eq("job_id", jobId).eq("staff_id", staffId).is("removed_at", null).eq("is_active", true).maybeSingle();
   if (!existing) {
-    const { data: s } = await admin.from("staff").select("department_id").eq("id", staffId).maybeSingle();
-    await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: staffId, section: sectionOfDepartment(s?.department_id) ?? "strip_refit", assigned_by: by, created_by: by, updated_by: by });
+    const { data: s } = await admin.from("staff").select("department_id, team").eq("id", staffId).maybeSingle();
+    await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: staffId, section: (s ? SECTION_OF_TEAM[teamOf(s)] : null) ?? sectionOfDepartment(s?.department_id) ?? "strip_refit", assigned_by: by, created_by: by, updated_by: by });
   }
   return { stage: stage?.label };
 }
@@ -700,18 +730,19 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
   if (stagelessIds.length) {
     const { data: lineRows } = await admin
       .from("quotation_lines")
-      .select("id, quotation:quotations!inner(job_id, status, is_active, version), service:services(bodyshop_kind)")
+      .select("id, line_type, side, title, package_key, package_items, film_colour, film_code, tint_percent, quotation:quotations!inner(job_id, status, is_active, version), service:services(bodyshop_kind, department)")
       .in("quotation.job_id", stagelessIds)
       .eq("is_active", true)
       .eq("quotation.is_active", true)
       .neq("quotation.status", "cancelled");
     const kindsOf = new Map<string, Set<string>>();
-    for (const l of (lineRows ?? []) as unknown as { quotation: { job_id: string } | null; service: { bodyshop_kind: string | null } | null }[]) {
+    for (const l of (lineRows ?? []) as unknown as (SideLine & { quotation: { job_id: string } | null; service: { bodyshop_kind: string | null; department: string | null } | null })[]) {
       const jid = l.quotation?.job_id;
-      const kind = l.service?.bodyshop_kind;
-      if (!jid || !kind) continue;
-      if (!kindsOf.has(jid)) kindsOf.set(jid, new Set());
-      kindsOf.get(jid)!.add(kind);
+      if (!jid) continue;
+      for (const kind of kindsOfLine(l, l.service)) {
+        if (!kindsOf.has(jid)) kindsOf.set(jid, new Set());
+        kindsOf.get(jid)!.add(kind);
+      }
     }
     for (const [jid, kinds] of kindsOf) {
       const keys = stageKeysFor(Array.from(kinds));
@@ -908,4 +939,34 @@ export async function installerHistoryFor(vehicleId: string | null): Promise<{ j
   const totals = [...byJob.values()].filter((m) => m > 0);
   if (!totals.length) return null;
   return { jobs: totals.length, avgHours: Math.round((totals.reduce((a, b) => a + b, 0) / totals.length / 60) * 10) / 10 };
+}
+
+/**
+ * Newly approved bodyshop work on a car whose stages already exist (an additional quotation, or a new approval after
+ * the car was ready): the stages it needs that the car does not have yet are added before the handover, and if no
+ * stage is running the first new one starts (the handover waits again).
+ */
+export async function extendBodyshopStages(jobId: string, actor: Actor): Promise<{ added: string[] }> {
+  const admin = createAdminClient();
+  const { kinds } = await approvedKinds(jobId);
+  const want = stageKeysFor(kinds);
+  const before = await loadStages(jobId);
+  const have = new Set(before.map((s) => s.key));
+  const added: string[] = [];
+  for (const key of want) {
+    if (key === "handover" || have.has(key)) continue;
+    const r = await addStage(jobId, key, null, actor);
+    if (!r.error) added.push(stageLabelFor(key, kinds));
+  }
+  if (!added.length) return { added };
+  const stages = await loadStages(jobId);
+  const now = new Date().toISOString();
+  if (!stages.some((s) => s.status === "active" && s.key !== "handover")) {
+    const next = stages.find((s) => s.status === "pending" && s.key !== "handover");
+    if (next) await admin.from("bodyshop_stages").update({ status: "active", started_at: now, updated_by: actor.id }).eq("id", next.id);
+    const handover = stages.find((s) => s.key === "handover" && s.status === "active");
+    if (handover) await admin.from("bodyshop_stages").update({ status: "pending", started_at: null, updated_by: actor.id }).eq("id", handover.id);
+  }
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "bodyshop_stage", note: `New bodyshop work approved: ${added.join(", ")} added to the stages`, created_by: actor.id });
+  return { added };
 }

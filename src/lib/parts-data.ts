@@ -4,6 +4,8 @@ import { PART_SELECT, toPart } from "./quote-data";
 import type { PartItem } from "./quotes";
 import { createAdminClient } from "./supabase/admin";
 import { poCharges, type SupplierCharge } from "./supplier-charges";
+import { sidesToRelease } from "./job-sides";
+import type { Side } from "./teams";
 
 export type PoStatus = "pending_approval" | "approved" | "ordered" | "partly_received" | "received" | "cancelled";
 export const PO_STATUS_LABELS: Record<PoStatus, string> = {
@@ -240,10 +242,16 @@ export function partsLiveOf(parts: PartFull[], today: string, pendingLpo = false
 /** Parts are sorted when nothing is left to order or approve and nothing missing is late or undated. */
 export const partsPlanned = (live: PartsLive) => !live.pendingLpo && live.toOrder === 0 && live.late === 0 && live.missingNoDate === 0;
 
-/** Whose move the Planning card waits on, live: Parts until the parts are sorted, then the manager, then the advisor. */
-export function planningOnOf(job: { plan_released_at: string | null; plan_date_confirmed_at: string | null }, live: PartsLive): "parts" | "workshop" | "advisor" | null {
+export type PlanningOn = "parts" | "workshop" | "bodyshop" | "both_sides" | "advisor";
+/**
+ * Whose move the Planning card waits on, live: Parts until the parts are sorted, then the manager of each side still
+ * to release (the workshop manager, the bodyshop manager, or both on a mixed car), then the advisor.
+ */
+export function planningOnOf(job: { department?: string | null; plan_released_at: string | null; plan_bodyshop_released_at?: string | null; plan_date_confirmed_at: string | null }, live: PartsLive, sides?: Side[]): PlanningOn | null {
   if (!partsPlanned(live)) return "parts";
-  if (!job.plan_released_at) return "workshop";
+  const waiting = sidesToRelease(job, sides);
+  if (waiting.length === 2) return "both_sides";
+  if (waiting.length === 1) return waiting[0] === "bodyshop" ? "bodyshop" : "workshop";
   if (!job.plan_date_confirmed_at) return "advisor";
   return null;
 }

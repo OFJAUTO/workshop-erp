@@ -7,6 +7,7 @@ import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, toPartFull, toPo, toPoLine, type PartFull, type PoLineRow, type PurchaseOrderRow } from "./parts-data";
 import { createAdminClient } from "./supabase/admin";
 import { attachChargesToPo, chargesByPo, moveChargesToSupplierPo, type SupplierCharge } from "./supplier-charges";
+import { releaseWords } from "./job-sides";
 
 type Actor = { id: string; display_name: string };
 
@@ -210,7 +211,7 @@ export async function finishPartsPlanning(jobId: string, by: Actor | null, opts:
   const text = missing.length ? (ready ? `All parts here by ${ready}` : "Ordered, dates to follow") : fromStock.length || (partRows ?? []).length ? "Every part is here" : "No parts needed";
   await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `${text}${by ? ` (${by.display_name})` : ""}`, created_by: by?.id ?? null });
   if (!opts.quiet || firstTime) {
-    if (!job.plan_released_at) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${text}. Pick the start day and the technicians, then Release to workshop.`, jobId, href: `/jobs/${jobId}#planning` });
+    if (!job.plan_released_at) await notifyManagers(job.department ?? null, { type: "planning", title: `Plan the work · ${job.job_number}`, body: `${text}. ${releaseWords(job.department)}`, jobId, href: `/jobs/${jobId}#planning` });
   }
   return true;
 }

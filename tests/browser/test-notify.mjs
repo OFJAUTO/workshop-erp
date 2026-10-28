@@ -3,7 +3,7 @@
 // quotation sent and approved → planning → parts handover → work finished → work confirmed → QC →
 // wash → proforma → payment and tax invoice → gate-out. Run against `npx next dev -p 3100`:
 //   node --env-file=.env.local tests/browser/test-notify.mjs
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 /** Ticks a technician; one already on a car asks "Assign anyway?" first (depends on the live workshop). */
 async function tickTech(page, box) {
@@ -67,9 +67,9 @@ try {
     // The rebuilt board (batch 21 Oct, section 6): tap the car, tick the person, pick the road test, Assign.
     await page.locator(`[data-assign-car="${jobId}"]`).click();
     await sleep(500);
-    const person = page.locator(`[data-assign-person="${techId}"]`);
+    const person = page.locator(`[data-pick-person="${techId}"]`);
     check("assign page lists the free technician", (await person.count()) === 1, `tech ${techId} · ${page.url()}`);
-    await person.click();
+    await pickPerson(page, techId);
     await page.getByText("Road test first", { exact: true }).click();
     await page.locator("[data-assign-submit]").click();
     await submitted(page);

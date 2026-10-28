@@ -51,7 +51,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   }
   // A bodyshop car leaves only after the release sign-off (the owner signs on behalf of anyone on the bodyshop page).
   const { data: jd } = await admin.from("jobs").select("department").eq("id", jobId).maybeSingle();
-  const bodyshopCar = jd?.department === "bodyshop";
+  const bodyshopCar = jd?.department === "bodyshop" || jd?.department === "both";
   if (bodyshopCar) {
     const st = await signoffState(jobId);
     if (st.hasStages && !st.complete) return { error: `Release sign-off missing: waiting on ${st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. Sign it on the bodyshop page.`, values };

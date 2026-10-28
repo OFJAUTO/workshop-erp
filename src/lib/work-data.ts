@@ -39,6 +39,7 @@ export function additionalWorkLabel(a: AdditionalWorkRow): { text: string; tone:
   return { text: "Approved, being quoted", tone: "ink" };
 }
 import { type QcItem } from "./qc-items";
+import { lineSideOf, type SideLine } from "./job-sides";
 
 export { QC_KIND_LABELS, type QcItem } from "./qc-items";
 export type QcCheckRow = { id: string; job_id: string; round: number; status: "open" | "passed" | "failed"; inspector_id: string | null; started_at: string; finished_at: string | null; mileage: number | null; mileage_unit: string | null; postscan_path: string | null; postscan_waived_reason: string | null; items: QcItem[]; notes: string | null; created_at: string };
@@ -140,11 +141,21 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
     admin.from("work_lines").select("id, quotation_line_id, position, title, hours_quoted, status, is_active").eq("job_id", jobId),
   ]);
   const serviceIds = Array.from(new Set(((lines ?? []) as { service_id?: string | null }[]).map((l) => l.service_id).filter((x): x is string => !!x)));
-  const { data: svcRows } = serviceIds.length ? await admin.from("services").select("id, time_allowance_hours").in("id", serviceIds) : { data: [] as { id: string; time_allowance_hours: number | string | null }[] };
+  const [{ data: svcRows }, { data: jobDept }] = await Promise.all([
+    serviceIds.length ? admin.from("services").select("id, time_allowance_hours, department, bodyshop_kind").in("id", serviceIds) : Promise.resolve({ data: [] as { id: string; time_allowance_hours: number | string | null; department: string | null; bodyshop_kind: string | null }[] }),
+    admin.from("jobs").select("department").eq("id", jobId).maybeSingle(),
+  ]);
+  const svcOf = new Map((svcRows ?? []).map((s) => [s.id as string, s]));
+  const dept = (jobDept?.department as string | null) ?? null;
+  const onWorkOrder = (l: QuoteLine) => {
+    const side = lineSideOf(l as unknown as SideLine, l.service_id ? svcOf.get(l.service_id) : null);
+    return dept === "bodyshop" ? side === "mechanical" : dept === "both" ? side !== "bodyshop" : true;
+  };
   const allowance = new Map((svcRows ?? []).map((s) => [s.id as string, s.time_allowance_hours === null ? null : Number(s.time_allowance_hours)]));
   // The technician's budget: labour hours as quoted; a fixed-price service brings its time allowance times the quantity.
   const hoursFor = (l: QuoteLine): number | null => (l.line_type === "labour" ? l.hours : l.line_type === "package" && l.service_id && allowance.get(l.service_id) ? Math.round(Number(allowance.get(l.service_id)) * (l.quantity || 1) * 10) / 10 : null);
   const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && !isUnchosen(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))));
+  // Retiring looks at every approved line (a bodyshop line's old work line stays); only new rows follow the side.
   const wantedIds = new Set(wanted.map((l) => l.id));
   const all = (existing ?? []) as { id: string; quotation_line_id: string | null; position: number; title: string; hours_quoted: number | string | null; status: string; is_active: boolean }[];
   const have = new Set(all.filter((e) => e.is_active).map((e) => e.quotation_line_id).filter(Boolean));
@@ -154,7 +165,7 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
   const spare = all.filter((e) => e.is_active && e.quotation_line_id && !wantedIds.has(e.quotation_line_id));
   const rows: Record<string, unknown>[] = [];
   for (const l of wanted) {
-    if (have.has(l.id)) continue;
+    if (have.has(l.id) || !onWorkOrder(l)) continue;
     const twin = spare.find((e) => !!l.revised_from_line_id && e.quotation_line_id === l.revised_from_line_id) ?? spare.find((e) => e.title === l.title);
     if (twin) {
       spare.splice(spare.indexOf(twin), 1);

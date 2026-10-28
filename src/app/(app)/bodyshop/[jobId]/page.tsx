@@ -10,7 +10,7 @@ import { PanelMarker } from "@/components/PanelMarker";
 import { cleanPanelMarks } from "@/lib/car-outline";
 import { markPreworkChecked, savePreworkCheck } from "@/app/(app)/jobs/damage-actions";
 import { loadBodyshopJob, type StageRow } from "@/lib/bodyshop";
-import { BODYSHOP_KIND_LABELS, SECTION_LABELS, SECTIONS, STAGE_DEFS, sectionOfDepartment, signoffKeyOf, type BodyshopKind, type StageSection } from "@/lib/bodyshop-kinds";
+import { BODYSHOP_KIND_LABELS, SECTION_LABELS, STAGE_DEFS, sectionOfDepartment, signoffKeyOf, type BodyshopKind, type StageSection } from "@/lib/bodyshop-kinds";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
 import { INVOICE_SELECT, toInvoice } from "@/lib/invoice-data";
@@ -38,6 +38,9 @@ import { rowMissing, stageAsks, warrantyCardOf, type WarrantyRow } from "@/lib/w
 import { saveWarrantyDetailsAction, stageDoneWarrantyAction } from "../warranty-actions";
 import { aboveLimit, tintSummary } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
+import { StaffPicker } from "@/components/StaffPicker";
+import { pickablePeople } from "@/lib/staff-picker";
+import { TEAM_LABELS, TEAM_OF_SECTION, teamOf } from "@/lib/teams";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +60,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const { message, error } = await searchParams;
   const [data, settings, site] = await Promise.all([loadBodyshopJob(jobId), getSettings(), getSiteUrl()]);
   if (!data) notFound();
-  const { job, stages, assignments, clockings, signoffs, removedItems, updates, kinds, film, tintPercent, people } = data;
+  const { job, stages, assignments, clockings, signoffs, removedItems, updates, kinds, film, tintPercent } = data;
   const v = job.vehicle;
   const admin = createAdminClient();
   const { data: vinRow } = await admin.from("vehicles").select("vin").eq("id", job.vehicle_id).maybeSingle();
@@ -65,6 +68,9 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const isBodyshopManager = role === "workshop_manager" && BODYSHOP_DEPTS.includes(staff.department_id ?? "");
   const canManage = !staff.viewingAs && (isOwner || isBodyshopManager);
   const canLead = !staff.viewingAs && (isOwner || isBodyshopManager || role === "team_leader");
+  // THE shared picker's people: a team leader picks from their own team only (the leader first), managers from every bodyshop team.
+  const myTeam = role === "team_leader" ? teamOf(staff) : null;
+  const pickers = canLead ? (await pickablePeople(settings, ["bodyshop"])).filter((p) => !myTeam || p.team === myTeam) : [];
   const { data: prework } = await createAdminClient().from("jobs").select("prework_panels, prework_checked_at").eq("id", jobId).maybeSingle();
   const canQuote = !staff.viewingAs && can(role, "bodyshopQuote");
   const seesMoney = isOwner || role === "accounts" || role === "service_advisor";
@@ -188,7 +194,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         <Card className="flex flex-col gap-2 border-ink">
           <SectionLabel>Not started yet</SectionLabel>
           <p className="text-sm">{kinds.length ? "The stages are built from the approved packages when the gate-in photos are complete." : "No approved bodyshop packages yet: the quotation has to be approved first."}</p>
-          {canManage && kinds.length ? <form action={startWorkAction.bind(null, jobId)}><Button type="submit" size="md" data-start-work>Start the work now</Button></form> : null}
+          {canManage && kinds.length && !["approved", "waiting_parts"].includes(job.status) ? <form action={startWorkAction.bind(null, jobId)}><Button type="submit" size="md" data-start-work>Start the work now</Button></form> : null}
+          {["approved", "waiting_parts"].includes(job.status) ? <p className="text-sm"><Link href={`/jobs/${jobId}#planning`} className="font-semibold underline underline-offset-4">Release it to the bodyshop on the Planning card</Link> (start day and team).</p> : null}
         </Card>
       ) : null}
 
@@ -338,7 +345,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             {assignments.map((a) => (
               <span key={a.id} className={`inline-flex items-center gap-2 rounded-control border px-2.5 min-h-10 text-sm font-bold ${openClockBy.has(a.staff_id) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-on-car={a.staff_id}>
                 <Avatar name={a.name} photoUrl={a.photoUrl} size={24} />{a.name}
-                <span className="text-[11px] font-semibold text-muted">{SECTION_LABELS[a.section as StageSection] ?? a.section}{openClockBy.has(a.staff_id) ? " · clocked in" : ""}</span>
+                <span className="text-[11px] font-semibold text-muted">{TEAM_LABELS[TEAM_OF_SECTION[a.section] ?? "dismantle_refit"]}{openClockBy.has(a.staff_id) ? " · clocked in" : ""}</span>
                 {canLead && job.is_open ? (
                   <>
                     <form action={clockAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={a.staff_id} />{openClockBy.has(a.staff_id) ? <input type="hidden" name="out" value="1" /> : null}<button type="submit" className="rounded-control border border-line px-2 py-0.5 text-[11px] font-bold" data-clock={openClockBy.has(a.staff_id) ? "out" : "in"}>{openClockBy.has(a.staff_id) ? "Clock out" : "Clock in"}</button></form>
@@ -350,19 +357,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           </div>
           {canLead && job.is_open ? (
             <div className="flex flex-col gap-2 border-t border-line pt-3">
-              <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Put someone on the car (one tap)</span>
-              {SECTIONS.map((sec) => {
-                const list = people.staff.filter((p) => p.section === sec && !assignments.some((a) => a.staff_id === p.id));
-                if (!list.length) return null;
-                return (
-                  <div key={sec} className="flex flex-wrap items-center gap-1.5">
-                    <span className="w-28 text-xs text-muted">{SECTION_LABELS[sec]}</span>
-                    {list.map((p) => (
-                      <form key={p.id} action={assignAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={p.id} /><button type="submit" className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-line-strong bg-white px-2 text-xs font-bold" data-add-person={p.id}><Avatar name={p.name} photoUrl={p.photoUrl} size={20} />{p.name}</button></form>
-                    ))}
-                  </div>
-                );
-              })}
+              <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{role === "team_leader" ? "Put someone from your team on the car (one tap)" : "Put someone on the car (one tap)"}</span>
+              <StaffPicker mode="tap" people={pickers} sides={["bodyshop"]} exclude={assignments.map((a) => a.staff_id)} action={assignAction.bind(null, jobId)} field="staff_id" showLoad={role !== "team_leader"} emptyText={role === "team_leader" ? "Everyone in your team is on the car." : undefined} />
             </div>
           ) : null}
         </Card>

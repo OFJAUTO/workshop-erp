@@ -10,7 +10,7 @@ import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from
 import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
-import { partsSteps, stepPartOf } from "@/lib/parts-steps";
+import { partsSteps, stepPartOf, noPartsNeeded } from "@/lib/parts-steps";
 import { notFound, redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
@@ -68,14 +68,15 @@ import { PlanningCard } from "./PlanningCard";
 import { TechniciansCard } from "./TechniciansCard";
 import { ServiceStickerCard } from "./ServiceStickerCard";
 import { jobHasOilChange, serviceStickerDefaults, stickerSettings, type ServiceStickerData } from "@/lib/stickers";
-import { TechnicianPicker } from "@/components/TechnicianPicker";
-import { technicianLoads } from "@/lib/technician-load";
 import { loadJobTechnicians } from "@/lib/job-technicians";
 import { JobSummaryCard } from "./JobSummaryCard";
 import { ItemsCard } from "./ItemsCard";
 import { LOOSE_SKIP_STAGES, loadJobItems } from "@/lib/loose-items";
 import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
+import { StaffPicker } from "@/components/StaffPicker";
+import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
+import { sidesOfDepartment } from "@/lib/job-sides";
 
 export const dynamic = "force-dynamic";
 
@@ -178,10 +179,21 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canNote = can(role, "noteToManager") && job.is_open;
   const seesCustomerDetails = can(role, "viewCustomers");
 
-  const { data: technicians } = canAssign
-    ? await supabase.from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name")
-    : { data: [] as { id: string; display_name: string; department_id: string | null }[] };
+  // The car's sides (job-sides.ts) and THE people source for every picker on this page.
+  const jobSides = await workSidesOf(id, job.department);
+  const people = canAssign && !staff.viewingAs ? await pickablePeople(settings, jobSides) : [];
   const onCar = canAssign || job.assigned_to ? await loadJobTechnicians(id) : [];
+  const bodyOnCar = canAssign && jobSides.includes("bodyshop") ? await bodyshopOnCar(id) : [];
+  const mechOnCar = onCar.filter((t) => !bodyOnCar.some((b) => b.staff_id === t.staff_id));
+  const viewerSide = role === "owner" ? null : sideOfDepartment(staff.department_id);
+  // The Assign card: who does the first look at the car. A car with a mechanical side needs a mechanic (and the
+  // road test choice); a bodyshop-only car its team.
+  const assignSides = sidesOfDepartment(job.department).filter((s) => !viewerSide || s === viewerSide);
+  // Before the inspection a car with a mechanical side needs its mechanic even when bodyshop people are on; later the
+  // card only comes back when nobody at all is on the car (the Planning release and "On the car" add people then).
+  const preInspection = ["gate_in_pending", "pending_approval", "pending_inspection", "pending_road_test"].includes(job.status);
+  const needsAssign = preInspection && sidesOfDepartment(job.department).includes("mechanical") ? mechOnCar.length === 0 : mechOnCar.length === 0 && bodyOnCar.length === 0;
+  const assignShowsRoadTest = assignSides.includes("mechanical");
   // The oil service sticker: on any job with an oil change, from the moment work starts.
   const stickerOn = ["in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status) && settings.sticker_service_required !== false && (await jobHasOilChange(id));
   const stickerData: ServiceStickerData | null = stickerOn ? serviceStickerDefaults(stickerSettings(settings), job as unknown as { work_started_at?: string | null; plan_released_at?: string | null; gated_in_at?: string | null; service_sticker?: unknown }, gateIn ? { mileage: gateIn.mileage, mileage_unit: gateIn.mileage_unit } : null, dubaiDate()) : null;
@@ -574,7 +586,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       </div>
 
       {plan && (plan.active || ["approved", "waiting_parts"].includes(job.status)) ? (
-        <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} technicians={(technicians ?? []).length ? (technicians ?? []) : await loadTechnicians()} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} />
+        <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} job={job} mySide={role === "owner" ? null : sideOfDepartment(staff.department_id)} people={people} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} />
       ) : null}
       {job.comeback_of || comebacksOfThis.length ? (
         <ComebackCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} original={comebackOriginal} comebacks={comebacksOfThis} inspectionApproved={inspection?.inspection.status === "approved"} />
@@ -687,7 +699,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={tile(partsBox)} data-stage-card="parts" data-state={partsBox}>
           <span className="flex items-center gap-2"><span className={boxTitle(partsBox)}>{tick(partsBox)}Parts</span>{partsDots}</span>
           <span className="text-sm font-semibold">
-            {partItems.length === 0 ? (quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
+            {partItems.length === 0 ? (noPartsNeeded(partsStepList) && !quoteSummary.openRequests ? <span className="text-green" data-no-parts>No parts needed ✓</span> : quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
           </span>
           {partItems.length ? (
             <span className="text-xs text-muted">
@@ -706,7 +718,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             return suppliers.length ? <span className="text-xs font-semibold" data-ordered-line>Parts ordered from {suppliers.join(", ")}{partsState.live.readyDate ? ` – arriving ${formatDate(partsState.live.readyDate)}` : ""}.</span> : null;
           })() : null}
           <div className="mt-auto flex flex-wrap gap-2">
-            {(can(role, "priceParts") || seesPrices) && (partItems.length || quoteSummary.openRequests || role === "owner") ? <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton> : can(role, "priceParts") || seesPrices ? (
+            {(can(role, "priceParts") || seesPrices) && (partItems.length || quoteSummary.openRequests || role === "owner") ? <LinkButton href={`/parts/${id}`} tone="secondary" size="md">Parts desk</LinkButton> : (can(role, "priceParts") || seesPrices) && !noPartsNeeded(partsStepList) ? (
               <span className="flex flex-col gap-1">
                 <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Parts desk</span>
                 <span className="text-xs text-muted">Opens when the approved report lists parts</span>
@@ -808,19 +820,23 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
         <div className="flex flex-col gap-6">
 
-          {canAssign && onCar.length ? (
-            <TechniciansCard jobId={id} technicians={onCar} available={technicians ?? []} canEdit={techniciansCanChange} canChangeLead={techniciansCanChange && inspection?.inspection.status !== "approved"} />
+          {canAssign && (mechOnCar.length || bodyOnCar.length) ? (
+            <TechniciansCard jobId={id} technicians={onCar} bodyshop={bodyOnCar} people={people} sides={jobSides} mySide={viewerSide} canEdit={techniciansCanChange} canChangeLead={techniciansCanChange && inspection?.inspection.status !== "approved"} />
           ) : null}
-          {canAssign && !onCar.length ? (
+          {canAssign && needsAssign && assignSides.length ? (
             <Card className="flex flex-col gap-3">
-              <SectionLabel>Assign technician</SectionLabel>
+              <SectionLabel>{assignShowsRoadTest ? "Assign technician" : "Assign the bodyshop team"}</SectionLabel>
               <form action={assignJob.bind(null, id)} className="flex flex-col gap-3">
-                <TechnicianPicker technicians={await technicianLoads(settings, job.department === "bodyshop" ? "bodyshop" : "mechanical")} checked={job.assigned_to ? [job.assigned_to] : []} hint="Freest first. Tick one or more; the first ticked is the lead and does the inspection." />
-                <div className="flex flex-col gap-1">
-                  <span className="text-sm font-semibold">Road test</span>
-                  <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_CHOICES} />
-                </div>
-                <Textarea name="road_test_note" rows={1} placeholder="Note (required when the road test is not possible)" defaultValue={roadTest?.decision_note ?? ""} />
+                <StaffPicker mode="tick" people={people.filter((p) => assignSides.includes(p.side))} sides={assignShowsRoadTest ? ["mechanical"] : assignSides} defaultChecked={job.assigned_to && people.some((p) => p.id === job.assigned_to) ? [job.assigned_to] : []} hint={assignShowsRoadTest ? "Freest first. Tick one or more; the first ticked is the lead and does the inspection." : "Leaders first, then freest first. Tick one or more."} />
+                {assignShowsRoadTest ? (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm font-semibold">Road test</span>
+                      <ChoiceButtons name="road_test" columns={3} defaultValue={defaultRoadTest} options={ROAD_TEST_CHOICES} />
+                    </div>
+                    <Textarea name="road_test_note" rows={1} placeholder="Note (required when the road test is not possible)" defaultValue={roadTest?.decision_note ?? ""} />
+                  </>
+                ) : <p className="text-xs text-muted" data-no-roadtest>Bodyshop car: no road test, no mechanical inspection.</p>}
                 <Button type="submit" disabled={!check.complete || (!job.first_approval_at && role !== "owner")}>
                   {job.assigned_to ? "Reassign" : "Assign"}
                 </Button>
@@ -922,11 +938,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       </div>
     </>
   );
-}
-
-async function loadTechnicians() {
-  const { data } = await createAdminClient().from("staff").select("id, display_name, department_id").eq("is_active", true).eq("role_id", "technician").order("display_name");
-  return (data ?? []) as { id: string; display_name: string; department_id: string | null }[];
 }
 
 async function loadApproverContacts(customerId: string) {

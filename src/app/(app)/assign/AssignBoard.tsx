@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { assignJob } from "@/app/(app)/jobs/actions";
 import { Badge, Button, Card, ChoiceButtons, Empty, Textarea } from "@/components/ui";
+import { StaffPicker } from "@/components/StaffPicker";
 import type { TechnicianLoad } from "@/lib/technician-load";
-import { TEAMS, teamOf, type Side } from "@/lib/teams";
+import type { Side } from "@/lib/teams";
 
 export type BoardCar = {
   id: string;
@@ -45,14 +46,8 @@ export function AssignBoard({ cars, people }: { cars: BoardCar[]; people: Techni
   const selected = cars.find((c) => c.id === selectedId) ?? null;
   const sides: Side[] = selected?.department === "bodyshop" ? ["bodyshop"] : selected?.department === "both" ? ["mechanical", "bodyshop"] : ["mechanical"];
   const isBodyshopOnly = selected?.department === "bodyshop";
-  const toggle = (id: string) => setTicked((t) => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pick = (id: string) => { setSelectedId(id); setTicked(new Set()); };
-  const sideOfPerson = (p: TechnicianLoad): Side => (["bodyshop", "paint", "ppf_tint", "detailing"].includes(p.department_id ?? "") ? "bodyshop" : "mechanical");
-  const groups = sides.flatMap((side) =>
-    TEAMS[side]
-      .map((team) => ({ side, team, members: people.filter((p) => sideOfPerson(p) === side && teamOf(p) === team.key) }))
-      .filter((g) => g.members.length > 0),
-  );
+  const shownSides = sides.filter((s) => people.some((p) => p.side === s));
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(380px,440px)] gap-4 items-start" data-assign-board>
@@ -104,35 +99,8 @@ export function AssignBoard({ cars, people }: { cars: BoardCar[]; people: Techni
             ) : (
               <form action={assignJob.bind(null, selected.id)} className="flex flex-col gap-3" data-assign-form>
                 <input type="hidden" name="back" value="/assign" />
-                {ticked.size ? [...ticked].map((id) => <input key={id} type="hidden" name="technician" value={id} />) : null}
-                {groups.map((g) => (
-                  <div key={`${g.side}-${g.team.key}`} className="flex flex-col gap-1" data-team={g.team.key}>
-                    <span className="text-[12px] font-bold uppercase tracking-[0.08em] text-muted">{g.team.label}{sides.length > 1 ? ` · ${g.side === "bodyshop" ? "Bodyshop" : "Mechanical"}` : ""}</span>
-                    <ul className="flex flex-col">
-                      {g.members.map((p) => {
-                        const on = ticked.has(p.id);
-                        return (
-                          <li key={p.id}>
-                            <button type="button" onClick={() => toggle(p.id)} aria-pressed={on} data-assign-person={p.id}
-                              className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
-                              <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
-                              <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-chip">
-                                {p.photoUrl ? <Image src={p.photoUrl} alt={p.display_name} fill sizes="36px" className="object-cover" unoptimized /> : <span className="flex h-full w-full items-center justify-center text-[13px] font-extrabold text-muted">{p.display_name.slice(0, 1)}</span>}
-                              </span>
-                              <span className="min-w-0 flex-1 flex flex-col">
-                                <span className="truncate text-[15px] font-semibold">{p.display_name}{p.role_id === "team_leader" ? <span className="ml-1 text-[11px] font-bold uppercase text-muted">· Leader</span> : null}</span>
-                                <span className={`text-[12px] ${p.status === "free" ? "font-semibold text-green" : "text-muted"}`}>{p.now}</span>
-                              </span>
-                              <span className="shrink-0 text-right text-[12px] text-muted">{p.loadHours} h<br />of {Math.round(p.weekHours)} h</span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))}
-                {groups.length === 0 ? <p className="text-[13px] text-muted">Nobody on this side yet: set the teams on the Team page.</p> : null}
-                {!isBodyshopOnly ? (
+                <StaffPicker key={selected.id} mode="tick" people={people} sides={shownSides.length ? shownSides : sides} value={[...ticked]} onChange={(ids) => setTicked(new Set(ids))} showLoad={false} />
+                {!isBodyshopOnly && (shownSides.length ? shownSides : sides).includes("mechanical") ? (
                   <div className="flex flex-col gap-1">
                     <span className="text-[14px] font-semibold">Road test{selected.roadTestSuggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-[12px] font-bold text-amber">Suggested: the requests mention noise, vibration, steering or braking</span> : null}</span>
                     <ChoiceButtons name="road_test" columns={3} defaultValue={selected.defaultRoadTest} options={ROAD_TEST_CHOICES} />

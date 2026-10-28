@@ -93,3 +93,10 @@ export function makeChecks() {
   const summary = () => { const failed = results.filter((r) => !r.ok).length; console.log(`\n${results.length - failed} passed, ${failed} failed`); return failed; };
   return { results, check, summary };
 }
+
+/** Ticks a person in THE staff picker; someone already on a car asks once ("Put on this car as well?") and the test says yes. */
+export async function pickPerson(scope, id) {
+  await scope.locator(id ? `[data-pick-person="${id}"]` : "[data-pick-person]").first().click();
+  const yes = scope.locator("[data-pick-busy] button").first();
+  if (await yes.count()) await yes.click();
+}

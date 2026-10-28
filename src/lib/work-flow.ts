@@ -12,6 +12,8 @@ import { getSettings } from "./settings";
 import { ensureProforma } from "./invoice-flow";
 import { WORK_SESSION_SELECT, buildQcItems, ensureWorkLines, latestQc, sessionMinutes, type WorkSessionRow } from "./work-data";
 import { stillToReceive } from "./part-state";
+import { checkPickable } from "./staff-picker";
+import { workSidesOf } from "./staff-picker";
 
 /** Who is doing something: a staff row, or the owner acting for someone. */
 export type Actor = { id: string; display_name: string; role_id: string };
@@ -166,6 +168,13 @@ export async function managerConfirmWork(jobId: string, actor: Actor, ok: boolea
   if (!job || !job.is_open || job.status !== "in_work") return { error: "This car is not in Work." };
   const techs = await activeTechnicians(jobId);
   const now = new Date().toISOString();
+  // A mixed car goes to QC once, after both sides: the bodyshop must be released and its stages done first.
+  if (ok && job.department === "both" && (await workSidesOf(jobId, job.department)).includes("bodyshop")) {
+    const { data: jb } = await admin.from("jobs").select("plan_bodyshop_released_at, bodyshop_started_at").eq("id", jobId).maybeSingle();
+    const { data: open } = await admin.from("bodyshop_stages").select("label").eq("job_id", jobId).eq("is_active", true).in("status", ["pending", "active"]).neq("key", "handover").order("position");
+    if (!jb?.plan_bodyshop_released_at && !jb?.bodyshop_started_at) return { error: "The bodyshop side of this car is not released yet: the bodyshop manager releases it from the Planning card. Confirm the work after the bodyshop stages are done." };
+    if ((open ?? []).length) return { error: `The bodyshop side is not finished yet (${(open ?? []).map((s) => s.label).join(", ")}). Confirm the work when the bodyshop stages are done, so QC checks the whole car once.` };
+  }
   if (!ok) {
     const clean = (note ?? "").trim().slice(0, 500);
     if (clean.length < 3) return { error: "Write what is not done; the technician sees it on top." };
@@ -210,8 +219,9 @@ export async function addTechnician(jobId: string, staffId: string, actor: Actor
   const admin = createAdminClient();
   const job = await jobRow(jobId);
   if (!job || !job.is_open) return { error: "This job is closed." };
-  const { data: tech } = await admin.from("staff").select("id, display_name, role_id, is_active").eq("id", staffId).maybeSingle();
-  if (!tech || !tech.is_active || tech.role_id !== "technician") return { error: "Choose a technician." };
+  const picked = await checkPickable([staffId], ["mechanical"]);
+  if (picked.error) return { error: picked.error };
+  const tech = picked.people[0];
   const { data: existing } = await admin.from("job_technicians").select("id, left_at").eq("job_id", jobId).eq("staff_id", staffId).eq("is_active", true).maybeSingle();
   if (existing && !existing.left_at) return { error: `${tech.display_name} is already on this car.` };
   if (existing) await admin.from("job_technicians").update({ left_at: null, left_reason: null, done_at: null, added_by: actor.id, added_at: new Date().toISOString(), updated_by: actor.id }).eq("id", existing.id);

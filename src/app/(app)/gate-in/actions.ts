@@ -16,6 +16,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES } from "@/lib/types";
+import { knownWordsUp } from "@/lib/text-case";
 
 /* ---------------------------------------------------------------------------
    Car picture upload (shared)
@@ -80,9 +81,10 @@ const gateInSchema = z
   });
 
 export async function requestLines(formData: FormData): Promise<string[]> {
+  const known = ((await getSettings()).known_words ?? []) as string[];
   return formData
     .getAll("requests")
-    .map((r) => String(r).trim())
+    .map((r) => knownWordsUp(String(r).trim(), known))
     .filter((r) => r.length > 0)
     .slice(0, 50);
 }

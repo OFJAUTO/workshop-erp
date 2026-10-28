@@ -1,20 +1,24 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Avatar, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { SECTIONS, SECTION_LABELS, sectionOfDepartment, type Section } from "@/lib/bodyshop-kinds";
-import { bodyshopPeople, loadBoard, sectionCars } from "@/lib/bodyshop";
+import { loadBoard, sectionCars } from "@/lib/bodyshop";
 import { formatDate } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { formatPlate } from "@/lib/types";
 import { assignAction, stageDoneAction } from "../actions";
+import { StaffPicker } from "@/components/StaffPicker";
+import { pickablePeople } from "@/lib/staff-picker";
+import { getSettings } from "@/lib/settings";
+import { TEAM_OF_SECTION } from "@/lib/teams";
 
 export const dynamic = "force-dynamic";
 
 /**
  * A team leader's screen: their section's cars in due order (car, stage, due date, who is on it), red late, amber
- * due today. One tap puts a person on a car, "Need help" pulls anyone from any team, and the stage is marked done here.
+ * due today. One tap puts a person of the team on a car (the shared staff picker), and the stage is marked done here.
  */
 export default async function MySectionPage({ searchParams }: { searchParams: Promise<{ section?: string; message?: string; error?: string }> }) {
   const staff = await requireStaff();
@@ -24,10 +28,11 @@ export default async function MySectionPage({ searchParams }: { searchParams: Pr
   const own = sectionOfDepartment(staff.department_id);
   const section = ((role === "team_leader" ? own : (q as Section | undefined) ?? own) ?? "ppf") as Section;
   if (!SECTIONS.includes(section)) redirect("/bodyshop");
-  const [board, people] = await Promise.all([loadBoard(), bodyshopPeople()]);
+  const [board, everyone] = await Promise.all([loadBoard(), getSettings().then((s) => pickablePeople(s, ["bodyshop"]))]);
   const { now, coming } = sectionCars(board.cars, section);
-  const mine = people.staff.filter((p) => p.section === section && p.role_id === "technician");
-  const others = people.staff.filter((p) => p.section !== section && p.role_id === "technician");
+  // THE shared picker's people: this section's team, the leader first and marked. Leaders pick their own team only.
+  const team = TEAM_OF_SECTION[section];
+  const mine = everyone.filter((p) => p.team === team);
   const canAct = !staff.viewingAs;
   const row = (c: (typeof now)[number], isComing: boolean) => {
     const v = c.job.vehicle;
@@ -50,37 +55,10 @@ export default async function MySectionPage({ searchParams }: { searchParams: Pr
         </div>
         <div className="flex flex-wrap items-center gap-2" data-mine-people>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">On it</span>
-          {mine.map((p) => (
-            <form key={p.id} action={assignAction.bind(null, c.job.id)}>
-              <input type="hidden" name="staff_id" value={p.id} />
-              <input type="hidden" name="from" value="mine" />
-              {onIds.has(p.id) ? <input type="hidden" name="off" value="1" /> : null}
-              <button type="submit" disabled={!canAct} className={`inline-flex min-h-10 items-center gap-2 rounded-control border px-2.5 text-sm font-bold ${onIds.has(p.id) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} aria-pressed={onIds.has(p.id)} data-assign-person={p.id}>
-                <Avatar name={p.name} photoUrl={p.photoUrl} size={24} />{onIds.has(p.id) ? "✓ " : ""}{p.name}
-              </button>
-            </form>
-          ))}
+          <StaffPicker mode="chips" people={mine} sides={["bodyshop"]} on={[...onIds]} action={assignAction.bind(null, c.job.id)} field="staff_id" fields={{ from: "mine" }} disabled={!canAct} />
           {c.people.filter((p) => !mine.some((m) => m.id === p.id)).map((p) => (
-            <form key={p.id} action={assignAction.bind(null, c.job.id)}>
-              <input type="hidden" name="staff_id" value={p.id} />
-              <input type="hidden" name="from" value="mine" />
-              <input type="hidden" name="off" value="1" />
-              <button type="submit" disabled={!canAct} className="inline-flex min-h-10 items-center gap-2 rounded-control border border-green bg-green-soft px-2.5 text-sm font-bold text-green" title="From another team">✓ {p.name}</button>
-            </form>
+            <span key={p.id} className="inline-flex min-h-10 items-center gap-2 rounded-control border border-green bg-green-soft px-2.5 text-sm font-bold text-green" title="From another team">✓ {p.name}</span>
           ))}
-          <details className="relative">
-            <summary className="list-none cursor-pointer inline-flex min-h-10 items-center rounded-control border border-dashed border-line-strong px-3 text-sm font-bold">Need help</summary>
-            <div className="absolute left-0 z-20 mt-1 w-72 rounded-card border border-line bg-white p-2 shadow-xl flex flex-wrap gap-1.5">
-              {others.length === 0 ? <span className="text-xs text-muted">Nobody in the other teams.</span> : null}
-              {others.map((p) => (
-                <form key={p.id} action={assignAction.bind(null, c.job.id)}>
-                  <input type="hidden" name="staff_id" value={p.id} />
-                  <input type="hidden" name="from" value="mine" />
-                  <button type="submit" disabled={!canAct || onIds.has(p.id)} className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-line-strong bg-white px-2 text-xs font-bold disabled:opacity-50"><Avatar name={p.name} photoUrl={p.photoUrl} size={20} />{p.name}</button>
-                </form>
-              ))}
-            </div>
-          </details>
           {!isComing && stage && stage.status === "active" && canAct ? (
             <form action={stageDoneAction.bind(null, c.job.id, stage.id)} className="ml-auto">
               <Button type="submit" size="md" data-stage-done>{stage.label} done</Button>

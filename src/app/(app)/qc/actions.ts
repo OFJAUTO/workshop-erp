@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { QC_SELECT, type QcCheckRow, type QcItem } from "@/lib/work-data";
 import { activeTechnicians, applyStageSideEffects, openQcRound } from "@/lib/work-flow";
+import { bodyshopOnCar } from "@/lib/staff-picker";
 
 function refresh(jobId: string) {
   revalidatePath("/qc");
@@ -109,6 +110,8 @@ export async function saveQc(jobId: string, formData: FormData) {
     await notifyManagers(job.department ?? null, n);
     const techIds = Array.from(new Set([...techs.map((t) => t.staff_id), ...(job.assigned_to ? [job.assigned_to] : [])]));
     if (techIds.length) await notifyStaff(techIds, { ...n, href: `/my-jobs/${jobId}` });
+    const bodyIds = (await bodyshopOnCar(jobId)).map((b) => b.staff_id).filter((id) => !techIds.includes(id));
+    if (bodyIds.length) await notifyStaff(bodyIds, { ...n, href: `/bodyshop/${jobId}` });
     refresh(jobId);
     redirect(`/qc?message=${encodeURIComponent(`${job.job_number}: ${failed.length} fail${failed.length === 1 ? "" : "s"}. The car is back in Work with the failed items.`)}`);
   }

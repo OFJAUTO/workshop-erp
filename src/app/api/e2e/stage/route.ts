@@ -63,6 +63,36 @@ export async function POST(request: NextRequest) {
   const { data: make } = await admin.from("vehicle_makes").select("id").limit(1).maybeSingle();
   const now = new Date().toISOString();
   await admin.from("customers").upsert({ id: CUST, customer_type: "individual", full_name: "Stage Test Customer", phone: "+971500000003", created_by: owner.id, updated_by: owner.id });
+  if (stage === "bodyshop-plan") {
+    // A car here and waiting in Planning with an approved bodyshop PACKAGE (no service behind it, like J-00493), no
+    // parts, Parts done. "mixed": a "both" car with a mechanical labour line as well. Each call starts it over.
+    const mixed = !!(body as { mixed?: boolean }).mixed;
+    const PVEH = ID("50"), PJOB = ID("51"), PQ = ID("52"), PGI = ID("53");
+    await admin.from("vehicles").upsert({ id: PVEH, customer_id: CUST, plate_country: "UAE", plate_emirate: "Dubai", plate_code: "F", plate_number: "63001", has_plate: true, make_id: make?.id, vin: "WDC1234567E2E0002", model_year: 2025, colour: "Polar white", created_by: owner.id, updated_by: owner.id });
+    const { data: haveJob } = await admin.from("jobs").select("gated_in_at, gated_in_by").eq("id", PJOB).maybeSingle();
+    const { error: jErr } = await admin.from("jobs").upsert({ id: PJOB, vehicle_id: PVEH, customer_id: CUST, status: "waiting_parts", stage: "parts", is_open: true, department: mixed ? "both" : "bodyshop", priority: "normal", gated_in_by: haveJob?.gated_in_by ?? advisor.id, gated_in_at: haveJob?.gated_in_at ?? now, first_approval_at: now, stage_entered_at: now, plan_parts_done_at: now, plan_parts_by: null, plan_released_at: null, plan_released_by: null, plan_start_date: null, plan_bodyshop_released_at: null, plan_bodyshop_released_by: null, plan_bodyshop_start_date: null, plan_date_confirmed_at: null, plan_date_confirmed_by: null, bodyshop_started_at: null, work_started_at: null, assigned_to: null, promised_at: null, created_by: advisor.id, updated_by: advisor.id });
+    if (jErr) return NextResponse.json({ error: "jobs: " + jErr.message }, { status: 500 });
+    await admin.from("bodyshop_stages").update({ is_active: false }).eq("job_id", PJOB);
+    await admin.from("bodyshop_assignments").update({ removed_at: now }).eq("job_id", PJOB).is("removed_at", null);
+    await admin.from("job_technicians").update({ is_active: false }).eq("job_id", PJOB);
+    await admin.from("work_lines").update({ is_active: false }).eq("job_id", PJOB);
+    await admin.from("gate_ins").upsert({ id: PGI, job_id: PJOB, arrived_by: "customer_drove", condition: "runs_drives", fuel_level: "half", cleanliness: "clean", mileage: 900, keys_count: 1, wheels_required: false, major_damage: false, keys_keychain: false, old_parts_return: false, customer_requests: "1. PPF", is_complete: true, created_by: advisor.id, updated_by: advisor.id });
+    const { data: haveQ } = await admin.from("quotations").select("id, status").eq("id", PQ).maybeSingle();
+    if (!haveQ) await admin.from("quotations").insert({ id: PQ, kind: "quotation", number: "Q-STAGE-P", version: 1, job_id: PJOB, customer_id: CUST, vehicle_id: PVEH, status: "sent", token: newToken(), sent_at: now, sent_by: advisor.id, sent_to_name: "Stage Customer", created_by: advisor.id, updated_by: advisor.id });
+    const { count: lineCount } = await admin.from("quotation_lines").select("id", { count: "exact", head: true }).eq("quotation_id", PQ);
+    // Lines change only while the quotation is open (an approved one locks them); then it is approved again.
+    await admin.from("quotations").update({ status: "sent", updated_by: advisor.id }).eq("id", PQ);
+    if (!lineCount) {
+      const snapshot = { key: "e2e_full", name: "E2E Full Protection", time_in_workshop: "3 days", pickup_dropoff: false, aftercare_check: false, items: [{ label: "Full body paint protection film", warranty: "10-year warranty" }, { label: "OFJ ceramic heat rejection tint – side & rear windows", warranty: "5-year warranty" }, { label: "PPF specific ceramic coating", warranty: "1-year warranty" }] };
+      await admin.from("quotation_lines").insert([
+        { quotation_id: PQ, position: 0, line_type: "package", title: "E2E Full Protection", service_id: null, package_key: "e2e_full", package_items: snapshot, price_per: "job", quantity: 1, unit_price: 24000, hours: null, source_type: "manual", urgency: "recommended", is_active: true, created_by: advisor.id, updated_by: advisor.id },
+        { quotation_id: PQ, position: 1, line_type: "labour", title: "Brake pads replace", service_id: null, package_key: null, package_items: null, price_per: "job", hours: 2, unit_price: 350, quantity: 2, source_type: "manual", urgency: "urgent", is_active: mixed, created_by: advisor.id, updated_by: advisor.id },
+      ]);
+    } else await admin.from("quotation_lines").update({ is_active: mixed }).eq("quotation_id", PQ).eq("line_type", "labour");
+    await admin.from("quotations").update({ status: "approved", responded_at: now, approver_name: "Stage Customer", updated_by: advisor.id }).eq("id", PQ);
+    await refreshQuoteTotals(PQ, settings, advisor.id);
+    return NextResponse.json({ jobId: PJOB, quotationId: PQ, mixed });
+  }
   if (stage === "bodyshop") {
     // A bodyshop car: quoted before arrival (Full PPF, tint, old PPF removal). "at": sent (link open for the customer),
     // approved (booked, not here), in_work (gated in, stages running) or ready (work done, sign-off open).

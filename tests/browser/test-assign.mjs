@@ -2,7 +2,7 @@
 // on the RIGHT (never repeated per car), server-enforced sides, bodyshop cars with no road test and no
 // mechanical inspection, a clear confirmation and the car leaving the list.
 //   node --env-file=.env.local tests/browser/test-assign.mjs
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, freeTech, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, freeTech, makeChecks, sleep, sql, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots";
@@ -37,7 +37,7 @@ if (!gi.length || !media.length) { console.log("SEED PROBLEM: gate-in clone", gi
   await page.waitForTimeout(500);
   check("teams grouped under headers (Technicians...)", /TECHNICIANS/i.test(((await page.locator("[data-assign-panel]").innerText()) ?? "")));
   check("road test chips for a mechanical car", (await page.locator("[data-assign-panel]").getByText("Road test first").count()) === 1);
-  await page.locator(`[data-assign-person="${techId}"]`).click();
+  await pickPerson(page, techId);
   await page.getByText("No road test", { exact: true }).click();
   await page.screenshot({ path: `${shots}/assign-board.png`, fullPage: true });
   await page.locator("[data-assign-submit]").click();
@@ -65,9 +65,9 @@ if (!gi.length || !media.length) { console.log("SEED PROBLEM: gate-in clone", gi
   const bodyTeams = ((await page.locator("[data-assign-panel]").innerText()) ?? "").replace(/\s+/g, " ");
   check("bodyshop teams shown (PPF / Dismantle & refit / ...)", /(PPF|DISMANTLE|PAINT|DETAILING)/i.test(bodyTeams), bodyTeams.slice(0, 160));
   await page.screenshot({ path: `${shots}/assign-bodyshop.png`, fullPage: true });
-  const anyBody = page.locator("[data-assign-person]").first();
+  const anyBody = page.locator("[data-pick-person]").first();
   if (await anyBody.count()) {
-    await anyBody.click();
+    await pickPerson(page, null);
     await page.locator("[data-assign-submit]").click();
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
     await sleep(1500);

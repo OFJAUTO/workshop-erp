@@ -20,6 +20,7 @@ import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 import { SUPPLIER_PAY_METHODS, flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 import { ensureWorkLines } from "@/lib/work-data";
+import { checkPickable } from "@/lib/staff-picker";
 
 function refresh(jobId: string | null, poId?: string) {
   revalidatePath("/parts");
@@ -495,7 +496,7 @@ export async function issueStock(formData: FormData) {
   const admin = createAdminClient();
   const [{ data: item }, { data: tech }, { data: priv }] = await Promise.all([admin.from("stock_items").select("id, name, quantity, unit_cost").eq("id", itemId).maybeSingle(), admin.from("staff").select("id, display_name, role_id").eq("id", technicianId).maybeSingle(), admin.from("staff_private").select("pin_hash").eq("staff_id", technicianId).maybeSingle()]);
   if (!item) redirect(`${back}?error=${encodeURIComponent("Item not found.")}`);
-  if (!tech || tech.role_id !== "technician") redirect(`${back}?error=${encodeURIComponent("Choose the technician.")}`);
+  if (!tech || (await checkPickable([technicianId], ["mechanical", "bodyshop"])).error) redirect(`${back}?error=${encodeURIComponent("Choose the technician or team leader.")}`);
   // Small consumables need no PIN; above the threshold from Settings the technician confirms with his PIN.
   const threshold = Number((await getSettings()).pin_needed_above_aed) || 0;
   const value = qty * (Number(item.unit_cost) || 0);

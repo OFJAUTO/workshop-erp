@@ -129,11 +129,12 @@ await section("3-10 stages, leader, tablet, updates", async () => {
   await go(lp, `${base}/bodyshop/mine`);
   check("4/5: the leader's screen lists the car as coming to PPF, in due order, with who is on it", (await lp.locator("[data-mine-car]").count()) >= 1 && /E2e Installer/.test((await lp.locator("[data-mine-people]").first().textContent()) ?? ""), ((await lp.locator("[data-mine-people]").first().textContent()) ?? "").slice(0, 120));
   check("4: the leader sees no prices anywhere on the page", !/AED/.test((await lp.textContent("body")) ?? ""));
-  // One tap puts the detailer on the car ("Need help" from another team).
-  await lp.locator("details summary", { hasText: "Need help" }).first().click();
-  await lp.locator(`[data-mine-car] details form button`, { hasText: "E2e Detailer" }).first().click();
+  // 28 October (B2): a leader picks from their own team only (the leader first); no "Need help" from other teams.
+  check("4: the leader's own team only, the leader at the top, no Need help", (await lp.locator("details summary", { hasText: "Need help" }).count()) === 0 && (await lp.locator(`[data-mine-car] [data-pick-person="${people.detailer}"]`).count()) === 0 && (await lp.locator("[data-mine-car] [data-staff-mode=chips] [data-pick-person]").first().getAttribute("data-pick-person")) === people.ppfLeader);
+  // One tap puts the leader himself on the car.
+  await lp.locator(`[data-mine-car] [data-pick-person="${people.ppfLeader}"]`).first().click();
   await afterSubmit(lp);
-  check("4: Need help pulls a person from another team onto the car", ((await sql("select count(*)::int as n from public.bodyshop_assignments where job_id = $1 and staff_id = $2 and removed_at is null", [jobId, people.detailer]))[0]?.n ?? 0) === 1);
+  check("4: one tap puts a person of the team on the car", ((await sql("select count(*)::int as n from public.bodyshop_assignments where job_id = $1 and staff_id = $2 and removed_at is null", [jobId, people.ppfLeader]))[0]?.n ?? 0) === 1);
   await shot(lp, "02-team-leader-due-list");
   // The leader's menu has no money pages.
   const nav = (await lp.locator("aside").textContent()) ?? "";

@@ -22,6 +22,7 @@ import { TechniciansCard } from "../TechniciansCard";
 import { loadJobTechnicians } from "@/lib/job-technicians";
 import { confirmWorkComplete, decideAdditionalWork, decidePause, sendWorkBack, setTimeBudget } from "../../work-actions";
 import { BudgetTimer } from "@/app/(app)/my-jobs/[id]/WorkPanel";
+import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
   const qcFailed = qc && qc.status === "failed" && job.status === "in_work" ? qc : null;
   const manages = role === "owner" || (role === "workshop_manager" && jobConcernsSide(job.department, sideOfDepartment(staff.department_id)));
   const canEdit = manages && can(role, "manageWork") && !staff.viewingAs && job.is_open;
-  const technicians = (techRows ?? []).filter((t) => !sideOfDepartment(t.department_id) || jobConcernsSide(job.department, sideOfDepartment(t.department_id)));
+  const sides = await workSidesOf(id, job.department);
   const nameOf = new Map((techRows ?? []).map((t) => [t.id, t.display_name]));
   const seesCost = role === "owner" || role === "accounts";
   const rate = Number(settings.technician_cost_rate_aed) || 0;
@@ -232,7 +233,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
               ))}
             </ul>
           </Card>
-          <TechniciansCard jobId={id} technicians={await loadJobTechnicians(id)} available={technicians} canEdit={canEdit && job.is_open && job.status === "in_work"} canChangeLead={canEdit && job.is_open && job.status === "in_work"} from="work" />
+          <TechniciansCard jobId={id} technicians={await loadJobTechnicians(id)} bodyshop={await bodyshopOnCar(id)} people={canEdit ? await pickablePeople(settings, sides) : []} sides={sides} mySide={role === "owner" ? null : sideOfDepartment(staff.department_id)} canEdit={canEdit && job.is_open && job.status === "in_work"} canChangeLead={canEdit && job.is_open && job.status === "in_work"} from="work" />
           <Card className="flex flex-col gap-2">
             <SectionLabel>Parts on this car</SectionLabel>
             {parts.needed.length === 0 ? <p className="text-sm text-muted">No parts needed.</p> : (

@@ -93,7 +93,7 @@ await section("A5-A6 assignment", async () => {
   // The rebuilt board (batch 21 Oct, section 6): the people and the road test show once a car is tapped.
   await page.locator(`[data-assign-car="${jobId}"]`).click();
   await page.waitForTimeout(500);
-  const chips = page.locator("[data-assign-person]");
+  const chips = page.locator("[data-pick-person]");
   check("assign panel lists the people (A5)", (await chips.count()) >= 2, String(await chips.count()));
   const radios = page.locator("input[type=radio][name=road_test]");
   const checked = await radios.evaluateAll((rs) => rs.filter((r) => r.checked).length);

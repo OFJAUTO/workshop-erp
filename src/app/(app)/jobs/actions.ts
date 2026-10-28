@@ -21,6 +21,9 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { checkPickable } from "@/lib/staff-picker";
+import { sidesOfDepartment } from "@/lib/job-sides";
+import { knownWordsUp } from "@/lib/text-case";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -88,23 +91,41 @@ export async function assignJob(jobId: string, formData: FormData) {
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
   const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
   // Server-enforced sides (section 6): a manager assigns his own side's work only; the owner assigns anything.
-  if (staff.role_id !== "owner") {
-    const mySide = sideOfDepartment(staff.department_id);
-    if (!jobConcernsSide(job.department, mySide)) redirect(`${back}?error=` + encodeURIComponent("This car belongs to the other side: its own manager assigns it."));
-  }
-  // Bodyshop cars have no road test and no mechanical inspection: the choice is simply not asked.
-  const choice: { decision: RoadTestDecision; note: string | null } | string = job.department === "bodyshop" ? { decision: "not_needed", note: null } : readRoadTestChoice(formData);
-  if (typeof choice === "string") redirect(`${back}?error=` + encodeURIComponent(choice));
+  const mySide = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
+  if (mySide && !jobConcernsSide(job.department, mySide)) redirect(`${back}?error=` + encodeURIComponent("This car belongs to the other side: its own manager assigns it."));
 
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The gate-in videos and photos must all be uploaded before the car can be assigned."));
   if (!job.first_approval_at && staff.role_id !== "owner") redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The customer has not approved the job card yet. No inspection before that."));
 
-  // Hands-on people: technicians and team leaders (the bodyshop's installers lead with their teams).
-  const { data: techRows } = technicianIds.length ? await supabase.from("staff").select("id, display_name, role_id, is_active, department_id").in("id", technicianIds).eq("is_active", true).in("role_id", ["technician", "team_leader"]) : { data: [] };
-  const techs = technicianIds.map((tid) => (techRows ?? []).find((t) => t.id === tid)).filter((t): t is NonNullable<typeof t> => !!t);
-  const tech = techs[0];
-  if (!tech) redirect(`${back}?error=` + encodeURIComponent("Tick at least one technician."));
+  // Hands-on people of the car's sides (the shared picker check): technicians, team leaders, a manager who leads a
+  // team - and a side's manager picks only their own side's people.
+  const carSides = sidesOfDepartment(job.department);
+  const picked = await checkPickable(technicianIds, mySide ? carSides.filter((s) => s === mySide) : carSides);
+  if (picked.error) redirect(`${back}?error=` + encodeURIComponent(picked.error));
+  const techs = picked.people;
+  const mechTechs = techs.filter((t) => t.side === "mechanical");
+  const bodyTechs = techs.filter((t) => t.side === "bodyshop");
+  // A mixed car: the bodyshop manager puts the bodyshop team on it; the mechanical inspection stays with the workshop manager.
+  if (job.department === "both" && !mechTechs.length && bodyTechs.length) {
+    const admin = createAdminClient();
+    for (const t of bodyTechs) {
+      const { data: already } = await admin.from("bodyshop_assignments").select("id").eq("job_id", jobId).eq("staff_id", t.id).is("removed_at", null).limit(1);
+      if (!already?.length) await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: t.id, section: t.section ?? sectionOfBodyshop(t.department_id) ?? "strip_refit", assigned_by: staff.id, created_by: staff.id, updated_by: staff.id });
+    }
+    await logEvent(supabase, jobId, staff.id, { event_type: "assigned", note: `Bodyshop team on the car: ${bodyTechs.map((t) => t.display_name).join(", ")}` });
+    await notifyStaff(bodyTechs.map((t) => t.id), { type: "bodyshop_heads_up", title: "You are on a car", body: `${staff.display_name} put you on this car for the bodyshop work.`, jobId, href: `/bodyshop/${jobId}` });
+    refresh(jobId);
+    revalidatePath("/assign");
+    redirect(`${back}?message=` + encodeURIComponent(`Bodyshop team on the car: ${bodyTechs.map((t) => t.display_name).join(", ")}.${job.assigned_to ? "" : " The workshop manager assigns the mechanical inspection."}`));
+  }
+  // Bodyshop cars have no road test and no mechanical inspection: the choice is simply not asked.
+  const choice: { decision: RoadTestDecision; note: string | null } | string = job.department === "bodyshop" ? { decision: "not_needed", note: null } : readRoadTestChoice(formData);
+  if (typeof choice === "string") redirect(`${back}?error=` + encodeURIComponent(choice));
+  // The lead does the mechanical inspection: on a mixed car the first mechanical person, else the first ticked.
+  const tech = mechTechs[0] ?? techs[0];
+  if (!tech) redirect(`${back}?error=` + encodeURIComponent("Tick at least one person."));
+  if (job.department !== "bodyshop" && !mechTechs.length) redirect(`${back}?error=` + encodeURIComponent("Tick at least one technician from the mechanical teams for the inspection."));
 
   // A road test the manager asks for holds the car in its own step, Pending road test, until the QC inspector has done it.
   const baseStatus: JobStatus = job.status === "gate_in_pending" || job.status === "pending_approval" || job.status === "pending_road_test" ? "pending_inspection" : (job.status as JobStatus);
@@ -123,19 +144,19 @@ export async function assignJob(jobId: string, formData: FormData) {
     to_staff: tech.id,
     note: `Assigned to ${techs.map((t) => t.display_name).join(", ")}${techs.length > 1 ? ` (lead ${tech.display_name})` : ""}`,
   });
-  for (const t of techs) await addTechnician(jobId, t.id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, { quiet: true });
+  for (const t of mechTechs) await addTechnician(jobId, t.id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, { quiet: true });
   const { data: jobRow } = await supabase.from("jobs").select("job_number, department").eq("id", jobId).maybeSingle();
   if (jobRow?.department !== "bodyshop") {
     const settings = await getSettings();
     await ensureInspection(jobId, tech.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
     await applyRoadTestChoice(jobId, jobRow?.job_number ?? "", { id: tech.id, display_name: tech.display_name }, choice, { id: staff.id, display_name: staff.display_name });
   }
-  // Bodyshop cars: the people land on the bodyshop board too (one row each, never doubled).
-  if (jobRow?.department === "bodyshop") {
+  // Bodyshop people land on the bodyshop board in their team's section (one row each, never doubled), mixed cars too.
+  if (bodyTechs.length) {
     const admin = createAdminClient();
-    for (const t of techs) {
+    for (const t of bodyTechs) {
       const { data: already } = await admin.from("bodyshop_assignments").select("id").eq("job_id", jobId).eq("staff_id", t.id).is("removed_at", null).limit(1);
-      if (!already?.length) await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: t.id, section: sectionOfBodyshop(t.department_id) ?? "ppf", assigned_by: staff.id, created_by: staff.id, updated_by: staff.id });
+      if (!already?.length) await admin.from("bodyshop_assignments").insert({ job_id: jobId, staff_id: t.id, section: t.section ?? sectionOfBodyshop(t.department_id) ?? "strip_refit", assigned_by: staff.id, created_by: staff.id, updated_by: staff.id });
     }
   }
   const waitsForRoadTest = jobRow?.department !== "bodyshop" && choice.decision === "needed";
@@ -258,7 +279,8 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
-  const requests = formData.getAll("requests").map((r) => String(r).trim()).filter(Boolean).slice(0, 50);
+  const known = ((await getSettings()).known_words ?? []) as string[];
+  const requests = formData.getAll("requests").map((r) => knownWordsUp(String(r).trim(), known)).filter(Boolean).slice(0, 50);
   if (requests.length === 0) return { error: "Keep at least one customer request.", values };
   const vipOn = formData.get("vip") === "on";
   const vipNote = blankToNull(formData.get("vip_note"));

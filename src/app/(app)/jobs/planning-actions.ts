@@ -15,6 +15,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { JobRow } from "@/lib/types";
 import { ensureWorkLines } from "@/lib/work-data";
 import { addTechnician, removeTechnician, setLeadTechnician } from "@/lib/work-flow";
+import { releaseWords, sideReleased, sidesToRelease, type Side } from "@/lib/job-sides";
+import { checkPickable } from "@/lib/staff-picker";
+import { assignPerson, extendBodyshopStages, startBodyshopWork } from "@/lib/bodyshop";
+import { sideOfDepartment } from "@/lib/inspection";
+import { unassignPerson } from "@/lib/bodyshop";
+import { workSidesOf } from "@/lib/staff-picker";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -48,7 +54,7 @@ export async function partsPlanned(jobId: string, formData: FormData) {
   const now = new Date().toISOString();
   await admin.from("jobs").update({ status: "waiting_parts", stage: "parts", plan_parts_done_at: now, plan_parts_by: staff.id, plan_parts_ready_date: plan.partsReadyDate ?? dubaiDate() }).eq("id", jobId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `Parts planned by ${staff.display_name}: ${plan.missing.length ? `all parts here by ${plan.partsReadyDate}` : "everything in stock"}`, created_by: staff.id });
-  await notifyManagers(job!.department ?? null, { type: "planning", title: `Plan the work · ${job!.job_number}`, body: `${plan.missing.length ? `Parts all here by ${plan.partsReadyDate}` : "All parts in stock"}. Pick the start day and the technicians, then Release to workshop.`, jobId, href: `/jobs/${jobId}#planning` });
+  await notifyManagers(job!.department ?? null, { type: "planning", title: `Plan the work · ${job!.job_number}`, body: `${plan.missing.length ? `Parts all here by ${plan.partsReadyDate}` : "All parts in stock"}. ${releaseWords(job!.department)}`, jobId, href: `/jobs/${jobId}#planning` });
   refresh(jobId);
   back(jobId, from, "Parts planned. The workshop manager is next.", true);
 }
@@ -90,34 +96,102 @@ export async function allInStock(jobId: string, formData: FormData) {
   back(jobId, from, "All parts in stock.", true);
 }
 
-/** The workshop manager picks the start day and the technicians and releases the car; only then does the technician get it. */
+/**
+ * Checks shared by both releases: the job is open and in planning (or, on a mixed car, the other side already went),
+ * this side is still to release, the person is this side's manager (or the owner), the start day, the parts.
+ */
+async function releaseChecks(jobId: string, formData: FormData, side: Side, staff: { id: string; role_id: string; department_id?: string | null }) {
+  const job = await jobOf(jobId);
+  const fail = (m: string): never => redirect(`/jobs/${jobId}?error=${encodeURIComponent(m)}#planning`);
+  if (!job || !job.is_open) return fail("This job is closed.");
+  const settings = await getSettings();
+  const plan = await loadPlanning(job, settings);
+  const words = side === "bodyshop" ? "the bodyshop" : "the workshop";
+  if (!plan.sides.includes(side)) return fail(`This car has no ${side === "bodyshop" ? "bodyshop" : "mechanical"} work to release.`);
+  if (sideReleased(job, side)) return fail(`Already released to ${words}.`);
+  const otherWent = plan.sides.some((s) => s !== side && sideReleased(job, s));
+  if (!["approved", "waiting_parts"].includes(job.status) && !(otherWent && !["closed", "in_delivery", "booked"].includes(job.status))) return fail("This car is not in planning.");
+  if (staff.role_id !== "owner") {
+    const mine = sideOfDepartment(staff.department_id);
+    if (mine && mine !== side) return fail(`Only ${side === "bodyshop" ? "the bodyshop manager" : "the workshop manager"} releases ${words} side of this car.`);
+  }
+  const start = String(formData.get("start_date") ?? "").trim();
+  const force = formData.get("force") === "on";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return fail("Pick the start day.");
+  if (!job.plan_parts_done_at && staff.role_id !== "owner") return fail("Parts have not planned the parts yet. Remind Parts, or the owner can release anyway.");
+  if (plan.missing.length && !force) return fail(`${plan.missing.length} part${plan.missing.length === 1 ? " is" : "s are"} not here yet (${plan.missing.map((p) => `${p.description}${p.expected_date ?? p.delivery_date ? ` · ${p.expected_date ?? p.delivery_date}` : ""}`).join(", ")}). Tick "Start with available parts" to release anyway.`);
+  const picked = await checkPickable(formData.getAll("technician").map(String), [side]);
+  if (picked.error) return fail(picked.error);
+  return { job, plan, settings, start, force, people: picked.people, fail };
+}
+const partsStateOf = (plan: Awaited<ReturnType<typeof loadPlanning>>) => (plan.missing.length ? (plan.parts.some((p) => p.order_status === "ordered" || p.order_status === "partly_received") ? "ordered" : "ordering") : plan.parts.length ? "received" : "none");
+
+/** The workshop manager picks the start day and the technicians and releases the mechanical work; only then does the technician get it. */
 export async function releaseToWorkshop(jobId: string, formData: FormData) {
   const staff = await requirePermission("manageWork");
   const admin = createAdminClient();
-  const job = await jobOf(jobId);
-  const fail = (m: string) => redirect(`/jobs/${jobId}?error=${encodeURIComponent(m)}#planning`);
-  if (!job || !job.is_open) fail("This job is closed.");
-  if (!["approved", "waiting_parts"].includes(job!.status)) fail("This car is not in planning.");
-  const settings = await getSettings();
-  const plan = await loadPlanning(job!, settings);
-  const techIds = formData.getAll("technician").map(String).filter(Boolean);
-  const start = String(formData.get("start_date") ?? "").trim();
-  const force = formData.get("force") === "on";
-  if (!techIds.length) fail("Tick at least one technician.");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) fail("Pick the start day.");
-  if (!job!.plan_parts_done_at && staff.role_id !== "owner") fail("Parts have not planned the parts yet. Remind Parts, or the owner can release anyway.");
-  if (plan.missing.length && !force) fail(`${plan.missing.length} part${plan.missing.length === 1 ? " is" : "s are"} not here yet (${plan.missing.map((p) => `${p.description}${p.expected_date ?? p.delivery_date ? ` · ${p.expected_date ?? p.delivery_date}` : ""}`).join(", ")}). Tick "Start with available parts" to release anyway.`);
-  const { data: techs } = await admin.from("staff").select("id, display_name").in("id", techIds).eq("role_id", "technician").eq("is_active", true);
-  if (!(techs ?? []).length) fail("Choose technicians.");
+  const { job, plan, start, force, people: techs } = await releaseChecks(jobId, formData, "mechanical", staff);
   const now = new Date().toISOString();
-  await admin.from("jobs").update({ status: "in_work", stage: "work", stage_entered_at: now, plan_released_at: now, plan_released_by: staff.id, plan_start_date: start, plan_release_note: force && plan.missing.length ? `Started with available parts; missing: ${plan.missing.map((p) => p.description).join(", ")}` : null, work_started_at: now, assigned_to: techs![0].id, parts_state: plan.missing.length ? (plan.parts.some((p) => p.order_status === "ordered" || p.order_status === "partly_received") ? "ordered" : "ordering") : plan.parts.length ? "received" : "none" }).eq("id", jobId);
-  for (const t of techs ?? []) await addTechnician(jobId, t.id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  const first = ["approved", "waiting_parts"].includes(job.status);
+  const missingNote = force && plan.missing.length ? `Started with available parts; missing: ${plan.missing.map((p) => p.description).join(", ")}` : null;
+  // A "both" car whose approved work is mechanical only: the bodyshop side has nothing to release.
+  const bodyNothing = job.department === "both" && !plan.sides.includes("bodyshop") && !job.plan_bodyshop_released_at;
+  await admin.from("jobs").update({ plan_released_at: now, plan_released_by: staff.id, plan_start_date: start, plan_release_note: missingNote, ...(bodyNothing ? { plan_bodyshop_released_at: now, plan_bodyshop_released_by: staff.id } : {}), ...(first ? { status: "in_work", stage: "work", stage_entered_at: now, work_started_at: now, parts_state: partsStateOf(plan) } : {}), assigned_to: techs[0].id }).eq("id", jobId);
+  for (const t of techs) await addTechnician(jobId, t.id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   const made = await ensureWorkLines(jobId, staff.id);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: job!.status, to_status: "in_work", note: `Released to the workshop by ${staff.display_name}: start ${start}, ${(techs ?? []).map((t) => t.display_name).join(", ")}${force && plan.missing.length ? ` · started with available parts (${plan.missing.length} missing)` : ""}${made ? ` · ${made} work line${made === 1 ? "" : "s"}` : ""}`, created_by: staff.id });
-  await notifyStaff((techs ?? []).map((t) => t.id), { type: "work_assigned", title: `Car for you · ${job!.job_number}`, body: `${staff.display_name} released it: start ${start}. Open it on the tablet.`, jobId, href: `/my-jobs/${jobId}` });
-  await notifyStaff(await advisorIds(jobId, job!.gated_in_by), { type: "planning", title: `Confirm the finish date · ${job!.job_number}`, body: `Work starts ${start}${plan.suggestedFinish ? `, suggested finish ${plan.suggestedFinish}` : ""}. Confirm the date and tell the customer.`, jobId, href: `/jobs/${jobId}#planning` });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: first ? "status_change" : "planning", from_status: first ? job.status : null, to_status: first ? "in_work" : null, note: `Released to the workshop by ${staff.display_name}: start ${start}, ${techs.map((t) => t.display_name).join(", ")}${force && plan.missing.length ? ` · started with available parts (${plan.missing.length} missing)` : ""}${made ? ` · ${made} work line${made === 1 ? "" : "s"}` : ""}`, created_by: staff.id });
+  await notifyStaff(techs.map((t) => t.id), { type: "work_assigned", title: `Car for you · ${job.job_number}`, body: `${staff.display_name} released it: start ${start}. Open it on the tablet.`, jobId, href: `/my-jobs/${jobId}` });
+  await afterRelease(jobId, job, plan, start, staff);
   refresh(jobId);
-  redirect(`/jobs/${jobId}?message=${encodeURIComponent(`Released to ${(techs ?? []).map((t) => t.display_name).join(", ")}. The advisor confirms the finish date.`)}`);
+  redirect(`/jobs/${jobId}?message=${encodeURIComponent(`Released to ${techs.map((t) => t.display_name).join(", ")}.${sidesToRelease({ ...job, plan_released_at: now }, plan.sides).length ? " The bodyshop manager releases the bodyshop side." : " The advisor confirms the finish date."}`)}`);
+}
+
+/**
+ * The bodyshop manager picks the start day and the bodyshop team and releases the car to the bodyshop: the people are
+ * put on the car in their team's section, the stages are built from the approved packages with due dates from the
+ * start day, and the first stage's team is told. No mechanical work order on a bodyshop-only car.
+ */
+export async function releaseToBodyshop(jobId: string, formData: FormData) {
+  const staff = await requirePermission("manageBodyshop");
+  const admin = createAdminClient();
+  const { job, plan, settings, start, force, people, fail } = await releaseChecks(jobId, formData, "bodyshop", staff);
+  const actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id };
+  // The stages first (nothing is written when the approved quotation has no bodyshop work), then the people.
+  // A mixed car whose mechanical side is not released yet stays in planning: the technicians get it at their own release.
+  const mechanicalWaits = plan.sides.includes("mechanical") && !sideReleased(job, "mechanical");
+  const started = await startBodyshopWork(jobId, actor, settings, { start, keepStatus: mechanicalWaits });
+  if (started.error) fail(started.error);
+  if (started.started === false) {
+    await extendBodyshopStages(jobId, actor);
+    if (["approved", "waiting_parts"].includes(job.status) && !mechanicalWaits) {
+      const at = new Date().toISOString();
+      await admin.from("jobs").update({ status: "in_work", stage: "work", stage_entered_at: at, updated_by: staff.id }).eq("id", jobId);
+      await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: job.status, to_status: "in_work", note: `Back on the bodyshop stages (${staff.display_name})`, created_by: staff.id });
+    }
+  }
+  for (const p of people) {
+    const r = await assignPerson(jobId, p.id, actor);
+    if (r.error) fail(r.error);
+  }
+  const now = new Date().toISOString();
+  const missingNote = force && plan.missing.length ? `Started with available parts; missing: ${plan.missing.map((p) => p.description).join(", ")}` : null;
+  // On a bodyshop-only car (or a "both" car with bodyshop work only) this IS the job's release.
+  const only = !plan.sides.includes("mechanical");
+  await admin.from("jobs").update({ plan_bodyshop_released_at: now, plan_bodyshop_released_by: staff.id, plan_bodyshop_start_date: start, ...(only ? { plan_released_at: now, plan_released_by: staff.id, plan_start_date: start, plan_release_note: missingNote } : {}), parts_state: partsStateOf(plan), ...(job.assigned_to ? {} : { assigned_to: people[0].id }) }).eq("id", jobId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `Released to the bodyshop by ${staff.display_name}: start ${start}, ${people.map((p) => `${p.display_name}${p.isLeader ? " (leader)" : ""}`).join(", ")}${force && plan.missing.length ? ` · started with available parts (${plan.missing.length} missing)` : ""}`, created_by: staff.id });
+  await afterRelease(jobId, { ...job, plan_bodyshop_released_at: now, ...(only ? { plan_released_at: now } : {}) }, plan, start, staff);
+  refresh(jobId);
+  revalidatePath("/bodyshop");
+  revalidatePath(`/bodyshop/${jobId}`);
+  redirect(`/jobs/${jobId}?message=${encodeURIComponent(`Released to the bodyshop: ${people.map((p) => p.display_name).join(", ")}.${only || sideReleased(job, "mechanical") ? " The advisor confirms the finish date." : " The workshop manager releases the mechanical side."}`)}`);
+}
+
+/** When every side is released, the advisor is asked to confirm the finish date. */
+async function afterRelease(jobId: string, job: JobRow, plan: Awaited<ReturnType<typeof loadPlanning>>, start: string, staff: { id: string }) {
+  void staff;
+  const fresh = await jobOf(jobId);
+  if (!fresh || sidesToRelease(fresh, plan.sides).length) return;
+  await notifyStaff(await advisorIds(jobId, job.gated_in_by), { type: "planning", title: `Confirm the finish date · ${job.job_number}`, body: `Work starts ${start}${plan.suggestedFinish ? `, suggested finish ${plan.suggestedFinish}` : ""}. Confirm the date and tell the customer.`, jobId, href: `/jobs/${jobId}#planning` });
 }
 
 /** The advisor confirms or changes the finish date and tells the customer. Never blocks the work. */
@@ -147,11 +221,13 @@ export async function remindPlanning(jobId: string) {
   const plan = await loadPlanning(job!, settings);
   const n = { type: "planning", title: `Reminder: planning waits on you · ${job!.job_number}`, body: `${staff.display_name} is waiting. ${plan.circles.find((c) => c.key === plan.waitingOn)?.line ?? ""}`, jobId, href: plan.waitingOn === "parts" ? `/parts/${jobId}` : `/jobs/${jobId}#planning` };
   if (plan.waitingOn === "parts") await notifyRoles(["parts"], n);
-  else if (plan.waitingOn === "workshop") await notifyManagers(job!.department ?? null, n);
+  else if (plan.waitingOn === "workshop") await notifyManagers("mechanical", n);
+  else if (plan.waitingOn === "bodyshop") await notifyManagers("bodyshop", n);
+  else if (plan.waitingOn === "both_sides") await notifyManagers("both", n);
   else if (plan.waitingOn === "advisor") await notifyStaff(await advisorIds(jobId, job!.gated_in_by), n);
   else redirect(`/jobs/${jobId}?message=${encodeURIComponent("Planning is complete; nobody to remind.")}`);
   await admin.from("jobs").update({ plan_reminded_at: new Date().toISOString() }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `${staff.display_name} reminded ${plan.waitingOn === "parts" ? "Parts" : plan.waitingOn === "workshop" ? "the workshop manager" : "the advisor"} about the planning`, created_by: staff.id });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "planning", note: `${staff.display_name} reminded ${plan.waitingOn === "parts" ? "Parts" : plan.waitingOn === "workshop" ? "the workshop manager" : plan.waitingOn === "bodyshop" ? "the bodyshop manager" : plan.waitingOn === "both_sides" ? "the workshop and bodyshop managers" : "the advisor"} about the planning`, created_by: staff.id });
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=${encodeURIComponent("Reminder sent.")}#planning`);
 }
@@ -162,17 +238,42 @@ const techBack = (jobId: string, formData: FormData, res: { error?: string; mess
   redirect(`${base}?${res.error ? "error" : "message"}=${encodeURIComponent(res.error ?? res.message ?? "Done.")}#technicians`);
 };
 
-/** One tap on a name: the technician is on the car (job card or work order). */
+/**
+ * One tap on a name in the shared picker (job card or work order): a mechanical person goes onto the car's technicians,
+ * a bodyshop person onto the bodyshop board in their team's section. Only the car's sides; a side's manager adds only
+ * their own side's people.
+ */
 export async function addTechnicianToJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("manageWork");
-  const res = await addTechnician(jobId, String(formData.get("technician") ?? ""), { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  const actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id };
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) return techBack(jobId, formData, { error: "This job is closed." });
+  const sides = await workSidesOf(jobId, job.department);
+  const mySide = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
+  const picked = await checkPickable([String(formData.get("technician") ?? "")], mySide ? sides.filter((s) => s === mySide) : sides);
+  if (picked.error) return techBack(jobId, formData, { error: picked.error });
+  const person = picked.people[0];
+  if (person.side === "mechanical" && ["gate_in_pending", "pending_approval"].includes(job.status)) return techBack(jobId, formData, { error: "Use Assign technician for the first mechanic: it sets the inspection and the road test." });
+  const res = person.side === "bodyshop" ? await assignPerson(jobId, person.id, actor).then((r) => (r.error ? r : { message: `${person.display_name} is on the car (${person.section === "strip_refit" ? "Dismantle & refit" : person.section === "ppf" ? "PPF" : person.section === "paint" ? "Painting" : "Detailing & cleaning"}).` })) : await addTechnician(jobId, person.id, actor);
   refresh(jobId);
+  revalidatePath(`/bodyshop/${jobId}`);
   techBack(jobId, formData, res);
+}
+
+/** "Take off" for a bodyshop person on the car (job card or work order). */
+export async function removeBodyshopPersonFromJob(jobId: string, staffId: string, formData: FormData) {
+  const staff = await requirePermission("manageWork");
+  if (staff.role_id !== "owner" && sideOfDepartment(staff.department_id) === "mechanical") return techBack(jobId, formData, { error: "The bodyshop manager takes bodyshop people off the car." });
+  await unassignPerson(jobId, staffId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  refresh(jobId);
+  revalidatePath(`/bodyshop/${jobId}`);
+  techBack(jobId, formData, { message: "Taken off the car." });
 }
 
 /** "Take off": the technician leaves the car; the lead passes on if needed. */
 export async function removeTechnicianFromJob(jobId: string, staffId: string, formData: FormData) {
   const staff = await requirePermission("manageWork");
+  if (staff.role_id !== "owner" && sideOfDepartment(staff.department_id) === "bodyshop") return techBack(jobId, formData, { error: "The workshop manager changes the mechanical technicians." });
   const res = await removeTechnician(jobId, staffId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   refresh(jobId);
   techBack(jobId, formData, res);
@@ -181,6 +282,7 @@ export async function removeTechnicianFromJob(jobId: string, staffId: string, fo
 /** "Make lead": another technician on the car carries the job and the inspection. */
 export async function makeLeadTechnician(jobId: string, staffId: string, formData: FormData) {
   const staff = await requirePermission("manageWork");
+  if (staff.role_id !== "owner" && sideOfDepartment(staff.department_id) === "bodyshop") return techBack(jobId, formData, { error: "The workshop manager changes the mechanical lead." });
   const res = await setLeadTechnician(jobId, staffId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   refresh(jobId);
   techBack(jobId, formData, res);

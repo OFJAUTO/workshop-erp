@@ -11,6 +11,7 @@ import type { RoadTestRow } from "./road-test";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { workSidesForJobs } from "./staff-picker";
 
 export type Urgency = "red" | "amber" | "grey";
 
@@ -63,6 +64,8 @@ type Row = {
   gate_in: { is_complete: boolean } | null;
   inspection: { status: InspectionStatus; technician_id: string | null; submitted_at: string | null; approved_at: string | null }[] | null;
   plan_released_at: string | null;
+  plan_bodyshop_released_at: string | null;
+  bodyshop_started_at: string | null;
   plan_date_confirmed_at: string | null;
   deposit_requested_at: string | null;
   work_done_at: string | null;
@@ -70,7 +73,7 @@ type Row = {
 };
 
 const SELECT =
-  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_date_confirmed_at, deposit_requested_at, work_done_at, wash_sent_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
+  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_bodyshop_released_at, bodyshop_started_at, plan_date_confirmed_at, deposit_requested_at, work_done_at, wash_sent_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
 
 /**
  * "Waiting on you": every open car whose next step is this person's move, oldest wait first. The owner sees
@@ -86,7 +89,8 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
   const all = (data ?? []) as unknown as Row[];
   const summaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
   // The live parts picture of every job at the parts step: no stored flag decides whose move it is.
-  const partsLiveMap = await loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id));
+  const planningJobs = all.filter((j) => ["approved", "waiting_parts"].includes(j.status) || (j.department === "both" && j.status === "in_work"));
+  const [partsLiveMap, sidesMap] = await Promise.all([loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id)), workSidesForJobs(planningJobs.map((j) => ({ id: j.id, department: (j.department as string | null) ?? null })))]);
   // The advance payments still short, one bulk read: the step bar and the lists all see the same facts.
   const depositOf = new Map((await depositsWaiting()).map((d) => [d.jobId, d]));
   // The live proforma or tax invoice of the cars at the money steps, so the next step never says "proforma to prepare" on a paid car.
@@ -124,7 +128,7 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
         workFinishedAt: j.work_done_at,
         washSentAt: j.wash_sent_at,
         ...(invoiceOf.has(j.id) ? { invoiced: true, invoiceKind: invoiceOf.get(j.id)!.kind, readySent: invoiceOf.get(j.id)!.kind === "proforma" && !!invoiceOf.get(j.id)!.sent_at, invoiceSent: invoiceOf.get(j.id)!.kind === "tax_invoice" && !!invoiceOf.get(j.id)!.sent_at } : {}),
-        ...(partsLiveMap.has(j.id) ? { parts: partsLiveMap.get(j.id)!, planningOn: planningOnOf(j, partsLiveMap.get(j.id)!) } : {}),
+        ...(partsLiveMap.has(j.id) ? { parts: partsLiveMap.get(j.id)!, planningOn: planningOnOf(j, partsLiveMap.get(j.id)!, sidesMap.get(j.id)) } : {}),
         ...(depositOf.has(j.id) ? { deposit: { required: depositOf.get(j.id)!.required, received: depositOf.get(j.id)!.received, short: true, requestedAt: j.deposit_requested_at } } : {}),
       },
     });
@@ -133,7 +137,7 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       role === "owner"
         ? true
         : role === "workshop_manager"
-          ? step.actorRole === "workshop_manager" && jobConcernsSide(j.department, side)
+          ? step.actorRole === "workshop_manager" && (step.side ? !side || step.side === side : jobConcernsSide(j.department, side))
           : role === "technician"
             ? step.actorRole === "technician" && (j.assigned_to === staff.id || myCars.has(j.id))
             : role === "service_advisor"

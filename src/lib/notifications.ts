@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import type { RoleId } from "./roles";
+import { sideOfPerson } from "./teams";
 
 /** Every kind of notification the system can send. Later phases add their own. */
 export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean }[] = [
@@ -225,7 +226,7 @@ export async function notifyJobAdvisors(jobId: string | null | undefined, n: Not
 export async function notifyManagers(jobDepartment: string | null | undefined, n: NotificationInput) {
   const admin = createAdminClient();
   const { data } = await admin.from("staff").select("id, department_id").eq("role_id", "workshop_manager").eq("is_active", true);
-  const side = (d: string | null) => (d === "mechanical" ? "mechanical" : d === "bodyshop" || d === "paint" || d === "ppf_tint" ? "bodyshop" : null);
+  const side = (d: string | null) => sideOfPerson({ department_id: d });
   const ids = (data ?? [])
     .filter((m) => !jobDepartment || jobDepartment === "both" || !side(m.department_id) || side(m.department_id) === jobDepartment)
     .map((m) => m.id);
