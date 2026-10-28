@@ -90,6 +90,8 @@ export type PaymentRow = {
   received_at: string;
   received_by: string | null;
   reference: string | null;
+  /** The bank's auth code (card machine and payment link). */
+  auth_code?: string | null;
   cheque_number: string | null;
   cheque_bank: string | null;
   cheque_date: string | null;
@@ -123,7 +125,7 @@ export type PaymentRow = {
 
 export const INVOICE_SELECT = "id, number, kind, job_id, customer_id, vehicle_id, credit_of, status, issued_at, issued_by, token, labour_mode, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, agreed_total_aed, discount_note, prepared_by, approved_by, notes, customer_snapshot, vehicle_snapshot, payment_link_url, warranty_credit_aed, converted_from, converted_to, issue_reason, deposit_for_quotation_id, created_at";
 export const INVOICE_LINE_SELECT = "id, invoice_id, position, section, description, details, positions, part_number, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, quotation_line_id, part_item_id, price_display, discount_percent, package_items, cut_method, cut_note";
-export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, deposit_quotation_id, deposit_invoice_number, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at, proof_path, client_key, settlement_id, actual_fee_aed";
+export const PAYMENT_SELECT = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, received_by, reference, auth_code, cheque_number, cheque_bank, cheque_date, cheque_status, cleared_at, bank_charge_aed, is_deposit, deposit_quotation_id, deposit_invoice_number, status, reversed_at, reversed_reason, notes, void_reason, voided_by, voided_at, verified_at, verified_by, approval_requested_by, approved_by, approved_at, created_at, proof_path, client_key, settlement_id, actual_fee_aed";
 
 export const METHOD_LABELS: Record<PaymentRow["method"], string> = { cash: "Cash", card: "Card", link: "Payment link", cheque: "Cheque", transfer: "Bank transfer" };
 

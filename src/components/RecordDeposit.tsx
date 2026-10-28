@@ -9,6 +9,8 @@ import { Button, Input } from "./ui";
 import { newUuid } from "@/lib/uuid";
 import { reloadIfStale } from "@/lib/app-version";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
+import { AuthCodeInput } from "@/components/AuthCodeInput";
+import { needsAuthCode } from "@/lib/auth-code";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const METHODS = [
@@ -47,6 +49,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
   const [method, setMethod] = useState("cash");
   const [amount, setAmount] = useState(d.outstanding > 0 ? String(d.outstanding) : "");
   const [reference, setReference] = useState("");
+  const [authCode, setAuthCode] = useState("");
   const [date, setDate] = useState(todayDubai);
   const [chequeNo, setChequeNo] = useState("");
   const [chequeBank, setChequeBank] = useState("");
@@ -79,7 +82,8 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
     fd.set("job_id", d.jobId);
     fd.set("method", method);
     fd.set("amount", amount);
-    fd.set("reference", reference);
+    fd.set("reference", needsAuthCode(method) ? "" : reference);
+    fd.set("auth_code", needsAuthCode(method) ? authCode : "");
     fd.set("received_date", date);
     fd.set("client_key", clientKey);
     if (method === "cheque") {
@@ -153,7 +157,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                   </div>
                 ) : null}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reference (optional)</span><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="transfer ref, slip no…" /></label>
+                  {needsAuthCode(method) ? <AuthCodeInput method={method} value={authCode} onChange={setAuthCode} name="deposit_auth_code" /> : <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reference (optional)</span><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="transfer ref, cheque bank…" /></label>}
                   <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date received</span><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-deposit-date /></label>
                 </div>
                 <div className="flex flex-col gap-1">

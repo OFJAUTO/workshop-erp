@@ -233,6 +233,8 @@ await section("F1 proforma", async () => {
   check("payment box shows Full amount and Part payment (A8)", /Full amount/.test(b ?? "") && /Part payment/.test(b ?? ""));
   check("bank fee note under the method buttons (F2)", /No bank fee/.test(b ?? ""));
   await page.getByRole("button", { name: "Card", exact: true }).first().click();
+  // 29 October 2026: a card payment needs the bank auth code.
+  if (await page.locator("[data-auth-code]").count()) await page.locator("[data-auth-code]").first().fill(`TA${String(Date.now()).slice(-4)}`);
   await sleep(200);
   // 29 October 2026: the card machine is 2.15% before VAT (the old 2.26% included the VAT).
   check("card shows its 2.15% + VAT fee (F2)", /Bank fee 2\.15% \+ VAT 5% on card/.test(await page.textContent("body")));

@@ -105,7 +105,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       <span className="font-semibold">{p.number}</span>
                       <span>{formatDateTime(p.received_at)}</span>
                       <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : p.status === "voided" || p.status === "reversed" ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" ? ` · ${p.cheque_status}` : ""}{p.is_deposit ? " · deposit" : ""}{p.status === "pending_owner" ? " · waiting for the owner" : ""}</Badge>
-                      <span className="text-muted">{p.method === "cheque" ? [p.cheque_number, p.cheque_bank, p.cheque_date].filter(Boolean).join(" · ") : p.reference}</span>
+                      <span className="text-muted">{p.method === "cheque" ? [p.cheque_number, p.cheque_bank, p.cheque_date].filter(Boolean).join(" · ") : p.auth_code ? `Auth ${p.auth_code}` : p.reference}</span>
                       <span className="text-muted">by {nameOf.get(p.received_by ?? "") ?? ""}</span>
                       <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
                       {(p.actual_fee_aed ?? p.bank_charge_aed) && seesCost ? <span className="text-xs text-muted" data-fee-line>{p.settlement_id && p.actual_fee_aed !== null && p.actual_fee_aed !== undefined ? `bank fee ${m(p.actual_fee_aed)} (actual)` : `charge ${m(p.bank_charge_aed)}${p.method === "card" || p.method === "link" ? " (est.)" : ""}`}</span> : null}

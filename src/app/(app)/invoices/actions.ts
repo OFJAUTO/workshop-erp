@@ -119,6 +119,7 @@ export async function recordPayment(formData: FormData) {
     method: String(formData.get("method") ?? ""),
     amount,
     reference: blankToNull(formData.get("reference")),
+    authCode: blankToNull(formData.get("auth_code")),
     cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
     notes: blankToNull(formData.get("notes")),
     clientKey: blankToNull(formData.get("client_key")),

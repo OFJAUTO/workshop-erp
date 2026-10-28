@@ -38,6 +38,8 @@ try {
     const panel = page.locator("[data-record-deposit-panel]");
     await panel.waitFor();
     await panel.locator(`[data-deposit-method="${m}"]`).click();
+    // Card and payment link need the bank auth code (29 October 2026).
+    if (m === "card" || m === "link") await panel.locator("[data-auth-code]").fill(`T${m === "card" ? "C" : "L"}${String(Date.now()).slice(-4)}`);
     if (WITH_PROOF.has(m)) {
       await panel.locator('input[type="file"]').first().setInputFiles({ name: `${m}-proof.png`, mimeType: "image/png", buffer: png });
       const up = await until(async () => (await sql("select count(*)::int as n from public.job_files where job_id = $1 and kind = 'payment_proof' and removed_at is null", [jobId]))[0].n >= 1, 40, 500);
@@ -88,6 +90,7 @@ try {
     const form = page.locator("[data-payment-form]");
     await form.waitFor({ timeout: 20000 });
     await form.locator(`[data-method="${m}"]`).click();
+    if (m === "card" || m === "link") await form.locator("[data-auth-code]").fill(`P${m === "card" ? "C" : "L"}${String(Date.now()).slice(-4)}`);
     if ((await form.locator("[data-amount-full]").count()) === 1) await form.locator("[data-amount-full]").click();
     // 28 Oct: the slip goes straight to storage (no 1 MB form limit); the form sends only its key.
     if (m === "card" || m === "transfer") {

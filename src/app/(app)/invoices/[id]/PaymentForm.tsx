@@ -7,6 +7,8 @@ import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { newUuid } from "@/lib/uuid";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
+import { AuthCodeInput } from "@/components/AuthCodeInput";
+import { needsAuthCode } from "@/lib/auth-code";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -60,6 +62,7 @@ export function PaymentForm({
   const [mode, setMode] = useState<"full" | "partial">(balance && balance > 0 ? "full" : "partial");
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
+  const [authCode, setAuthCode] = useState("");
   const [confirming, setConfirming] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const [clientKey] = useState(newUuid);
@@ -109,8 +112,10 @@ export function PaymentForm({
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque date</span><Input name="cheque_date" type="date" required /></label>
           </div>
         ) : null}
-        {method !== "cash" && method !== "cheque" ? (
-          <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === "card" ? "Terminal slip number (optional)" : method === "transfer" ? "Transfer reference (optional)" : "Link reference (optional)"} className="max-w-72" data-reference />
+        {needsAuthCode(method) ? (
+          <AuthCodeInput method={method} value={authCode} onChange={setAuthCode} />
+        ) : method === "transfer" ? (
+          <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Transfer reference (optional)" className="max-w-72" data-reference />
         ) : null}
         {method === "card" || method === "transfer" ? (
           <label className="flex flex-col gap-1">
@@ -138,7 +143,7 @@ export function PaymentForm({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label="Confirm full payment" data-confirm-full>
           <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
             <h2 className="text-lg font-extrabold">Confirm full payment</h2>
-            <p className="text-sm leading-relaxed">{confirmFullText({ amount: value, method, reference: reference || null, invoiceNumber, isProforma, nextTaxNumber })}</p>
+            <p className="text-sm leading-relaxed">{confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (authCode ? `auth ${authCode}` : null) : reference || null, invoiceNumber, isProforma, nextTaxNumber })}</p>
             <Button
               type="button"
               size="lg"

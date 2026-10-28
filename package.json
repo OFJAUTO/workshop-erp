@@ -112,7 +112,8 @@
     "test:b3": "node --env-file=.env.local tests/browser/test-b3.mjs",
     "test:popups": "node --env-file=.env.local tests/browser/popup-check.mjs",
     "test:fees1": "node --env-file=.env.local tests/browser/test-fees1.mjs",
-    "test:fees2": "node --env-file=.env.local tests/browser/test-fees2.mjs"
+    "test:fees2": "node --env-file=.env.local tests/browser/test-fees2.mjs",
+    "test:fees3": "node --env-file=.env.local tests/browser/test-fees3.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

@@ -264,6 +264,7 @@ export async function renderReceiptPdf(data: ReceiptData, settings: Settings): P
       title: "Paid by",
       strong: METHOD_LABELS[payment.method] ?? payment.method,
       rows: [
+        ["Auth code", payment.auth_code ?? null],
         ["Reference", payment.reference],
         ["Cheque no.", payment.cheque_number],
         ["Bank", payment.cheque_bank],

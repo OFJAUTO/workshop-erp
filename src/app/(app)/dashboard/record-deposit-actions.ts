@@ -73,7 +73,7 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
 
   const before = await depositState(jobId);
   const actor: Actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id, is_head_accountant: staff.is_head_accountant };
-  const r = await recordPaymentCore(actor, { invoiceId: null, jobId, method, amount, reference, cheque, clientKey }, settings);
+  const r = await recordPaymentCore(actor, { invoiceId: null, jobId, method, amount, reference, authCode: blankToNull(formData.get("auth_code")), cheque, clientKey }, settings);
   if (r.error || !r.paymentId) return { error: r.error ?? "Could not record the deposit." };
   if (r.pendingOwner) return { error: "The amount is above the job's balance: it went to the owner for approval." };
   const paymentId = r.paymentId;

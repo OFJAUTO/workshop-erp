@@ -58,7 +58,8 @@ try {
     await panel.waitFor();
     await panel.locator(`[data-deposit-method="${method}"]`).click();
     const auth = panel.locator("[data-auth-code]");
-    if (await auth.count()) await auth.fill(method === "link" ? "756117" : "219769");
+    // Test codes of its own: a real code (756117 is on RCT-00036) would be refused as a duplicate.
+    if (await auth.count()) await auth.fill(`F${method === "link" ? "L" : "C"}${String(Date.now()).slice(-4)}`);
     await panel.locator('input[type="file"]').first().setInputFiles({ name: `${method}.png`, mimeType: "image/png", buffer: png });
     await until(async () => (await sql("select count(*)::int as n from public.job_files where job_id = $1 and kind = 'payment_proof' and removed_at is null", [seed.jobId]))[0].n >= 1);
     const words = (await panel.locator("[data-deposit-fee]").textContent().catch(() => "")) ?? "";

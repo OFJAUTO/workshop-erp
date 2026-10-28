@@ -167,6 +167,8 @@ if (want("S2")) {
   await go(page, `${base}/jobs/${jobId}/invoice`);
   const before = (await sql("select count(*)::int as n from public.payments where invoice_id = $1 and is_active", [pro.id]))[0]?.n ?? 0;
   await page.locator("[data-method='card']").first().click();
+  // 29 October 2026: a card payment needs the bank auth code.
+  if (await page.locator("[data-auth-code]").count()) await page.locator("[data-auth-code]").first().fill(`TZ${String(Date.now()).slice(-4)}`);
   await page.locator("[data-amount-partial]").first().click();
   await page.locator("[data-amount-input]").first().fill("100");
   check("S2: the card slip photo box is there and required", (await page.locator("[data-proof-input]").count()) >= 1 && (await page.locator("[data-proof-input]").first().getAttribute("required")) !== null);

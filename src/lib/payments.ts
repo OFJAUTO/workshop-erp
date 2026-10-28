@@ -12,10 +12,11 @@ import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 import { createAdminClient } from "./supabase/admin";
 import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "./zoho-sync";
+import { AUTH_CODE_RE, authCodeProblem, cleanAuthCode, needsAuthCode } from "./auth-code";
 
 /** Who records: a staff member, or the payment gateway (no id). */
 export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
-export type PaymentInput = { invoiceId: string | null; jobId: string | null; method: string; amount: number; reference?: string | null; cheque?: { number: string | null; bank: string | null; date: string | null } | null; notes?: string | null; clientKey?: string | null };
+export type PaymentInput = { invoiceId: string | null; jobId: string | null; method: string; amount: number; reference?: string | null; /** The bank's 6-character auth code (card machine and payment link): required when staff record one. */ authCode?: string | null; cheque?: { number: string | null; bank: string | null; date: string | null } | null; notes?: string | null; clientKey?: string | null };
 export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string };
 
 const money = (n: number) => `AED ${round2(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
@@ -62,6 +63,12 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   if (!["cash", "card", "link", "cheque", "transfer"].includes(method)) return { error: "Choose the payment method." };
   const amount = round2(input.amount);
   if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter the amount received." };
+  // The auth code (29 October 2026): staff type it from the slip or the confirmation; the gateway may send its own.
+  const authCode = input.authCode ? cleanAuthCode(input.authCode) : null;
+  if (needsAuthCode(method) && actor.id) {
+    const problem = authCodeProblem(method, authCode ?? "");
+    if (problem) return { error: problem };
+  } else if (authCode && !AUTH_CODE_RE.test(authCode)) return { error: authCodeProblem(method, authCode) ?? "Check the auth code." };
   // The same tap twice: the second one is the same payment.
   if (input.clientKey) {
     const { data: same } = await admin.from("payments").select("id, number").eq("client_key", input.clientKey).maybeSingle();
@@ -92,6 +99,12 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (dup) return { error: `${dup.number} for ${money(amount)} by ${method} was recorded a moment ago. Not recorded twice.` };
   }
   if (!customerId) return { error: "Choose the invoice or the job." };
+  // One transaction, one auth code: the same code on another live receipt of this method (last 60 days) is a slip.
+  if (authCode && needsAuthCode(method) && !input.clientKey?.startsWith("ngenius:")) {
+    const since = new Date(Date.now() - 60 * 86400000).toISOString();
+    const { data: twin } = await admin.from("payments").select("number, amount_aed, received_at").eq("auth_code", authCode).eq("method", method).eq("is_active", true).neq("status", "voided").gte("received_at", since).limit(1).maybeSingle();
+    if (twin) return { error: `Auth code ${authCode} is already on ${twin.number} (${money(Number(twin.amount_aed) || 0)}). Check the ${method === "link" ? "payment confirmation" : "card slip"}.` };
+  }
   const cheque = method === "cheque" ? { cheque_number: input.cheque?.number ?? null, cheque_bank: input.cheque?.bank ?? null, cheque_date: input.cheque?.date ?? null, cheque_status: "pending" as const } : {};
   if (method === "cheque" && (!cheque.cheque_number || !cheque.cheque_date)) return { error: "A cheque needs its number and date." };
   // A payment with no invoice is a deposit on the job: it points at the approved quotation it was asked for on.
@@ -101,7 +114,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   if (over && !isOwner) {
     // Staff cannot record more than the balance: it waits for the owner.
     const fees = feesFor(amount, bankFeesOf(settings)[method]);
-    const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
+    const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
     if (error || !created) {
       await logAppError("record payment: insert (above balance)", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
       return { error: SAVE_FAILED };
@@ -114,7 +127,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const fees = feesFor(amount, bankFeesOf(settings)[method]);
   const verifies = actor.role_id === "owner" || actor.role_id === "accounts";
   const now = new Date().toISOString();
-  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
+  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (error || !created) {
     await logAppError("record payment: insert", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
     return { error: SAVE_FAILED };

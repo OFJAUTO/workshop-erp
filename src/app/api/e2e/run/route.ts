@@ -189,11 +189,11 @@ export async function POST(request: NextRequest) {
     check("exactly one receipt so far", receipts === 1, String(receipts));
     const verifyRow = (await admin.from("payments").select("verified_at").eq("id", pay1.paymentId!).maybeSingle()).data;
     check("advisor's payment waits for accounts to verify (K8)", !verifyRow?.verified_at);
-    const over = await recordPaymentCore(actor(advisor), { invoiceId: INV1, jobId: JOB1, method: "card", amount: total + 500, clientKey: "e2e-k2" }, settings);
+    const over = await recordPaymentCore(actor(advisor), { invoiceId: INV1, jobId: JOB1, method: "card", authCode: "E2E001", amount: total + 500, clientKey: "e2e-k2" }, settings);
     check("more than the balance waits for the owner (K4)", !!over.pendingOwner, over.error ?? over.message);
     const refused = await decideOverpayment(over.paymentId!, actor(owner), false, "Too much");
     check("the owner refuses it: voided, never deleted (K5)", !!refused.ok && (await admin.from("payments").select("status").eq("id", over.paymentId!).maybeSingle()).data?.status === "voided");
-    const rest = await recordPaymentCore(actor(owner), { invoiceId: INV1, jobId: JOB1, method: "card", amount: Math.round((total - 100) * 100) / 100, clientKey: "e2e-k3" }, settings);
+    const rest = await recordPaymentCore(actor(owner), { invoiceId: INV1, jobId: JOB1, method: "card", authCode: "E2E002", amount: Math.round((total - 100) * 100) / 100, clientKey: "e2e-k3" }, settings);
     check("the owner records the rest by card", !!rest.ok, rest.error);
     check("paid in full releases the car (K9)", (await job()).status === "ready", (await job()).status);
     const v = await verifyPayment(pay1.paymentId!, actor(owner));

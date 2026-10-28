@@ -15,7 +15,7 @@ import { createAdminClient } from "./supabase/admin";
  */
 
 export type NgeniusOrder = { reference: string; paymentUrl: string };
-export type NgeniusStatus = { state: "paid" | "pending" | "failed"; rawState: string; amountAed: number | null; cardLast4: string | null };
+export type NgeniusStatus = { state: "paid" | "pending" | "failed"; rawState: string; amountAed: number | null; cardLast4: string | null; /** The bank's authorisation code of the paid payment, when N-Genius sends it. */ authCode?: string | null };
 
 const PAID_STATES = new Set(["CAPTURED", "PURCHASED"]);
 const FAILED_STATES = new Set(["FAILED", "CANCELLED", "DECLINED", "REVERSED", "EXPIRED"]);
@@ -104,12 +104,13 @@ export async function fetchNgeniusStatus(reference: string): Promise<NgeniusStat
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`N-Genius did not return the order (${res.status})`);
-  const json = (await res.json()) as { _embedded?: { payment?: { state?: string; amount?: { value?: number }; paymentMethod?: { pan?: string } }[] }; amount?: { value?: number } };
+  const json = (await res.json()) as { _embedded?: { payment?: { state?: string; amount?: { value?: number }; paymentMethod?: { pan?: string }; authResponse?: { authorizationCode?: string } }[] }; amount?: { value?: number } };
   const payments = json._embedded?.payment ?? [];
   const paid = payments.find((p) => PAID_STATES.has(String(p.state ?? "").toUpperCase()));
   const latest = paid ?? payments.at(-1) ?? null;
   const raw = String(latest?.state ?? "STARTED").toUpperCase();
   const minor = paid?.amount?.value ?? json.amount?.value ?? null;
   const pan = latest?.paymentMethod?.pan ?? null;
-  return { state: paid ? "paid" : FAILED_STATES.has(raw) ? "failed" : "pending", rawState: raw, amountAed: minor !== null ? Math.round(minor) / 100 : null, cardLast4: pan ? pan.slice(-4) : null };
+  const auth = String(paid?.authResponse?.authorizationCode ?? "").replace(/\s+/g, "").toUpperCase();
+  return { state: paid ? "paid" : FAILED_STATES.has(raw) ? "failed" : "pending", rawState: raw, amountAed: minor !== null ? Math.round(minor) / 100 : null, cardLast4: pan ? pan.slice(-4) : null, authCode: /^[A-Z0-9]{6}$/.test(auth) ? auth : null };
 }
