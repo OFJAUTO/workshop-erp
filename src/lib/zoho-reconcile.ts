@@ -6,7 +6,7 @@ import { notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ZOHO_REAL_ORG_ID, zohoBooksNow, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
-import { beforeGoLiveStart, billErpFigures, poForZoho } from "@/lib/zoho-sync";
+import { beforeGoLiveStart, billErpFigures, poForZoho, zohoClearingAccounts } from "@/lib/zoho-sync";
 
 /**
  * Daily reconciliation (phase 4, 27 October 2026): every morning, yesterday per the ERP next to yesterday per
@@ -80,7 +80,7 @@ type ZohoListRow = Record<string, unknown> & { status?: string; total?: number; 
 async function zohoList(org: string, path: string, listKey: string, day: string): Promise<ZohoListRow[]> {
   const out: ZohoListRow[] = [];
   for (let page = 1; page <= 20; page++) {
-    const j = await zohoFetch<Record<string, unknown> & { page_context?: { has_more_page?: boolean } }>(`${path}?date=${day}&per_page=200&page=${page}`, { org });
+    const j = await zohoFetch<Record<string, unknown> & { page_context?: { has_more_page?: boolean } }>(`${path}${path.includes("?") ? "&" : "?"}date=${day}&per_page=200&page=${page}`, { org });
     const rows = (j[listKey] as ZohoListRow[] | undefined) ?? [];
     out.push(...rows);
     if (!j.page_context?.has_more_page) break;
@@ -168,6 +168,9 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
     total: round2((commRows ?? []).reduce((a, r) => a + Number(r.amount_aed), 0) + (recRows ?? []).reduce((a, r) => a + Number(r.total_aed), 0) + (feeRows ?? []).reduce((a, r) => a + Number(r.fee_aed), 0)),
   };
   const clearing = await clearingOpenAt(day);
+  // Card/link settlements: the transfers clearing -> bank for what the bank paid in (an undone one is not counted).
+  const { data: stlRows } = await admin.from("card_settlements").select("received_aed").eq("is_active", true).eq("settled_on", day).gt("received_aed", 0);
+  const erpSettlements: ReconSide = { count: (stlRows ?? []).length, total: round2((stlRows ?? []).reduce((a, r) => a + Number(r.received_aed), 0)) };
 
   /* ---------------- Zoho's side ---------------- */
   const [zInv, zCn, zPay, zBill, zVp, zExp] = [
@@ -178,6 +181,18 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
     await zohoList(org, "/vendorpayments", "vendorpayments", day),
     await zohoList(org, "/expenses", "expenses", day),
   ];
+  // The settlement transfers out of the two clearing accounts (only when the ERP has settlements or the accounts resolve).
+  let zSettle: ZohoListRow[] = [];
+  let settleNote: string | null = null;
+  const clearingIds = await zohoClearingAccounts(org);
+  if ("error" in clearingIds) settleNote = `The clearing accounts could not be read in Zoho: ${clearingIds.error}`;
+  else {
+    for (const id of [clearingIds.card, clearingIds.link]) {
+      const rows = await zohoList(org, `/banktransactions?account_id=${encodeURIComponent(id)}`, "banktransactions", day);
+      zSettle.push(...rows.filter((r) => String(r.transaction_type ?? "") === "transfer_fund" && String(r.reference_number ?? "").startsWith("STL-")));
+    }
+    zSettle = zSettle.filter((r, i, all) => all.findIndex((x) => x.transaction_id === r.transaction_id) === i);
+  }
   const zohoByMode: Record<string, number> = {};
   for (const r of zPay) {
     const mode = normMode(String(r.payment_mode ?? "others")) || "others";
@@ -199,6 +214,7 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
     section("Supplier bills", erpBills, { count: zBill.length, total: sum(zBill, "total") }, Math.max(0.009, 0.01 * billLines)),
     section("Supplier payments", erpVendorPayments, { count: zVp.length, total: sum(zVp, "amount") }),
     section("Expenses", erpExpenses, { count: zExp.length, total: sum(zExp, "total") }),
+    ...(settleNote ? [] : [section("Card/link settlement transfers", erpSettlements, { count: zSettle.length, total: sum(zSettle, "amount") })]),
   ];
   const paymentsByMode: Record<string, { erp: number; zoho: number; ok: boolean }> = {};
   for (const mode of new Set([...Object.keys(erpByMode), ...Object.keys(zohoByMode)])) {
@@ -217,7 +233,7 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
       org,
       orgLabel: org === ZOHO_REAL_ORG_ID ? "the REAL book" : "OFJ TEST",
       clearing,
-      note: "Deposits are ordinary payments in Zoho (shown inside Payments). Supplier credits and customer refunds show inside the bills' and credit notes' balances.",
+      note: `Deposits are ordinary payments in Zoho (shown inside Payments). Supplier credits and customer refunds show inside the bills' and credit notes' balances.${settleNote ? ` ${settleNote}` : ""}`,
     },
   };
 }

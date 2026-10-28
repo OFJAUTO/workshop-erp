@@ -1793,6 +1793,21 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
   }
   const gate = await startDateSkip(String(st.settled_on).slice(0, 10), "settlement", st.id);
   if (gate) return gate;
+  // The money must be IN the clearing account before it is moved out: every payment of the settlement first.
+  if (!st.zoho_transfer_id && !st.zoho_fee_id) {
+    const { data: payRows } = await admin.from("payments").select("id, number, job_id, is_deposit").eq("settlement_id", st.id);
+    const pays = (payRows ?? []) as { id: string; number: string; job_id: string | null; is_deposit: boolean }[];
+    if (pays.length) {
+      const { data: obRows } = await admin.from("zoho_outbox").select("kind, record_id, status, last_error").in("kind", ["deposit", "payment"]).in("record_id", pays.map((p) => p.id));
+      const obOf = new Map(((obRows ?? []) as { kind: string; record_id: string; status: string; last_error: string | null }[]).map((o) => [o.record_id, o]));
+      for (const p of pays) {
+        const ob = obOf.get(p.id);
+        if (ob?.status === "synced") continue;
+        if (!ob) await ensureQueued(p.is_deposit ? "deposit" : "payment", p.id, p.job_id);
+        return { wait: ob?.status === "failed" ? `Waiting for ${p.number}: it failed to reach Zoho (${(ob.last_error ?? "see its row").slice(0, 120)}). Fix it first; the transfer follows by itself.` : `Waiting for ${p.number} to reach Zoho first (the money must be in the clearing account before it moves to the bank).` };
+      }
+    }
+  }
   const received = round2(Number(st.received_aed) || 0);
   const fee = round2(Number(st.fee_aed) || 0);
   const clearing = accounts.depositTo[st.method];
@@ -1826,6 +1841,16 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
     await admin.from("card_settlements").update({ zoho_fee_id: feeId }).eq("id", st.id);
   }
   return { zohoId: transferId ?? feeId, result: { settlement: st.number, method: st.method, gross: round2(Number(st.gross_aed) || 0), received, fee, transfer_id: transferId, fee_expense_id: feeId, reference } };
+}
+
+/** The two clearing accounts' Zoho ids in an organization (for the daily reconciliation), or the reason they cannot be read. */
+export async function zohoClearingAccounts(org: string): Promise<{ card: string; link: string } | { error: string }> {
+  try {
+    const accounts = await resolveZohoAccounts(org, readZohoMap(await getSettings()));
+    return { card: accounts.depositTo.card, link: accounts.depositTo.link };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /* ------------------------------------------------------- the worker ------------------------------------------------------- */

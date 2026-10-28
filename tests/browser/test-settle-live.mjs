@@ -36,15 +36,26 @@ const [job] = await sql("select customer_id from public.jobs where id = $1", [jo
 const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active limit 1"))[0].id;
 // A deposit by card (no invoice needed): posts as an unapplied advance into Card machine clearing.
 const [p] = await sql("insert into public.payments (job_id, customer_id, method, amount_aed, bank_charge_aed, received_at, received_by, is_deposit, number, created_by, updated_by) values ($1, $2, 'card', 1234.50, 27.90, now() - interval '1 day', $3, true, $4, $3, $3) returning id, number", [jobId, job.customer_id, owner, `TRCT-S${RUN}`]);
+const TODAY = new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+const reconRow = async () => (await sql("select details from public.zoho_reconciliation where day = $1", [TODAY]))[0]?.details ?? null;
+const settleSection = (d) => (d?.sections ?? []).find((x) => x.label === "Card/link settlement transfers") ?? null;
+await fetch(`${LIVE}/api/cron/zoho?reconcile=${TODAY}`, { headers: { authorization: `Bearer ${CRON}` }, cache: "no-store" });
+const base = settleSection(await reconRow());
+check("0: the daily reconciliation has the settlement transfers line", !!base, JSON.stringify(base));
+
 await sql("insert into public.zoho_outbox (kind, record_id, job_id) values ('contact', $1, null) on conflict (kind, record_id) do update set status = 'pending', claimed_at = null", [job.customer_id]);
-await sql("insert into public.zoho_outbox (kind, record_id, job_id) values ('deposit', $1, $2) on conflict (kind, record_id) do nothing", [p.id, jobId]);
+const [st] = await sql("insert into public.card_settlements (number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, created_by, updated_by) values ($1, 'card', (now() + interval '4 hours')::date, 1, 1234.50, 1206.10, 28.40, $2, $3, $3) returning id, number", [`STL-E${RUN.slice(-4)}`, `E2E stmt ${RUN}`, owner]);
+await sql("update public.payments set settlement_id = $1, actual_fee_aed = 28.40 where id = $2", [st.id, p.id]);
+await sql("insert into public.zoho_outbox (kind, record_id) values ('settlement', $1)", [st.id]);
+await cron();
+const waitRow = await row("settlement", st.id);
+const depRow = await row("deposit", p.id);
+check("1: the transfer WAITS while its payment has not reached Zoho", waitRow?.status === "pending" && /Waiting for TRCT-S/.test(waitRow?.last_error ?? "") || depRow?.status === "synced", JSON.stringify(waitRow));
+check("1: the waiting payment was queued for it", !!depRow, JSON.stringify(depRow));
 const pr = await settled("deposit", p.id);
 check("1: the card payment posted", pr?.status === "synced", JSON.stringify(pr).slice(0, 300));
 check("1: at the FULL amount with NO bank charge in Zoho", Number(pr?.zoho_result?.amount) === 1234.5 && Number(pr?.zoho_result?.bank_charges) === 0, JSON.stringify(pr?.zoho_result));
 
-const [st] = await sql("insert into public.card_settlements (number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, created_by, updated_by) values ($1, 'card', (now() + interval '4 hours')::date, 1, 1234.50, 1206.10, 28.40, $2, $3, $3) returning id, number", [`STL-E${RUN.slice(-4)}`, `E2E stmt ${RUN}`, owner]);
-await sql("update public.payments set settlement_id = $1, actual_fee_aed = 28.40 where id = $2", [st.id, p.id]);
-await sql("insert into public.zoho_outbox (kind, record_id) values ('settlement', $1)", [st.id]);
 const sr = await settled("settlement", st.id);
 check("2: the settlement posted", sr?.status === "synced", JSON.stringify(sr).slice(0, 400));
 check("2: the transfer clearing -> bank carries what arrived (1,206.10)", !!sr?.zoho_result?.transfer_id && Number(sr?.zoho_result?.received) === 1206.1, JSON.stringify(sr?.zoho_result));
@@ -55,6 +66,11 @@ await sql("update public.card_settlements set zoho_transfer_id = null, zoho_fee_
 await sql("update public.zoho_outbox set status = 'pending', claimed_at = null where kind = 'settlement' and record_id = $1", [st.id]);
 const again = await settled("settlement", st.id);
 check("3: a re-run finds the same transfer and fee (nothing posted twice)", again?.zoho_result?.transfer_id === sr?.zoho_result?.transfer_id && again?.zoho_result?.fee_expense_id === sr?.zoho_result?.fee_expense_id, JSON.stringify(again?.zoho_result));
+
+// The reconciliation counts the new transfer on both sides (compared with the day's baseline).
+await fetch(`${LIVE}/api/cron/zoho?reconcile=${TODAY}`, { headers: { authorization: `Bearer ${CRON}` }, cache: "no-store" });
+const after = settleSection(await reconRow());
+check("4: the reconciliation sees the transfer in the ERP AND in Zoho (one more on each side)", !!base && !!after && after.erp.count === base.erp.count + 1 && after.zoho.count === base.zoho.count + 1, JSON.stringify({ base, after }));
 
 await sql("delete from public.zoho_outbox where kind = 'settlement' and record_id = $1", [st.id]);
 await sql("update public.payments set settlement_id = null where settlement_id = $1", [st.id]);

@@ -2,7 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { Button, Input, Notice } from "@/components/ui";
-import { checkSettlement, CLEARING_LABEL, preTicked, splitFee, type ClearingMethod } from "@/lib/card-settlement-rules";
+import { checkSettlement, CLEARING_LABEL, preTicked, receivedAfter, splitFee, type ClearingMethod } from "@/lib/card-settlement-rules";
 import { initialFormState, type FormState } from "@/lib/form-state";
 
 export type SettleRow = { id: string; number: string; method: ClearingMethod; amount: number; estimate: number; receivedAt: string; plate: string; isDeposit: boolean; late: boolean };
@@ -31,7 +31,8 @@ export function SettlementForm({ rows, today, initialMethod, canSave, action }: 
   }
   const mine = useMemo(() => rows.filter((r) => r.method === method), [rows, method]);
   const ticked = useMemo(() => picked ?? new Set(mine.filter((r) => preTicked(r.receivedAt, settledOn)).map((r) => r.id)), [picked, mine, settledOn]);
-  const tickedRows = mine.filter((r) => ticked.has(r.id));
+  // A payment taken after the settlement day can never be in it: shown greyed out, never counted.
+  const tickedRows = mine.filter((r) => ticked.has(r.id) && !receivedAfter(r.receivedAt, settledOn));
   const gross = Math.round(tickedRows.reduce((a, r) => a + r.amount, 0) * 100) / 100;
   const receivedNum = received.trim() ? Number(received.replace(/,/g, "")) : null;
   const check = checkSettlement(gross, receivedNum);
@@ -66,15 +67,17 @@ export function SettlementForm({ rows, today, initialMethod, canSave, action }: 
       {mine.length ? (
         <ul className="divide-y divide-line rounded-card border border-line bg-white" data-settle-list>
           {mine.map((r) => {
-            const on = ticked.has(r.id);
+            const after = receivedAfter(r.receivedAt, settledOn);
+            const on = ticked.has(r.id) && !after;
             const share = shares.get(r.id);
             return (
               <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm" data-settle-row={r.number}>
                 <label className="flex min-h-11 cursor-pointer items-center gap-3">
-                  <input type="checkbox" name="ids" value={r.id} checked={on} onChange={() => toggle(r.id)} className="h-5 w-5 accent-ink" data-settle-tick={r.number} />
+                  <input type="checkbox" name="ids" value={r.id} checked={on} disabled={after} onChange={() => toggle(r.id)} className="h-5 w-5 accent-ink" data-settle-tick={r.number} />
                   <span className="font-bold">{r.number}</span>
                 </label>
                 <span className="text-muted">{dayText(r.receivedAt)} · {r.plate}{r.isDeposit ? " · deposit" : ""}</span>
+                {after ? <span className="text-xs font-semibold text-muted" data-settle-after>Taken after this settlement date</span> : null}
                 {r.late ? <span className="rounded-full bg-amber-soft px-2 text-xs font-bold text-amber" data-settle-late>Not settled after 3 working days</span> : null}
                 <span className="ml-auto font-extrabold">{aed(r.amount)}</span>
                 <span className="w-44 text-right text-xs text-muted">
@@ -129,5 +132,24 @@ export function SettlementForm({ rows, today, initialMethod, canSave, action }: 
         <div data-settle-done><Notice tone="success">{state.success}</Notice></div>
       ) : null}
     </form>
+  );
+}
+
+/** Undo a settlement (wrong amount or wrong ticks): one reason, the answer right under the button. */
+export function UndoSettlement({ number, active, action }: { number: string; active: boolean; action: (s: FormState, f: FormData) => Promise<FormState> }) {
+  const [state, formAction, pending] = useActionState(action, initialFormState);
+  // Stays mounted on its row after the page refreshes, so the answer is still where the person clicked.
+  if (state.success) return <span className="text-xs font-semibold text-green" data-settle-undone>{state.success}</span>;
+  if (!active) return null;
+  return (
+    <details className="relative" data-settle-undo={number}>
+      <summary className="inline-flex min-h-9 cursor-pointer items-center rounded-control border border-line-strong bg-white px-3 text-xs font-bold">Undo</summary>
+      <form action={formAction} className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-2 rounded-card border border-line bg-white p-3 shadow-xl">
+        <span className="text-xs text-muted">The payments go back to &ldquo;not settled&rdquo; with their estimated fee. If Zoho already has the transfer, the sync page tells the accountant to remove it by hand.</span>
+        <Input name="reason" required placeholder="Why? (wrong amount, wrong ticks…)" data-settle-undo-reason />
+        <Button type="submit" size="md" tone="secondary" disabled={pending} data-settle-undo-confirm>{pending ? "Undoing…" : `Undo ${number}`}</Button>
+        {state.error ? <span className="text-xs font-semibold text-red">{state.error}</span> : null}
+      </form>
+    </details>
   );
 }

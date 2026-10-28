@@ -3,8 +3,8 @@ import { requirePermission } from "@/lib/auth";
 import { CLEARING_LABEL } from "@/lib/card-settlement-rules";
 import { dubaiToday, loadSettlements, loadUnsettled } from "@/lib/card-settlements";
 import { formatDate, formatDayTime } from "@/lib/format";
-import { recordSettlementAction } from "./actions";
-import { SettlementForm } from "./SettlementForm";
+import { recordSettlementAction, undoSettlementAction } from "./actions";
+import { SettlementForm, UndoSettlement } from "./SettlementForm";
 
 export const dynamic = "force-dynamic";
 
@@ -55,15 +55,18 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
         {history.length ? (
           <ul className="divide-y divide-line text-sm" data-settle-history>
             {history.map((h) => (
-              <li key={h.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5" data-settle-history-row={h.number}>
-                <span className="font-bold">{h.number}</span>
+              <li key={h.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 ${h.active ? "" : "text-muted"}`} data-settle-history-row={h.number}>
+                <span className={`font-bold ${h.active ? "" : "line-through"}`}>{h.number}</span>
+                {!h.active ? <Badge tone="red">Undone</Badge> : null}
                 <span>{formatDate(`${h.settledOn}T12:00:00+04:00`)}</span>
                 <Badge tone="neutral">{CLEARING_LABEL[h.method]}</Badge>
                 <span className="text-muted">{h.count} payment{h.count === 1 ? "" : "s"} · {aed(h.gross)} ticked · {aed(h.received)} received</span>
                 <span className="font-semibold">fee {aed(h.fee)} ({h.gross > 0 ? ((h.fee / h.gross) * 100).toFixed(2) : "0.00"}%)</span>
                 {h.statementRef ? <span className="text-muted">ref {h.statementRef}</span> : null}
                 <span className="ml-auto text-xs text-muted">by {h.createdByName ?? "—"} · {formatDayTime(h.createdAt)}</span>
-                <Badge tone={h.zohoStatus === "synced" ? "green" : h.zohoStatus === "failed" ? "red" : "neutral"}>{h.zohoStatus === "synced" ? "In Zoho" : h.zohoStatus === "failed" ? "Zoho: see the sync page" : "Zoho: queued"}</Badge>
+                <Badge tone={h.zohoStatus === "synced" ? "green" : h.zohoStatus === "failed" ? "red" : "neutral"}>{h.zohoStatus === "synced" ? (h.active ? "In Zoho" : "Zoho: nothing posted") : h.zohoStatus === "failed" ? "Zoho: see the sync page" : "Zoho: queued"}</Badge>
+                {!staff.viewingAs ? <UndoSettlement number={h.number} active={h.active} action={undoSettlementAction.bind(null, h.id)} /> : null}
+                {!h.active && h.note ? <span className="w-full text-xs">{h.note}</span> : null}
               </li>
             ))}
           </ul>

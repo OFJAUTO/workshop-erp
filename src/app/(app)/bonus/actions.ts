@@ -37,6 +37,8 @@ export async function approveBonusPeriod(formData: FormData) {
   const settings = await getSettings();
   const view = await bonusRowsOf(settings, periodKey);
   if (view.approved) redirect(`/bonus?period=${periodKey}&message=${encodeURIComponent("Already approved.")}`);
+  const estimated = view.rows.filter((r) => r.cardFeeEstimated).length;
+  if (estimated && formData.get("confirm_estimated") !== "1") redirect(`/bonus?period=${periodKey}&error=${encodeURIComponent(`${estimated} invoice${estimated === 1 ? " still has an" : "s still have"} estimated card fee. Tick "Approve anyway" to freeze them as they are, or record the bank settlement first.`)}`);
   const admin = createAdminClient();
   await admin.from("advisor_bonus_periods").insert({ period: periodKey, rows: view.rows, total_aed: view.total, approved_by: staff.id, created_by: staff.id, updated_by: staff.id });
   revalidatePath("/bonus");

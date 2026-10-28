@@ -172,6 +172,10 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   if (!raw) return { error: "Receipt not found." };
   const p = toPayment(raw as Record<string, unknown>);
   if (p.status === "voided") return { error: "Already voided." };
+  if (p.settlement_id) {
+    const { data: st } = await admin.from("card_settlements").select("number").eq("id", p.settlement_id).maybeSingle();
+    return { error: `${p.number} is part of the bank settlement ${(st as { number: string } | null)?.number ?? ""}. Undo that settlement on Card settlements first, then void the receipt.` };
+  }
   await admin.from("payments").update({ status: "voided", void_reason: clean, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
   // A receipt that already reached a Zoho book cannot be unposted from here: the row turns red for accounts to fix
   // by hand — including, after go-live, one that sits in the REAL book's opening balances.

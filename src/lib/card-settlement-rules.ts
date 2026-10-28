@@ -59,6 +59,11 @@ export function checkSettlement(gross: number, received: number | null): Settlem
   return { ok: true, gross: g, fee, feePercent, ...(askAgain ? { askAgain } : {}) };
 }
 
+/** A payment taken AFTER the settlement day cannot be in it (money cannot leave the clearing account before it came in). */
+export function receivedAfter(receivedAtIso: string, settledOn: string): boolean {
+  return new Date(Date.parse(receivedAtIso) + 4 * 3600 * 1000).toISOString().slice(0, 10) > settledOn;
+}
+
 /** Pre-ticked: payments received BEFORE the settlement day (the bank pays a day's batch out on a later day). */
 export function preTicked(receivedAtIso: string, settledOn: string): boolean {
   const day = new Date(Date.parse(receivedAtIso) + 4 * 3600 * 1000).toISOString().slice(0, 10);

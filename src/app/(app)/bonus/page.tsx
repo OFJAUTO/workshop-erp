@@ -79,6 +79,7 @@ export default async function BonusPage({ searchParams }: { searchParams: Promis
                     <span className="text-muted">{r.plate ?? r.jobNumber ?? ""} · {formatDate(r.date)}</span>
                     <span>Profit {aed(r.profit)}</span>
                     {r.clawback ? <Badge tone="red">Credit note</Badge> : <span className="text-muted">{r.ratePercent}%</span>}
+                    {r.cardFeeEstimated && !view.approved ? <span data-bonus-fee-estimated><Badge tone="amber">Card fee estimated</Badge></span> : null}
                     {r.overrideReason ? <span className="text-xs text-muted">{r.overrideReason}</span> : null}
                     <span className={`ml-auto font-bold ${r.bonus < 0 ? "text-red" : ""}`} data-bonus-amount>{aed(r.bonus)}</span>
                     {!view.approved && !r.clawback ? (
@@ -100,8 +101,14 @@ export default async function BonusPage({ searchParams }: { searchParams: Promis
           <Card className="flex flex-wrap items-center gap-3">
             <span className="text-base font-extrabold">Total: {aed(view.total)}</span>
             {view.approved ? <Badge tone="green">Approved</Badge> : view.rows.length ? (
-              <form action={approveBonusPeriod} className="ml-auto">
+              <form action={approveBonusPeriod} className="ml-auto flex flex-col items-end gap-2">
                 <input type="hidden" name="period" value={view.period.key} />
+                {view.rows.some((r) => r.cardFeeEstimated) ? (
+                  <label className="flex max-w-md items-start gap-2 text-sm font-semibold text-amber" data-bonus-estimated-ask>
+                    <input type="checkbox" name="confirm_estimated" value="1" required className="mt-1 h-5 w-5 accent-ink" />
+                    <span>{view.rows.filter((r) => r.cardFeeEstimated).length} invoice{view.rows.filter((r) => r.cardFeeEstimated).length === 1 ? " still has an" : "s still have"} estimated card fee (the bank has not settled yet). Approving freezes them as they are. Approve anyway?</span>
+                  </label>
+                ) : null}
                 <Button type="submit" size="lg" data-approve-bonuses>Approve bonuses for this period</Button>
               </form>
             ) : null}

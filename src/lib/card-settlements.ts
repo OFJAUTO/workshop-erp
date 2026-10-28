@@ -7,7 +7,8 @@ import { addWorkingDays } from "./planning";
 import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
-import { tryEnqueueZoho } from "./zoho-sync";
+import { recordOwnerReport } from "./owner-report";
+import { reopenZoho, tryEnqueueZoho } from "./zoho-sync";
 
 /** A card or payment-link payment still in the clearing account (no settlement yet). */
 export type UnsettledPayment = {
@@ -40,6 +41,8 @@ export type SettlementRow = {
   createdAt: string;
   createdByName: string | null;
   zohoStatus: string | null;
+  /** False once undone (kept on record with the reason in the note). */
+  active: boolean;
 };
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
@@ -80,8 +83,9 @@ export async function loadUnsettled(settledOn?: string): Promise<UnsettledPaymen
 
 export async function loadSettlements(limit = 40): Promise<SettlementRow[]> {
   const admin = createAdminClient();
-  const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, note, created_at, created_by").eq("is_active", true).order("created_at", { ascending: false }).limit(limit);
-  const rows = (data ?? []) as { id: string; number: string; method: ClearingMethod; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; note: string | null; created_at: string; created_by: string | null }[];
+  const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, note, created_at, created_by, is_active").order("created_at", { ascending: false }).limit(limit);
+  // A settlement undone in the same breath as it was made (two people at once) is noise, not history.
+  const rows = ((data ?? []) as { id: string; number: string; method: ClearingMethod; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; note: string | null; created_at: string; created_by: string | null; is_active: boolean }[]).filter((r) => r.is_active || !/settled by someone else at the same time/.test(r.note ?? ""));
   const ids = rows.map((r) => r.id);
   const staffIds = Array.from(new Set(rows.map((r) => r.created_by).filter((x): x is string => !!x)));
   const [{ data: ob }, { data: people }] = await Promise.all([
@@ -104,6 +108,7 @@ export async function loadSettlements(limit = 40): Promise<SettlementRow[]> {
     createdAt: r.created_at,
     createdByName: r.created_by ? (names.get(r.created_by) ?? null) : null,
     zohoStatus: zoho.get(r.id) ?? null,
+    active: r.is_active,
   }));
 }
 
@@ -128,13 +133,16 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
   const ids = Array.from(new Set(input.paymentIds.filter(Boolean)));
   if (!ids.length) return { ok: false, error: "Tick the payments this settlement paid out." };
   const admin = createAdminClient();
-  const { data: rows } = await admin.from("payments").select("id, number, method, amount_aed, status, is_active, settlement_id").in("id", ids);
-  const pays = (rows ?? []) as { id: string; number: string; method: string; amount_aed: number | string; status: string; is_active: boolean; settlement_id: string | null }[];
+  const { data: rows } = await admin.from("payments").select("id, number, method, amount_aed, status, is_active, settlement_id, received_at, job_id").in("id", ids);
+  const pays = (rows ?? []) as { id: string; number: string; method: string; amount_aed: number | string; status: string; is_active: boolean; settlement_id: string | null; received_at: string; job_id: string | null }[];
   if (pays.length !== ids.length) return { ok: false, error: "One of the ticked payments no longer exists. Reload the page." };
   const wrong = pays.find((p) => p.method !== input.method);
   if (wrong) return { ok: false, error: `${wrong.number} is not a ${CLEARING_LABEL[input.method].toLowerCase()} payment. One settlement covers one method.` };
   const gone = pays.find((p) => p.settlement_id || p.status !== "recorded" || !p.is_active);
   if (gone) return { ok: false, error: `${gone.number} is ${gone.settlement_id ? "already in another settlement" : "voided"}. Reload the page.` };
+  // Money cannot leave the clearing account before it came in: a payment taken after the settlement day is refused.
+  const late = pays.find((p) => dubaiDay(p.received_at) > input.settledOn);
+  if (late) return { ok: false, error: `${late.number} was received on ${dubaiDay(late.received_at)}, after the settlement date ${input.settledOn}. Untick it or pick the right date.` };
   const amounts = pays.map((p) => ({ id: p.id, amount: round2(Number(p.amount_aed) || 0) }));
   const check = checkSettlement(amounts.reduce((a, p) => a + p.amount, 0), input.received);
   if (!check.ok) return { ok: false, error: check.error ?? "Check the figures." };
@@ -171,7 +179,53 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
     return { ok: false, error: "Someone else settled one of these payments at the same time. Nothing was recorded: reload the page and try again." };
   }
   await tryEnqueueZoho("settlement", made.id, null, actorId);
+  await refreshClosedReports(pays.map((p) => p.job_id));
   return { ok: true, number: made.number, fee: check.fee, count: pays.length };
+}
+
+/** Closed jobs keep a frozen owner report: rebuilt when their card fee switches between estimate and actual. */
+async function refreshClosedReports(jobIds: (string | null)[]): Promise<void> {
+  const ids = Array.from(new Set(jobIds.filter((x): x is string => !!x)));
+  if (!ids.length) return;
+  const { data } = await createAdminClient().from("jobs").select("id").in("id", ids).eq("is_open", false);
+  const settings = await getSettings();
+  for (const j of (data ?? []) as { id: string }[]) {
+    try {
+      await recordOwnerReport(j.id, settings);
+    } catch (e) {
+      await logAppError("card_settlement_owner_report", e, { jobId: j.id });
+    }
+  }
+}
+
+export type UndoResult = { ok: true; number: string; posted: boolean } | { ok: false; error: string };
+
+/**
+ * Undoes a settlement (a wrong amount or wrong ticks): its payments go back to unsettled with their estimated fee,
+ * the settlement stays on record as undone with the reason, and Zoho is told. A transfer that already reached Zoho
+ * turns red on the sync page for the accountant to remove by hand; one that had not is never posted.
+ */
+export async function undoSettlement(settlementId: string, reason: string, actorId: string): Promise<UndoResult> {
+  const clean = reason.trim().slice(0, 300);
+  if (clean.length < 3) return { ok: false, error: "Write why the settlement is undone." };
+  const admin = createAdminClient();
+  const { data } = await admin.from("card_settlements").select("id, number, is_active, note, zoho_transfer_id, zoho_fee_id").eq("id", settlementId).maybeSingle();
+  const st = data as { id: string; number: string; is_active: boolean; note: string | null; zoho_transfer_id: string | null; zoho_fee_id: string | null } | null;
+  if (!st) return { ok: false, error: "Settlement not found." };
+  if (!st.is_active) return { ok: false, error: `${st.number} is already undone.` };
+  const { data: payRows } = await admin.from("payments").select("id, job_id").eq("settlement_id", st.id);
+  const { error: e1 } = await admin.from("card_settlements").update({ is_active: false, note: [st.note, `Undone: ${clean}`].filter(Boolean).join(" · ").slice(0, 600), updated_by: actorId }).eq("id", st.id).eq("is_active", true);
+  if (e1) {
+    await logAppError("card_settlement_undo", e1, { staffId: actorId, detail: { settlement: st.number } });
+    return { ok: false, error: SAVE_FAILED };
+  }
+  const { error: e2 } = await admin.from("payments").update({ settlement_id: null, actual_fee_aed: null, updated_by: actorId }).eq("settlement_id", st.id);
+  if (e2) await logAppError("card_settlement_undo_payments", e2, { staffId: actorId, detail: { settlement: st.number } });
+  // The outbox row runs again: unposted = skipped, posted = red with the by-hand words.
+  await tryEnqueueZoho("settlement", st.id, null, actorId);
+  await reopenZoho("settlement", st.id);
+  await refreshClosedReports(((payRows ?? []) as { job_id: string | null }[]).map((p) => p.job_id));
+  return { ok: true, number: st.number, posted: !!(st.zoho_transfer_id || st.zoho_fee_id) };
 }
 
 /** The clearing accounts' open balance at the end of a Dubai day (ERP side): card/link money not yet paid out. */

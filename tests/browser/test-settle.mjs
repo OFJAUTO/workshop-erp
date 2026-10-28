@@ -116,5 +116,77 @@ try {
 }
 void late;
 
+// 7. (28 Oct) A payment taken after the settlement day is greyed out and never counted.
+const fresh = await pay(250, 5.65, new Date().toISOString(), null);
+const yesterdayDay = new Date(Date.now() + 4 * 3600 * 1000 - 24 * 3600 * 1000).toISOString().slice(0, 10);
+const b7 = await browserFor("accounts", { viewport: { width: 1366, height: 1100 } });
+try {
+  await go(b7.page, `${base}/card-settlements?method=card`);
+  await b7.page.waitForSelector("[data-settle-date]", { timeout: 30000 });
+  await b7.page.locator("[data-settle-date]").fill(yesterdayDay);
+  await sleep(500);
+  const tick = b7.page.locator(`[data-settle-tick="${fresh.number}"]`);
+  check("7: a payment taken after the settlement date is disabled and unticked", (await tick.isDisabled()) && !(await tick.isChecked()) && (await b7.page.locator(`[data-settle-row="${fresh.number}"] [data-settle-after]`).count()) === 1);
+} finally {
+  await b7.browser.close();
+}
+
+// 8. Voiding a receipt that sits in a settlement is refused in words.
+const ob8 = await browserFor("owner", { viewport: { width: 1366, height: 1100 } });
+try {
+  await go(ob8.page, `${base}/invoices/${inv.id}`);
+  const det = ob8.page.locator("details", { hasText: "Void this receipt" }).first();
+  await det.locator("summary").click();
+  await det.locator("textarea, input[name=reason]").first().fill("E2E void check");
+  await det.locator("button", { hasText: /^Void$/ }).click();
+  await ob8.page.waitForURL(/error=/, { timeout: 20000 }).catch(() => null);
+  const body8 = decodeURIComponent(ob8.page.url());
+  check("8: voiding a settled receipt is refused (undo the settlement first)", /part of the bank settlement STL-\d{5}/.test(body8), body8.slice(-160));
+  const still = await sql("select status from public.payments where id = $1", [p1.id]);
+  check("8: the receipt stays recorded", still[0]?.status === "recorded");
+} finally {
+  await ob8.browser.close();
+}
+
+// 9. A closed job's frozen owner report is rebuilt when its card fee changes; undoing the settlement puts the estimate back.
+await sql("update public.jobs set is_open = false where id = $1", [jobId]);
+const before9 = (await sql("select owner_report_at::text as at from public.jobs where id = $1", [jobId]))[0]?.at ?? null;
+const b9 = await browserFor("accounts", { viewport: { width: 1366, height: 1100 } });
+try {
+  await go(b9.page, `${base}/card-settlements`);
+  const row = b9.page.locator(`[data-settle-undo="${st.number}"]`);
+  await row.locator("summary").click();
+  await row.locator("[data-settle-undo-reason]").fill("E2E wrong amount typed");
+  await row.locator("[data-settle-undo-confirm]").click();
+  await b9.page.waitForSelector("[data-settle-undone]", { timeout: 20000 }).catch(() => null);
+  check("9: Undo answers right there", /undone: its payments are back/.test((await b9.page.locator("[data-settle-undone]").first().textContent().catch(() => "")) ?? ""));
+  await b9.page.screenshot({ path: "tests/browser/shots/settle-undo.png" });
+} finally {
+  await b9.browser.close();
+}
+const after9 = await sql("select s.is_active, (select count(*)::int from public.payments where settlement_id = s.id) as n, (select count(*)::int from public.payments where id = any($2::uuid[]) and actual_fee_aed is null and settlement_id is null) as cleared from public.card_settlements s where s.id = $1", [st.id, [p1.id, p2.id]]);
+check("9: the settlement is undone and both payments are back to the estimate", after9[0]?.is_active === false && after9[0]?.n === 0 && after9[0]?.cleared === 2, JSON.stringify(after9[0]));
+const at9 = (await sql("select owner_report_at::text as at from public.jobs where id = $1", [jobId]))[0]?.at ?? null;
+check("9: the closed job's owner report was rebuilt", !!at9 && at9 !== before9, `${before9} -> ${at9}`);
+const q9 = await sql("select status from public.zoho_outbox where kind = 'settlement' and record_id = $1", [st.id]);
+check("9: Zoho is told (the row runs again; unposted = nothing posted)", q9.length === 1, JSON.stringify(q9));
+await sql("delete from public.zoho_outbox where kind = 'settlement' and record_id = $1", [st.id]);
+await sql("update public.jobs set is_open = true where id = $1", [jobId]);
+
+// 10. The advisor bonus marks a profit whose card fee is still an estimate, and approval asks first.
+const [bigInv] = await sql("insert into public.invoices (number, kind, job_id, customer_id, status, issued_at, subtotal_aed, taxable_aed, vat_aed, total_aed, created_by, updated_by) values ($1, 'tax_invoice', $2, $3, 'issued', now(), 20000, 20000, 1000, 21000, $4, $4) returning id", [`INV-E2EBON-${Date.now().toString().slice(-6)}`, jobId, job.customer_id, owner]);
+await pay(21000, 474.6, yesterday, bigInv.id);
+const ob10 = await browserFor("owner", { viewport: { width: 1366, height: 1100 } });
+try {
+  await go(ob10.page, `${base}/bonus`);
+  await ob10.page.waitForLoadState("domcontentloaded");
+  await sleep(1500);
+  check("10: the bonus row says the card fee is estimated", (await ob10.page.locator("[data-bonus-fee-estimated]").count()) >= 1);
+  check("10: approving the period asks first (tick to approve anyway)", (await ob10.page.locator("[data-bonus-estimated-ask] input[required]").count()) === 1);
+  await ob10.page.screenshot({ path: "tests/browser/shots/settle-bonus.png" });
+} finally {
+  await ob10.browser.close();
+}
+
 cleanupDb();
 process.exit(summary() ? 1 : 0);

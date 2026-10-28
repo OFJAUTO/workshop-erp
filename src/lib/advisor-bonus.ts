@@ -45,6 +45,8 @@ export type BonusRow = {
   bonus: number;
   /** A credit note took this invoice's already-approved bonus back. */
   clawback: boolean;
+  /** The card/link fee in this profit is still the estimate (the bank has not settled the payment yet). */
+  cardFeeEstimated?: boolean;
 };
 export type BonusView = { period: BonusPeriod; rows: BonusRow[]; approved: { at: string; byName: string | null } | null; total: number };
 
@@ -108,6 +110,7 @@ export async function bonusRowsOf(settings: Settings, periodKey?: string): Promi
       overrideReason: o?.reason ?? null,
       bonus: round2((bonusProfit * rate) / 100),
       clawback: false,
+      cardFeeEstimated: p.provisionalWhy.includes("card fee estimated until the bank settles"),
     });
   }
   // Credit notes this period against invoices whose bonus was already approved: the bonus comes back off.
