@@ -1705,7 +1705,9 @@ async function createExpense(org: string, input: { accountId: string; paidThroug
       reference_number: cut(input.reference, 100),
       description: cut(input.description, 100),
       // Itemised (a settlement's MSF and fee per payment, each with the 5% tax that books the input VAT).
-      ...(input.lines?.length ? { is_inclusive_tax: false, line_items: input.lines.map((l, i) => ({ account_id: l.account_id, amount: l.amount, ...(l.tax_id ? { tax_id: l.tax_id } : {}), description: cut(l.description, 100), item_order: i + 1 })) } : {}),
+      // A UAE taxed expense needs its tax treatment and place of supply: the bank (Network International) is VAT
+      // registered and the service is supplied in Dubai, as on our own invoices.
+      ...(input.lines?.length ? { is_inclusive_tax: false, tax_treatment: "vat_registered", place_of_supply: "DU", line_items: input.lines.map((l, i) => ({ account_id: l.account_id, amount: l.amount, ...(l.tax_id ? { tax_id: l.tax_id } : {}), description: cut(l.description, 100), item_order: i + 1 })) } : {}),
     },
   });
   if (!j.expense) throw new ZohoError("Zoho did not return the new expense.");
