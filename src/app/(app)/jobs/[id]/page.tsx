@@ -77,6 +77,7 @@ import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./Se
 import { StaffPicker } from "@/components/StaffPicker";
 import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
 import { sidesOfDepartment } from "@/lib/job-sides";
+import { bodyshopScopeOf, maySignAftercare } from "@/lib/team-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -433,7 +434,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           {!aftercare.done_at && (role === "owner" || role === "service_advisor") ? (
             <AftercareMessage template={aftercareReminder ?? String(settings.whatsapp_aftercare_template ?? "")} date={formatDate(aftercare.due_date)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} />
           ) : null}
-          {!aftercare.done_at && (role === "owner" || role === "workshop_manager" || role === "team_leader") && !staff.viewingAs ? (
+          {!aftercare.done_at && maySignAftercare(bodyshopScopeOf(staff)) ? (
             <AftercareSignoff action={signOffAftercare.bind(null, id)} points={[...AFTERCARE_POINTS]} jobId={id} />
           ) : null}
         </Card>

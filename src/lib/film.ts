@@ -147,9 +147,13 @@ export async function finishRoll(rollId: string, settings: Settings, actor: { id
 }
 
 /** The film and tint cost on one job. */
-export async function jobFilmCost(jobId: string): Promise<{ film: number; tint: number; metres: number }> {
+export async function jobFilmCost(jobId: string): Promise<{ film: number; tint: number; metres: number; ceramic: number }> {
   const admin = createAdminClient();
-  const { data } = await admin.from("film_usage").select("metres, cost_aed, roll:film_rolls(kind)").eq("job_id", jobId).eq("is_active", true);
+  const [{ data }, { data: cer }] = await Promise.all([
+    admin.from("film_usage").select("metres, cost_aed, roll:film_rolls(kind)").eq("job_id", jobId).eq("is_active", true),
+    admin.from("ceramic_usage").select("cost_aed").eq("job_id", jobId).eq("is_active", true),
+  ]);
+  const ceramic = round2((cer ?? []).reduce((a, c) => a + (Number(c.cost_aed) || 0), 0));
   let film = 0;
   let tint = 0;
   let metres = 0;
@@ -161,7 +165,7 @@ export async function jobFilmCost(jobId: string): Promise<{ film: number; tint: 
       metres += Number(u.metres) || 0;
     }
   }
-  return { film: round2(film), tint: round2(tint), metres: round2(metres) };
+  return { film: round2(film), tint: round2(tint), metres: round2(metres), ceramic };
 }
 
 /** The consumables share per bodyshop car: the monthly amount over the cars finished that month (last month's average until month end). */
@@ -173,4 +177,19 @@ export async function consumablesShare(settings: Settings, now = new Date()): Pr
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
   const { count } = await admin.from("jobs").select("id", { count: "exact", head: true }).eq("department", "bodyshop").gte("gated_out_at", start).lt("gated_out_at", end);
   return round2(monthly / Math.max(1, count ?? 0));
+}
+
+/** Ceramic on a car (B2): one row per coat, the share of a bottle (Settings: cars per bottle) at the bottle price. */
+export async function recordCeramicUsage(jobId: string, input: { kind: "exterior" | "interior"; product: string | null; batch: string | null }, settings: Settings, by: string): Promise<{ error?: string; cost?: number }> {
+  const perBottle = Number(input.kind === "exterior" ? settings.ceramic_cars_exterior_per_bottle : settings.ceramic_cars_interior_per_bottle) || (input.kind === "exterior" ? 4 : 5.5);
+  const share = Math.round((1 / perBottle) * 1000) / 1000;
+  const cost = round2((Number(settings.ceramic_bottle_price_aed) || 300) * share);
+  const { error } = await createAdminClient().from("ceramic_usage").insert({ job_id: jobId, kind: input.kind, product: input.product?.slice(0, 120) ?? null, batch: input.batch?.slice(0, 60) ?? null, share, cost_aed: cost, created_by: by, updated_by: by });
+  return error ? { error: "Couldn't save the ceramic. Try again." } : { cost };
+}
+
+/** The ceramic recorded on a car. */
+export async function jobCeramicUsage(jobId: string): Promise<{ id: string; kind: string; product: string | null; batch: string | null; cost: number; at: string }[]> {
+  const { data } = await createAdminClient().from("ceramic_usage").select("id, kind, product, batch, cost_aed, created_at").eq("job_id", jobId).eq("is_active", true).order("created_at");
+  return ((data ?? []) as { id: string; kind: string; product: string | null; batch: string | null; cost_aed: number | string; created_at: string }[]).map((r) => ({ id: r.id, kind: r.kind, product: r.product, batch: r.batch, cost: Number(r.cost_aed) || 0, at: r.created_at }));
 }

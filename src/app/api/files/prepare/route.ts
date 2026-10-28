@@ -13,7 +13,7 @@ export async function authoriseJobUpload(jobId: string) {
   if (!staff || staff.viewingAs) return null;
   const { data } = await createAdminClient().from("jobs").select("id, is_open").eq("id", jobId).maybeSingle();
   if (!data) return null;
-  return { staffId: staff.id, jobId: data.id as string };
+  return { staffId: staff.id, jobId: data.id as string, roleId: staff.role_id as string };
 }
 
 /** Step 1 of an upload: a one-time address for the file. */

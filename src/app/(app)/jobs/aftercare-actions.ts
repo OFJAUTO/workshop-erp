@@ -7,15 +7,16 @@ import { blankToNull } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { verifyPin } from "@/lib/pin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { bodyshopScopeOf, maySignAftercare } from "@/lib/team-scope";
 
 const BODYSHOP_DEPTS = ["bodyshop", "paint", "ppf_tint", "detailing"];
 
 /** The PPF team leader signs the 10-day check off with his own PIN; the findings and note are kept. */
 export async function signOffAftercare(jobId: string, formData: FormData) {
   const staff = await requireStaff();
-  const back = `/jobs/${jobId}`;
-  const allowed = !staff.viewingAs && (staff.role_id === "owner" || ((staff.role_id === "workshop_manager" || staff.role_id === "team_leader") && BODYSHOP_DEPTS.includes(staff.department_id ?? "")));
-  if (!allowed) redirect(`${back}?error=${encodeURIComponent("Only the owner, the bodyshop manager or a team leader signs the check off.")}`);
+  const back = String(formData.get("from") ?? "") === "bodyshop" ? `/bodyshop/${jobId}` : `/jobs/${jobId}`;
+  void BODYSHOP_DEPTS;
+  if (!maySignAftercare(bodyshopScopeOf(staff))) redirect(`${back}?error=${encodeURIComponent("The PPF team leader (or the bodyshop manager) signs the 10-day check off.")}`);
   const admin = createAdminClient();
   const { data: row } = await admin.from("aftercare_checks").select("id, done_at").eq("job_id", jobId).eq("is_active", true).maybeSingle();
   if (!row) redirect(`${back}?error=${encodeURIComponent("No after-care check on this job.")}`);

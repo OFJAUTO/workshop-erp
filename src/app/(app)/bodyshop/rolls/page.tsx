@@ -4,14 +4,15 @@ import { filmTypesOf, rollsWithUse } from "@/lib/film";
 import { formatDate } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { finishRollAction, openRollAction } from "./actions";
+import { bodyshopScopeOf, mayEnterProduct } from "@/lib/team-scope";
 
 export const dynamic = "force-dynamic";
-const BODYSHOP_DEPTS = ["bodyshop", "paint", "ppf_tint", "detailing"];
 
 /** Film and tint rolls: open one, see the metres left, finish it (waste checked, tint split over its cars). */
 export default async function RollsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
-  const mayTouch = !staff.viewingAs && (staff.role_id === "owner" || ((staff.role_id === "workshop_manager" || staff.role_id === "team_leader") && BODYSHOP_DEPTS.includes(staff.department_id ?? "")));
+  const mayTouch = mayEnterProduct(bodyshopScopeOf(staff), "ppf");
+  const seesPrices = !staff.viewingAs && (staff.role_id === "owner" || staff.role_id === "accounts");
   if (!mayTouch && staff.role_id !== "accounts") return <Notice tone="error">Rolls are for the owner, the bodyshop manager and the team leaders.</Notice>;
   const { message, error } = await searchParams;
   const settings = await getSettings();
@@ -34,7 +35,7 @@ export default async function RollsPage({ searchParams }: { searchParams: Promis
               <Select name="kind" defaultValue="film" className="min-w-36"><option value="film">Film (PPF)</option><option value="tint">Tint</option></Select>
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Film type (for film)
-              <Select name="film_key" defaultValue={types[0]?.key ?? ""} className="min-w-44">{types.map((t) => <option key={t.key} value={t.key}>{t.name} · AED {t.roll_price} / {t.roll_m} m</option>)}</Select>
+              <Select name="film_key" defaultValue={types[0]?.key ?? ""} className="min-w-44">{types.map((t) => <option key={t.key} value={t.key}>{t.name}{seesPrices ? ` · AED ${t.roll_price} / ${t.roll_m} m` : ` · ${t.roll_m} m`}</option>)}</Select>
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Roll name or number
               <Input name="name" placeholder="Roll #12" required className="min-w-40" />
@@ -52,7 +53,7 @@ export default async function RollsPage({ searchParams }: { searchParams: Promis
               <li key={r.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm" data-roll={r.name}>
                 <Badge tone="ink">{r.kind === "tint" ? "Tint" : "Film"}</Badge>
                 <span className="font-bold">{r.name}</span>
-                {r.kind === "film" ? <span className="text-muted">{typeName(r.film_key)} · {r.usedMetres} m used{r.metresLeft !== null ? ` · ${r.metresLeft} m left of ${r.length_m} m` : ""}</span> : <span className="text-muted">{r.usedJobs} car{r.usedJobs === 1 ? "" : "s"} so far · AED {r.price_aed} the roll</span>}
+                {r.kind === "film" ? <span className="text-muted">{typeName(r.film_key)} · {r.usedMetres} m used{r.metresLeft !== null ? ` · ${r.metresLeft} m left of ${r.length_m} m` : ""}</span> : <span className="text-muted">{r.usedJobs} car{r.usedJobs === 1 ? "" : "s"} so far{seesPrices ? ` · AED ${r.price_aed} the roll` : ""}</span>}
                 <span className="text-xs text-muted">opened {formatDate(r.opened_at)}</span>
                 {mayTouch ? <form action={finishRollAction.bind(null, r.id)} className="ml-auto"><Button type="submit" tone="secondary" size="md" data-finish-roll>Roll finished</Button></form> : null}
               </li>

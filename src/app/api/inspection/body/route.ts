@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { canEditBody, cleanFinding, isBodyshopStaff, loadBodyState, notifyBodyshopAssessment } from "@/lib/bodyshop-findings";
+import { canEditBody, cleanFinding, isBodyshopAssessor, isBodyshopStaff, loadBodyState, notifyBodyshopAssessment } from "@/lib/bodyshop-findings";
 import { panelLabel } from "@/lib/car-outline";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     await admin.from("inspections").update(patch).eq("id", insp.id);
     if (body.structural === true) await admin.from("job_events").insert({ job_id: insp.job_id, event_type: "bodyshop_assessment", note: `Structural / chassis damage suspected by ${staff.display_name}: chassis measurement needed`, created_by: staff.id });
   } else if (body.op === "checked") {
-    if (!isBodyshopStaff(s)) return NextResponse.json({ error: "Only bodyshop staff or the owner mark the assessment checked." }, { status: 403 });
+    if (!isBodyshopAssessor(s)) return NextResponse.json({ error: "Only the bodyshop manager or the owner mark the assessment checked." }, { status: 403 });
     await admin.from("inspections").update({ bodyshop_checked_at: now, bodyshop_checked_by: staff.id, ...stamp }).eq("id", insp.id);
     await admin.from("job_events").insert({ job_id: insp.job_id, event_type: "bodyshop_assessment", note: `Bodyshop findings checked by ${staff.display_name}`, created_by: staff.id });
   } else return NextResponse.json({ error: "Bad request." }, { status: 400 });

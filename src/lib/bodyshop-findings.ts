@@ -48,6 +48,10 @@ export function isBodyshopStaff(staff: { role_id: string; department_id?: string
   if (staff.role_id === "workshop_manager" || staff.role_id === "team_leader") return sideOfDepartment(staff.department_id ?? null) === "bodyshop";
   return false;
 }
+/** Changing or checking the assessment: the owner and the bodyshop manager (a team leader reads it, B2). */
+export function isBodyshopAssessor(staff: { role_id: string; department_id?: string | null }): boolean {
+  return isBodyshopStaff(staff) && staff.role_id !== "team_leader";
+}
 
 /**
  * Who may change the bodyshop findings: bodyshop staff and the owner always; before the bodyshop check, also the
@@ -55,6 +59,7 @@ export function isBodyshopStaff(staff: { role_id: string; department_id?: string
  */
 export async function canEditBody(staff: { id: string; role_id: string; department_id?: string | null; viewingAs?: unknown }, insp: { job_id: string; status: string; bodyshop_checked_at: string | null }): Promise<boolean> {
   if (staff.viewingAs) return false;
+  if (staff.role_id === "team_leader") return false;
   if (isBodyshopStaff(staff)) return true;
   if (insp.bodyshop_checked_at) return false;
   if (staff.role_id === "technician") return ["not_started", "in_progress", "returned"].includes(insp.status) && (await technicianOnJob(insp.job_id, staff.id));

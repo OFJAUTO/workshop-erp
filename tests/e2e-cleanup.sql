@@ -10,6 +10,8 @@ begin
   select coalesce(array_agg(id), '{}') into cust_ids from public.customers where id::text like '22222222-0000-4000-8000-00000000e%';
   select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids);
   select coalesce(array_agg(id), '{}') into job_ids from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids) or vehicle_id = any(veh_ids);
+  delete from public.bodyshop_problems where job_id = any(job_ids);
+  delete from public.ceramic_usage where job_id = any(job_ids);
   delete from public.bodyshop_clockings where job_id = any(job_ids);
   delete from public.bodyshop_assignments where job_id = any(job_ids);
   delete from public.bodyshop_signoffs where job_id = any(job_ids);
@@ -72,6 +74,8 @@ begin
   select coalesce(array_agg(id), '{}') into cust_ids from public.customers where phone like '+9715000000%' or full_name ilike 'e2e %';
   select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where customer_id = any(cust_ids);
   select coalesce(array_agg(id), '{}') into job_ids from public.jobs where customer_id = any(cust_ids) or vehicle_id = any(veh_ids);
+  delete from public.bodyshop_problems where job_id = any(job_ids);
+  delete from public.ceramic_usage where job_id = any(job_ids);
   delete from public.bodyshop_clockings where job_id = any(job_ids);
   delete from public.bodyshop_assignments where job_id = any(job_ids);
   delete from public.bodyshop_signoffs where job_id = any(job_ids);
@@ -141,6 +145,9 @@ begin
   delete from public.notifications where staff_id = any(sids);
   delete from public.notification_preferences where staff_id = any(sids);
   delete from public.upload_failures where staff_id = any(sids);
+  delete from public.bodyshop_problems where raised_by = any(sids) or answered_by = any(sids);
+  delete from public.ceramic_usage where created_by = any(sids);
+  update public.bodyshop_stages set handover_by = null where handover_by = any(sids);
   delete from public.bodyshop_clockings where staff_id = any(sids);
   delete from public.bodyshop_assignments where staff_id = any(sids);
   delete from public.bodyshop_signoffs where staff_id = any(sids);

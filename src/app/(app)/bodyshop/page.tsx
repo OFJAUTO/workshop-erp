@@ -4,6 +4,7 @@ import { LinkButton, Notice, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { loadBoard } from "@/lib/bodyshop";
 import { can, type RoleId } from "@/lib/roles";
+import { FALLBACK_POLL_MS } from "@/lib/live-connection";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +16,13 @@ export default async function BodyshopPage({ searchParams }: { searchParams: Pro
   const board = await loadBoard();
   return (
     <>
-      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_signoffs"]} />
+      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_signoffs"]} alwaysPollMs={role === "team_leader" ? FALLBACK_POLL_MS : undefined} />
       <PageHeader
         title="Bodyshop"
         subtitle={`${board.cars.length} car${board.cars.length === 1 ? "" : "s"} in the bodyshop · ${board.goingOut.length} going out today or tomorrow`}
         actions={
           <>
-            {role === "team_leader" ? <LinkButton href="/bodyshop/mine" size="lg">My section</LinkButton> : null}
+            {role === "team_leader" ? <LinkButton href="/bodyshop/mine" size="lg">My team</LinkButton> : null}
             {can(role, "bodyshopQuote") ? <LinkButton href="/estimates/new?bodyshop=1" size="lg" data-new-bodyshop-estimate>New estimate (bodyshop)</LinkButton> : null}
           </>
         }

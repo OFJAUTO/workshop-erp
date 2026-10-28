@@ -20,6 +20,10 @@ export async function POST(request: NextRequest) {
   if (!jobId || !path.startsWith(`${jobId}/`) || !FILE_KINDS.includes(kind)) return NextResponse.json({ error: "Bad request." }, { status: 400 });
   const who = await authoriseJobUpload(jobId);
   if (!who) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
+  if (who.roleId === "team_leader" && kind !== "bodyshop_photo") return NextResponse.json({ error: "Not allowed." }, { status: 403 });
+  // A stored file is registered once: an existing path is never signed again for someone else.
+  const { data: already } = await createAdminClient().from("job_files").select("id").eq("storage_path", path).limit(1);
+  if ((already ?? []).length) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   // ref_id is a uuid column: a file is tied to a payment, an LPO, a work line or a panel's own key (a uuid).
   const refId = body.refId ? String(body.refId) : null;
   if (refId && !isUuid(refId)) {

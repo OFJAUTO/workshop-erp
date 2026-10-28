@@ -6,6 +6,7 @@ import { daysBetween, dubaiDay } from "./warranty";
 import { dubaiDate, workingTimeOf } from "./jobs";
 import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { bodyshopPeople } from "./bodyshop";
 
 /**
  * The complimentary 10-day after-care check on package jobs (20 October 2026). Booked by itself the
@@ -76,6 +77,9 @@ export async function aftercareHourly(opts: { jobIds?: string[] } = {}): Promise
     const step = day >= 20 && !r.reminded_20_at ? { col: "reminded_20_at", title: `Third reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder (ready on the job card). After 30 days the warranty shows Not activated." } : day >= 12 && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_12_at", title: `Second reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder with the warranty link (ready on the job card)." } : day >= 8 && !r.reminded_at && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_at", title: `10-day after-care check due ${formatDate(String(r.due_date))} · ${job.job_number}`, body: "Send the customer the message (ready on the job card) and confirm the visit. The check activates the warranty." } : null;
     if (!step) continue;
     await notifyStaff(await jobAdvisorIds(r.job_id as string), { type: "aftercare_due", title: step.title, body: step.body, jobId: r.job_id as string, href: `/jobs/${r.job_id}#warranty-card` });
+    // The PPF leader does the check: told on the same days, sent to the bodyshop page where his card is.
+    const ppfLeaders = (await bodyshopPeople()).leaders.filter((l) => l.section === "ppf").map((l) => l.id);
+    if (ppfLeaders.length) await notifyStaff(ppfLeaders, { type: "aftercare_due", title: step.title.replace("Send the reminder", "The 10-day check"), body: "The customer is due for the 10-day after-care check: sign it off on the car's bodyshop page.", jobId: r.job_id as string, href: `/bodyshop/${r.job_id}#aftercare` });
     await admin.from("aftercare_checks").update({ [step.col]: new Date().toISOString() }).eq("id", r.id);
     if (step.col === "reminded_at") reminded++;
     else overdue++;

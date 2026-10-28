@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { compactPartNumber } from "@/lib/price-import";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { can, type RoleId } from "@/lib/roles";
 
 /**
  * Price memory: the last price given for a part number ("A 167 330 68 00" and "A1673306800" are the same number):
@@ -10,6 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  if (staff && (staff.viewingAs ? false : !can(staff.role_id as RoleId, "viewPartCosts"))) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const pn = request.nextUrl.searchParams.get("pn") ?? "";
   const compact = compactPartNumber(pn);
   if (compact.length < 4) return NextResponse.json({ memory: null });

@@ -9,6 +9,20 @@ import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
 
+const HANDOVER_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGklEQVR4nGP4z8BAEmIY1TCqYVTDqIbhqgEAOK8f8Rf2cHcAAAAASUVORK5CYII=", "base64");
+/** THE stage hand-over (B2): open it, add a photo, the PIN when asked, sign off. */
+async function handOver(page, key, pin) {
+  await page.locator(`[data-stage-handover-open='${key}']`).click();
+  const dlg = page.locator(`[data-stage-handover='${key}']`);
+  await dlg.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: `${key}.png`, mimeType: "image/png", buffer: HANDOVER_PNG });
+  for (let i = 0; i < 40 && (await dlg.locator("[data-stage-handover-send]").isDisabled()); i++) await new Promise((r) => setTimeout(r, 300));
+  if (pin) await dlg.locator("[data-handover-pin]").fill(pin);
+  const before = page.url();
+  await dlg.locator("[data-stage-handover-send]").click();
+  await page.waitForURL((u) => u.toString() !== before && /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
 cleanupDb();
@@ -107,9 +121,14 @@ await section("3-10 stages, leader, tablet, updates", async () => {
   await mp.locator("[data-removed-add]").click();
   await afterSubmit(mp);
   check("3: a removed item is written down", (await sql("select count(*)::int as n from public.bodyshop_removed_items where job_id = $1 and is_active", [jobId]))[0]?.n === 1);
-  // The first stage done by the manager (strip and refit is his team).
-  await mp.locator("[data-stage-done='removal']").click();
-  await afterSubmit(mp);
+  // The first stage signed off (28 Oct, B2: a team stage is handed over with photos and the leader's PIN; the owner
+  // signs without a PIN, so no real person's PIN is touched).
+  {
+    const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
+    await go(op, `${base}/bodyshop/${jobId}`);
+    await handOver(op, "removal", null);
+    await ob.close();
+  }
   const after1 = await sql("select key, status from public.bodyshop_stages where job_id = $1 and is_active order by position limit 2", [jobId]);
   check("3: Done moves the car to the next stage", after1[0]?.status === "done" && after1[1]?.status === "active", JSON.stringify(after1));
   // Change the handover date: everyone is told.
@@ -138,7 +157,7 @@ await section("3-10 stages, leader, tablet, updates", async () => {
   await shot(lp, "02-team-leader-due-list");
   // The leader's menu has no money pages.
   const nav = (await lp.locator("aside").textContent()) ?? "";
-  check("4: the leader's menu has Bodyshop and My section, no Invoices or Profit", /My section/.test(nav) && !/Invoices|Profit/.test(nav));
+  check("4: the leader's menu has Bodyshop and My team, no Invoices or Profit", /My team/.test(nav) && !/Invoices|Profit/.test(nav));
   await lb.close();
 
   // The shared section tablet: a registered device with section PPF, the installer clocks out with the PIN.
@@ -182,9 +201,9 @@ await section("3-10 stages, leader, tablet, updates", async () => {
   await eb.close();
   await sql("update public.bodyshop_stages set status = 'pending', started_at = null where job_id = $1 and key = 'electrical'", [jobId]);
 
-  // Customer updates: the leader picks a photo and the message carries the progress link.
+  // Customer updates (28 Oct, B2: the bodyshop manager or the advisor, never a leader - the message goes to the customer's phone).
   await sql("insert into public.job_files (job_id, kind, storage_path, content_type, uploaded_by, created_by, updated_by) values ($1, 'bodyshop_photo', $2, 'image/jpeg', $3, $3, $3)", [jobId, `${jobId}/e2e-photo.jpg`, people.ppfLeader]);
-  const { browser: ub, page: up } = await browserForId(people.ppfLeader, { viewport: { width: 1366, height: 900 } });
+  const { browser: ub, page: up } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
   await go(up, `${base}/bodyshop/${jobId}`);
   await up.locator("[data-pick-photo='arrived']").click();
   if (!(await until(async () => ((await up.locator("[data-photo-picker]").count()) ? 1 : null), 10, 300))) await up.locator("[data-pick-photo='arrived']").click();
@@ -237,8 +256,9 @@ await section("11-12 sign-off and going out", async () => {
     const box = lp.locator(`[data-stage-warranty-form] ${sel}`);
     if (await box.count()) { await box.click({ clickCount: 3 }); await box.pressSequentially(val); }
   }
-  await lp.locator("[data-stage-done='ppf']").click();
+  await lp.locator("[data-stage-warranty-save='ppf']").click();
   await afterSubmit(lp);
+  await handOver(lp, "ppf", "1234");
   await lb.close();
   await sql("update public.bodyshop_stages set status = 'done', done_at = now() where job_id = $1 and key <> 'handover' and status <> 'done'", [jobId]);
   await sql("update public.jobs set status = 'ready', stage = 'ready' where id = $1", [jobId]);

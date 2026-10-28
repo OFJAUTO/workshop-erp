@@ -28,6 +28,21 @@ const renderPage = (pdf, i, file) => {
 const termsBefore = (await sql("select value from public.settings where key = 'warranty_terms'"))[0]?.value ?? null;
 const SPEC = { rows: { windshield: { on: true, coverage: "clear", shade: "clear", double: false }, front_sides: { on: true, shade: 50, double: false }, rear_sides: { on: true, shade: 50, double: false }, rear_window: { on: true, shade: 50, double: false }, roof: { on: false, shade: null, double: false } }, roofFitted: false };
 const uploaded = [];
+// THE stage hand-over (28 Oct, B2): a team stage is signed off with a photo and the leader's PIN (E2e leaders: 1234).
+const HANDOVER_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGklEQVR4nGP4z8BAEmIY1TCqYVTDqIbhqgEAOK8f8Rf2cHcAAAAASUVORK5CYII=", "base64");
+async function handOver(page, key, pin) {
+  await page.locator(`[data-stage-handover-open='${key}']`).first().click();
+  const dlg = page.locator(`[data-stage-handover='${key}']`);
+  if (!(await dlg.locator("[data-job-file-upload] a, [data-job-file-upload] img").count())) {
+    await dlg.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: `${key}.png`, mimeType: "image/png", buffer: HANDOVER_PNG });
+  }
+  for (let i = 0; i < 40 && (await dlg.locator("[data-stage-handover-send]").isDisabled()); i++) await sleep(300);
+  if (pin) await dlg.locator("[data-handover-pin]").fill(pin);
+  const before = page.url();
+  await dlg.locator("[data-stage-handover-send]").click();
+  await page.waitForURL((u) => u.toString() !== before && /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
+  await sleep(1500);
+}
 
 cleanupDb();
 const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active limit 1"))[0].id;
@@ -52,17 +67,17 @@ await activate("ppf");
 const { browser: lb, page: lp } = await browserForId(people.ppfLeader, { viewport: { width: 1366, height: 1000 } });
 await go(lp, `${base}/bodyshop/${jobId}#stages`);
 const form = lp.locator('[data-stage-warranty-form="ppf"]');
-check("1: the PPF stage's Done asks for the warranty details (PPF, and the tint merged into it)", (await form.count()) === 1 && (await form.locator('[data-warranty-roll="ppf:"]').count()) === 1 && (await form.locator('[data-warranty-roll="tint:"]').count()) === 1);
+check("1: the PPF stage asks for the warranty details (PPF, and the tint merged into it)", (await form.count()) === 1 && (await form.locator('[data-warranty-roll="ppf:"]').count()) === 1 && (await form.locator('[data-warranty-roll="tint:"]').count()) === 1);
 check("1: the areas covered come pre-ticked from the quotation (Full body)", (await form.locator('[data-warranty-area="Full body"]').getAttribute("aria-pressed")) === "true");
-await form.locator('[data-stage-done="ppf"]').click();
-await submitted(lp);
-check("1: Done without the numbers is refused, saying what is missing", /roll or batch number/.test(decodeURIComponent(lp.url())) && (await sql("select status from public.bodyshop_stages where job_id = $1 and key = 'ppf' and is_active", [jobId]))[0]?.status === "active", decodeURIComponent(lp.url()).slice(-160));
+await handOver(lp, "ppf", "1234");
+check("1: signing off without the numbers is refused, saying what is missing", /roll or batch number/.test(decodeURIComponent(lp.url())) && (await sql("select status from public.bodyshop_stages where job_id = $1 and key = 'ppf' and is_active", [jobId]))[0]?.status === "active", decodeURIComponent(lp.url()).slice(-160));
 await lp.locator('[data-stage-warranty-form="ppf"] [data-warranty-roll="ppf:"]').pressSequentially("E2E-PPF-0042");
 await lp.locator('[data-stage-warranty-form="ppf"] [data-warranty-roll="tint:"]').pressSequentially("E2E-TINT-007");
 await lp.locator('[data-stage-warranty-form="ppf"]').scrollIntoViewIfNeeded();
 await lp.screenshot({ path: shot("warranty12-1-ppf-stage.png"), clip: (await lp.locator('[data-stage-warranty-form="ppf"]').boundingBox()) ?? undefined });
-await lp.locator('[data-stage-warranty-form="ppf"] [data-stage-done="ppf"]').click();
+await lp.locator('[data-stage-warranty-form="ppf"] [data-stage-warranty-save="ppf"]').click();
 await submitted(lp);
+await handOver(lp, "ppf", "1234");
 const ppfEntry = (await sql("select roll_batch, areas from public.warranty_entries where job_id = $1 and product = 'ppf' and is_active", [jobId]))[0];
 const tintEntry = (await sql("select roll_batch from public.warranty_entries where job_id = $1 and product = 'tint' and is_active", [jobId]))[0];
 check("1: with the numbers the stage is done and the details kept (roll, areas, tint roll)", ppfEntry?.roll_batch === "E2E-PPF-0042" && JSON.stringify(ppfEntry?.areas) === JSON.stringify(["Full body"]) && tintEntry?.roll_batch === "E2E-TINT-007" && (await sql("select status from public.bodyshop_stages where job_id = $1 and key = 'ppf' and is_active", [jobId]))[0]?.status === "done", JSON.stringify({ ppfEntry, tintEntry }));
@@ -73,11 +88,12 @@ await activate("detail");
 const { browser: db, page: dp } = await browserForId(people.detailingLeader, { viewport: { width: 1366, height: 1000 } });
 await go(dp, `${base}/bodyshop/${jobId}#stages`);
 const cform = dp.locator('[data-stage-warranty-form="detail"]');
-check("2: the final detail's Done asks for the ceramic product and batch", (await cform.count()) === 1 && (await cform.locator("[data-warranty-product]").count()) === 1);
+check("2: the final detail asks for the ceramic product and batch", (await cform.count()) === 1 && (await cform.locator("[data-warranty-product]").count()) === 1);
 await cform.locator("[data-warranty-product]").pressSequentially("E2e Ceramic Pro 9H");
 await cform.locator("[data-warranty-roll]").pressSequentially("CB-2219");
-await cform.locator('[data-stage-done="detail"]').click();
+await cform.locator('[data-stage-warranty-save="detail"]').click();
 await submitted(dp);
+await handOver(dp, "detail", "1234");
 const cer = (await sql("select product_name, roll_batch from public.warranty_entries where job_id = $1 and product = 'ceramic' and is_active", [jobId]))[0];
 check("2: the ceramic product and batch are kept, the product becomes a one-tap chip", cer?.product_name === "E2e Ceramic Pro 9H" && cer?.roll_batch === "CB-2219" && JSON.stringify((await sql("select value from public.settings where key = 'ceramic_products_used'"))[0]?.value ?? []).includes("E2e Ceramic Pro 9H"), JSON.stringify(cer ?? {}));
 await db.close();

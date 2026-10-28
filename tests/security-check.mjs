@@ -42,7 +42,7 @@ const ownerViews = await q(`select c.relname from pg_class c join pg_namespace n
 check("no view runs as its owner (RLS bypass)", ownerViews.length === 0, ownerViews.map((r) => r.relname).join(", "));
 
 // 4. Server-only token tables: dark to both API roles.
-const SERVER_ONLY = ["short_links", "payment_requests", "payment_links", "setup_links", "quick_codes", "google_mailbox_tokens", "staff_private", "background_jobs", "app_errors", "zoho_tokens", "zoho_outbox", "zoho_reconciliation", "zoho_outbox_archive", "card_settlements"];
+const SERVER_ONLY = ["short_links", "payment_requests", "payment_links", "setup_links", "quick_codes", "google_mailbox_tokens", "staff_private", "background_jobs", "app_errors", "zoho_tokens", "zoho_outbox", "zoho_reconciliation", "zoho_outbox_archive", "card_settlements", "bodyshop_problems", "ceramic_usage"];
 for (const t of SERVER_ONLY) {
   const g = await q(`select coalesce(string_agg(distinct grantee || ':' || privilege_type, ','), '') as g from information_schema.role_table_grants where table_schema = 'public' and table_name = '${t}' and grantee in ('anon'${t === "staff_private" ? "" : ",'authenticated'"})`);
   check(`${t} is not reachable by ${t === "staff_private" ? "anon" : "anon or authenticated"}`, !g[0]?.g, g[0]?.g);
@@ -72,6 +72,39 @@ for (const [path, label] of PROBES) {
     check(`anon cannot read ${label}`, !(r.status === 200 && rows > 0), `HTTP ${r.status}, ${rows} row(s)`);
   } catch (e) {
     check(`anon cannot read ${label}`, false, `probe failed: ${e.message.slice(0, 50)}`);
+  }
+}
+
+// 6. A team leader's own login (28 October 2026, B2) reads no prices or costs: simulated inside a rolled-back
+//    transaction as the authenticated role with a real leader's id (nothing is written).
+{
+  const leader = (await q("select id from public.staff where role_id = 'team_leader' and is_active order by display_name limit 1"))[0]?.id;
+  if (!leader) check("a team leader exists for the probe", false, "no team leader");
+  else {
+    const tables = ["services", "stock_movements", "declined_work", "gate_outs", "jobs", "job_events", "customers", "customer_contacts", "advisor_bonus_periods", "advisor_bonus_overrides", "price_imports", "price_import_lines", "supplier_discount_changes", "stock_items", "quotations", "quotation_lines", "invoices", "payments", "part_items", "purchase_orders", "film_rolls", "film_usage"];
+    const seen = [];
+    await client.query("begin");
+    try {
+      await client.query("set local role authenticated");
+      await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: leader, role: "authenticated" })]);
+      for (const t of tables) {
+        await client.query("savepoint p");
+        try {
+          const n = Number((await client.query(`select count(*)::int as n from public.${t}`)).rows[0].n);
+          if (n > 0) seen.push(`${t} (${n})`);
+          await client.query("release savepoint p");
+        } catch {
+          await client.query("rollback to savepoint p");
+        }
+      }
+      const money = Number((await client.query("select count(*)::int as n from public.settings where key ~* '(price|cost|rate|aed|profit|margin|markup|discount|commission|bonus|target|charge|fee|salary|recovery_rates|recovery_types|film_types|package)'")).rows[0].n);
+      if (money > 0) seen.push(`settings money keys (${money})`);
+      const files = Number((await client.query("select count(*)::int as n from storage.objects where bucket_id = 'job-files'")).rows[0].n);
+      if (files > 0) seen.push(`job-files bucket (${files})`);
+    } finally {
+      await client.query("rollback");
+    }
+    check("a team leader's login reads no prices, costs or money files", seen.length === 0, seen.join(", "));
   }
 }
 

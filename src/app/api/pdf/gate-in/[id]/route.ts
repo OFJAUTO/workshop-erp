@@ -50,7 +50,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     : latest
       ? `Link created ${formatDateTime(latest.created_at)}${latest.sent_at ? `, sent ${formatDateTime(latest.sent_at)}` : ", not sent yet"}. Not approved yet.`
       : "No approval link yet.";
-  const feeLine = feeNotice(settings.inspection_fee_notice, job.inspection_fee_aed ?? settings.inspection_fee_aed);
+  const feeLine = ["team_leader", "technician", "qc_inspector"].includes(String(staff?.role_id)) ? "" : feeNotice(settings.inspection_fee_notice, job.inspection_fee_aed ?? settings.inspection_fee_aed);
 
   const isVideo = (k: string) => k === "video" || k === "video_exterior" || k === "video_interior";
   const wanted = media

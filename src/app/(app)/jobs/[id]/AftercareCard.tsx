@@ -22,12 +22,13 @@ export function AftercareMessage({ template, date, phoneDigits }: { template: st
 }
 
 /** The team leader's check: three points, a note and his PIN. */
-export function AftercareSignoff({ action, points, jobId }: { action: Action; points: string[]; jobId: string }) {
+export function AftercareSignoff({ action, points, jobId, from }: { action: Action; points: string[]; jobId: string; from?: string }) {
   const [open, setOpen] = useState(false);
   const [photos, setPhotos] = useState<JobFile[]>([]);
   if (!open) return <Button type="button" tone="secondary" size="md" className="self-start" onClick={() => setOpen(true)} data-aftercare-open>Do the check (team leader)</Button>;
   return (
     <form action={action} className="flex flex-col gap-2 rounded-control bg-chip p-3" data-aftercare-form>
+      {from ? <input type="hidden" name="from" value={from} /> : null}
       <span className="text-sm font-bold">Checked and in order (tick each point):</span>
       <div className="flex flex-wrap gap-4">
         {points.map((p) => (

@@ -20,6 +20,7 @@ export default async function HomePage() {
   if (can(role, "viewDashboard")) redirect("/dashboard");
   if (role === "technician") redirect("/my-jobs");
   if (role === "qc_inspector") redirect("/road-tests");
+  if (role === "team_leader") redirect("/bodyshop/mine");
   const today = new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
     day: "numeric",

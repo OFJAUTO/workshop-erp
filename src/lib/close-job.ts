@@ -40,7 +40,7 @@ export async function updatePackageCostHistory(jobId: string): Promise<void> {
     admin.from("recovery_trips").select("price_aed").eq("job_id", jobId).eq("is_active", true),
   ]);
   const recovery = (trips ?? []).reduce((a, t) => a + (Number(t.price_aed) || 0), 0);
-  const realCost = Math.round((film.film + film.tint + (Number(q.materials_cost_aed) || 0) + share + labour.cost + recovery) * 100) / 100;
+  const realCost = Math.round((film.film + film.tint + film.ceramic + (Number(q.materials_cost_aed) || 0) + share + labour.cost + recovery) * 100) / 100;
   if (!(realCost > 0)) return;
   const history = { ...((settings.package_cost_history ?? {}) as Record<string, { n: number; avg_cost: number }>) };
   for (const key of keys) {

@@ -120,7 +120,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const supabase = await createClient();
+  const supabase = role === "team_leader" ? createAdminClient() : await createClient();
   const [card, bundle, settings, { data: rt }] = await Promise.all([
     loadJobCard(supabase, id),
     loadInspection(id),

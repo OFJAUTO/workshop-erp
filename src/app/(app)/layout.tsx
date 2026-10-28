@@ -46,13 +46,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const entries: (NavItem & { show: boolean })[] = [
-    { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" },
+    { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") && role !== "accounts" && role !== "parts" },
     { href: "/parts/arrivals", label: "Parts arrivals", show: role === "parts" || role === "owner" },
     { href: "/assign", label: "To assign", show: can(role, "assignJobs") },
     { href: "/bodyshop", label: "Bodyshop", show: can(role, "viewBodyshop") && role !== "accounts" && !(role === "workshop_manager" && staff.department_id === "mechanical") },
-    { href: "/bodyshop/mine", label: "My section", show: role === "team_leader" },
+    { href: "/bodyshop/mine", label: "My team", show: role === "team_leader" },
     { href: "/my-jobs", label: "My jobs", show: role === "technician" },
     { href: "/road-tests", label: "Road tests", show: can(role, "roadTest") },
     { href: "/scans", label: "Scan reports", show: role === "owner" || role === "workshop_manager" || role === "qc_inspector" },

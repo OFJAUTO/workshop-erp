@@ -85,6 +85,7 @@ async function roleBrowser(role) {
 
 const technicianId = (await sql("select id from public.staff where role_id = 'technician' and is_active order by display_name limit 1"))[0]?.id ?? null;
 const bodyshopId = (await sql("select id from public.staff where is_active and department_id in ('bodyshop', 'paint', 'ppf_tint', 'detailing') and role_id in ('workshop_manager', 'team_leader') order by role_id desc limit 1"))[0]?.id ?? null;
+const leaderId = (await sql("select id from public.staff where is_active and role_id = 'team_leader' and display_name not ilike 'E2e %' order by display_name limit 1"))[0]?.id ?? null;
 const roles = [
   { name: "owner", key: "owner" },
   { name: "advisor", key: "service_advisor" },
@@ -93,6 +94,7 @@ const roles = [
   { name: "workshop-manager", id: MANAGER_MECH },
   technicianId ? { name: "technician", id: technicianId } : null,
   bodyshopId ? { name: "bodyshop", id: bodyshopId } : null,
+  leaderId ? { name: "team-leader", id: leaderId } : null,
 ].filter(Boolean).filter((r) => !onlyRole || r.name === onlyRole);
 
 // Pages reached from inside another page (not in the menu) that still need checking.

@@ -7,19 +7,21 @@ import { finishRoll, openRoll, recordFilmUsage, recordTintUsage } from "@/lib/fi
 import { blankToNull } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { bodyshopScopeOf, mayEnterProduct } from "@/lib/team-scope";
+import { recordCeramicUsage } from "@/lib/film";
 
 const BODYSHOP_DEPTS = ["bodyshop", "paint", "ppf_tint", "detailing"];
 
-/** Who may touch rolls and metres: the owner, bodyshop managers and team leaders. */
-async function rollStaff() {
+/** Who may touch rolls and metres: the owner, the bodyshop manager and the PPF team's leader (film and tint are theirs). */
+async function rollStaff(product: "ppf" | "tint" | "ceramic" = "ppf") {
   const staff = await requireStaff();
-  const ok = !staff.viewingAs && (staff.role_id === "owner" || ((staff.role_id === "workshop_manager" || staff.role_id === "team_leader") && BODYSHOP_DEPTS.includes(staff.department_id ?? "")));
-  return ok ? staff : null;
+  void BODYSHOP_DEPTS;
+  return mayEnterProduct(bodyshopScopeOf(staff), product) ? staff : null;
 }
 
 export async function openRollAction(formData: FormData) {
   const staff = await rollStaff();
-  if (!staff) redirect(`/bodyshop/rolls?error=${encodeURIComponent("Only the owner, the bodyshop manager or a team leader opens rolls.")}`);
+  if (!staff) redirect(`/bodyshop/rolls?error=${encodeURIComponent("Only the owner, the bodyshop manager or the PPF team leader opens rolls.")}`);
   const kind = String(formData.get("kind") ?? "film") === "tint" ? "tint" : "film";
   const r = await openRoll({ kind, filmKey: blankToNull(formData.get("film_key")), name: String(formData.get("name") ?? "").trim() }, await getSettings(), staff!.id);
   revalidatePath("/bodyshop/rolls");
@@ -38,7 +40,7 @@ export async function finishRollAction(rollId: string) {
 export async function filmUsageAction(jobId: string, formData: FormData) {
   const staff = await rollStaff();
   const back = `/bodyshop/${jobId}`;
-  if (!staff) redirect(`${back}?error=${encodeURIComponent("Only the owner, the bodyshop manager or a team leader enters metres.")}`);
+  if (!staff) redirect(`${back}?error=${encodeURIComponent("Only the owner, the bodyshop manager or the PPF team leader enters metres.")}`);
   const rollId = String(formData.get("roll_id") ?? "");
   const metres = Number(String(formData.get("metres") ?? "").replace(",", "."));
   if (!rollId) redirect(`${back}?error=${encodeURIComponent("Pick the roll.")}`);
@@ -57,7 +59,7 @@ export async function filmUsageAction(jobId: string, formData: FormData) {
 
 /** One tap: this car used this tint roll. */
 export async function tintUsageAction(jobId: string, rollId: string) {
-  const staff = await rollStaff();
+  const staff = await rollStaff("tint");
   const back = `/bodyshop/${jobId}`;
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
   const r = await recordTintUsage(jobId, rollId, staff!.id);
@@ -92,4 +94,15 @@ export async function saveBodyshopCosting(formData: FormData) {
   await upsert("big_car_models", "Big cars (1.5 film rolls)", String(formData.get("big_models") ?? "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 60));
   revalidatePath("/settings/packages");
   redirect(`/settings/packages?message=${encodeURIComponent("Costing saved.")}`);
+}
+
+/** The detailing leader's ceramic on one car: exterior or interior, the product and its batch; the bottle share is costed. */
+export async function ceramicUsageAction(jobId: string, formData: FormData) {
+  const staff = await rollStaff("ceramic");
+  const back = `/bodyshop/${jobId}`;
+  if (!staff) redirect(`${back}?error=${encodeURIComponent("The detailing leader (or the bodyshop manager) enters the ceramic.")}#materials`);
+  const kind = String(formData.get("kind") ?? "") === "interior" ? "interior" : "exterior";
+  const r = await recordCeramicUsage(jobId, { kind, product: blankToNull(formData.get("product")), batch: blankToNull(formData.get("batch")) }, await getSettings(), staff!.id);
+  revalidatePath(back);
+  redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? `Saved: ${kind} ceramic on this car.`)}#materials`);
 }

@@ -10,7 +10,7 @@ import { PanelMarker } from "@/components/PanelMarker";
 import { cleanPanelMarks } from "@/lib/car-outline";
 import { markPreworkChecked, savePreworkCheck } from "@/app/(app)/jobs/damage-actions";
 import { loadBodyshopJob, type StageRow } from "@/lib/bodyshop";
-import { BODYSHOP_KIND_LABELS, SECTION_LABELS, STAGE_DEFS, sectionOfDepartment, signoffKeyOf, type BodyshopKind, type StageSection } from "@/lib/bodyshop-kinds";
+import { BODYSHOP_KIND_LABELS, SECTION_LABELS, STAGE_DEFS, signoffKeyOf, type BodyshopKind, type StageSection } from "@/lib/bodyshop-kinds";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
 import { INVOICE_SELECT, toInvoice } from "@/lib/invoice-data";
@@ -27,7 +27,7 @@ import { JOB_FILE_SELECT, signJobFiles } from "@/lib/work-data";
 import { addStageAction, afterPhotoAction, assignAction, bookArrivalAction, clockAction, moveStageAction, notReadyAction, refitTickAction, removeStageAction, removedItemAction, reopenStageAction, requestDepositAction, setStageDueAction, signOffAction, stageDoneAction, startWorkAction, updatePhotoAction, updateSentAction } from "../actions";
 import { consumablesShare, jobFilmCost, rollsWithUse } from "@/lib/film";
 import { bodyshopLabourBySection } from "@/lib/bodyshop";
-import { filmUsageAction, tintUsageAction } from "../rolls/actions";
+import { ceramicUsageAction, filmUsageAction, tintUsageAction } from "../rolls/actions";
 import { RemovedItemForm } from "./RemovedItemForm";
 import { SignoffPanel } from "./SignoffPanel";
 import { UpdatesPanel, type UpdateState } from "./UpdatesPanel";
@@ -41,6 +41,15 @@ import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { StaffPicker } from "@/components/StaffPicker";
 import { pickablePeople } from "@/lib/staff-picker";
 import { TEAM_LABELS, TEAM_OF_SECTION, teamOf } from "@/lib/teams";
+import { StageHandover } from "@/components/StageHandover";
+import { ProblemButton } from "@/components/ProblemButton";
+import { bodyshopScopeOf, isBodyshopManagerScope, mayActOnSection, mayEnterProduct, maySignAftercare } from "@/lib/team-scope";
+import { jobCeramicUsage } from "@/lib/film";
+import { AftercareSignoff } from "@/app/(app)/jobs/[id]/AftercareCard";
+import { signOffAftercare } from "@/app/(app)/jobs/aftercare-actions";
+import { AFTERCARE_POINTS } from "@/lib/aftercare";
+import { answerProblemAction, handOverStageAction, raiseProblemAction } from "../actions";
+import { FALLBACK_POLL_MS } from "@/lib/live-connection";
 
 export const dynamic = "force-dynamic";
 
@@ -68,13 +77,15 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const isBodyshopManager = role === "workshop_manager" && BODYSHOP_DEPTS.includes(staff.department_id ?? "");
   const canManage = !staff.viewingAs && (isOwner || isBodyshopManager);
   const canLead = !staff.viewingAs && (isOwner || isBodyshopManager || role === "team_leader");
+  const scope = bodyshopScopeOf(staff);
+  const managerScope = isBodyshopManagerScope(scope);
+  const ownSection = (section: string) => mayActOnSection(scope, section);
   // THE shared picker's people: a team leader picks from their own team only (the leader first), managers from every bodyshop team.
   const myTeam = role === "team_leader" ? teamOf(staff) : null;
   const pickers = canLead ? (await pickablePeople(settings, ["bodyshop"])).filter((p) => !myTeam || p.team === myTeam) : [];
   const { data: prework } = await createAdminClient().from("jobs").select("prework_panels, prework_checked_at").eq("id", jobId).maybeSingle();
   const canQuote = !staff.viewingAs && can(role, "bodyshopQuote");
   const seesMoney = isOwner || role === "accounts" || role === "service_advisor";
-  const mySection = sectionOfDepartment(staff.department_id);
   const myKey = signoffKeyOf(role, staff.department_id);
   // A server page: today is read once.
   const today = dubaiDate();
@@ -123,6 +134,19 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const warranty = await warrantyCardOf(jobId, settings);
   const wRows = warranty?.rows ?? [];
   const stageKeys = stages.map((s) => s.key);
+  const [{ data: stagePhotoRows }, { data: problemRows }, { data: careRow }] = await Promise.all([
+    stages.length ? admin.from("job_files").select(JOB_FILE_SELECT).eq("job_id", jobId).eq("kind", "bodyshop_photo").in("ref_id", stages.map((s) => s.id)).is("removed_at", null).order("created_at") : Promise.resolve({ data: [] }),
+    admin.from("bodyshop_problems").select("id, text, photo_path, raised_by, answer, answered_at, answered_by, created_at, raiser:staff!bodyshop_problems_raised_by_fkey(display_name), answerer:staff!bodyshop_problems_answered_by_fkey(display_name)").eq("job_id", jobId).eq("is_active", true).order("created_at", { ascending: false }),
+    admin.from("aftercare_checks").select("id, due_date, done_at, activated_at").eq("job_id", jobId).eq("is_active", true).maybeSingle(),
+  ]);
+  const stageFiles = (stagePhotoRows ?? []) as { id: string; ref_id: string | null; storage_path: string; content_type: string | null; caption: string | null }[];
+  const stageUrls = await signJobFiles(stageFiles.map((f) => f.storage_path));
+  const photosOfStage = (stageId: string) => stageFiles.filter((f) => f.ref_id === stageId).map((f) => ({ id: f.id, path: f.storage_path, url: stageUrls[f.storage_path] ?? null, caption: f.caption, contentType: f.content_type }));
+  type ProblemRow = { id: string; text: string; photo_path: string | null; raised_by: string; answer: string | null; answered_at: string | null; created_at: string; raiser: { display_name: string } | null; answerer: { display_name: string } | null };
+  const problems = (problemRows ?? []) as unknown as ProblemRow[];
+  const problemPhotoPaths = problems.map((p) => p.photo_path).filter((p): p is string => !!p);
+  const { data: problemSigned } = problemPhotoPaths.length ? await admin.storage.from("job-files").createSignedUrls(problemPhotoPaths, 3600) : { data: [] as { path: string | null; signedUrl: string }[] };
+  const problemPhoto = new Map((problemSigned ?? []).filter((s) => s.path).map((s) => [s.path as string, s.signedUrl]));
   const mayWriteWarranty = !staff.viewingAs && (isOwner || isBodyshopManager || role === "team_leader");
   const openRollNames = wRows.length ? (await rollsWithUse()).filter((r) => !r.finished_at) : [];
   const rollsFor = (r: WarrantyRow) => openRollNames.filter((x) => x.kind === (r.product === "tint" ? "tint" : "film")).map((x) => x.name);
@@ -131,7 +155,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const productWord = (r: WarrantyRow) => (r.product === "ppf" ? "PPF" : r.product === "tint" ? "Tint" : "Ceramic");
   return (
     <>
-      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} />
+      <LiveRefresh tables={["jobs", "bodyshop_stages", "bodyshop_assignments", "bodyshop_clockings", "bodyshop_signoffs"]} jobId={jobId} alwaysPollMs={role === "team_leader" ? FALLBACK_POLL_MS : undefined} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`${v ? formatPlate(v) : job.job_number} · ${carName}`}
@@ -163,7 +187,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             <ol className="flex flex-col gap-2 text-sm">
               <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${approvedQuote ? "bg-green text-white" : latestQuote?.status === "sent" || latestQuote?.status === "opened" ? "bg-amber-bar text-white" : "border border-line-strong"}`}>1</span><span>Quotation {latestQuote ? <>{latestQuote.number}: <span className="font-semibold">{approvedQuote ? `approved ${formatDate(latestQuote.responded_at)}` : latestQuote.status === "draft" ? "being built" : latestQuote.status === "sent" || latestQuote.status === "opened" ? "sent, waiting for the customer" : latestQuote.status}</span></> : "not started"}</span></li>
               <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${job.booked_arrival_at ? "bg-green text-white" : "border border-line-strong"}`}>2</span><span>Arrival {job.booked_arrival_at ? <span className="font-semibold">{formatDateTime(job.booked_arrival_at)}</span> : "not booked"} · handover {job.promised_at ? <span className="font-semibold">{formatDate(job.promised_at)}</span> : "not set"}</span></li>
-              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${deposits.length ? "bg-green text-white" : "border border-line-strong"}`}>3</span><span>Deposit {deposits.length ? <span className="font-semibold">{deposits[0].number} for {aed(deposits[0].total_aed)}</span> : "optional"}</span></li>
+              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${deposits.length ? "bg-green text-white" : "border border-line-strong"}`}>3</span><span>Deposit {deposits.length ? <span className="font-semibold">{deposits[0].number}{seesMoney ? ` for ${aed(deposits[0].total_aed)}` : " requested"}</span> : "optional"}</span></li>
             </ol>
             <p className="text-xs text-muted">When the car arrives, gate it in from the calendar entry: the gate-in links to this quotation and nothing is retyped. The stages start by themselves once the gate-in photos are in.</p>
           </Card>
@@ -218,7 +242,10 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <ol className="divide-y divide-line">
             {stages.map((s, i) => {
               const tone = stageTone(s);
-              const mayDone = canLead && s.status === "active" && (isOwner || isBodyshopManager || mySection === s.section || (s.section === "qc" && role === "team_leader") || (s.section === "handover" && false));
+              const teamStage = !["qc", "handover", "electrical"].includes(s.section);
+              const mayHandOver = canLead && job.is_open && s.status === "active" && teamStage && ownSection(s.section);
+              const mayDone = canLead && s.status === "active" && !teamStage && s.key !== "handover" && managerScope;
+              const next = stages.slice(i + 1).find((x) => x.status !== "done" && x.status !== "skipped");
               return (
                 <li key={s.id} className="py-2 flex flex-wrap items-center gap-2" data-stage={s.key} data-stage-status={s.status} data-tone={tone}>
                   <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${s.status === "done" ? "bg-green text-white" : s.status === "active" ? "bg-ink text-white" : "border border-line-strong text-muted"}`}>{s.status === "done" ? "✓" : i + 1}</span>
@@ -235,7 +262,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                     ) : (
                       <span className={`text-xs ${tone === "red" ? "font-bold text-red" : tone === "amber" ? "font-bold text-amber" : "text-muted"}`} data-stage-due-text>{s.due_date ? (tone === "red" && s.status !== "done" ? `Late · due ${formatDate(s.due_date)}` : tone === "amber" && s.status !== "done" ? "Due today" : `Due ${formatDate(s.due_date)}`) : ""}</span>
                     )}
-                    {mayDone && s.key !== "handover" && !(s.key === "qc" && wRows.length) && !stageAsks(s, stageKeys, wRows).length ? <form action={stageDoneAction.bind(null, jobId, s.id)}><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></form> : null}
+                    {mayDone && !(s.key === "qc" && wRows.length) ? <form action={stageDoneAction.bind(null, jobId, s.id)}><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></form> : null}
+                    {mayHandOver ? <StageHandover jobId={jobId} stage={{ id: s.id, key: s.key, label: s.label }} nextLabel={next ? `${next.label} – ${TEAM_OF_SECTION[next.section] ? TEAM_LABELS[TEAM_OF_SECTION[next.section]] : SECTION_LABELS[next.section]}` : null} photos={photosOfStage(s.id)} needPin={!isOwner} action={handOverStageAction.bind(null, jobId, s.id)} /> : null}
                     {canManage && s.status === "done" && s.key !== "handover" ? <form action={reopenStageAction.bind(null, jobId, s.id)}><Button type="submit" tone="ghost" size="md">Reopen</Button></form> : null}
                     {canManage && s.status !== "done" && s.key !== "handover" ? (
                       <>
@@ -245,11 +273,11 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                       </>
                     ) : null}
                   </span>
-                  {mayDone && s.key !== "qc" && stageAsks(s, stageKeys, wRows).length ? (
+                  {mayHandOver && stageAsks(s, stageKeys, wRows).filter((r) => mayEnterProduct(scope, r.product)).length ? (
                     <form action={stageDoneWarrantyAction.bind(null, jobId, s.id)} className="flex w-full flex-col gap-2 rounded-control bg-chip p-3" data-stage-warranty-form={s.key}>
-                      <span className="text-sm font-bold">For the warranty card, before {s.label} is done:</span>
-                      {stageAsks(s, stageKeys, wRows).map((r) => <WarrantyFields key={`${r.product}:${r.itemKey}`} row={fieldRow(r)} rolls={rollsFor(r)} products={ceramicProducts} />)}
-                      <div><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></div>
+                      <span className="text-sm font-bold">For the warranty card, before {s.label} is signed off:</span>
+                      {stageAsks(s, stageKeys, wRows).filter((r) => mayEnterProduct(scope, r.product)).map((r) => <WarrantyFields key={`${r.product}:${r.itemKey}`} row={fieldRow(r)} rolls={rollsFor(r)} products={ceramicProducts} />)}
+                      <div><Button type="submit" tone="secondary" size="md" data-stage-warranty-save={s.key}>Save the details</Button></div>
                     </form>
                   ) : null}
                   {mayDone && s.key === "qc" && wRows.length ? (
@@ -307,7 +335,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             <details className="text-sm" data-warranty-edit>
               <summary className="flex min-h-11 cursor-pointer items-center font-semibold underline underline-offset-4">Write or correct the details</summary>
               <form action={saveWarrantyDetailsAction.bind(null, jobId)} className="mt-2 flex flex-col gap-2">
-                {wRows.map((r) => <WarrantyFields key={`${r.product}:${r.itemKey}`} row={fieldRow(r)} rolls={rollsFor(r)} products={ceramicProducts} />)}
+                {wRows.filter((r) => mayEnterProduct(scope, r.product)).map((r) => <WarrantyFields key={`${r.product}:${r.itemKey}`} row={fieldRow(r)} rolls={rollsFor(r)} products={ceramicProducts} />)}
                 <div><Button type="submit" size="md" data-warranty-save>Save the details</Button></div>
                 <p className="text-xs text-muted">A change after QC needs QC to confirm the details again.</p>
               </form>
@@ -325,7 +353,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                 <li key={r.id} className="py-2 flex flex-wrap items-center gap-2" data-removed-item>
                   <form action={refitTickAction.bind(null, jobId, r.id)}>
                     <input type="hidden" name="on" value={r.refitted_at ? "0" : "1"} />
-                    <button type="submit" disabled={!canLead} className={`inline-flex min-h-10 items-center gap-2 rounded-control border px-3 text-sm font-bold ${r.refitted_at ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} aria-pressed={!!r.refitted_at} data-refit-tick>{r.refitted_at ? "✓ Back on" : "Tick when back on"}</button>
+                    <button type="submit" disabled={!managerScope} className={`inline-flex min-h-11 items-center gap-2 rounded-control border px-3 text-sm font-bold ${r.refitted_at ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} aria-pressed={!!r.refitted_at} data-refit-tick>{r.refitted_at ? "✓ Back on" : "Tick when back on"}</button>
                   </form>
                   <span className="font-semibold">{r.label}</span>
                   <span className="text-xs text-muted">off {formatDateTime(r.removed_at)}{r.refitted_at ? ` · on ${formatDateTime(r.refitted_at)}` : ""}{r.photo_path ? " · photo" : ""}</span>
@@ -333,7 +361,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
               ))}
             </ul>
           )}
-          {canLead && job.is_open ? <RemovedItemForm jobId={jobId} action={removedItemAction.bind(null, jobId)} /> : null}
+          {managerScope && job.is_open ? <RemovedItemForm jobId={jobId} action={removedItemAction.bind(null, jobId)} /> : null}
         </Card>
       ) : null}
 
@@ -346,7 +374,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
               <span key={a.id} className={`inline-flex items-center gap-2 rounded-control border px-2.5 min-h-10 text-sm font-bold ${openClockBy.has(a.staff_id) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-on-car={a.staff_id}>
                 <Avatar name={a.name} photoUrl={a.photoUrl} size={24} />{a.name}
                 <span className="text-[11px] font-semibold text-muted">{TEAM_LABELS[TEAM_OF_SECTION[a.section] ?? "dismantle_refit"]}{openClockBy.has(a.staff_id) ? " · clocked in" : ""}</span>
-                {canLead && job.is_open ? (
+                {canLead && job.is_open && ownSection(a.section) ? (
                   <>
                     <form action={clockAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={a.staff_id} />{openClockBy.has(a.staff_id) ? <input type="hidden" name="out" value="1" /> : null}<button type="submit" className="rounded-control border border-line px-2 py-0.5 text-[11px] font-bold" data-clock={openClockBy.has(a.staff_id) ? "out" : "in"}>{openClockBy.has(a.staff_id) ? "Clock out" : "Clock in"}</button></form>
                     <form action={assignAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={a.staff_id} /><input type="hidden" name="off" value="1" /><button type="submit" className="text-muted px-1" aria-label={`Take ${a.name} off`}>✕</button></form>
@@ -367,7 +395,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
       {!booked && stages.length ? (
         <Card id="updates" className="flex flex-col gap-3" data-updates-card>
           <SectionLabel>Customer updates (one photo, one line, three moments)</SectionLabel>
-          <UpdatesPanel jobId={jobId} updates={updateStates} photos={photoFiles} afterPhotoId={job.bodyshop_after_photo_id} phoneDigits={phoneDigits} canAct={canLead || canQuote} onPhoto={updatePhotoAction.bind(null, jobId)} onSent={updateSentAction.bind(null, jobId)} onAfterPhoto={afterPhotoAction.bind(null, jobId)} />
+          <UpdatesPanel jobId={jobId} updates={updateStates} photos={photoFiles} afterPhotoId={job.bodyshop_after_photo_id} phoneDigits={managerScope || canQuote ? phoneDigits : ""} canAct={managerScope || canQuote} onPhoto={updatePhotoAction.bind(null, jobId)} onSent={updateSentAction.bind(null, jobId)} onAfterPhoto={afterPhotoAction.bind(null, jobId)} />
           {job.bodyshop_handover_token ? <p className="text-xs text-muted">Handover page: <Link href={`/handover/${job.bodyshop_handover_token}`} target="_blank" className="font-semibold underline underline-offset-4">{site}/handover/{job.bodyshop_handover_token.slice(0, 8)}…</Link>{kinds.includes("ppf") || kinds.includes("coloured_ppf") ? <> · <Link href={`/api/pdf/warranty/${job.bodyshop_handover_token}`} target="_blank" className="font-semibold underline underline-offset-4">Warranty certificate (PDF)</Link></> : null}</p> : null}
         </Card>
       ) : null}
@@ -381,20 +409,59 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         </Card>
       ) : null}
 
+      {!booked && (canLead || canQuote) ? (
+        <Card id="problems" className={`flex flex-col gap-3 ${problems.some((p) => !p.answered_at) ? "border-amber-bar" : ""}`} data-problems-card>
+          <SectionLabel right={problems.filter((p) => !p.answered_at).length ? `${problems.filter((p) => !p.answered_at).length} open` : undefined}>Problems</SectionLabel>
+          {problems.length === 0 ? <p className="text-sm text-muted">No problems raised.</p> : (
+            <ul className="divide-y divide-line">
+              {problems.map((p) => (
+                <li key={p.id} className="flex flex-col gap-2 py-2" data-problem={p.answered_at ? "answered" : "open"}>
+                  <div className="flex flex-wrap items-start gap-3">
+                    {p.photo_path && problemPhoto.get(p.photo_path) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <a href={problemPhoto.get(p.photo_path) ?? undefined} target="_blank" rel="noreferrer"><img src={problemPhoto.get(p.photo_path) ?? undefined} alt="Problem photo" className="h-16 w-20 rounded-control object-cover" /></a>
+                    ) : null}
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-sm font-semibold">{p.text}</span>
+                      <span className="text-xs text-muted">{p.raiser?.display_name ?? "A leader"} · {formatDateTime(p.created_at)}</span>
+                      {p.answered_at ? <span className="text-sm text-green font-semibold" data-problem-answer>Answer from {p.answerer?.display_name ?? "the manager"}: {p.answer}</span> : <span className="text-xs font-bold text-amber">Waiting for the bodyshop manager</span>}
+                    </span>
+                  </div>
+                  {!p.answered_at && managerScope ? (
+                    <form action={answerProblemAction.bind(null, jobId, p.id)} className="flex flex-wrap items-end gap-2" data-problem-answer-form>
+                      <Input name="answer" placeholder="Your answer to the team" required maxLength={1000} className="min-w-64 flex-1" textCase="sentence" />
+                      <Button type="submit" size="md">Answer</Button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {canLead && job.is_open && scope.kind !== "none" ? <div><ProblemButton jobId={jobId} stageId={stages.find((s) => s.status === "active")?.id ?? null} action={raiseProblemAction.bind(null, jobId)} /></div> : null}
+        </Card>
+      ) : null}
+
+      {careRow && (maySignAftercare(scope) || seesMoney) ? (
+        <Card id="aftercare" className={`flex flex-col gap-2 ${careRow.done_at ? "border-green" : "border-ink"}`} data-aftercare-card>
+          <SectionLabel right={careRow.done_at ? "Done" : careRow.due_date ? `Due ${formatDate(careRow.due_date)}` : undefined}>10-day after-care check</SectionLabel>
+          {careRow.done_at ? <p className="text-sm font-semibold text-green">Signed off {formatDateTime(careRow.done_at)}.</p> : careRow.activated_at ? <p className="text-sm font-semibold text-green">Activated by the owner {formatDateTime(careRow.activated_at)}.</p> : maySignAftercare(scope) ? <AftercareSignoff action={signOffAftercare.bind(null, jobId)} points={[...AFTERCARE_POINTS]} jobId={jobId} from="bodyshop" /> : <p className="text-sm text-muted">The PPF team leader does the check and signs it off here.</p>}
+        </Card>
+      ) : null}
+
       {canLead && job.status !== "booked" ? await (async () => {
-        const [openRolls, used] = await Promise.all([rollsWithUse(), admin.from("film_usage").select("id, metres, cost_aed, roll:film_rolls(kind, name)").eq("job_id", jobId).eq("is_active", true)]);
+        const [openRolls, used, ceramic] = await Promise.all([rollsWithUse(), admin.from("film_usage").select("id, metres, cost_aed, roll:film_rolls(kind, name)").eq("job_id", jobId).eq("is_active", true), jobCeramicUsage(jobId)]);
         const filmRolls = openRolls.filter((r) => r.kind === "film" && !r.finished_at);
         const tintRolls = openRolls.filter((r) => r.kind === "tint" && !r.finished_at);
         const rows = (used.data ?? []) as unknown as { id: string; metres: number | null; cost_aed: number; roll: { kind: string; name: string } | null }[];
         return (
           <Card id="materials" className="flex flex-col gap-3" data-materials-card>
-            <SectionLabel right={<Link href="/bodyshop/rolls" className="underline underline-offset-4">Rolls</Link>}>Film and tint on this car</SectionLabel>
+            <SectionLabel right={mayEnterProduct(scope, "ppf") ? <Link href="/bodyshop/rolls" className="underline underline-offset-4">Rolls</Link> : undefined}>Materials on this car</SectionLabel>
             {rows.length ? (
               <ul className="flex flex-col gap-1 text-sm">
                 {rows.map((u) => <li key={u.id} className="flex flex-wrap items-center gap-2"><span className="font-semibold">{u.roll?.kind === "tint" ? "Tint roll" : "Film"} · {u.roll?.name}</span>{u.metres !== null ? <span className="text-muted">{u.metres} m</span> : <span className="text-muted">one car&apos;s share</span>}{isOwner ? <span className="ml-auto text-xs text-muted">{aed(Number(u.cost_aed))}</span> : null}</li>)}
               </ul>
-            ) : <p className="text-sm text-muted">Nothing entered yet. The PPF team leader enters the metres at the end of his stage.</p>}
-            <form action={filmUsageAction.bind(null, jobId)} className="flex flex-wrap items-end gap-2" data-film-usage>
+            ) : <p className="text-sm text-muted">Nothing entered yet. The PPF team leader enters the metres at the end of the PPF stage.</p>}
+            {mayEnterProduct(scope, "ppf") ? <form action={filmUsageAction.bind(null, jobId)} className="flex flex-wrap items-end gap-2" data-film-usage>
               <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Film roll
                 <Select name="roll_id" defaultValue={filmRolls[0]?.id ?? ""} className="min-w-44">{filmRolls.length ? filmRolls.map((r) => <option key={r.id} value={r.id}>{r.name}{r.metresLeft !== null ? ` · ${r.metresLeft} m left` : ""}</option>) : <option value="">No open film roll: open one under Rolls</option>}</Select>
               </label>
@@ -405,13 +472,36 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                 <input type="file" name="photo" accept="image/*" className="text-xs" />
               </label>
               <Button type="submit" size="md" data-save-metres>Save the metres</Button>
-            </form>
-            {tintRolls.length ? (
+            </form> : null}
+            {tintRolls.length && mayEnterProduct(scope, "tint") ? (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-muted">Tint used (one tap):</span>
                 {tintRolls.map((r) => <form key={r.id} action={tintUsageAction.bind(null, jobId, r.id)}><Button type="submit" tone="secondary" size="md" data-tint-roll>{r.name}</Button></form>)}
               </div>
             ) : null}
+            <div className="flex flex-col gap-2 border-t border-line pt-3" data-ceramic>
+              <span className="text-sm font-bold">Ceramic</span>
+              {ceramic.length ? (
+                <ul className="flex flex-col gap-1 text-sm">
+                  {ceramic.map((c) => <li key={c.id} data-ceramic-row><span className="font-semibold">{c.kind === "interior" ? "Interior" : "Exterior"}</span>{c.product ? ` · ${c.product}` : ""}{c.batch ? ` · batch ${c.batch}` : ""}{isOwner ? <span className="text-muted"> · {aed(c.cost)}</span> : null}</li>)}
+                </ul>
+              ) : <p className="text-sm text-muted">None entered. The detailing team leader enters the ceramic used.</p>}
+              {mayEnterProduct(scope, "ceramic") && job.is_open ? (
+                <form action={ceramicUsageAction.bind(null, jobId)} className="flex flex-wrap items-end gap-2" data-ceramic-form>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Where
+                    <Select name="kind" defaultValue="exterior" className="min-w-36"><option value="exterior">Exterior</option><option value="interior">Interior</option></Select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Product
+                    <Input name="product" placeholder={ceramicProducts[0] ?? "Product"} list="ceramic-products" className="min-w-44" />
+                  </label>
+                  <datalist id="ceramic-products">{ceramicProducts.map((p) => <option key={p} value={p} />)}</datalist>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Bottle / batch no.
+                    <Input name="batch" placeholder="Batch" className="min-w-32" />
+                  </label>
+                  <Button type="submit" size="md" data-save-ceramic>Save the ceramic</Button>
+                </form>
+              ) : null}
+            </div>
           </Card>
         );
       })() : null}
@@ -427,7 +517,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         const otherMaterials = Number(q?.materials_cost_aed) || 0;
         const recovery = (tripRows ?? []).reduce((a, t) => a + (Number(t.price_aed) || 0), 0);
         const labourCost = sections.reduce((a, s) => a + s.cost, 0);
-        const real = Math.round((income - film.film - film.tint - otherMaterials - share - labourCost - recovery) * 100) / 100;
+        const real = Math.round((income - film.film - film.tint - film.ceramic - otherMaterials - share - labourCost - recovery) * 100) / 100;
         const row = (label: string, v: number, minus = true) => (
           <div className="flex items-center justify-between text-sm"><span className="text-muted">{label}</span><span className="font-semibold">{minus && v ? "−" : ""}{aed(v)}</span></div>
         );
@@ -437,6 +527,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             {row("Package price (before VAT)", income, false)}
             {row(`Film${film.metres ? ` (${film.metres} m)` : ""}`, film.film)}
             {row("Tint", film.tint)}
+            {row("Ceramic", film.ceramic)}
             {row("Other materials (internal box)", otherMaterials)}
             {row("Consumables share", share)}
             {row("Labour (clocked)", Math.round(labourCost * 100) / 100)}

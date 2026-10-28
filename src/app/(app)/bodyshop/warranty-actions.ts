@@ -9,6 +9,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fieldOf } from "@/lib/warranty";
 import { saveWarrantyEntry, stageAsks, warrantyCardOf, type WarrantyRow } from "@/lib/warranty-data";
+import { bodyshopScopeOf, isBodyshopManagerScope, mayEnterProduct } from "@/lib/team-scope";
 
 const enc = encodeURIComponent;
 const BODYSHOP_DEPTS = ["bodyshop", "paint", "ppf_tint", "detailing"];
@@ -20,7 +21,7 @@ function refresh(jobId: string) {
   revalidatePath("/warranties");
 }
 
-/** Who writes the warranty details: the owner, the bodyshop manager, a team leader (QC too). */
+/** Who writes the warranty details: the owner, the bodyshop manager, a team leader for their own products (saveRows). */
 async function writer() {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
@@ -30,9 +31,11 @@ async function writer() {
 }
 
 /** The typed details of the rows on this form, saved; rows not on the form are left alone. */
-async function saveRows(jobId: string, rows: WarrantyRow[], formData: FormData, actor: { id: string }, stageId: string | null) {
+async function saveRows(jobId: string, rows: WarrantyRow[], formData: FormData, actor: { id: string; role_id?: string; department_id?: string | null; team?: string | null }, stageId: string | null) {
   let saved = 0;
+  const scope = bodyshopScopeOf({ role_id: actor.role_id ?? "", department_id: actor.department_id, team: actor.team });
   for (const r of rows) {
+    if (!mayEnterProduct(scope, r.product)) continue;
     if (!formData.has(fieldOf(r, "roll")) && !formData.has(fieldOf(r, "product"))) continue;
     const typed = String(formData.get(fieldOf(r, "area_other")) ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     const areas = Array.from(new Set([...formData.getAll(fieldOf(r, "areas")).map(String), ...typed]));
@@ -64,6 +67,13 @@ export async function stageDoneWarrantyAction(jobId: string, stageId: string, fo
   const stages = await loadStages(jobId);
   const stage = stages.find((s) => s.id === stageId);
   if (!stage) redirect(`/bodyshop/${jobId}?error=${enc("Stage not found.")}#stages`);
+  // QC (the manager's) confirms the set here; a team's stage saves its details and is signed off by the hand-over.
+  if (stage!.key !== "qc" || !isBodyshopManagerScope(bodyshopScopeOf(staff))) {
+    const card0 = await warrantyCardOf(jobId, settings);
+    if (card0) await saveRows(jobId, stageAsks(stage!, stages.map((s) => s.key), card0.rows), formData, staff, stageId);
+    refresh(jobId);
+    redirect(`/bodyshop/${jobId}?message=${enc("Warranty details saved. Sign the stage off with photos and your PIN (Done).")}#stages`);
+  }
   const card = await warrantyCardOf(jobId, settings);
   if (card) {
     const asked = stage!.key === "qc" ? card.rows : stageAsks(stage!, stages.map((s) => s.key), card.rows);

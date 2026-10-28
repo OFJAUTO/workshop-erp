@@ -10,7 +10,7 @@ import { ensureProforma } from "./invoice-flow";
 import { INVOICE_SELECT, nextDocumentNumber, toInvoice } from "./invoice-data";
 import { dubaiDate } from "./jobs";
 import { newToken } from "./media";
-import { notifyStaff } from "./notifications";
+import { jobAdvisorIds, notifyStaff } from "./notifications";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
 import { isUnchosen, round2, type QuoteLine } from "./quotes";
 import { bankChargePercentFor, type Settings } from "./settings";
@@ -54,11 +54,15 @@ export async function bodyshopPeople(): Promise<{ managers: Person[]; leaders: P
   return { managers: all.filter((p) => p.role_id === "workshop_manager"), leaders: all.filter((p) => p.role_id === "team_leader"), staff: all.filter((p) => p.role_id === "technician" || p.role_id === "team_leader"), all };
 }
 const idsOf = (ps: Person[]) => ps.map((p) => p.id);
-/** Everyone to tell about a car: the bodyshop managers, the leaders of the sections the car goes through, the advisor. */
-export async function involvedIds(jobId: string, sections: string[], advisorId: string | null) {
+/**
+ * Everyone to tell about a car: the bodyshop managers and the advisors in charge; the leaders of the sections the car
+ * goes through only when `withLeaders` (their own sign-off) - car-wide news is not theirs (B2).
+ */
+export async function involvedIds(jobId: string, sections: string[], advisorId: string | null, withLeaders = false) {
   const { managers, leaders } = await bodyshopPeople();
   const secs = new Set(sections);
-  return Array.from(new Set([...idsOf(managers), ...idsOf(leaders.filter((l) => l.section && secs.has(l.section))), ...(advisorId ? [advisorId] : [])]));
+  const advisors = await jobAdvisorIds(jobId);
+  return Array.from(new Set([...idsOf(managers), ...(withLeaders ? idsOf(leaders.filter((l) => l.section && secs.has(l.section))) : []), ...advisors, ...(advisorId && !advisors.length ? [advisorId] : [])]));
 }
 
 /** The approved packages on the car: kinds, and the film or tint details written on the lines. */
@@ -374,7 +378,7 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     if (handover && handover.status === "pending") await admin.from("bodyshop_stages").update({ status: "active", started_at: now, updated_by: actor.id }).eq("id", handover.id);
     await admin.from("job_events").insert({ job_id: job.id, event_type: "bodyshop_stage", note: `Bodyshop side complete (${actor.display_name}); the mechanical side takes the car through QC to Ready`, created_by: actor.id });
     const needed = neededSignoffs(stages.map((s) => s.section));
-    await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The bodyshop work is complete; the mechanical work carries on. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
+    await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by, true), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The bodyshop work is complete; the mechanical work carries on. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
   }
   if (!left.length && job.status === "in_work" && !mixed) {
     await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, updated_by: actor.id }).eq("id", job.id);
@@ -387,7 +391,7 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     const handover = stages.find((s) => s.key === "handover");
     if (handover) await admin.from("bodyshop_stages").update({ status: "active", started_at: now, updated_by: actor.id }).eq("id", handover.id);
     const needed = neededSignoffs(stages.map((s) => s.section));
-    await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The work is complete. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}. Handover ${formatDate(job.promised_at)}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
+    await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by, true), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The work is complete. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}. Handover ${formatDate(job.promised_at)}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
   }
   return { ok: true };
 }
@@ -491,6 +495,7 @@ export async function shiftAfterLateStage(stage: StageRow, daysLate: number, set
   await admin.from("bodyshop_stages").update({ late_notified_at: new Date().toISOString() }).eq("id", stage.id);
   const { managers } = await bodyshopPeople();
   const ids = Array.from(new Set([...idsOf(managers), ...(job.gated_in_by ? [job.gated_in_by] : [])]));
+  if (stage.status === "active") ids.push(...(await leaderIdsOf(stage.section)).filter((x) => !ids.includes(x)));
   await notifyStaff(ids, { type: "bodyshop_late", title: `${shortCar(job.vehicle)} ${stage.label} late by ${daysLate} day${daysLate === 1 ? "" : "s"}`, body: `Handover now ${formatDate(newPromised ?? job.promised_at)}.`, jobId: job.id, href: `/bodyshop/${job.id}` });
   await admin.from("job_events").insert({ job_id: job.id, event_type: "bodyshop_late", note: `${stage.label} late by ${daysLate} day${daysLate === 1 ? "" : "s"}; handover moved to ${formatDate(newPromised ?? job.promised_at)}`, created_by: null });
   if (newPromised) await tellHandoverMoved(job.id, newPromised, null, true);
@@ -605,12 +610,14 @@ export async function signOff(jobId: string, roleKey: SignoffKey, actor: Actor, 
   const state = await signoffState(jobId);
   if (!state.needed.includes(roleKey)) return { error: "That sign-off is not needed on this car." };
   if (state.signed.includes(roleKey)) return { complete: state.complete };
+  const { data: js } = await admin.from("jobs").select("is_open, status").eq("id", jobId).maybeSingle();
+  if (!js?.is_open || !["ready", "pending_payment"].includes(String(js.status))) return { error: "The release is signed when the work is complete and the car is Ready." };
   await admin.from("bodyshop_signoffs").insert({ job_id: jobId, role_key: roleKey, staff_id: actor.id, on_behalf: onBehalf, created_by: actor.id, updated_by: actor.id });
   await admin.from("job_events").insert({ job_id: jobId, event_type: "bodyshop_signoff", note: `Release signed by ${actor.display_name}${onBehalf ? ` on behalf of the ${roleKey === "manager" ? "bodyshop manager" : `${roleKey} leader`}` : ""}`, created_by: actor.id });
   const after = await signoffState(jobId);
   if (after.complete) {
     const job = await jobRow(jobId);
-    if (job) await notifyStaff(await involvedIds(jobId, (await loadStages(jobId)).map((s) => s.section), job.gated_in_by), { type: "bodyshop_signoff", title: `${shortCar(job.vehicle)} signed off, ready to hand over`, body: `Every sign-off is in. Handover ${formatDate(job.promised_at)}.`, jobId, href: `/jobs/${jobId}/gate-out` });
+    if (job) await notifyStaff(await involvedIds(jobId, (await loadStages(jobId)).map((s) => s.section), job.gated_in_by, true), { type: "bodyshop_signoff", title: `${shortCar(job.vehicle)} signed off, ready to hand over`, body: `Every sign-off is in. Handover ${formatDate(job.promised_at)}.`, jobId, href: `/jobs/${jobId}/gate-out` });
   }
   return { complete: after.complete };
 }
@@ -621,8 +628,14 @@ export async function notReady(jobId: string, roleKey: SignoffKey, reason: strin
   const clean = reason.trim().slice(0, 200);
   if (clean.length < 3) return { error: "Say in a few words what is not ready." };
   const stages = await loadStages(jobId);
+  const state = await signoffState(jobId);
+  if (!state.needed.includes(roleKey)) return { error: "That sign-off is not needed on this car." };
+  const { data: js } = await admin.from("jobs").select("is_open, status").eq("id", jobId).maybeSingle();
+  if (!js?.is_open || !["ready", "pending_payment"].includes(String(js.status))) return { error: "Not ready is for a car waiting for its release sign-off." };
   const section: StageSection = roleKey === "manager" ? "strip_refit" : roleKey;
-  const back = [...stages].reverse().find((s) => s.section === section && s.status === "done") ?? [...stages].reverse().find((s) => s.status === "done" && s.key !== "handover");
+  // A leader reopens their own team's stage; the bodyshop manager may reopen the last stage done if strip and refit had none.
+  const back = [...stages].reverse().find((s) => s.section === section && s.status === "done") ?? (roleKey === "manager" ? [...stages].reverse().find((s) => s.status === "done" && s.key !== "handover") : undefined);
+  if (!back) return { error: "There is no finished stage of your team on this car to send back." };
   const now = new Date().toISOString();
   if (back) await admin.from("bodyshop_stages").update({ status: "active", done_at: null, done_by: null, updated_by: actor.id }).eq("id", back.id);
   const handover = stages.find((s) => s.key === "handover");
@@ -637,6 +650,7 @@ export async function notReady(jobId: string, roleKey: SignoffKey, reason: strin
   if (handover && newPromised) await admin.from("bodyshop_stages").update({ due_date: newPromised }).eq("id", handover.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "bodyshop_not_ready", note: `Not ready (${actor.display_name}): ${clean}. Back to ${back?.label ?? "the work"}; handover ${formatDate(newPromised ?? job.promised_at)}.`, created_by: actor.id });
   const ids = await involvedIds(jobId, stages.map((s) => s.section), job.gated_in_by);
+  if (back) await tellSection(job, { ...back, status: "active" }, `${shortCar(job.vehicle)} is back with you: ${clean}`);
   await notifyStaff(ids, { type: "bodyshop_not_ready", title: `${shortCar(job.vehicle)} not ready: ${clean}`, body: `${actor.display_name} sent it back to ${back?.label ?? "the work"}. Handover now ${formatDate(newPromised ?? job.promised_at)}.`, jobId, href: `/bodyshop/${jobId}` });
   return {};
 }
@@ -856,6 +870,7 @@ export async function bodyshopHourly(settings: Settings): Promise<{ late: number
     const state = await signoffState(j.id);
     if (!state.hasStages) continue;
     const ids = await involvedIds(j.id, (await loadStages(j.id)).map((s) => s.section), null);
+    for (const k of state.waitingOn) if (k !== "manager") ids.push(...(await leaderIdsOf(k)).filter((x) => !ids.includes(x)));
     await notifyStaff(ids, { type: "bodyshop_due_out", title: `${shortCar(j.vehicle)} due out tomorrow`, body: state.waitingOn.length ? `Sign-off needed from ${state.waitingOn.map((k) => ({ manager: "the bodyshop manager", ppf: "PPF", detailing: "Detailing", paint: "Paint" })[k]).join(" and ")}.` : "Every sign-off is in.", jobId: j.id, href: `/bodyshop/${j.id}#signoff` });
     await admin.from("jobs").update({ bodyshop_due_out_notified_at: new Date().toISOString() }).eq("id", j.id);
     dueOut++;
