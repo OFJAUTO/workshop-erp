@@ -356,6 +356,8 @@ export const MEASUREMENTS: MeasurementField[] = [
     ],
     group: "Battery test",
   },
+  // Optional (29 October 2026): the cold cranking amps the tester measured, shown on the report when entered.
+  { key: "battery_cca", label: "Battery CCA (optional)", unit: "CCA", kind: "number", group: "Battery test", optional: true },
   { key: "vent_temp", label: "A/C vent temperature", unit: "°C", kind: "number", group: "Air conditioning" },
 ];
 
@@ -513,8 +515,9 @@ export const PARTS_UNITS = ["pc", "set", "pair", "litre", "kg", "m"] as const;
 /** One line of "Parts needed": the part, how many, the unit. The quantity follows the part to the price request and the quotation. */
 export type PartsRow = { part: string; qty: number; unit: string };
 
-export type InspectionLimits = { tread_max: number; pads_max: number; battery_max: number; vent_min: number; vent_max: number; fluid_max: number; tyre_years: number; pads_bad_max: number; pads_good_min: number };
-export const DEFAULT_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6 };
+/** tyre_old_years: the report warns on tyres older than this ("OLD TYRE", 29 October 2026). */
+export type InspectionLimits = { tread_max: number; pads_max: number; battery_max: number; vent_min: number; vent_max: number; fluid_max: number; tyre_years: number; pads_bad_max: number; pads_good_min: number; tyre_old_years: number };
+export const DEFAULT_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6, tyre_old_years: 5 };
 /** The limits from Settings on top of the defaults. */
 export function inspectionLimitsOf(settings: { inspection_limits?: unknown }): InspectionLimits {
   const raw = (settings.inspection_limits ?? {}) as Partial<Record<keyof InspectionLimits, number | string>>;

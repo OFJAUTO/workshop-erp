@@ -73,7 +73,7 @@ const NUMBER_KEYS = [
 ] as const;
 /** Settings kept as a list, one entry per line on the form. */
 const LIST_KEYS = ["part_types", "labour_actions", "labour_positions", "big_job_tags", "fluid_grades", "quick_remarks", "known_words", "tyre_brands", "damage_note_chips", "premium_brands"] as const;
-const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years", "pads_bad_max", "pads_good_min"] as const;
+const LIMIT_KEYS = ["tread_max", "pads_max", "battery_max", "vent_min", "vent_max", "fluid_max", "tyre_years", "pads_bad_max", "pads_good_min", "tyre_old_years"] as const;
 
 const TEXT_KEYS = [
   "ppf_brand_name",

@@ -35,7 +35,7 @@ export default async function SettingsPage() {
   let stageHours: Record<string, number> = {};
   let branchesText = "";
   const listTexts: Record<string, string> = {};
-  let limits: Record<string, number> = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15 };
+  let limits: Record<string, number> = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6, tyre_old_years: 5 };
   let prescanGate = false;
   let labourJobsText = "";
   let candidates: Record<string, number> = {};

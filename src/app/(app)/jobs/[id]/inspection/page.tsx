@@ -28,6 +28,9 @@ import { InspectionForm, type Suggestions } from "@/app/(app)/my-jobs/[id]/Inspe
 import { ApproveFormLive, RequestChangeForm, ReturnForm, ReviewBar } from "./forms";
 import { PartsListTick } from "@/components/PartsListTick";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { Collapsible } from "@/components/Collapsible";
+import { InspectionReport } from "@/components/InspectionReport";
+import { loadReportData } from "@/lib/report-data";
 
 export const dynamic = "force-dynamic";
 
@@ -175,6 +178,14 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const [tyreSizeSuggestion, catalogue] = await Promise.all([tyreSizeSuggestionFor(vehicle.id), loadCatalogue()]);
   const partsList = cleanPartsList(insp.parts_list);
   const partLines = mergePartsList(partsList);
+  // Section 8: the customer's report as the customer sees it, from the same layout as the link and the PDF.
+  const [preview, { data: reportLink }] = await Promise.all([
+    loadReportData(card, bundle, roadTest, settings, { thumbs: true }),
+    createAdminClient().from("report_links").select("token").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const reportToken = (reportLink?.token as string | undefined) ?? null;
+  // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
+  const previewSignedAt = Date.now();
 
   const bodyChecked = (await createAdminClient().from("inspections").select("bodyshop_checked_at").eq("id", insp.id).maybeSingle()).data?.bodyshop_checked_at as string | null | undefined;
   const body = { initial: await loadBodyState(insp.id), canEdit: await canEditBody(staff, { job_id: id, status: insp.status, bodyshop_checked_at: bodyChecked ?? null }), canCheck: isBodyshopStaff(staff) && !staff.viewingAs };
@@ -261,6 +272,15 @@ export default async function InspectionReportPage({ params }: { params: Promise
               ]}
             />
           </Card>
+
+          <div data-report-preview>
+            <Collapsible title="Customer's report (preview)" right={<span className="text-xs text-muted normal-case tracking-normal">{insp.status === "approved" ? "as sent" : "as it stands now"}</span>}>
+              <div className="px-4 pb-5 sm:px-5 flex flex-col gap-3">
+                {reportToken ? <a href={`/api/pdf/report/${reportToken}`} target="_blank" rel="noreferrer" className="self-start text-sm font-semibold underline" data-report-preview-pdf>Open the PDF</a> : null}
+                <InspectionReport data={preview} refreshUrl={reportToken ? `/api/customer/videos?t=${encodeURIComponent(reportToken)}` : ""} signedAt={previewSignedAt} withHead />
+              </div>
+            </Collapsible>
+          </div>
 
           {reviewing ? (
             <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} body={body} readOnly={false} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} submitAction={null} showPrescanToggle={can(role, "sendReport")} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={null} partsListFooter={<PartsListTick action={confirmPartsList.bind(null, id)} confirmedAt={insp.parts_list_confirmed_at} confirmedByName={tickName} count={partLines.length} canTick={canApprove && insp.status === "submitted"} />} />

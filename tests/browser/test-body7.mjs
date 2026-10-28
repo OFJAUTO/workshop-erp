@@ -87,7 +87,7 @@ const doc = mupdf.Document.openDocument(Buffer.from(await pdf.arrayBuffer()), "a
 let t = "";
 for (let i = 0; i < doc.countPages(); i++) t += doc.loadPage(i).toStructuredText("preserve-whitespace").asText();
 t = t.replace(/\s+/g, " ");
-check("3: the report has a Body section: front bumper, Dent, Crack, Severe, Replace", /BODY · 1 PANEL/i.test(t) && /Front bumper/i.test(t) && /Dent, Crack/i.test(t) && /Severe/i.test(t) && /Replace/i.test(t), t.match(/BODY.{0,200}/i)?.[0] ?? String(pdf.status));
+check("3: the report has a Body section: front bumper, Dent, Crack, Severe, Replace", /\bBODY\b/.test(t) && /Front bumper/i.test(t) && /Dent, Crack/i.test(t) && /Severe/i.test(t) && /Replace/i.test(t), t.match(/BODY.{0,200}/i)?.[0] ?? String(pdf.status));
 check("3: and says airbags deployed, chassis measurement needed", /Airbags deployed/i.test(t) && /chassis measurement needed/i.test(t));
 const pageIdx = Array.from({ length: doc.countPages() }, (_, i) => i).find((i) => /BODY/i.test(doc.loadPage(i).toStructuredText("preserve-whitespace").asText())) ?? 0;
 fs.writeFileSync(shot("body7-3-report-body.png"), Buffer.from(doc.loadPage(pageIdx).toPixmap(mupdf.Matrix.scale(1.3, 1.3), mupdf.ColorSpace.DeviceRGB, false, true).asPNG()));

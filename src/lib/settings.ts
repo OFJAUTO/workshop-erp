@@ -147,7 +147,7 @@ const DEFAULTS = {
   dangerous_customer_text: "SAFETY WARNING: our technician found a fault that makes this vehicle unsafe to drive. We strongly recommend the repair before the vehicle is driven. If you decline it, please consider recovery instead of driving.",
   dangerous_customer_text_ar: "تحذير سلامة: وجد الفني عطلاً يجعل هذه المركبة غير آمنة للقيادة. ننصح بشدة بإجراء الإصلاح قبل قيادة المركبة. في حال رفض الإصلاح، يُرجى التفكير في نقل المركبة بالشاحنة بدلاً من قيادتها.",
   dangerous_acknowledgement_text: "I understand that this vehicle has a fault that makes it unsafe to drive, that OFJ Automotive advised the repair, and that I decline it at my own risk.",
-  inspection_limits: { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6 } as Record<string, number>,
+  inspection_limits: { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6, tyre_old_years: 5 } as Record<string, number>,
   item_suggestions: {} as Record<string, { parts?: string[]; remarks?: string[] }>,
   manager_note_presets: [
     "Report checked and accurate.",

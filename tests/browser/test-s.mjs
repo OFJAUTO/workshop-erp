@@ -84,18 +84,20 @@ await section("2 quotation strip", async () => {
 await section("3 customer link and pdf", async () => {
   const { browser, page } = await browserFor("owner", { viewport: { width: 420, height: 900 } });
   await go(page, `${base}/report/e2e-road-test-token`);
-  const box = page.locator("[data-road-test]");
-  check("3: the customer's first page shows the road test", (await box.count()) === 1);
-  const items = await box.locator("[data-road-item]").evaluateAll((els) => els.map((e) => ({ s: e.getAttribute("data-road-item"), t: e.textContent })));
-  check("3: Bad first with its remark, then Average; Good as one line", items.length === 2 && items[0].s === "bad" && /Noises: Knocking over bumps/.test(items[0].t) && items[1].s === "average" && /Good: .*Engine/.test((await box.textContent()) ?? ""), JSON.stringify(items));
+  // 29 October 2026 (section 8): the road test is its own block of the report, its findings also in Needs attention.
+  const box = page.locator("[data-report-section=road_test]");
+  check("3: the customer's report shows the road test", (await box.count()) === 1);
+  const items = await box.locator("[data-finding]").evaluateAll((els) => els.map((e) => ({ s: e.querySelector("[data-chip]")?.textContent ?? "", t: e.textContent })));
+  check("3: Bad first with its remark, then Average; Good as one line", items.length === 2 && /bad/i.test(items[0].s) && /Noises · Knocking over bumps/.test(items[0].t) && /average/i.test(items[1].s) && /Good.*Engine/.test((await box.textContent()) ?? ""), JSON.stringify(items));
+  check("3: the road test's findings are in Needs attention too", (await page.locator("[data-report-attention]").textContent())?.includes("Noises") === true);
   await browser.close();
   const res = await fetch(`${base}/api/pdf/report/e2e-road-test-token`);
   check("3: the report PDF opens", res.status === 200 && /pdf/.test(res.headers.get("content-type") ?? ""), String(res.status));
   const text = (await pdfText(Buffer.from(await res.arrayBuffer()))).replace(/\s+/g, " ");
-  const iRoad = text.search(/Road test\s*·\s*2 noted/i);
-  const iAttention = text.search(/Needs attention/i);
-  check("3: the PDF has the road test section before 'Needs attention'", iRoad >= 0 && iAttention > iRoad, `${iRoad} / ${iAttention}`);
-  check("3: the PDF lists Noises (Bad) with the remark and the good items on one line", /Bad\s+Noises/i.test(text) && /Knocking over bumps/.test(text) && /Good: .*Steering/.test(text) && !/Noted on the road test/.test(text), text.slice(Math.max(0, iRoad - 20), iRoad + 260));
+  const iRoad = text.search(/ROAD TEST/);
+  const iAttention = text.search(/NEEDS ATTENTION/);
+  check("3: the PDF has its ROAD TEST block after 'Needs attention' (the report's order)", iRoad >= 0 && iAttention >= 0 && iRoad > iAttention, `${iRoad} / ${iAttention}`);
+  check("3: the PDF lists Noises (Bad) with the remark and the good items on one line", /Bad\s+Noises/i.test(text.slice(iRoad)) && /Knocking over bumps/.test(text.slice(iRoad)) && /Good .*Steering/.test(text.slice(iRoad)) && !/Noted on the road test/.test(text), text.slice(iRoad, iRoad + 260));
 });
 
 cleanupDb();

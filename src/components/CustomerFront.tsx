@@ -65,7 +65,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
               </div>
             </section>
             {boxes.length ? (
-              <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <section className={`grid grid-cols-1 gap-3 ${boxes.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
                 {boxes.map((b) => (
                   <div key={b.title} className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-[3px] text-xs">
                     <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{b.title}</span>

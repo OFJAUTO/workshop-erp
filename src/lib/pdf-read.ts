@@ -57,6 +57,20 @@ export async function renderPdfPage(buffer: Buffer | Uint8Array, index: number, 
   return doc.loadPage(index).toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false, true).asPNG();
 }
 
+/**
+ * How full the last page of one of our A4 documents is (0 to 1): the lowest text or picture between the compact
+ * header and the footer, as a share of the body's height. The report uses it to avoid a nearly empty last page.
+ */
+export async function pdfLastPageFill(buffer: Buffer | Uint8Array, body: { top: number; bottom: number } = { top: 66, bottom: 732 }): Promise<{ pages: number; fill: number }> {
+  const mupdf = await lib();
+  const doc = mupdf.Document.openDocument(Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer), "application/pdf");
+  const pages = doc.countPages();
+  const data = JSON.parse(doc.loadPage(pages - 1).toStructuredText("preserve-images").asJSON()) as { blocks?: { bbox: { y: number; h: number } }[] };
+  let lowest = body.top;
+  for (const b of data.blocks ?? []) if (b.bbox.y >= body.top && b.bbox.y < body.bottom) lowest = Math.max(lowest, Math.min(body.bottom, b.bbox.y + b.bbox.h));
+  return { pages, fill: (lowest - body.top) / (body.bottom - body.top) };
+}
+
 /** Every text line with its position, page by page: the dealer-block parser works off the geometry. */
 export async function readPdfPositionedLines(buffer: Buffer | Uint8Array): Promise<PosLine[][]> {
   const mupdf = await lib();

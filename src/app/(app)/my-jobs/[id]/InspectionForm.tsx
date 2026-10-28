@@ -220,7 +220,7 @@ function Dot({ ok, attempted }: { ok: boolean; attempted: boolean }) {
   return <span className={`inline-block h-3 w-3 rounded-full ${attempted ? "bg-red-bar" : "bg-line-strong"}`} aria-label="incomplete" />;
 }
 
-const AUTO_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6 };
+const AUTO_LIMITS: InspectionLimits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6, tyre_old_years: 5 };
 
 /**
  * The technician's report: the scan step (when the gate is on), findings per customer request, the

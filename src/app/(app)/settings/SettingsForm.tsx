@@ -31,7 +31,7 @@ export function SettingsForm({
   labourByMake,
   qcChecksText,
   listTexts = {},
-  limits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6 },
+  limits = { tread_max: 12, pads_max: 20, battery_max: 16, vent_min: -5, vent_max: 40, fluid_max: 30, tyre_years: 15, pads_bad_max: 3, pads_good_min: 6, tyre_old_years: 5 },
   breakTimes = {},
   prescanGate = false,
   labourJobsText = "",
@@ -507,6 +507,7 @@ export function SettingsForm({
               <Field label="Tyre year pick-list (years back)"><Input name="limit__tyre_years" defaultValue={String(limits.tyre_years)} inputMode="numeric" required /></Field>
               <Field label="Pads Bad at or under (mm)"><Input name="limit__pads_bad_max" defaultValue={String(limits.pads_bad_max ?? 3)} inputMode="decimal" required /></Field>
               <Field label="Pads Good from (mm)"><Input name="limit__pads_good_min" defaultValue={String(limits.pads_good_min ?? 6)} inputMode="decimal" required /></Field>
+              <Field label="Warn on tyres older than (years)" hint="The report marks them OLD TYRE with an advisory."><Input name="limit__tyre_old_years" defaultValue={String(limits.tyre_old_years ?? 5)} inputMode="numeric" required data-tyre-old-years /></Field>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Fluid grades (one per line)" hint="One-tap suggestions on fluid items.">

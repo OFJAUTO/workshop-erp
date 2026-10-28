@@ -106,7 +106,7 @@ try {
   // 29 October 2026: each video is a tile with its own picture; a tap plays it in THE viewer (PhotoViewer).
   const posters = await list.locator("[data-player]").evaluateAll((els) => els.map((e) => e.getAttribute("data-viewer-poster") ?? ""));
   check("3: each tile shows the video's own picture", posters.length === 2 && posters.every((p) => /\.jpg/.test(p)), posters.map((p) => p.slice(0, 60)).join(" | "));
-  await cust.locator("[data-report-videos]").scrollIntoViewIfNeeded();
+  await list.first().scrollIntoViewIfNeeded();
   await cust.screenshot({ path: shot("videos2-2-link-before.png"), fullPage: true });
   for (let i = 0; i < 2; i++) {
     await list.nth(i).locator("[data-play]").click();
