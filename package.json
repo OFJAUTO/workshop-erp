@@ -108,7 +108,9 @@
     "test:version": "node --env-file=.env.local tests/browser/test-version.mjs",
     "test:realtime": "node --env-file=.env.local tests/browser/test-realtime.mjs",
     "test:b1": "node --env-file=.env.local tests/browser/test-b1.mjs",
-    "test:b2": "node --env-file=.env.local tests/browser/test-b2.mjs"
+    "test:b2": "node --env-file=.env.local tests/browser/test-b2.mjs",
+    "test:b3": "node --env-file=.env.local tests/browser/test-b3.mjs",
+    "test:popups": "node --env-file=.env.local tests/browser/popup-check.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

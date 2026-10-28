@@ -4,7 +4,7 @@ import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, effectiveMarkupPercent, floorProblem, isHidden, lineTotal, minimumMarkupAed, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
-import { LINE_SELECT, SERVICE_SELECT, labourRateFor, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
+import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { toSnapshot } from "@/lib/packages";
@@ -518,6 +518,28 @@ export async function POST(request: NextRequest) {
       if (!kind || v <= 0) Object.assign(patch, { discount_kind: null, discount_value: null, discount_percent: 0 });
       else Object.assign(patch, { discount_kind: kind, discount_value: kind === "percent" ? Math.min(100, v) : v, discount_percent: 0 });
     }
+    // Who gave the discount decides the words and the approval (B3). The giver is stamped only when the discount really
+    // changes (Apply with the same figures changes nothing). The owner's own discount never needs his approval, and it
+    // approves nothing else either: a quotation waiting for him is checked again after the save (below). An advisor's
+    // change while it waits sends it back to draft, so the owner sees the new figure when it is sent again; an earlier
+    // approval only covers what the owner saw (approvalCovers at the send).
+    let ownerDiscountWhilePending = false;
+    if (h.discount_kind !== undefined || h.discount_value !== undefined || h.discount_scope !== undefined) {
+      const { data: curA } = await admin.from("quotations").select("status, discount_kind, discount_value, discount_scope").eq("id", q.id).maybeSingle();
+      const kindWas = (curA?.discount_kind as string | null) ?? null;
+      const valueWas = Number(curA?.discount_value ?? 0) || 0;
+      const scopeWas = (curA?.discount_scope as string | null) ?? "labour";
+      const kindNow = "discount_kind" in patch ? ((patch.discount_kind as string | null) ?? null) : kindWas;
+      const valueNow = "discount_value" in patch ? Number(patch.discount_value ?? 0) || 0 : valueWas;
+      const scopeNow = h.discount_scope !== undefined ? (h.discount_scope === "labour_services" ? "labour_services" : "labour") : scopeWas;
+      if (kindNow !== kindWas || Math.abs(valueNow - valueWas) > 0.0001 || scopeNow !== scopeWas) {
+        Object.assign(patch, { discount_set_by: staff.id, discount_set_at: new Date().toISOString() });
+        if (curA?.status === "pending_owner") {
+          if (isOwner) ownerDiscountWhilePending = true;
+          else Object.assign(patch, { status: "draft", owner_approval_reason: null });
+        }
+      }
+    }
     // The deposit the advisor asks for: none, a fixed amount, a share of the parts or of the total. Written down with who and when.
     if (h.deposit_mode !== undefined || h.deposit_value !== undefined) {
       const { data: curQ } = await admin.from("quotations").select("deposit_mode, deposit_value, number, version").eq("id", q.id).maybeSingle();
@@ -552,6 +574,21 @@ export async function POST(request: NextRequest) {
     const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await refreshed();
+    if (ownerDiscountWhilePending) {
+      // The owner changed the discount on a quotation waiting for him: his discount is no longer a reason. Whatever
+      // else is left (a large total, a line discount) stays in his box; with nothing left it goes back to the advisor.
+      const b = await loadQuotation(q.id);
+      if (b) {
+        const left = approvalReasonsNow(b, settings, true);
+        if (left.length) await admin.from("quotations").update({ owner_approval_reason: left.join("; "), updated_by: staff.id }).eq("id", q.id);
+        else {
+          await admin.from("quotations").update({ status: "draft", owner_approval_reason: null, updated_by: staff.id }).eq("id", q.id);
+          await logQuoteEvent(q.id, b.quotation.job_id, staff.id, "quote_owner_approved", `${b.quotation.number} v${b.quotation.version}: the owner set the discount himself; nothing else needs his approval`);
+          const to = [...new Set([b.quotation.created_by, ...(b.quotation.job_id ? await advisorsInCharge(b.quotation.job_id) : [])].filter((x): x is string => !!x && x !== staff.id))];
+          if (to.length) await notifyStaff(to, { type: "quote_owner_approval", title: `Owner set the discount on ${b.quotation.number}: complete and send it`, body: "", jobId: b.quotation.job_id, href: b.quotation.job_id ? `/jobs/${b.quotation.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+        }
+      }
+    }
     return NextResponse.json({ ok: true });
   }
   return NextResponse.json({ error: "Nothing to save." }, { status: 400 });

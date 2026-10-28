@@ -20,6 +20,7 @@ import { reviseQuotation } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { EstimateMenu } from "../EstimateMenu";
+import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
   const { data: locker } = lockFresh ? await createAdminClient().from("staff").select("display_name").eq("id", q.editing_by!).maybeSingle() : { data: null };
   const lockedBy = lockFresh ? (locker?.display_name ?? "Someone") : null;
+  const discountBy = await discountByOf(q);
   const services = await loadServices(staff.id);
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_estimate_template
@@ -94,6 +96,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         </Card>
       ) : null}
       <QuoteEditor
+        ownerBox={<OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} />}
+        discountBy={discountBy}
+        viewerName={staff.display_name}
         autoOpenPackages={openPackages === "1"}
         tintBox={<TintSpecPanel quotation={q} settings={settings} isOwner={isOwner} viewOnly={!!staff.viewingAs} />}
         quotation={q}

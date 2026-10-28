@@ -13,9 +13,9 @@ import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
-import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, effectiveMarkupPercent, isUnchosen, marginToneOf, ownerApprovalReasons, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, approvalCovers, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -392,13 +392,20 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
     await admin.from("quotations").update({ completed_at: new Date().toISOString(), completed_by: staff.id, updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name} on sending (owner)`);
   }
-  const totals = quoteTotals(bundle.lines, q, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
-  const reasons = ownerApprovalReasons(q, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 });
-  if (reasons.length && staff.role_id !== "owner" && !q.owner_approved_at) {
+  const setter = q.discount_set_by ?? null;
+  const { data: setterRow } = setter ? await admin.from("staff").select("role_id").eq("id", setter).maybeSingle() : { data: null };
+  const reasons = approvalReasonsNow(bundle, settings, setterRow?.role_id === "owner");
+  // The owner's approval covers what he saw: the same reasons, or a total or discount that has only gone down since.
+  // Anything new or bigger goes back to him.
+  if (reasons.length && staff.role_id !== "owner" && !approvalCovers(q.owner_approved_at ? q.owner_approval_reason : null, reasons)) {
     if (q.status !== "pending_owner") {
-      await admin.from("quotations").update({ status: "pending_owner", owner_approval_reason: reasons.join("; "), updated_by: staff.id }).eq("id", q.id);
+      await admin.from("quotations").update({ status: "pending_owner", owner_approval_reason: reasons.join("; "), owner_approved_by: null, owner_approved_at: null, updated_by: staff.id }).eq("id", q.id);
       await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_approval", `${q.number} sent to the owner for approval: ${reasons.join("; ")}`);
       await notifyRoles(["owner"], { type: "quote_owner_approval", title: `Quotation needs your approval · ${q.number}`, body: reasons.join("; "), jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+      refresh(q.job_id, q.id);
+    } else if ((q.owner_approval_reason ?? "") !== reasons.join("; ")) {
+      // Still waiting, but the figures moved: the owner's box shows what would go out now.
+      await admin.from("quotations").update({ owner_approval_reason: reasons.join("; "), updated_by: staff.id }).eq("id", q.id);
       refresh(q.job_id, q.id);
     }
     return { pendingOwner: reasons };
@@ -457,6 +464,10 @@ export async function decideQuoteApproval(quotationId: string, formData: FormDat
   const decision = String(formData.get("decision") ?? "");
   const note = blankToNull(formData.get("note"));
   const admin = createAdminClient();
+  // Only a quotation still waiting, with the reason the owner saw, can be decided: a box left open never approves a newer figure.
+  if (q.status !== "pending_owner") redirect(`${back}?error=${encodeURIComponent("This quotation is no longer waiting for your approval: it was changed or already decided. Check it again.")}`);
+  const seen = formData.get("seen");
+  if (decision === "approve" && seen !== null && String(seen) !== (q.owner_approval_reason ?? "")) redirect(`${back}?error=${encodeURIComponent("The figures changed since you opened it. Check the new reason and approve again.")}`);
   if (decision === "approve") {
     await admin.from("quotations").update({ status: "draft", owner_approved_by: staff.id, owner_approved_at: new Date().toISOString(), updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_approved", `Owner approved ${q.number}${note ? `: ${note}` : ""}`);

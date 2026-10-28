@@ -28,7 +28,7 @@ export function WashForms({ jobId, atWash, canAct, from = null, washState = null
           <Button type="button" tone="ghost" size="md" onClick={() => setSkipping(true)}>Skip the wash</Button>
           {asking ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4" role="dialog" aria-modal="true" data-wash-ask>
-              <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+              <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
                 <span className="text-lg font-extrabold">Is the car wash free?</span>
                 <p className="text-sm">Check with the wash team before sending.</p>
                 {busy ? (

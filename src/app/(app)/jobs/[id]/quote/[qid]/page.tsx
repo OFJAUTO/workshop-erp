@@ -10,8 +10,8 @@ import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { installerHistoryFor } from "@/lib/bodyshop";
-import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, packageCostingOf } from "@/lib/quote-data";
-import { QUOTE_STATUS_LABELS, aed, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
+import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, packageCostingOf, approvalReasonsNow } from "@/lib/quote-data";
+import { QUOTE_STATUS_LABELS, aed, approvalCovers, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
@@ -19,7 +19,7 @@ import { shortFor } from "@/lib/short-links";
 import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { confirmEstimateUnchanged, decideQuoteApproval, decideRevision, declineQuotation, declineToGateOut, requestRevision, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
+import { confirmEstimateUnchanged, declineQuotation, declineToGateOut, requestRevision, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { loadPricingRows } from "@/lib/parts-pricing";
@@ -30,6 +30,7 @@ import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { jobCharges } from "@/lib/supplier-charges";
 import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { severityLabel } from "@/lib/car-outline";
+import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
 
 export const dynamic = "force-dynamic";
 
@@ -117,37 +118,11 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const requesterName = nameOf(q.revision_requested_by);
   const revisionPending = !!q.revision_requested_at && !q.revision_allowed_at && !q.revision_declined_at;
   // The owner's box sits in the right column under "Before sending": the approval above the limit, or a revision request.
-  const ownerBox = can(role, "approveQuotes") && (q.status === "pending_owner" || revisionPending) ? (
-    <Card className="flex flex-col gap-3 border-ink" data-owner-box>
-      {q.status === "pending_owner" ? (
-        <>
-          <SectionLabel>Owner&apos;s approval</SectionLabel>
-          <p className="text-sm">{q.owner_approval_reason}</p>
-          <form action={decideQuoteApproval.bind(null, q.id)} className="flex flex-col gap-2">
-            <Textarea name="note" rows={2} placeholder="Note to the advisor (optional)" />
-            <div className="flex gap-2">
-              <Button type="submit" name="decision" value="approve" size="md" autoFocus={approve === "1"} data-owner-approve>Approve</Button>
-              <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Ask for changes</Button>
-            </div>
-          </form>
-        </>
-      ) : null}
-      {revisionPending ? (
-        <>
-          <SectionLabel>Revision requested</SectionLabel>
-          <p className="text-sm"><span className="font-semibold">{requesterName ?? (q.revision_request_kind === "parts" ? "Parts" : "The advisor")}</span>: {q.revision_request_reason}</p>
-          <p className="text-xs text-muted">The customer approved this quotation. Allow one revision, or decline.</p>
-          <form action={decideRevision.bind(null, q.id)} className="flex flex-col gap-2">
-            <Textarea name="note" rows={2} placeholder="Note (optional)" />
-            <div className="flex gap-2">
-              <Button type="submit" name="decision" value="allow" size="md" data-revision-allow>Allow one revision</Button>
-              <Button type="submit" name="decision" value="decline" tone="secondary" size="md" data-revision-decline>Decline</Button>
-            </div>
-          </form>
-        </>
-      ) : null}
-    </Card>
-  ) : null;
+  const discountBy = await discountByOf(q);
+  // The owner's approval still covers what the quotation would ask now (the send's own rule).
+  const approvalNow = approvalReasonsNow(bundle, settings, discountBy?.owner === true);
+  const approvalStands = !!q.owner_approved_at && approvalCovers(q.owner_approval_reason ?? null, approvalNow);
+  const ownerBox = <OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} approveFocus={approve === "1"} revision={{ pending: revisionPending, requesterName, kind: q.revision_request_kind ?? null, reason: q.revision_request_reason ?? null }} />;
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").
   const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
@@ -227,7 +202,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
-      {q.owner_approved_at && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
+      {q.owner_approved_at && !approvalStands && q.status === "draft" ? <div data-owner-approval-stale><Notice tone="info">Changed since the owner approved it ({approvalNow.join("; ")}). Sending asks the owner again.</Notice></div> : null}
+      {approvalStands && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
       {bundle.versions.length > 1 ? (
         <p className="text-xs text-muted">
           Versions:{" "}
@@ -291,6 +267,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         revision={{ requestedAt: q.revision_requested_at ?? null, requestedBy: requesterName, reason: q.revision_request_reason ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
         reviseReasons={reasonsFor(settings, "revise_after_approval")}
         ownerBox={ownerBox}
+        discountBy={discountBy}
+        viewerName={staff.display_name}
         tintBox={<TintSpecPanel quotation={q} settings={settings} isOwner={isOwner} viewOnly={!!staff.viewingAs} />}
         autoSend={send === "1"}
       />

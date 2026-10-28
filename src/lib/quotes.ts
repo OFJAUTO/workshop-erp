@@ -145,6 +145,9 @@ export type QuoteRow = {
   payment_by_card: boolean;
   owner_approval_reason: string | null;
   owner_approved_by: string | null;
+  /** Who gave the labour discount and when (B3). */
+  discount_set_by?: string | null;
+  discount_set_at?: string | null;
   owner_approved_at: string | null;
   sent_at: string | null;
   sent_by: string | null;
@@ -796,15 +799,24 @@ export function estimatedDaysAfterApproval(lines: QuoteLine[], parts: PartItem[]
  * counts toward it; within the limit the advisor sends it himself, above it the quotation waits as
  * pending_owner ("Waiting for the owner: discount 18% of labour (limit 10%)"). The owner is never limited.
  */
-export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, lines: QuoteLine[], totals: { total: number; discountBase: number; discount: number; rounding: number }, settings: { discountLimit: number; approvalAbove: number }): string[] {
+/**
+ * The discount against the advisor's limit, in one place: the amount exactly as given, the share of the labour to
+ * one decimal (information only - never used to recalculate the amount), the round-off at sending shown on its own
+ * but counted toward the limit.
+ */
+export function discountAgainstLimit(totals: { discountBase: number; discount: number; rounding?: number | null }, limit: number): { amount: number; roundOff: number; pct: number; over: boolean; words: string } {
+  const amount = round2(totals.discount ?? 0);
+  const roundOff = round2(Math.max(0, -(totals.rounding ?? 0)));
+  const pct = totals.discountBase > 0 ? ((amount + roundOff) / totals.discountBase) * 100 : 0;
+  const over = limit > 0 && pct > limit + 0.049;
+  return { amount, roundOff, pct, over, words: `${aed(amount)}${roundOff > 0 ? ` + round-off ${aed(roundOff)}` : ""} = ${pct.toFixed(1)}% of labour` };
+}
+
+export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, lines: QuoteLine[], totals: { total: number; discountBase: number; discount: number; rounding: number }, settings: { discountLimit: number; approvalAbove: number }, opts: { discountByOwner?: boolean } = {}): string[] {
   void q;
   const out: string[] = [];
-  const roundOff = Math.max(0, -(totals.rounding ?? 0));
-  const givenAway = round2((totals.discount ?? 0) + roundOff);
-  const pct = totals.discountBase > 0 && givenAway > 0 ? (givenAway / totals.discountBase) * 100 : 0;
-  if (settings.discountLimit > 0 && pct > settings.discountLimit + 0.049) {
-    out.push(`discount ${pct.toFixed(pct >= 10 ? 0 : 1)}% of labour (limit ${settings.discountLimit}%)${roundOff > 0 ? `, the round-off of ${aed(roundOff)} counted` : ""}`);
-  }
+  const d = discountAgainstLimit(totals, settings.discountLimit);
+  if (!opts.discountByOwner && d.over) out.push(`discount ${d.words} (limit ${settings.discountLimit}%)`);
   for (const l of lines) {
     if (!l.is_active) continue;
     if (hasCostFloor(l) && (l.discount_percent ?? 0) > 0) out.push(`${l.title}: part discount of ${l.discount_percent}%${l.discount_reason ? ` (${l.discount_reason})` : ""}`);
@@ -812,6 +824,37 @@ export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, line
   }
   if (settings.approvalAbove > 0 && totals.total > settings.approvalAbove) out.push(`Total of ${aed(totals.total)} is above ${aed(settings.approvalAbove)}`);
   return out;
+}
+
+/**
+ * Does the owner's approval (the reasons he saw, joined by "; ") still cover the reasons the quotation has now? A
+ * reason he saw word for word is covered, and so is a total or a labour discount that has only gone DOWN since. Anything
+ * new or bigger goes back to him (B3 review: an approval is for what was approved, never a blank cheque).
+ */
+export function approvalCovers(approved: string | null | undefined, reasons: string[]): boolean {
+  if (!reasons.length) return true;
+  if (!approved) return false;
+  const seen = approved.split("; ");
+  const num = (s: string) => Number(s.replace(/[^\d.]/g, "")) || 0;
+  const totalOf = (r: string) => { const m = /^Total of (.+?) is above /.exec(r); return m ? num(m[1]) : null; };
+  // "discount AED 5,611.00 + round-off AED 1.52 = 46.8% of labour": the discount itself, and the labour it comes off
+  // (worked back from the share, which includes the round-off). The round-off chosen at Send never counts as "more".
+  const discountOf = (r: string) => {
+    const m = /^discount (.+?) = ([\d.]+)% of labour/.exec(r);
+    if (!m) return null;
+    const [main, ro = ""] = m[1].split(" + round-off ");
+    const pct = Number(m[2]);
+    return { main: num(main), base: pct > 0 ? ((num(main) + num(ro)) * 100) / pct : 0 };
+  };
+  return reasons.every((r) => {
+    if (seen.includes(r)) return true;
+    const t = totalOf(r);
+    if (t !== null) return seen.some((s) => { const st = totalOf(s); return st !== null && st + 0.005 >= t; });
+    const d = discountOf(r);
+    // Covered when the discount has not grown and the labour has not shrunk (0.5% slack: the share is shown to one decimal).
+    if (d) return seen.some((s) => { const sd = discountOf(s); return !!sd && sd.main + 0.005 >= d.main && d.base >= sd.base * 0.995; });
+    return false;
+  });
 }
 
 /** The latest delivery date of the parts on the quote, if any. */

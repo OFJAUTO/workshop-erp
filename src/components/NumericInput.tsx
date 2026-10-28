@@ -7,30 +7,45 @@ const SETTLE_MS = 1000;
 
 const fmt = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
-/** Digits, one separator (dot or comma) and, for decimals, a leading minus; letters typed by mistake disappear. */
+/**
+ * Digits, separators and, for decimals, a leading minus; letters typed by mistake disappear. One dot at most; commas
+ * may repeat before it (thousands, "12,500.00" as the screens print money) but never after it.
+ */
 export function cleanNumberText(raw: string, decimal: boolean): string {
   if (!decimal) return raw.replace(/[^\d]/g, "");
   let t = raw.replace(/[^\d.,-]/g, "");
   const negative = t.startsWith("-");
   t = t.replace(/-/g, "");
-  let separator = false;
+  let dot = false;
   let out = "";
   for (const ch of t) {
-    if (ch === "." || ch === ",") {
-      if (separator) continue;
-      separator = true;
-    }
+    if (ch === ".") {
+      if (dot) continue;
+      dot = true;
+    } else if (ch === "," && dot) continue;
     out += ch;
   }
   return (negative ? "-" : "") + out;
 }
 
-/** A finished number: "2", "2.2", ".5", "2,5", "10.25" or "" (clearing the box). "2." and "-" are not finished yet. */
-export const numberComplete = (t: string) => t === "" || /^-?(\d+([.,]\d+)?|[.,]\d+)$/.test(t);
+/** Thousands written with commas: "5,611", "1,234,567", "12,500.00" (never "0,500" - that is a half). */
+const THOUSANDS = /^-?[1-9]\d{0,2}(,\d{3})+(\.\d*)?$/;
 
-/** The text as the rest of the app reads it: a dot for the comma, "0.5" for ".5", "2" for "2."; "" stays "". */
+/** A finished number: "2", "2.2", ".5", "2,5", "10.25", "5,611", "12,500.00" or "" (clearing the box). "2." and "-" are not finished yet. */
+export const numberComplete = (t: string) => t === "" || (THOUSANDS.test(t) && !t.endsWith(".")) || /^-?(\d+([.,]\d+)?|[.,]\d+)$/.test(t);
+
+/**
+ * The text as the rest of the app reads it: commas dropped from thousands ("5,611" is 5611), otherwise a dot for the
+ * comma ("2,5" is 2.5), "0.5" for ".5", "2" for "2."; "" stays "".
+ */
 export function normalizeNumberText(t: string): string {
-  let s = t.trim().replace(",", ".");
+  let s = t.trim();
+  if (THOUSANDS.test(s)) s = s.replace(/,/g, "");
+  else {
+    s = s.replace(/,/g, ".");
+    const first = s.indexOf(".");
+    if (first >= 0) s = s.slice(0, first + 1) + s.slice(first + 1).replace(/\./g, "");
+  }
   if (s === "" || s === "-" || s === "." || s === "-.") return "";
   if (s.startsWith(".")) s = `0${s}`;
   if (s.startsWith("-.")) s = `-0${s.slice(1)}`;
@@ -48,7 +63,8 @@ export function parseNumberText(t: string): number | null {
 /**
  * A number or money box that never rewrites what is being typed. While it has the cursor the text stays exactly as
  * typed ("2.", ".5", "2,5"); about a second after typing stops, or when the box is left, the finished number goes to
- * the rest of the app through onChange (dot or comma both accepted). On leaving, the box shows the finished number.
+ * the rest of the app through onChange (a decimal dot or comma, and thousands commas as printed: "5,611" is 5611).
+ * On leaving, the box shows the finished number.
  */
 export function NumericInput({ className = "", value, defaultValue, onChange, onBlur, onFocus, onKeyDown, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   const decimal = props.inputMode === "decimal";

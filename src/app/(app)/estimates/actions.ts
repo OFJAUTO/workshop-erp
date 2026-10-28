@@ -137,7 +137,7 @@ export async function copyEstimate(id: string): Promise<{ error?: string; id?: s
   const admin = createAdminClient();
   const { data: created, error } = await admin
     .from("quotations")
-    .insert({ kind: "estimate", customer_id: q.customer_id, vehicle_id: q.vehicle_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, tint_spec: q.tint_spec ?? null, film_rolls_est: q.film_rolls_est ?? null, copied_from_id: q.id, created_by: staff.id, updated_by: staff.id })
+    .insert({ kind: "estimate", customer_id: q.customer_id, vehicle_id: q.vehicle_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", discount_set_by: q.discount_set_by ?? null, discount_set_at: q.discount_set_at ?? null, expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, tint_spec: q.tint_spec ?? null, film_rolls_est: q.film_rolls_est ?? null, copied_from_id: q.id, created_by: staff.id, updated_by: staff.id })
     .select("id, number")
     .single();
   if (error || !created) return { error: error?.message ?? "Could not copy the estimate." };

@@ -123,7 +123,7 @@ export function PartPicker({
   }
 
   const tabBtn = (id: string, label: string) => (
-    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm font-semibold whitespace-nowrap ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`} data-category={id}>
+    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 py-1.5 text-left text-sm font-semibold leading-tight whitespace-nowrap sm:whitespace-normal ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`} data-category={id}>
       {label}
     </button>
   );

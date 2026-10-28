@@ -23,7 +23,8 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { INTERNAL_ONLY_LABEL, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { parseNumber } from "@/lib/price-import";
+import { INTERNAL_ONLY_LABEL, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -288,6 +289,8 @@ export function QuoteEditor({
   estimatedDays = 0,
   isRevision = false,
   lockedBy = null,
+  discountBy = null,
+  viewerName = null,
   lock = null,
 }: {
   quotation: QuoteRow;
@@ -334,6 +337,10 @@ export function QuoteEditor({
   reviseReasons?: string[];
   /** The owner's approval box (above the limit) or the revision request, shown under "Before sending". */
   ownerBox?: ReactNode;
+  /** Who gave the labour discount (B3): the words on the line follow them, not the person looking. */
+  discountBy?: { name: string; owner: boolean } | null;
+  /** The person on screen: a discount changed here and not yet reloaded is theirs. */
+  viewerName?: string | null;
   /** Section 11: the tint specification box, shown under the labour and services while a line is tint work. */
   tintBox?: ReactNode;
   /** Arriving from "send the revised quotation": complete and open the send window by itself. */
@@ -353,6 +360,13 @@ export function QuoteEditor({
   const [lockLive, setLockLive] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [header, setHeader] = useState({ discount_percent: quotation.discount_percent, customer_note: quotation.customer_note ?? "", expected_payment_method: quotation.expected_payment_method ?? "not_sure", discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", commission_to: quotation.commission_to ?? null, materials_cost_aed: Number(quotation.materials_cost_aed) || 0, commission_kind: quotation.commission_kind ?? null, commission_value: quotation.commission_value ?? null, commission_status: (quotation.commission_status as "pending" | "approved" | "declined" | null) ?? (quotation.commission_to ? "approved" : null), deposit_mode: quotation.deposit_mode ?? "none", deposit_value: quotation.deposit_value ?? null, film_rolls_est: quotation.film_rolls_est ?? null });
+  // A discount saved elsewhere (another person, or this screen's own save coming back) replaces the screen's figures,
+  // so the words never credit the viewer with someone else's change (B3 review).
+  const [discountSeenAt, setDiscountSeenAt] = useState(quotation.discount_set_at ?? null);
+  if ((quotation.discount_set_at ?? null) !== discountSeenAt) {
+    setDiscountSeenAt(quotation.discount_set_at ?? null);
+    setHeader((h) => ({ ...h, discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour" }));
+  }
   const [discountOpen, setDiscountOpen] = useState(false);
   /** "Markup for every part … Apply to all": as a percentage of the cost, or a fixed AED per part. */
   const [allMode, setAllMode] = useState<"percent" | "aed">("percent");
@@ -724,7 +738,14 @@ export function QuoteEditor({
   const namedLabour = labourLines.filter((l) => l.title.trim());
   const labourDone = namedLabour.filter(finishedLine).length;
   const blockers = sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm });
-  const reasons = ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove });
+  // Who gave the discount (B3): changed on this screen and not saved back yet = the viewer; otherwise the stored giver.
+  // An unknown giver counts as not the owner, exactly as the server does.
+  const discountChangedHere = Number(header.discount_value ?? 0) !== Number(quotation.discount_value ?? 0) || (header.discount_kind ?? null) !== (quotation.discount_kind ?? null) || (header.discount_scope ?? "labour") !== (quotation.discount_scope ?? "labour");
+  const discountGiver = discountChangedHere && viewerName ? { name: viewerName, owner: isOwner } : discountBy;
+  const discountByOwnerNow = discountGiver?.owner === true;
+  const reasons = ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove }, { discountByOwner: discountByOwnerNow });
+  /** The owner's approval still covers what the quotation asks now (the send's own rule). */
+  const approvalStands = !!quotation.owner_approved_at && approvalCovers(quotation.owner_approval_reason ?? null, reasons);
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
   const sent = !!quotation.sent_at || ["sent", "opened", "approved", "urgent_requested", "declined", "expired", "superseded"].includes(quotation.status);
   const completed = !!completedAt;
@@ -1350,22 +1371,26 @@ export function QuoteEditor({
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
               </Button>
               {(() => {
-                // The discount against the advisor's limit, live (1.6): green inside it, amber above (the
-                // owner approves at send); the round-off at sending counts toward the same limit.
-                const given = totals.discount + Math.max(0, -(totals.rounding ?? 0));
+                // The discount against the limit (B3): the amount exactly as given, the % for information, and the
+                // words from WHO gave it - the owner (no limit, no approval) or the advisor, named.
                 const limit = settings.discountLimit ?? 0;
-                if (!(given > 0) || !(totals.discountBase > 0)) return null;
-                const pct = (given / totals.discountBase) * 100;
-                const pctText = pct.toFixed(pct >= 10 ? 0 : 1);
-                const over = limit > 0 && pct > limit + 0.049;
+                if (!(totals.discount > 0) || !(totals.discountBase > 0)) return null;
+                const d = discountAgainstLimit(totals, limit);
+                const byOwner = discountByOwnerNow;
+                const who = discountGiver?.name ?? "the advisor";
                 const pendingOwner = quotation.status === "pending_owner";
+                // An advisor's discount above the limit that the owner already approved (and nothing grew since).
+                const approved = !byOwner && d.over && approvalStands && !pendingOwner;
+                const over = !byOwner && d.over && !approved;
                 return (
-                  <span className={`inline-flex items-center text-xs font-semibold ${over ? "text-amber-bar" : "text-green"}`} data-discount-status data-discount-over={over ? "" : undefined}>
-                    {isOwner
-                      ? `${aed(given)} = ${pctText}% of labour · owner (no limit)`
-                      : over
-                        ? `${pctText}% · limit ${limit}% · ${pendingOwner ? "Waiting for owner approval" : "the owner approves before it can be sent"}`
-                        : `${aed(given)} = ${pctText}% of labour · within your limit (${limit}%)`}
+                  <span className={`inline-flex items-center text-xs font-semibold ${over ? "text-amber-bar" : "text-green"}`} data-discount-status data-discount-over={over ? "" : undefined} data-discount-by={byOwner ? "owner" : "advisor"} data-discount-approved={approved ? "" : undefined}>
+                    {byOwner
+                      ? `${d.words} · given by the owner (no limit)`
+                      : approved
+                        ? `${d.words} · by ${who} · approved by the owner`
+                        : over
+                        ? `${d.words} · by ${who} · limit ${limit}% · ${pendingOwner ? "waiting for owner approval" : "the owner approves before it can be sent"}`
+                        : `${d.words} · by ${who} · within the limit (${limit}%)`}
                   </span>
                 );
               })()}
@@ -1642,7 +1667,7 @@ export function QuoteEditor({
               ) : null}
             </div>
           ) : null}
-          {settings.discountLimit > 0 && totals.discountBase > 0 && (totals.discount / totals.discountBase) * 100 > settings.discountLimit + 0.001 ? <p className="text-xs font-semibold text-amber">Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
+          {settings.discountLimit > 0 && totals.discountBase > 0 && !discountByOwnerNow && !approvalStands && discountAgainstLimit(totals, settings.discountLimit).over ? <p className="text-xs font-semibold text-amber" data-discount-limit-note>Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
           {showProfit ? (
             <div className="flex flex-col gap-1 rounded-control bg-chip p-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Internal (not shown to the customer)</span>
@@ -1774,7 +1799,7 @@ export function QuoteEditor({
           {!sent && completed ? (
             <>
               <p className="text-xs text-muted">Complete {formatDayTime(completedAt)}. Any change reopens it.</p>
-              {!blockers.length && reasons.length && !isOwner ? <p className="text-xs font-semibold text-amber">Needs the owner&apos;s approval: {reasons.join("; ")}</p> : null}
+              {!blockers.length && reasons.length && !isOwner && !approvalStands ? <p className="text-xs font-semibold text-amber">Needs the owner&apos;s approval: {reasons.join("; ")}</p> : null}
               {!disabled ? <button type="button" className="self-start text-xs font-semibold underline underline-offset-4" onClick={() => run(() => reopenQuotation(quotation.id))}>Reopen to change</button> : null}
             </>
           ) : null}
@@ -1814,7 +1839,7 @@ export function QuoteEditor({
       ) : null}
       {removeAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-remove-parts-ask>
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">Also remove its {removeAsk.parts} part{removeAsk.parts === 1 ? "" : "s"}?</span>
             <p className="text-sm text-muted">They leave the quotation and the parts list. A part already ordered is never removed quietly: Parts are asked whether to return it or keep it in stock.</p>
             <div className="flex flex-wrap gap-2">
@@ -1855,7 +1880,7 @@ export function QuoteEditor({
       ) : null}
       {partsAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-parts-ask>
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">{partsAsk.message}</span>
             <ul className="text-sm font-semibold uppercase">{partsAsk.missing.map((m, i) => <li key={i}>{m}</li>)}</ul>
             <p className="text-xs text-muted">Every priced part belongs on the quotation, Our stock included (our stock only skips the ordering). The customer is not charged for a part that is not here.</p>
@@ -1869,7 +1894,7 @@ export function QuoteEditor({
       ) : null}
       {depositAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-deposit-ask>
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">{depositAsk}</span>
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" onClick={() => { setDepositAsk(null); setHeaderField({ deposit_mode: "aed", deposit_value: totals.depositSuggested || null }, true); document.querySelector<HTMLElement>("[data-deposit-box]")?.scrollIntoView({ block: "center", behavior: "smooth" }); }} data-deposit-add>Add deposit</Button>
@@ -1881,7 +1906,7 @@ export function QuoteEditor({
       {reviseAskDialog}
       {lowAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-low-profit-ask>
-          <div className="w-full max-w-md rounded-card border-2 border-red-bar bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card border-2 border-red-bar bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold text-red">{lowAsk}</span>
             <p className="text-sm text-muted">Sending anyway is written on the quotation and the owner is told.</p>
             <div className="flex flex-wrap gap-2">
@@ -1893,7 +1918,7 @@ export function QuoteEditor({
       ) : null}
       {compAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-complimentary-ask>
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">Price 0: mark as Complimentary?</span>
             <p className="text-sm text-muted">The customer sees the word instead of a price; the line stays valid and our own cost still counts against profit.</p>
             <div className="flex flex-wrap gap-2">
@@ -1906,7 +1931,7 @@ export function QuoteEditor({
       ) : null}
       {positionsAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-positions-ask>
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">Positions and quantity disagree</span>
             <span className="text-sm">{positionsAsk}</span>
             <div className="flex flex-wrap gap-2">
@@ -1918,7 +1943,7 @@ export function QuoteEditor({
       ) : null}
       {markupAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-markup-ask>
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">{markupAsk}</span>
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" onClick={() => { setMarkupAsk(null); const box = document.getElementById("markup-all") ?? document.querySelector<HTMLElement>("[data-markup-box]"); box?.scrollIntoView({ block: "center", behavior: "smooth" }); (box as HTMLElement | null)?.focus(); }} data-markup-set>Set markup</Button>
@@ -1939,7 +1964,7 @@ export function QuoteEditor({
       ) : null}
       {confirming ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
-          <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
             <span className="text-lg font-extrabold">{confirming.message}</span>
             <p className="text-sm text-muted">Yes, keep it: the line stays amber and is not asked about again. Change: the figure goes back to what it was.</p>
             <div className="flex gap-2">
@@ -1976,7 +2001,7 @@ export function QuoteEditor({
                   {pending ? "Checking…" : isQuotation ? "Quotation complete" : "Estimate complete"}
                 </Button>
               ) : null}
-              {!sent && completed && canSend ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
+              {!sent && completed && canSend ? <SendQuoteControl isOwner={isOwner} quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
               {canSend && sent && onRevise ? <form action={onRevise}><Button type="submit" tone="secondary" size="md" data-revise-bar>Revise quotation</Button></form> : null}
               {canSend && sent && !onRevise && onAskRevise ? (
                 <span className="inline-flex flex-wrap items-center gap-2" data-ask-revise-bar>
@@ -2164,10 +2189,15 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
   const base = bases[scope];
   const [text, setText] = useState(initialValue ? String(initialValue) : "");
   const boxRef = useRef<HTMLDivElement>(null);
-  const v = Number(text.replace(",", ".")) || 0;
+  const v = parseNumber(text) ?? 0;
   /** Apply reads the box itself: the number box hands its figure on a moment after typing stops, and a quick tap must not lose it. */
-  const current = () => Number((boxRef.current?.querySelector("input")?.value ?? text).replace(",", ".")) || 0;
+  const current = () => parseNumber(boxRef.current?.querySelector("input")?.value ?? text) ?? 0;
   const amount = kind === "percent" ? round2(base * (Math.min(100, Math.max(0, v)) / 100)) : round2(Math.min(base, Math.max(0, v)));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={onClose}>
       <div ref={boxRef} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-labour-discount-dialog>
@@ -2177,14 +2207,15 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
           <button type="button" onClick={() => setScope("labour_services")} aria-pressed={scope === "labour_services"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour_services" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Labour + services</button>
         </div>
         <p className="text-xs text-muted">{scope === "labour" ? `On our own labour lines only (${aed(base)} of labour).` : `On our labour and our own services (${aed(base)}).`} Never on parts, outside work or other charges. Taken off before VAT, then the round-off.</p>
-        <div className="flex items-center gap-2">
-          <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="0" autoFocus aria-label="Discount amount" className="w-28 text-right min-h-11" />
-          <span className="inline-flex rounded-control border border-line-strong overflow-hidden">
-            <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-11 px-4 text-sm font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>%</button>
-            <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-11 px-4 text-sm font-bold ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="0" autoFocus aria-label="Discount amount" className="text-right min-h-11" style={{ width: "8rem" }} />
+          <span className="inline-flex shrink-0 rounded-control border border-line-strong" data-discount-kind>
+            <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-11 min-w-12 shrink-0 rounded-l-control px-4 text-sm font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>%</button>
+            <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-11 min-w-14 shrink-0 rounded-r-control px-4 text-sm font-bold whitespace-nowrap ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
           </span>
         </div>
-        <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off ${scope === "labour" ? "the labour" : "labour and services"}` : "No discount"}</p>
+        <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off ${scope === "labour" ? "the labour" : "labour and services"}${base > 0 ? ` (= ${((amount / base) * 100).toFixed(1)}% of ${aed(base)})` : ""}` : "No discount"}</p>
+        {kind === "aed" && v > base && base > 0 ? <p className="text-xs font-semibold text-amber" data-discount-capped>The {scope === "labour" ? "labour" : "labour and services"} come to {aed(base)}: the discount stops there.</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="md" onClick={() => onApply(kind, current(), scope)}>Apply</Button>
           {initialValue ? <Button type="button" tone="secondary" size="md" onClick={() => onApply(kind, 0, scope)}>Remove the discount</Button> : null}

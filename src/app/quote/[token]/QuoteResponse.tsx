@@ -18,7 +18,7 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
       </button>
       {open ? (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-3" onClick={() => setOpen(false)}>
-          <form method="post" action={`/api/quote/${token}`} className="w-full max-w-md rounded-lg bg-white p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <form method="post" action={`/api/quote/${token}`} className="w-full max-w-md rounded-lg bg-white p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} data-quote-approve-sheet>
             <span className="text-lg font-extrabold">{isEstimate ? "Accept" : "Approve"} this {word} for {aed(total)}?</span>
             <details className="text-sm">
               <summary className="cursor-pointer font-semibold">Terms and conditions</summary>

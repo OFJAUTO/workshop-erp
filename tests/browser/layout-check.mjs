@@ -132,6 +132,11 @@ for (const role of roles) {
   await browser.close();
   console.log(`${role.name}: ${targets.length} pages done`);
 }
+// Every pop-up too (B3, 28 October 2026): with the full check, or alone with ROLE=popups.
+if (!onlyRole || onlyRole === "popups") {
+  const { runPopups } = await import("./popup-check.mjs");
+  findings.push(...(await runPopups()));
+}
 console.log(`\n${pagesChecked} page views checked across ${roles.length} roles and ${WIDTHS.length} widths · ${shots} screenshots in tests/browser/shots/layout/`);
 console.log(findings.length ? `${findings.length} problems found` : "No overlaps, nothing cut off, no sideways scrolling.");
 process.exit(findings.length ? 1 : 0);

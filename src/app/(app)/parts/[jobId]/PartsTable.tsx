@@ -834,7 +834,7 @@ function SplitDialog({ name, qty, onClose, onSplit }: { name: string; qty: numbe
   const ready = lines.filter((l) => l.name.trim()).length >= 2;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-split-dialog>
         <span className="text-lg font-extrabold">Split into separate parts</span>
         <p className="text-xs text-muted">One line per part. The first keeps this row; the others become their own rows, each priced on its own.</p>
         {lines.map((l, i) => (
@@ -862,7 +862,7 @@ function SupplierList({ rows, car, vin, openingLine, onClose }: { rows: TableRow
   const text = [car, vin ? `VIN: ${vin}` : "", "", openingLine, ...lines].join("\n");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-xl rounded-card bg-white p-5 flex flex-col gap-3 max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-xl rounded-card bg-white p-5 flex flex-col gap-3 max-h-[90vh]" onClick={(e) => e.stopPropagation()} data-supplier-list>
         <div className="flex items-center justify-between gap-2"><span className="text-lg font-extrabold">List for the supplier</span><button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button></div>
         <div className="flex flex-wrap gap-1.5">
           {rows.filter((r) => !r.optionGroup).map((r) => (

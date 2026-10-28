@@ -258,7 +258,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
       ) : null}
 
       {open ? (
-        <div className="z-50 rounded-card border border-line bg-white text-ink shadow-xl flex flex-col max-sm:fixed max-sm:inset-x-4 max-sm:top-20 sm:absolute sm:right-0 sm:top-13 sm:w-[380px]">
+        <div className="fixed z-50 inset-x-4 top-20 sm:inset-x-auto sm:right-4 sm:w-[380px] rounded-card border border-line bg-white text-ink shadow-xl flex flex-col" data-bell-panel>
           <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-line shrink-0">
             <span className="text-sm font-extrabold">Notifications</span>
             <span className="flex items-center gap-2">
