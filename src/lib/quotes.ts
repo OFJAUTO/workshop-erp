@@ -699,7 +699,7 @@ export function quoteTotals(
   // the automatic hidden Fee line the server keeps, or the old estimate from the card tick.
   // The bank's fee before VAT (the VAT on it is reclaimable): MSF % of the total plus the fee per transaction, rounded like the bank.
   const fixedFee = total > 0 ? Math.max(0, opts.bankChargeFixed ?? 0) : 0;
-  const bankCharge = opts.bankChargePercent !== undefined && (opts.bankChargePercent > 0 || fixedFee > 0) ? round2(roundHalfUp((total * opts.bankChargePercent) / 100) + fixedFee) : feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? 0 : 0;
+  const bankCharge = opts.bankChargePercent !== undefined ? (opts.bankChargePercent > 0 || fixedFee > 0 ? round2(roundHalfUp((total * opts.bankChargePercent) / 100) + fixedFee) : 0) : feeLine ? round2(feeLine.unit_cost ?? 0) : q.payment_by_card ? 0 : 0;
   // Commission: a fixed amount, or a percentage of the total before VAT. Internal only. It counts in the
   // costs the moment it is set (shown as "pending owner approval"); it leaves the costs only when the
   // owner declines it. The profit, the team target and the advisor bonus all see the same figure.

@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number; /** A name for the labour line, given while the quotation is still a draft. */ labourTitle?: string };
+  const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number; /** A name for the labour line, given while the quotation is still a draft. */ labourTitle?: string; /** How the customer is expected to pay (set on the draft, before approval locks it). */ method?: string };
   const stage = body.stage ?? "inspection";
   const admin = createAdminClient();
   // Two side doors for the tests: the work order lines of a job, and an open QC round with its items.
@@ -216,7 +216,7 @@ export async function POST(request: NextRequest) {
   await admin.from("part_items").upsert({ id: PA, job_id: JOB, description: "front brake pads", part_number: "pad-stage-1", quantity: 1, cost_aed: 200, availability: "to_order", delivery_date: new Date(Date.now() + 4 * 3600000 + 3 * 86400000).toISOString().slice(0, 10), confirm_status: "confirmed", confirmed_quantity: 1, part_type: "genuine", priced_by: owner.id, priced_at: now, created_by: owner.id, updated_by: owner.id });
   await admin.from("part_requests").upsert({ id: PR1, job_id: JOB, inspection_id: inspectionId, source_type: "request", source_key: REQ1, label: "rear brake discs", requested_text: "set of two", status: "open", quantity: 2, unit: "pcs", created_by: tech1.id, updated_by: tech1.id });
   const token = newToken();
-  await admin.from("quotations").upsert({ id: Q1, kind: "quotation", number: "Q-STAGE-1", version: 1, job_id: JOB, customer_id: CUST, vehicle_id: VEH, status: "draft", token, created_by: advisor.id, updated_by: advisor.id, ...(body.deposit ? { deposit_mode: "aed", deposit_value: Number(body.deposit) } : {}), ...(stage === "ready" ? { sent_at: now, sent_by: advisor.id } : {}) });
+  await admin.from("quotations").upsert({ id: Q1, kind: "quotation", number: "Q-STAGE-1", version: 1, job_id: JOB, customer_id: CUST, vehicle_id: VEH, status: "draft", token, created_by: advisor.id, updated_by: advisor.id, ...(body.deposit ? { deposit_mode: "aed", deposit_value: Number(body.deposit) } : {}), ...(body.method ? { expected_payment_method: String(body.method) } : {}), ...(stage === "ready" ? { sent_at: now, sent_by: advisor.id } : {}) });
   const { data: existingLines } = await admin.from("quotation_lines").select("id").eq("quotation_id", Q1);
   if (!(existingLines ?? []).length) {
     await admin.from("quotation_lines").insert([

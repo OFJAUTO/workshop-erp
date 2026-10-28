@@ -2,7 +2,7 @@ import "server-only";
 import { dubaiDate } from "./jobs";
 import { round2 } from "./money";
 import { isHidden, isUnchosen, lineCost, type LineType } from "./quotes";
-import type { Settings } from "./settings";
+import { expectedFeeCost, expectedFeeRule, type Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { chargeTotalsByJob } from "./supplier-charges";
 import { feeOf, isClearing } from "./card-settlement-rules";
@@ -82,7 +82,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("bodyshop_clockings").select("job_id, minutes").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     // Bodyshop materials from the approved quotations; the commission is read separately below, because
     // the job's ONE commission rides on the newest version, whatever its quotation status is right now.
-    jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, materials_cost_aed, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).eq("status", "approved") : Promise.resolve({ data: [] }),
+    jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, materials_cost_aed, version, created_at, commission_to, commission_paid_at, expected_payment_method").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).eq("status", "approved") : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
   const chargeTotals = await chargeTotalsByJob(jobIds);
@@ -98,7 +98,6 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       .filter((l) => l.quotation?.job_id === invoice.job_id && !isUnchosen(l) && isHidden({ line_type: l.line_type as LineType, visible_to_customer: l.visible_to_customer, fee_kind: l.fee_kind }))
       .map((l) => ({ line_type: l.line_type as LineType, fee_kind: l.fee_kind, quantity: Number(l.quantity) || 1, unit_cost: l.unit_cost === null ? null : Number(l.unit_cost) }));
     const hiddenCost = round2(hidden.filter((l) => !l.fee_kind && l.line_type !== "recovery").reduce((a, l) => a + lineCost(l), 0));
-    const feeEstimate = round2(hidden.filter((l) => l.fee_kind === "bank_charge").reduce((a, l) => a + lineCost(l), 0));
     // The suppliers' own charges on the job's parts (courier, freight) are an internal cost too.
     const otherCost = round2(ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0));
     // The recovery cost: the drivers' real prices once any trip carries one; the quotation's hidden recovery lines until then.
@@ -106,7 +105,12 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const tripCost = round2(jobTrips.reduce((a, t) => a + (Number(t.price_aed) || 0), 0));
     const hiddenRecovery = round2(hidden.filter((l) => !l.fee_kind && l.line_type === "recovery").reduce((a, l) => a + lineCost(l), 0));
     const recoveryCost = tripCost > 0 ? tripCost : hiddenRecovery;
-    const jobQuotes = ((quotes ?? []) as { job_id: string; materials_cost_aed: number | string | null }[]).filter((x) => x.job_id === invoice.job_id);
+    const jobQuotes = ((quotes ?? []) as { job_id: string; materials_cost_aed: number | string | null; version: number; created_at: string; expected_payment_method: string | null }[]).filter((x) => x.job_id === invoice.job_id);
+    // The bank fee before a payment is recorded: the invoice total at the rule of the way the customer is expected to
+    // pay (newest approved quotation), without the reclaimable VAT (29 October 2026). The quotation's own hidden fee
+    // line is frozen at approval and may carry an older rate, so it only counts when there is no approved quotation.
+    const newestQuote = [...jobQuotes].sort((a, b) => (`${String(a.version).padStart(4, "0")}${a.created_at}` < `${String(b.version).padStart(4, "0")}${b.created_at}` ? 1 : -1))[0] ?? null;
+    const feeEstimate = newestQuote ? expectedFeeCost(settings, newestQuote.expected_payment_method, invoice.total_aed) : round2(hidden.filter((l) => l.fee_kind === "bank_charge").reduce((a, l) => a + lineCost(l), 0));
     // The job's ONE commission: the newest row still carrying one (paid first), wherever it sits.
     type ComRow = { job_id: string; commission_aed: number | string | null; commission_status: string | null; version: number; created_at: string; commission_paid_at: string | null };
     const jobComs = ((comRows ?? []) as ComRow[]).filter((x) => x.job_id === invoice.job_id && x.commission_status !== "declined" && x.commission_status !== "superseded");
@@ -236,10 +240,16 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
   return { date, target, yellowPercent, invoicedProfit, invoicedTotal: round2(today.reduce((a, p) => a + p.invoice.total_aed, 0)), collected, carry, effective, percent, tone, monthProfit, count: today.length, provisional: today.filter((p) => p.provisional).length, comebacks, month };
 }
 
+/** The bank fee options for quoteTotals from the way the customer is expected to pay (the one rule, without VAT). */
+function feeOpts(settings: Settings, method: unknown): { bankChargePercent: number; bankChargeFixed: number } {
+  const rule = expectedFeeRule(settings, typeof method === "string" ? method : null);
+  return { bankChargePercent: rule.msfPercent, bankChargeFixed: rule.txnFee };
+}
+
 /** "In progress (approved, not invoiced)": the expected profit of approved quotations on open jobs with no tax invoice yet. */
 export async function approvedNotInvoicedProfit(settings: Settings): Promise<number> {
   const admin = createAdminClient();
-  const { data: qs } = await admin.from("quotations").select("id, job_id, discount_percent, vat_percent, payment_by_card, rounded_total_aed, discount_kind, discount_value, discount_scope, commission_kind, commission_value, commission_status, materials_cost_aed, deposit_mode, deposit_value, job:jobs!quotations_job_id_fkey!inner(id, is_open, department)").eq("kind", "quotation").eq("status", "approved").eq("is_active", true).eq("job.is_open", true);
+  const { data: qs } = await admin.from("quotations").select("id, job_id, discount_percent, vat_percent, payment_by_card, rounded_total_aed, expected_payment_method, discount_kind, discount_value, discount_scope, commission_kind, commission_value, commission_status, materials_cost_aed, deposit_mode, deposit_value, job:jobs!quotations_job_id_fkey!inner(id, is_open, department)").eq("kind", "quotation").eq("status", "approved").eq("is_active", true).eq("job.is_open", true);
   const rows = ((qs ?? []) as unknown as (Record<string, unknown> & { job: { id: string; is_open: boolean; department: string | null } })[]);
   if (!rows.length) return 0;
   const jobIds = Array.from(new Set(rows.map((r) => r.job.id)));
@@ -252,7 +262,7 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
   let total = 0;
   for (const r of open) {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges: charges.get(r.job.id) ?? 0 });
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges: charges.get(r.job.id) ?? 0, ...feeOpts(settings, r.expected_payment_method) });
     total += totals.profit;
   }
   return round2(total);
@@ -273,10 +283,10 @@ export type AdvisorDay = {
   workingDaysLeft: number;
 };
 
-const ADVISOR_QUOTE_SELECT = "id, job_id, discount_percent, vat_percent, payment_by_card, rounded_total_aed, discount_kind, discount_value, discount_scope, commission_kind, commission_value, commission_status, materials_cost_aed, deposit_mode, deposit_value, responded_at, sent_by, status, number, version, job:jobs!quotations_job_id_fkey(id, department, gated_in_by)";
+const ADVISOR_QUOTE_SELECT = "id, job_id, discount_percent, vat_percent, payment_by_card, rounded_total_aed, expected_payment_method, discount_kind, discount_value, discount_scope, commission_kind, commission_value, commission_status, materials_cost_aed, deposit_mode, deposit_value, responded_at, sent_by, status, number, version, job:jobs!quotations_job_id_fkey(id, department, gated_in_by)";
 
 /** The profit of each approved quotation, from its own lines and the department's cost rate. */
-async function approvedQuoteProfits(settings: Settings, fromIso: string): Promise<{ id: string; jobId: string | null; respondedAt: string; sentBy: string | null; profit: number; net: number }[]> {
+export async function approvedQuoteProfits(settings: Settings, fromIso: string): Promise<{ id: string; jobId: string | null; respondedAt: string; sentBy: string | null; profit: number; net: number }[]> {
   const admin = createAdminClient();
   const { data: qs } = await admin.from("quotations").select(ADVISOR_QUOTE_SELECT).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).gte("responded_at", fromIso);
   const rows = ((qs ?? []) as unknown as (Record<string, unknown> & { job: { id: string; department: string | null } | null })[]);
@@ -285,7 +295,7 @@ async function approvedQuoteProfits(settings: Settings, fromIso: string): Promis
   const charges = await chargeTotalsByJob(Array.from(new Set(rows.map((r) => r.job?.id).filter((x): x is string => !!x))));
   return rows.map((r) => {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges: r.job?.id ? charges.get(r.job.id) ?? 0 : 0 });
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges: r.job?.id ? charges.get(r.job.id) ?? 0 : 0, ...feeOpts(settings, r.expected_payment_method) });
     return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: totals.profit, net: totals.net };
   });
 }
