@@ -49,33 +49,58 @@ try {
     const no = await box.getAttribute("data-settle-tick");
     if (no !== p1.number && no !== p2.number && (await box.isChecked())) await box.uncheck();
   }
-  const received = page.locator("[data-settle-received]");
-  await received.click();
-  await received.pressSequentially("3600");
-  await received.blur();
-  await sleep(600);
-  check("3: more than the ticked total is refused before saving", /more/.test((await page.locator("[data-settle-problem]").textContent().catch(() => "")) ?? "") && (await page.locator("[data-settle-save]").isDisabled()));
-  await received.click();
-  await received.fill("");
-  await received.pressSequentially("3419.50");
-  await received.blur();
-  await sleep(600);
-  check("3: the actual fee shows live (AED 80.50 · 2.30%)", /80\.50 · 2\.30%/.test((await page.locator("[data-settle-fee]").textContent()) ?? ""));
-  check("3: each ticked payment shows its share", /23\.00/.test((await page.locator(`[data-settle-row="${p1.number}"] [data-settle-share]`).textContent()) ?? "") && /57\.50/.test((await page.locator(`[data-settle-row="${p2.number}"] [data-settle-share]`).textContent()) ?? ""));
+  // 29 October 2026: the bank's own figures in one row - 1,000 + 2,500 by card machine: MSF 21.50 + 53.75 = 75.25,
+  // no fee per transaction, VAT 1.08 + 2.69 = 3.77 (the bank rounds the VAT per transaction), net 3,420.98.
+  await page.locator("[data-settle-msf]").click();
+  await page.locator("[data-settle-msf]").fill("");
+  await page.locator("[data-settle-msf]").pressSequentially("75.25");
+  await page.locator("[data-settle-msf]").blur();
+  await page.locator("[data-settle-txn]").click();
+  await page.locator("[data-settle-txn]").fill("");
+  await page.locator("[data-settle-txn]").pressSequentially("0");
+  await page.locator("[data-settle-txn]").blur();
+  await sleep(1300);
+  check("3: the VAT is pre-filled as 5% of the fees (3.76), editable", (await page.locator("[data-settle-vat]").inputValue()) === "3.76");
+  await page.locator("[data-settle-vat]").click();
+  await page.locator("[data-settle-vat]").fill("");
+  await page.locator("[data-settle-vat]").pressSequentially("3.77");
+  await page.locator("[data-settle-vat]").blur();
+  await page.locator("[data-settle-net]").click();
+  await page.locator("[data-settle-net]").fill("");
+  await page.locator("[data-settle-net]").pressSequentially("3400");
+  await page.locator("[data-settle-net]").blur();
+  await sleep(1300);
+  check("3: figures that do not add up: a red 'AED 20.98 difference' and the button blocked", /AED 20\.98 difference/.test((await page.locator("[data-settle-diff]").textContent().catch(() => "")) ?? "") && (await page.locator("[data-settle-save]").isDisabled()));
+  await page.locator("[data-settle-override] input").check();
+  await sleep(300);
+  check("3: 'Save anyway' still needs the reason in the note", (await page.locator("[data-settle-save]").isDisabled()) && (await page.locator("[data-settle-need-note]").count()) === 1);
+  await page.locator("[data-settle-note]").fill("E2E bank kept back a chargeback");
+  await sleep(300);
+  check("3: with a note the owner or accounts can save anyway", !(await page.locator("[data-settle-save]").isDisabled()));
+  await page.screenshot({ path: "tests/browser/shots/settle-difference.png" });
+  await page.locator("[data-settle-override] input").uncheck();
+  await page.locator("[data-settle-note]").fill("");
+  await page.locator("[data-settle-net]").click();
+  await page.locator("[data-settle-net]").fill("");
+  await page.locator("[data-settle-net]").pressSequentially("3420.98");
+  await page.locator("[data-settle-net]").blur();
+  await sleep(1300);
+  check("3: the figures add up: 3,500 = net + MSF + fee + VAT ✓", /✓/.test((await page.locator("[data-settle-adds]").textContent().catch(() => "")) ?? "") && !(await page.locator("[data-settle-save]").isDisabled()));
+  check("3: each ticked payment shows its share (MSF 21.50 + VAT 1.08, MSF 53.75 + VAT 2.69)", /MSF 21\.50 \+ fee 0\.00 \+ VAT 1\.08/.test((await page.locator(`[data-settle-row="${p1.number}"] [data-settle-share]`).textContent()) ?? "") && /MSF 53\.75 \+ fee 0\.00 \+ VAT 2\.69/.test((await page.locator(`[data-settle-row="${p2.number}"] [data-settle-share]`).textContent()) ?? ""));
   await page.locator("[data-settle-ref]").fill("E2E statement 4471");
   await page.screenshot({ path: "tests/browser/shots/settle-before.png" });
   await page.locator("[data-settle-save]").click();
   await page.waitForSelector("[data-settle-done]", { timeout: 30000 }).catch(() => null);
   const done = (await page.locator("[data-settle-done]").first().textContent().catch(() => "")) ?? "";
-  check("3: the result shows under the button", /STL-\d{5} recorded: 2 payments, bank fee AED 80\.50/.test(done), done);
+  check("3: the result shows under the button", /STL-\d{5} recorded: 2 payments, the bank kept AED 79\.02 \(MSF \+ fee AED 75\.25 on the jobs/.test(done), done);
   await page.screenshot({ path: "tests/browser/shots/settle-after.png" });
 } finally {
   await browser.close();
 }
-const [st] = await sql("select id, number, gross_aed::text, received_aed::text, fee_aed::text from public.card_settlements where statement_ref = 'E2E statement 4471'");
-check("4: the settlement is stored (3,500 ticked, 3,419.50 received, 80.50 fee)", st?.gross_aed === "3500.00" && st?.received_aed === "3419.50" && st?.fee_aed === "80.50", JSON.stringify(st));
-const shares = await sql("select number, actual_fee_aed::text as fee from public.payments where settlement_id = $1 order by amount_aed", [st?.id ?? "00000000-0000-0000-0000-000000000000"]);
-check("4: each payment carries its actual share", shares.length === 2 && shares[0].fee === "23.00" && shares[1].fee === "57.50", JSON.stringify(shares));
+const [st] = await sql("select id, number, gross_aed::text, received_aed::text, fee_aed::text, msf_aed::text, txn_fee_aed::text, vat_aed::text, difference_aed::text from public.card_settlements where statement_ref = 'E2E statement 4471'");
+check("4: the settlement is stored (3,500 ticked, net 3,420.98, MSF 75.25, fee 0, VAT 3.77, no difference)", st?.gross_aed === "3500.00" && st?.received_aed === "3420.98" && st?.fee_aed === "79.02" && st?.msf_aed === "75.25" && st?.txn_fee_aed === "0.00" && st?.vat_aed === "3.77" && st?.difference_aed === "0.00", JSON.stringify(st));
+const shares = await sql("select number, actual_fee_aed::text as fee, actual_msf_aed::text as msf, actual_vat_aed::text as vat from public.payments where settlement_id = $1 order by amount_aed", [st?.id ?? "00000000-0000-0000-0000-000000000000"]);
+check("4: each payment carries its actual share (cost without VAT; VAT apart)", shares.length === 2 && shares[0].fee === "21.50" && shares[0].vat === "1.08" && shares[1].fee === "53.75" && shares[1].vat === "2.69", JSON.stringify(shares));
 const queued = await sql("select id from public.zoho_outbox where kind = 'settlement' and record_id = $1", [st?.id ?? "00000000-0000-0000-0000-000000000000"]);
 check("4: the Zoho transfer is queued", queued.length === 1);
 // No Zoho call today: the queued row goes before the five-minute sync can pick it up.
@@ -90,7 +115,7 @@ try {
   await ob.page.waitForSelector("table", { timeout: 30000 });
   const row = ob.page.locator("tr", { hasText: invNo }).first();
   const mark = await row.locator("[data-fee-mark]").getAttribute("data-fee-mark").catch(() => null);
-  check("5: the job's bank charge is the actual fee (80.50, marked actual)", mark === "actual" && /8[01]\s*actual/.test((await row.textContent()) ?? ""), `${mark} · ${((await row.textContent()) ?? "").replace(/\s+/g, " ").slice(0, 160)}`);
+  check("5: the job's bank charge is the actual MSF + fee without VAT (75.25, marked actual)", mark === "actual" && /75\s*actual/.test((await row.textContent()) ?? ""), `${mark} · ${((await row.textContent()) ?? "").replace(/\s+/g, " ").slice(0, 160)}`);
 } finally {
   await ob.browser.close();
 }

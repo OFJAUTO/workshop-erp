@@ -6,6 +6,7 @@ import { terminalList } from "@/lib/bank-fees";
 import { requirePermission } from "@/lib/auth";
 import { recordSettlement, undoSettlement } from "@/lib/card-settlements";
 import { formValues, type FormState } from "@/lib/form-state";
+import { reportNumber } from "@/lib/settlement-report";
 
 const blank = (v: FormDataEntryValue | null) => {
   const t = String(v ?? "").trim();
@@ -16,14 +17,19 @@ export async function recordSettlementAction(_prev: FormState, formData: FormDat
   const staff = await requirePermission("cardSettlements");
   const values = formValues(formData);
   if (staff.viewingAs) return { error: "You are viewing as someone else: switch back to record a settlement.", values };
-  const receivedRaw = String(formData.get("received") ?? "").replace(/,/g, "").trim();
-  const received = receivedRaw ? Number(receivedRaw) : null;
+  // Amounts as typed: "9,815.20", "-175.00" (the bank prints fees with a minus) - the fees count as plain amounts.
+  const amount = (key: string) => reportNumber(formData.get(key));
+  const fee = (key: string) => { const n = amount(key); return n === null ? null : Math.abs(n); };
   const res = await recordSettlement(
     {
       method: String(formData.get("method") ?? ""),
       settledOn: String(formData.get("settled_on") ?? "").slice(0, 10),
       paymentIds: formData.getAll("ids").map(String),
-      received: received !== null && Number.isFinite(received) ? received : null,
+      net: amount("net"),
+      msf: fee("msf"),
+      txn: fee("txn"),
+      vat: fee("vat"),
+      override: formData.get("override") === "1",
       statementRef: blank(formData.get("statement_ref")),
       note: blank(formData.get("note")),
       confirmed: formData.get("confirmed") === "1",
@@ -32,7 +38,7 @@ export async function recordSettlementAction(_prev: FormState, formData: FormDat
   );
   if (!res.ok) return { error: res.error, values: { ...values, ...(res.askAgain ? { ask: "1" } : {}) } };
   revalidatePath("/card-settlements");
-  return { success: `${res.number} recorded: ${res.count} payment${res.count === 1 ? "" : "s"}, bank fee AED ${res.fee.toFixed(2)}. Each job now shows the actual fee, and Zoho gets the transfer and the bank charges.` };
+  return { success: `${res.number} recorded: ${res.count} payment${res.count === 1 ? "" : "s"}, the bank kept AED ${res.fee.toFixed(2)} (MSF + fee AED ${res.cost.toFixed(2)} on the jobs, the VAT reclaimable)${res.difference ? `, saved with an AED ${Math.abs(res.difference).toFixed(2)} difference (written in the change log)` : ""}. Each job now shows the actual fee; Zoho gets the transfer, the fees and the input VAT.` };
 }
 
 /** THE bank fee settings save (owner and accounts): MSF % before VAT, fee per transaction, VAT on the fees, terminal IDs. */

@@ -5,7 +5,7 @@ import { dubaiToday, loadSettlements, loadUnsettled } from "@/lib/card-settlemen
 import { formatDate, formatDayTime } from "@/lib/format";
 import { recordSettlementAction, saveBankFeesAction, undoSettlementAction } from "./actions";
 import { BankFeeSettings } from "./BankFeeSettings";
-import { bankFeeValuesOf, getSettings } from "@/lib/settings";
+import { bankFeeValuesOf, bankFeesOf, getSettings } from "@/lib/settings";
 import { SettlementForm, UndoSettlement } from "./SettlementForm";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +41,7 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
 
       <Card className="flex flex-col gap-4">
         <SectionLabel>Record a settlement</SectionLabel>
-        <SettlementForm rows={rows.map((r) => ({ id: r.id, number: r.number, method: r.method, amount: r.amount, estimate: r.estimate, receivedAt: r.receivedAt, plate: r.plate, isDeposit: r.isDeposit, late: r.late }))} today={today} initialMethod={initialMethod} canSave={!staff.viewingAs} action={recordSettlementAction} />
+        <SettlementForm rows={rows.map((r) => ({ id: r.id, number: r.number, method: r.method, amount: r.amount, estimate: r.estimate, est: r.est, authCode: r.authCode, receivedAt: r.receivedAt, plate: r.plate, isDeposit: r.isDeposit, late: r.late }))} today={today} initialMethod={initialMethod} canSave={!staff.viewingAs} rules={{ card: bankFeesOf(settings).card, link: bankFeesOf(settings).link }} action={recordSettlementAction} />
       </Card>
 
       <Card className="flex flex-col gap-2" data-settle-upload>
@@ -63,7 +63,9 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
                 <span>{formatDate(`${h.settledOn}T12:00:00+04:00`)}</span>
                 <Badge tone="neutral">{CLEARING_LABEL[h.method]}</Badge>
                 <span className="text-muted">{h.count} payment{h.count === 1 ? "" : "s"} · {aed(h.gross)} ticked · {aed(h.received)} received</span>
-                <span className="font-semibold">fee {aed(h.fee)} ({h.gross > 0 ? ((h.fee / h.gross) * 100).toFixed(2) : "0.00"}%)</span>
+                <span className="font-semibold" data-settle-history-fees>{h.msf !== null ? `MSF ${aed(h.msf)} + fee ${aed(h.txn ?? 0)} + VAT ${aed(h.vat ?? 0)}` : `fee ${aed(h.fee)}`} ({h.gross > 0 ? ((h.fee / h.gross) * 100).toFixed(2) : "0.00"}%)</span>
+                {h.source === "report" ? <Badge tone="neutral">From the bank report</Badge> : null}
+                {h.difference ? <span className="w-full text-xs font-semibold text-red" data-settle-history-diff>Saved with an AED {Math.abs(h.difference).toFixed(2)} difference: {h.differenceNote}</span> : null}
                 {h.statementRef ? <span className="text-muted">ref {h.statementRef}</span> : null}
                 <span className="ml-auto text-xs text-muted">by {h.createdByName ?? "—"} · {formatDayTime(h.createdAt)}</span>
                 <Badge tone={h.zohoStatus === "synced" ? "green" : h.zohoStatus === "failed" ? "red" : "neutral"}>{h.zohoStatus === "synced" ? (h.active ? "In Zoho" : "Zoho: nothing posted") : h.zohoStatus === "failed" ? "Zoho: see the sync page" : "Zoho: queued"}</Badge>
