@@ -44,7 +44,7 @@ try {
   await page.locator("[data-settle-save]").click();
   await page.waitForSelector("[data-settle-done]", { timeout: 30000 }).catch(() => null);
   const done = (await page.locator("[data-settle-done]").first().textContent().catch(() => "")) ?? "";
-  if (!done) console.log("BOX:", ((await page.locator("[data-settle-box]").textContent().catch(() => "")) ?? "").replace(/s+/g, " ").slice(0, 600));
+  if (!done) console.log("BOX:", ((await page.locator("[data-settle-box]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").slice(0, 600));
   check("3 the answer under the button names the difference", /saved with an AED 7\.42 difference/.test(done), done);
   const [st] = await sql("select id, number, difference_aed::text d, difference_note n, received_aed::text net, msf_aed::text msf, vat_aed::text vat from public.card_settlements where statement_ref = 'E2E statement F4'");
   check("4 the settlement keeps the difference and the reason", st?.d === "7.42" && /held 7\.42 back/.test(st?.n ?? "") && st?.net === "970.00" && st?.msf === "21.50" && st?.vat === "1.08", JSON.stringify(st));

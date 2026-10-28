@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { recordReport, uploadSettlementReport } from "@/lib/settlement-import";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { terminalList } from "@/lib/bank-fees";
 import { requirePermission } from "@/lib/auth";
@@ -91,4 +93,30 @@ export async function undoSettlementAction(settlementId: string, _prev: FormStat
   if (!res.ok) return { error: res.error };
   revalidatePath("/card-settlements");
   return { success: `${res.number} undone: its payments are back to "not settled".${res.posted ? " Zoho already had it: the sync page shows the transfer and fee to remove by hand." : ""}` };
+}
+
+/** Upload the bank's Merchant Transaction Report: kept, read, then reviewed on this page (nothing recorded yet). */
+export async function uploadReportAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePermission("cardSettlements");
+  if (staff.viewingAs) return { error: "You are viewing as someone else: switch back to upload a report." };
+  const file = formData.get("report");
+  if (!(file instanceof File)) return { error: "Choose the report file (PDF, CSV or Excel)." };
+  const res = await uploadSettlementReport(file, staff.id);
+  if (!res.ok) return { error: res.error };
+  redirect(`/card-settlements?report=${res.id}#report`);
+}
+
+/** Record the reviewed report: one settlement per method, each payment with its exact MSF, fee and VAT. */
+export async function recordReportAction(reportId: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePermission("cardSettlements");
+  if (staff.viewingAs) return { error: "You are viewing as someone else: switch back to record a settlement." };
+  const picks: Record<number, string> = {};
+  for (const [k, v] of formData.entries()) {
+    const m = /^pick_(\d+)$/.exec(k);
+    if (m && String(v)) picks[Number(m[1])] = String(v);
+  }
+  const res = await recordReport(reportId, { picks, settledOn: String(formData.get("settled_on") ?? "").slice(0, 10), statementRef: blank(formData.get("statement_ref")), note: blank(formData.get("note")), flagsSeen: formData.get("flags_seen") === "1" }, staff.id);
+  if (!res.ok) return { error: res.error };
+  revalidatePath("/card-settlements");
+  return { success: `${res.numbers.join(" and ")} recorded from the bank's report: each payment carries its exact MSF, fee and VAT, and each job now shows the actual fee.` };
 }

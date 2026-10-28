@@ -27,6 +27,7 @@ begin
   delete from public.zoho_outbox where kind = 'settlement' and record_id in (select id from public.card_settlements where statement_ref ilike 'e2e%');
   update public.payments set settlement_id = null, actual_fee_aed = null, actual_msf_aed = null, actual_txn_fee_aed = null, actual_vat_aed = null where settlement_id in (select id from public.card_settlements where statement_ref ilike 'e2e%');
   delete from public.card_settlements where statement_ref ilike 'e2e%';
+  delete from public.settlement_reports where file_name ilike 'e2e%' or file_name ilike 'ni-mtr-%';
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
   delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids) or customer_id = any(cust_ids);
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
@@ -91,6 +92,7 @@ begin
   delete from public.zoho_outbox where kind = 'settlement' and record_id in (select id from public.card_settlements where statement_ref ilike 'e2e%');
   update public.payments set settlement_id = null, actual_fee_aed = null, actual_msf_aed = null, actual_txn_fee_aed = null, actual_vat_aed = null where settlement_id in (select id from public.card_settlements where statement_ref ilike 'e2e%');
   delete from public.card_settlements where statement_ref ilike 'e2e%';
+  delete from public.settlement_reports where file_name ilike 'e2e%' or file_name ilike 'ni-mtr-%';
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
   delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids) or customer_id = any(cust_ids);
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);

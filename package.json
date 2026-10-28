@@ -114,7 +114,9 @@
     "test:fees1": "node --env-file=.env.local tests/browser/test-fees1.mjs",
     "test:fees2": "node --env-file=.env.local tests/browser/test-fees2.mjs",
     "test:fees3": "node --env-file=.env.local tests/browser/test-fees3.mjs",
-    "test:fees4": "node --env-file=.env.local tests/browser/test-fees4.mjs"
+    "test:fees4": "node --env-file=.env.local tests/browser/test-fees4.mjs",
+    "test:fees5": "node --env-file=.env.local tests/browser/test-fees5.mjs",
+    "test:mtr": "node tests/settlement-report-check.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

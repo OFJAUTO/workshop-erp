@@ -3,7 +3,9 @@ import { requirePermission } from "@/lib/auth";
 import { CLEARING_LABEL } from "@/lib/card-settlement-rules";
 import { dubaiToday, loadSettlements, loadUnsettled } from "@/lib/card-settlements";
 import { formatDate, formatDayTime } from "@/lib/format";
-import { recordSettlementAction, saveBankFeesAction, undoSettlementAction } from "./actions";
+import { recordReportAction, recordSettlementAction, saveBankFeesAction, undoSettlementAction, uploadReportAction } from "./actions";
+import { ReportReview, ReportUpload } from "./ReportReview";
+import { loadReport, reviewMatches, reviewPaymentsFor } from "@/lib/settlement-import";
 import { BankFeeSettings } from "./BankFeeSettings";
 import { bankFeeValuesOf, bankFeesOf, getSettings } from "@/lib/settings";
 import { SettlementForm, UndoSettlement } from "./SettlementForm";
@@ -12,11 +14,15 @@ export const dynamic = "force-dynamic";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default async function CardSettlementsPage({ searchParams }: { searchParams: Promise<{ method?: string }> }) {
+export default async function CardSettlementsPage({ searchParams }: { searchParams: Promise<{ method?: string; report?: string }> }) {
   const staff = await requirePermission("cardSettlements");
   const sp = await searchParams;
   const [rows, history, settings] = await Promise.all([loadUnsettled(), loadSettlements(), getSettings()]);
   const today = dubaiToday();
+  // A report being reviewed: matched afresh against the payments still waiting each time the page opens.
+  const reviewReport = sp.report && /^[0-9a-f-]{36}$/.test(sp.report) ? await loadReport(sp.report) : null;
+  const reviewPayments = reviewReport ? await reviewPaymentsFor(reviewReport) : [];
+  const review = reviewReport ? { report: reviewReport, payments: reviewPayments, matches: reviewMatches(reviewReport, reviewPayments) } : null;
   const initialMethod = sp.method === "link" ? "link" : sp.method === "card" ? "card" : rows.some((r) => r.method === "card") || !rows.length ? "card" : "link";
   const open = { card: rows.filter((r) => r.method === "card"), link: rows.filter((r) => r.method === "link") };
 
@@ -44,12 +50,20 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
         <SettlementForm rows={rows.map((r) => ({ id: r.id, number: r.number, method: r.method, amount: r.amount, estimate: r.estimate, est: r.est, authCode: r.authCode, receivedAt: r.receivedAt, plate: r.plate, isDeposit: r.isDeposit, late: r.late }))} today={today} initialMethod={initialMethod} canSave={!staff.viewingAs} rules={{ card: bankFeesOf(settings).card, link: bankFeesOf(settings).link }} action={recordSettlementAction} />
       </Card>
 
-      <Card className="flex flex-col gap-2" data-settle-upload>
+      <Card className="flex flex-col gap-3" data-settle-upload id="report">
         <SectionLabel>Upload the settlement report</SectionLabel>
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="button" disabled className="min-h-11 cursor-not-allowed rounded-control border-2 border-line-strong bg-chip px-4 text-sm font-bold text-muted" data-settle-upload-button>Upload settlement report – coming soon</button>
-          <span className="text-sm text-muted">Needs one real Network International settlement file (CSV or Excel) to learn its columns: the transaction date and time, the card or order reference, the gross amount, the fee (and its VAT), the net amount, and the payout date and batch. Until then, record each payout above by hand.</span>
-        </div>
+        <ReportUpload action={uploadReportAction} canSave={!staff.viewingAs} />
+        {review ? (
+          <ReportReview
+            report={{ ...review.report.parsed, fileName: review.report.fileName }}
+            matches={review.matches}
+            payments={review.payments}
+            today={today}
+            recorded={!!review.report.recordedAt}
+            canSave={!staff.viewingAs}
+            action={recordReportAction.bind(null, review.report.id)}
+          />
+        ) : sp.report ? <p className="text-sm text-muted">That report was not found. Upload it again.</p> : null}
       </Card>
 
       <Card className="flex flex-col gap-2">

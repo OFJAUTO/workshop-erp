@@ -1,0 +1,23 @@
+{
+  "_about": "Network International Merchant Transaction Reports of 24 October 2026, rebuilt from the figures the owner gave (the files themselves did not arrive). Merchant no., chain ID, terminal IDs, card numbers and ACQ_REF_NBR are masked.",
+  "reports": [
+    {
+      "file": "ni-mtr-link-24oct",
+      "method": "link",
+      "header": { "from": "24/10/2026", "to": "24/10/2026", "merchantNo": "XXXXXX4401", "chainId": "XXXX17", "date": "25/10/2026" },
+      "lines": [
+        { "date": "24/10/2026", "terminal": "XXXX7701", "card": "4XXXXXXXXXXX0001", "type": "SALES", "acqRef": "XXXXXXXXXXXXXXXXXXX0001", "authCode": "756117", "amount": "10000.00", "msf": "-175.00", "txn": "-1.00", "vat": "-8.80", "net": "9815.20", "desp": "M/D/C/CN" }
+      ],
+      "summary": { "posCount": 1, "posValue": "10,000.00", "commission": "-175.00", "feeTransactions": "-1.00", "vat": "-8.80", "adjustments": "0.00", "chargebacks": "0.00", "suspended": "0.00", "rebates": "0.00", "instalmentFees": "0.00", "netPayable": "9,815.20" }
+    },
+    {
+      "file": "ni-mtr-pos-24oct",
+      "method": "card",
+      "header": { "from": "24/10/2026", "to": "24/10/2026", "merchantNo": "XXXXXX4402", "chainId": "XXXX17", "date": "25/10/2026" },
+      "lines": [
+        { "date": "24/10/2026", "terminal": "XXXX7702", "card": "5XXXXXXXXXXX0002", "type": "SALES", "acqRef": "XXXXXXXXXXXXXXXXXXX0002", "authCode": "219769", "amount": "1470.00", "msf": "-31.61", "txn": "0.00", "vat": "-1.58", "net": "1436.81", "desp": "E/D/C/CN" }
+      ],
+      "summary": { "posCount": 1, "posValue": "1,470.00", "commission": "-31.61", "feeTransactions": "0.00", "vat": "-1.58", "adjustments": "0.00", "chargebacks": "0.00", "suspended": "0.00", "rebates": "0.00", "instalmentFees": "0.00", "netPayable": "1,436.81" }
+    }
+  ]
+}
