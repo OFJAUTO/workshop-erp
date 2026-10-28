@@ -103,16 +103,19 @@ try {
   check("3: the customer link shows both videos", (await list.count()) === 2);
   const caps = await list.locator("figcaption").allTextContents();
   check("3: each under its item with the answer ('<item> – Bad')", targets.every((it) => caps.some((c) => c.includes(`${it.item_label} – Bad`))), caps.join(" | "));
-  const posters = await list.locator("video").evaluateAll((els) => els.map((e) => e.getAttribute("poster") ?? ""));
-  check("3: each player opens on the video's own picture", posters.length === 2 && posters.every((p) => /\.jpg/.test(p)), posters.map((p) => p.slice(0, 60)).join(" | "));
+  // 29 October 2026: each video is a tile with its own picture; a tap plays it in THE viewer (PhotoViewer).
+  const posters = await list.locator("[data-player]").evaluateAll((els) => els.map((e) => e.getAttribute("data-viewer-poster") ?? ""));
+  check("3: each tile shows the video's own picture", posters.length === 2 && posters.every((p) => /\.jpg/.test(p)), posters.map((p) => p.slice(0, 60)).join(" | "));
   await cust.locator("[data-report-videos]").scrollIntoViewIfNeeded();
   await cust.screenshot({ path: shot("videos2-2-link-before.png"), fullPage: true });
   for (let i = 0; i < 2; i++) {
     await list.nth(i).locator("[data-play]").click();
-    const ok = await until(async () => list.nth(i).locator("video").evaluate((v) => v.currentTime > 0.2 && !v.paused && v.muted), 30, 300);
-    check(`3: video ${i + 1} plays inside the page, muted`, !!ok);
+    const ok = await until(async () => ((await cust.locator("[data-lightbox-video]").count()) ? cust.locator("[data-lightbox-video]").evaluate((v) => v.currentTime > 0.2 && !v.paused && v.muted) : false), 30, 300);
+    check(`3: video ${i + 1} plays in the viewer, muted`, !!ok);
+    if (i === 1) await cust.screenshot({ path: shot("videos2-3-link-playing.png") });
+    await cust.locator("[data-lightbox-close]").click();
+    await until(async () => ((await cust.locator("[data-lightbox]").count()) === 0 ? true : null), 15, 200);
   }
-  await cust.screenshot({ path: shot("videos2-3-link-playing.png"), fullPage: true });
 
   // Fresh addresses on demand: only the link's token opens them.
   const fresh = await (await fetch(`${base}/api/customer/videos?t=${token}`)).json();

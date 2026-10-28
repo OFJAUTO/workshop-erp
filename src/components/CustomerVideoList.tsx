@@ -29,7 +29,7 @@ export function CustomerVideoList({ videos, signedAt, refreshUrl }: { videos: La
     <div className="grid grid-cols-1 gap-4" data-customer-video-list>
       {videos.map((v) => (
         <figure key={v.id} id={`v-${v.id}`} className="flex flex-col gap-1 scroll-mt-4 target:outline target:outline-2 target:outline-ink target:rounded-card" data-report-video={v.id}>
-          <VideoPlayer video={{ id: v.id, url: v.url }} signedAt={signedAt} freshen={() => freshen(v.id)} poster={v.poster} />
+          <VideoPlayer video={{ id: v.id, url: v.url }} label={v.label} signedAt={signedAt} freshen={() => freshen(v.id)} poster={v.poster} />
           <figcaption className="text-sm font-semibold">
             {v.label}
             {v.duration_s ? <span className="text-xs text-[#5F6368] font-normal"> · {v.duration_s}s</span> : null}

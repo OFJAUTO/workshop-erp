@@ -4,6 +4,7 @@ import { Logo } from "@/components/Logo";
 import { loadUpdate } from "@/lib/bodyshop-public";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { getSettings } from "@/lib/settings";
+import { ViewerThumb } from "@/components/PhotoViewer";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +39,10 @@ export default async function ProgressPage({ params }: { params: Promise<{ token
               <span className="text-[11px] font-bold tracking-[0.12em] uppercase text-[#5F6368]">{u.carTitle}{u.plate ? ` · ${u.plate}` : ""}</span>
               <h1 className="text-2xl font-extrabold">{WORDS[u.kind].title}</h1>
               {u.photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={u.photoUrl} alt={WORDS[u.kind].title} className="aspect-[4/3] w-full rounded-lg object-cover bg-[#F4F4F5]" />
+                <ViewerThumb src={u.photoUrl} thumb={u.photoThumb} label={`${u.carTitle} · ${WORDS[u.kind].title}`} className="block w-full overflow-hidden rounded-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={u.photoThumb ?? u.photoUrl} alt={WORDS[u.kind].title} className="aspect-[4/3] w-full object-cover bg-[#F4F4F5]" />
+                </ViewerThumb>
               ) : null}
               <p className="text-sm leading-relaxed">{WORDS[u.kind].line}</p>
               {u.kind === "ready" && u.handoverToken ? (

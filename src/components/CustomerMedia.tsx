@@ -1,42 +1,41 @@
 "use client";
 
-import { useState } from "react";
-import { Lightbox } from "./Lightbox";
+import { ViewerThumb } from "./PhotoViewer";
 
-export type CustomerMediaItem = { id: string; kind: "photo" | "video" | "pdf"; url: string | null; label?: string | null };
+export type CustomerMediaItem = { id: string; kind: "photo" | "video" | "pdf"; url: string | null; /** The small picture for the page; the viewer opens `url`. */ thumbUrl?: string | null; label?: string | null; poster?: string | null };
 
 /**
- * Photos and videos on a customer's page: photos open in a full-size viewer with swipe and an X
- * (never a new tab); videos play where they are, muted until the customer turns the sound on.
+ * Photos and videos on a customer's page: small pictures that open THE page-wide viewer (PhotoViewer) - full screen,
+ * pinch or double-tap to zoom the photo, swipe through every photo of the page, videos play in it muted.
  */
-export function CustomerMedia({ items, size = "md" }: { items: CustomerMediaItem[]; size?: "sm" | "md" }) {
-  const [open, setOpen] = useState<number | null>(null);
-  // Photos and videos in one viewer, in the order shown.
-  const photos = items.filter((i) => (i.kind === "photo" || i.kind === "video") && i.url);
-  const slides = photos.map((p) => ({ key: p.id, url: p.url as string, label: p.label ?? (p.kind === "video" ? "Video" : "Photo"), kind: p.kind === "video" ? ("video" as const) : ("image" as const) }));
+export function CustomerMedia({ items, size = "md", label }: { items: CustomerMediaItem[]; size?: "sm" | "md"; /** The item's name the viewer shows ("FRONT BRAKE PADS – 3 MM"). */ label?: string }) {
   const box = size === "sm" ? "h-24 w-24" : "h-32 w-32";
   const video = size === "sm" ? "h-24 w-36" : "h-32 w-48";
   if (!items.some((i) => i.url)) return null;
   return (
-    <div className="flex flex-wrap gap-2 py-1">
+    <div className="flex flex-wrap gap-2 py-1" data-customer-media>
       {items.map((i) =>
         !i.url ? null : i.kind === "video" ? (
-          <button key={i.id} type="button" onClick={() => setOpen(photos.findIndex((p) => p.id === i.id))} className={`${video} relative overflow-hidden rounded-lg bg-black`} aria-label="Play the video">
-            <video src={i.url} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-            <span className="absolute inset-0 flex items-center justify-center text-white text-2xl">▶</span>
-          </button>
+          <ViewerThumb key={i.id} src={i.url} kind="video" label={label ?? i.label ?? "Video"} detail={label && i.label ? i.label : null} poster={i.poster ?? null} viewerKey={i.id} className={`${video} relative overflow-hidden rounded-lg bg-black`}>
+            {i.poster ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={i.poster} alt="" className="h-full w-full object-cover" loading="lazy" />
+            ) : (
+              <video src={`${i.url}#t=0.5`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
+            )}
+            <span className="absolute inset-0 flex items-center justify-center text-2xl text-white drop-shadow">▶</span>
+          </ViewerThumb>
         ) : i.kind === "pdf" ? (
           <a key={i.id} href={i.url} className="inline-flex min-h-11 items-center rounded-lg border border-[#D4D4D8] bg-[#F4F4F5] px-3 text-sm font-semibold">
             PDF · {i.label ?? "document"}
           </a>
         ) : (
-          <button key={i.id} type="button" onClick={() => setOpen(photos.findIndex((p) => p.id === i.id))} className={`${box} overflow-hidden rounded-lg bg-[#F4F4F5] cursor-zoom-in`} aria-label={`Enlarge: ${i.label ?? "photo"}`}>
+          <ViewerThumb key={i.id} src={i.url} thumb={i.thumbUrl ?? null} label={label ?? i.label ?? "Photo"} detail={label && i.label ? i.label : null} viewerKey={i.id} className={`${box} overflow-hidden rounded-lg bg-[#F4F4F5]`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={i.url} alt={i.label ?? "Photo"} className="h-full w-full object-cover" loading="lazy" />
-          </button>
+            <img src={i.thumbUrl ?? i.url} alt={i.label ?? "Photo"} className="h-full w-full object-cover" loading="lazy" />
+          </ViewerThumb>
         ),
       )}
-      {open !== null && slides[open] ? <Lightbox slides={slides} index={open} onClose={() => setOpen(null)} onMove={setOpen} /> : null}
     </div>
   );
 }

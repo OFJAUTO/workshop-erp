@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { openViewerAt, ViewerThumb } from "./PhotoViewer";
 
 export type CustomerVideo = { id: string; kind: string; url: string; duration_s: number | null; taken_at: string };
 
@@ -85,7 +86,7 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
         return (
           <figure key={kind} className="flex flex-col gap-1" data-video-slot={kind} data-video-state={v ? "ready" : "waiting"}>
             {v ? (
-              <VideoPlayer video={v} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.kind === kind)?.url ?? null} />
+              <VideoPlayer video={v} label={LABELS[kind] ?? "Video"} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.kind === kind)?.url ?? null} />
             ) : (
               <div className="aspect-video w-full rounded-card bg-chip flex flex-col items-center justify-center gap-1 text-center px-4">
                 <span className="text-sm font-bold">Video getting ready…</span>
@@ -101,7 +102,7 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
       })}
       {extra.map((v) => (
         <figure key={v.id} className="flex flex-col gap-1" data-video-slot={v.kind} data-video-state="ready">
-          <VideoPlayer video={v} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.id === v.id)?.url ?? null} />
+          <VideoPlayer video={v} label={LABELS[v.kind] ?? "Video"} signedAt={feed.signedAt} freshen={async () => (await refresh())?.videos.find((x) => x.id === v.id)?.url ?? null} />
           <figcaption className="text-xs font-semibold">{LABELS[v.kind] ?? "Video"}{v.duration_s ? ` · ${v.duration_s}s` : ""}</figcaption>
         </figure>
       ))}
@@ -110,27 +111,23 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
 }
 
 /**
- * The ONE customer video player (check-in videos on the approval page, inspection videos on the report link): a
- * poster with a Play button first; the address is renewed when it is old; errors show a message with a retry.
- * `poster` is a stored picture of the video; without it a frame is drawn from the video itself.
+ * The ONE customer video tile (check-in videos on the approval page, inspection videos on the report link): a picture
+ * of the video with a Play button; a tap opens THE page-wide viewer (PhotoViewer) and the video plays there, muted to
+ * start. An address older than forty minutes is renewed before it opens. `poster` is a stored picture of the video;
+ * without it a frame is drawn from the video itself.
  */
-export function VideoPlayer({ video, signedAt, freshen, poster: storedPoster = null }: { video: Pick<CustomerVideo, "id" | "url">; signedAt: number; freshen: () => Promise<string | null>; poster?: string | null }) {
-  const ref = useRef<HTMLVideoElement>(null);
+export function VideoPlayer({ video, signedAt, freshen, poster: storedPoster = null, label = "Video" }: { video: Pick<CustomerVideo, "id" | "url">; signedAt: number; freshen: () => Promise<string | null>; poster?: string | null; /** The video's name in the viewer. */ label?: string }) {
   const [src, setSrc] = useState(video.url);
   const [signed, setSigned] = useState(signedAt);
-  const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState<number>(0);
   const [poster, setPoster] = useState<string | null>(storedPoster);
 
-  // A new address from the feed (after a refresh) replaces the old one while the video is not playing.
+  // A new address from the feed (after a refresh) replaces the old one.
   const [seenUrl, setSeenUrl] = useState(video.url);
   if (seenUrl !== video.url) {
     setSeenUrl(video.url);
-    if (!playing) {
-      setSrc(video.url);
-      setSigned(signedAt);
-    }
+    setSrc(video.url);
+    setSigned(signedAt);
   }
 
   // A real frame as the poster, drawn half a second in (when the browser lets the page read the pixels).
@@ -177,66 +174,34 @@ export function VideoPlayer({ video, signedAt, freshen, poster: storedPoster = n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.id]);
 
-  async function start() {
-    const el = ref.current;
-    if (!el) return;
-    setLoading(true);
+  async function open(el: HTMLElement) {
     let url = src;
-    // An address older than forty minutes, or one that failed: ask for a fresh one before playing.
-    if (Date.now() - signed > STALE_MS || failed > 0) {
+    // An address older than forty minutes: a fresh one before the viewer opens.
+    if (Date.now() - signed > STALE_MS) {
+      setLoading(true);
       const fresh = await freshen();
+      setLoading(false);
       if (fresh) {
         url = fresh;
         setSrc(fresh);
         setSigned(Date.now());
       }
     }
-    if (el.src !== url) {
-      el.src = url;
-      el.load();
-    }
-    try {
-      await el.play();
-      setFailed(0);
-      setPlaying(true);
-    } catch (err) {
-      // A paused player with controls still lets the customer try; a real load error arrives through onError.
-      if (!(err instanceof DOMException && err.name === "NotAllowedError")) setFailed((f) => f + 1);
-      else setPlaying(true);
-    } finally {
-      setLoading(false);
-    }
+    openViewerAt(el, { url, kind: "video", poster });
   }
 
   return (
-    <div className="relative w-full aspect-video rounded-card overflow-hidden bg-black" data-player>
-      <video
-        ref={ref}
-        src={src}
-        poster={poster ?? undefined}
-        controls={playing}
-        playsInline
-        muted
-        preload="metadata"
-        className="h-full w-full"
-        onError={() => { setFailed((f) => f + 1); setPlaying(false); }}
-        onPlaying={() => setPlaying(true)}
-      />
-      {!playing ? (
-        <button type="button" onClick={start} className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 text-white" aria-label={failed ? "Couldn't load the video. Tap to try again" : "Play the video"} data-play>
-          {failed ? (
-            <>
-              <span className="rounded-card bg-white/95 px-3 py-2 text-sm font-bold text-ink">Couldn&apos;t load the video. Tap to try again.</span>
-              {failed > 1 ? <span className="text-xs text-white/90">This video format may not play on this phone.</span> : null}
-            </>
-          ) : (
-            <>
-              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 text-ink text-2xl font-bold pl-1">{loading ? "…" : "▶"}</span>
-              <span className="text-xs font-semibold">{loading ? "Loading…" : "Tap to play"}</span>
-            </>
-          )}
-        </button>
-      ) : null}
-    </div>
+    <ViewerThumb src={src} kind="video" label={label} poster={poster} viewerKey={video.id} onOpen={(el) => void open(el)} className="relative block w-full aspect-video overflow-hidden rounded-card bg-black" data-player>
+      {poster ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={poster} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <video src={`${src}#t=0.5`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
+      )}
+      <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 text-white" data-play>
+        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 pl-1 text-2xl font-bold text-ink">{loading ? "…" : "▶"}</span>
+        <span className="text-xs font-semibold">{loading ? "Loading…" : "Tap to play"}</span>
+      </span>
+    </ViewerThumb>
   );
 }

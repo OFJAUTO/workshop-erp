@@ -13,6 +13,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
 import { CustomerVideos } from "@/components/CustomerVideos";
+import { thumbsFor } from "@/lib/media-urls";
+import { GATE_IN_BUCKET } from "@/lib/media";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +61,8 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   // A server page: rendered once per request, the clock is read once (the players renew their addresses from it).
   // eslint-disable-next-line react-hooks/purity
   const signedAt = Date.now();
+  // Small pictures for the page; the viewer opens the sharp ones (videos keep their own tiles).
+  const photoThumbs = await thumbsFor(GATE_IN_BUCKET, media.filter((m) => !String(m.kind).startsWith("video")).map((m) => m.storage_path));
   const dirty = gateIn.cleanliness === "dirty" || gateIn.cleanliness === "very_dirty";
   const approved = !!req.approved_at;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
@@ -130,7 +134,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
         <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
         <div className="py-1 flex flex-col gap-4">
           <CustomerVideos token={token} initial={videoRows} expected={videoRows.some((v) => v.kind === "video") ? ["video"] : ["video_exterior", "video_interior"]} complete={videosComplete} signedAt={signedAt} />
-          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} damageNote={gateIn.damage_note} stacked hideVideos />
+          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} thumbs={Object.fromEntries(photoThumbs)} damageNote={gateIn.damage_note} stacked hideVideos />
         </div>
         {dirty ? <p className="text-xs font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
         {gateIn.dash_cam ? <p className="text-xs font-semibold">Dash cam fitted: it will be disconnected as per the terms and conditions.</p> : null}

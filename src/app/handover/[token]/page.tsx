@@ -9,6 +9,7 @@ import { WarrantyCardPanel } from "@/components/WarrantyCardPanel";
 import { qrDataUrl } from "@/lib/pdf/qr";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
+import { ViewerThumb } from "@/components/PhotoViewer";
 
 export const dynamic = "force-dynamic";
 
@@ -60,15 +61,19 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
           <div className="grid grid-cols-2 gap-3">
             <figure className="flex flex-col gap-1">
               {data.beforeUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={data.beforeUrl} alt="Before" className="aspect-[4/3] w-full rounded-lg object-cover bg-[#F4F4F5]" />
+                <ViewerThumb src={data.beforeUrl} thumb={data.beforeThumb} label={`${data.carTitle} · Before`} className="block w-full overflow-hidden rounded-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={data.beforeThumb ?? data.beforeUrl} alt="Before" className="aspect-[4/3] w-full object-cover bg-[#F4F4F5]" />
+                </ViewerThumb>
               ) : <div className="aspect-[4/3] w-full rounded-lg bg-[#F4F4F5]" />}
               <figcaption className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Before</figcaption>
             </figure>
             <figure className="flex flex-col gap-1">
               {data.afterUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={data.afterUrl} alt="After" className="aspect-[4/3] w-full rounded-lg object-cover bg-[#F4F4F5]" />
+                <ViewerThumb src={data.afterUrl} thumb={data.afterThumb} label={`${data.carTitle} · After`} className="block w-full overflow-hidden rounded-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={data.afterThumb ?? data.afterUrl} alt="After" className="aspect-[4/3] w-full object-cover bg-[#F4F4F5]" />
+                </ViewerThumb>
               ) : <div className="aspect-[4/3] w-full rounded-lg bg-[#F4F4F5]" />}
               <figcaption className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">After</figcaption>
             </figure>

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lightbox, type LightboxSlide } from "@/components/Lightbox";
+import type { LightboxSlide } from "@/components/Lightbox";
+import { ViewerThumb } from "@/components/PhotoViewer";
 import { formatDateTime } from "@/lib/format";
 import { MEDIA_KIND_LABELS, type GateInMediaRow } from "@/lib/types";
 import { WHEEL_KINDS, WHEEL_LABELS, isWheelKind, wheelConditionText } from "@/lib/wheels";
@@ -97,14 +98,12 @@ function RemoveX({ onRemove, label }: { onRemove: () => void; label: string }) {
 function Thumb({
   slide,
   caption,
-  onOpen,
   aspect = "aspect-[4/3]",
   small = false,
   onRemove,
 }: {
   slide: Slide | null;
   caption: string;
-  onOpen: () => void;
   aspect?: string;
   small?: boolean;
   /** Set when this person may take the photo off. */
@@ -114,10 +113,10 @@ function Thumb({
     <figure className="relative flex flex-col gap-1 min-w-0">
       {onRemove ? <RemoveX onRemove={onRemove} label={caption} /> : null}
       {slide ? (
-        <button type="button" onClick={onOpen} className={`block w-full ${aspect} rounded-card overflow-hidden bg-chip cursor-zoom-in focus-visible:ring-2 focus-visible:ring-ink/40`} aria-label={`Enlarge: ${caption}`}>
+        <ViewerThumb src={slide.url} thumb={slide.thumb} label={slide.label} detail={caption} viewerKey={slide.key} className={`block w-full ${aspect} rounded-card overflow-hidden bg-chip focus-visible:ring-2 focus-visible:ring-ink/40`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={slide.url} alt={caption} className="h-full w-full object-cover" loading="lazy" />
-        </button>
+          <img src={slide.thumb ?? slide.url} alt={caption} className="h-full w-full object-cover" loading="lazy" />
+        </ViewerThumb>
       ) : (
         <div className={`${aspect} rounded-card bg-chip`} />
       )}
@@ -134,6 +133,7 @@ function Thumb({
 export function MediaGallery({
   media,
   urls,
+  thumbs = {},
   carPictureUrl,
   damageNote,
   compact = false,
@@ -143,6 +143,8 @@ export function MediaGallery({
 }: {
   media: GateInMediaRow[];
   urls: Record<string, string>;
+  /** Small pictures for the page (the viewer opens the sharp `urls`); missing ones fall back to the sharp address. */
+  thumbs?: Record<string, string>;
   carPictureUrl?: string | null;
   damageNote?: string | null;
   compact?: boolean;
@@ -153,7 +155,6 @@ export function MediaGallery({
   /** Anyone doing the gate-in while it is open; only the owner once it is finished. */
   canRemove?: boolean;
 }) {
-  const [open, setOpen] = useState<number | null>(null);
   const router = useRouter();
   const [removeError, setRemoveError] = useState<string | null>(null);
   const remove = async (id: string) => {
@@ -179,28 +180,21 @@ export function MediaGallery({
   const other = media.filter((m) => m.kind === "gate_out_photo");
   const cols = compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4";
 
-  // One ordered list of everything that can be enlarged, so swiping moves through all of it.
-  const slides: Slide[] = [];
-  const slideIndex = new Map<string, number>();
-  function add(key: string, url: string | undefined, label: string, detail?: string, kind: "image" | "video" = "image"): Slide | null {
+  // Every picture and video opens THE page-wide viewer (PhotoViewer): swiping runs through the whole page in order.
+  let count = 0;
+  function add(key: string, url: string | undefined, label: string, detail?: string, kind: "image" | "video" = "image", thumb?: string): Slide | null {
     if (!url) return null;
-    const s: Slide = { key, url, label, detail, kind };
-    slideIndex.set(key, slides.length);
-    slides.push(s);
-    return s;
+    count++;
+    return { key, url, thumb: thumb ?? null, label, detail, kind };
   }
   const carSlide = carPictureUrl ? add("car", carPictureUrl, "Car picture") : null;
-  const rowSlide = (p: GateInMediaRow) => add(p.id, urls[p.storage_path], KIND_LABEL[p.kind], captionFor(p, compact));
-  const videoSlides = videos.map((v) => add(v.id, urls[v.storage_path], KIND_LABEL[v.kind], captionFor(v, compact), "video"));
+  const rowSlide = (p: GateInMediaRow) => add(p.id, urls[p.storage_path], KIND_LABEL[p.kind], captionFor(p, compact), "image", thumbs[p.storage_path]);
   const dashboardSlides = dashboard.map(rowSlide);
   const keysSlides = keys.map(rowSlide);
   const wheelSlides = wheels.map(rowSlide);
   const damageSlides = damage.map(rowSlide);
   const otherSlides = other.map(rowSlide);
-  const openSlide = (s: Slide | null) => {
-    if (s) setOpen(slideIndex.get(s.key) ?? null);
-  };
-  const hasPhotos = slides.length > 0;
+  const hasPhotos = count > 0 || videos.length > 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -214,22 +208,22 @@ export function MediaGallery({
 
       {carPictureUrl ? (
         <div className={compact ? "w-full" : "w-full max-w-md"}>
-          <Thumb slide={carSlide} caption="Car picture" onOpen={() => openSlide(carSlide)} aspect="aspect-[16/10]" />
+          <Thumb slide={carSlide} caption="Car picture" aspect="aspect-[16/10]" />
         </div>
       ) : null}
 
       {videos.length ? (
         <div className={`grid gap-4 ${compact || stacked ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2"}`}>
-          {videos.map((v, i) => {
+          {videos.map((v) => {
             const url = urls[v.storage_path];
             return (
               <figure key={v.id} className="relative flex flex-col gap-1">
                 {canRemove ? <RemoveX onRemove={() => remove(v.id)} label={KIND_LABEL[v.kind]} /> : null}
                 {url ? (
-                  <button type="button" onClick={() => openSlide(videoSlides[i])} className="relative block w-full overflow-hidden rounded-card" aria-label="Play the video">
+                  <ViewerThumb src={url} kind="video" label={KIND_LABEL[v.kind]} detail={captionFor(v, compact)} viewerKey={v.id} className="relative block w-full overflow-hidden rounded-card">
                     <VideoPreview url={url} />
                     <span className="absolute inset-0 flex items-center justify-center text-white text-3xl drop-shadow">▶</span>
-                  </button>
+                  </ViewerThumb>
                 ) : <div className="aspect-video rounded-card bg-chip" />}
                 <figcaption className="text-xs font-semibold">
                   {KIND_LABEL[v.kind]}
@@ -245,12 +239,12 @@ export function MediaGallery({
       {dashboard.length || keys.length ? (
         <div className={`grid gap-3 ${cols}`}>
           {dashboard.map((p, i) => (
-            <Thumb key={p.id} slide={dashboardSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(dashboardSlides[i])} onRemove={removeFor(p.id)} />
+            <Thumb key={p.id} slide={dashboardSlides[i]} caption={captionFor(p, compact)} onRemove={removeFor(p.id)} />
           ))}
           {keys.length ? (
             <div className="col-span-2 grid grid-cols-2 gap-3 rounded-card border border-line p-2">
               {keys.map((p, i) => (
-                <Thumb key={p.id} slide={keysSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(keysSlides[i])} onRemove={removeFor(p.id)} />
+                <Thumb key={p.id} slide={keysSlides[i]} caption={captionFor(p, compact)} onRemove={removeFor(p.id)} />
               ))}
             </div>
           ) : null}
@@ -266,7 +260,7 @@ export function MediaGallery({
                 key={p.id}
                 slide={wheelSlides[i]}
                 caption={`${WHEEL_LABELS[p.kind as (typeof WHEEL_KINDS)[number]]}${p.wheel_condition?.length ? ` · ${wheelConditionText(p.wheel_condition)}` : ""}`}
-                onOpen={() => openSlide(wheelSlides[i])}
+               
                 onRemove={removeFor(p.id)}
                 aspect="aspect-square"
                 small
@@ -282,7 +276,7 @@ export function MediaGallery({
           {damage.length ? (
             <div className={`grid gap-3 ${cols}`}>
               {damage.map((p, i) => (
-                <Thumb key={p.id} slide={damageSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(damageSlides[i])} onRemove={removeFor(p.id)} />
+                <Thumb key={p.id} slide={damageSlides[i]} caption={captionFor(p, compact)} onRemove={removeFor(p.id)} />
               ))}
             </div>
           ) : null}
@@ -293,12 +287,11 @@ export function MediaGallery({
       {other.length ? (
         <div className={`grid gap-3 ${cols}`}>
           {other.map((p, i) => (
-            <Thumb key={p.id} slide={otherSlides[i]} caption={captionFor(p, compact)} onOpen={() => openSlide(otherSlides[i])} onRemove={removeFor(p.id)} />
+            <Thumb key={p.id} slide={otherSlides[i]} caption={captionFor(p, compact)} onRemove={removeFor(p.id)} />
           ))}
         </div>
       ) : null}
 
-      {open !== null ? <Lightbox slides={slides} index={open} onClose={() => setOpen(null)} onMove={setOpen} /> : null}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { TERMS_LABELS, type TermsKey } from "@/lib/warranty";
 import { warrantyCardByToken } from "@/lib/warranty-data";
+import { ViewerThumb } from "@/components/PhotoViewer";
 
 export const dynamic = "force-dynamic";
 
@@ -63,10 +64,10 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
         {card.checkPhotos.length ? (
           <div className="mt-1 grid grid-cols-3 gap-2" data-warranty-check-photos>
             {card.checkPhotos.filter((p) => p.url).map((p) => (
-              <a key={p.id} href={p.url!} target="_blank" rel="noreferrer">
+              <ViewerThumb key={p.id} src={p.url!} thumb={p.thumb ?? null} label="10-day after-care check" detail={card.car} viewerKey={p.id} className="block w-full overflow-hidden rounded-lg">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.url!} alt="10-day check photo" className="aspect-square w-full rounded-lg object-cover bg-[#F4F4F5]" />
-              </a>
+                <img src={p.thumb ?? p.url!} alt="10-day check photo" className="aspect-square w-full object-cover bg-[#F4F4F5]" />
+              </ViewerThumb>
             ))}
           </div>
         ) : null}

@@ -11,6 +11,7 @@ import { tintSpecForJob } from "./tint-data";
 import { formatPlate } from "./types";
 import { addMonthsIso, areasFromLabels, ceramicCoverageOf, dubaiDay, monthsFromWords, periodWords, termsOf, warrantyStatusOf, type AftercareRow, type WarrantyProduct, type WarrantyStatus, type WarrantyTerms } from "./warranty";
 import { JOB_FILES_BUCKET } from "./work-data";
+import { thumbsFor } from "./media-urls";
 
 /**
  * Section 12: the ONE warranty card model. Built from the job's approved quotation (what was fitted: PPF, tint,
@@ -53,7 +54,7 @@ export type WarrantyCard = {
   handoverDay: string | null;
   status: WarrantyStatus;
   check: (AftercareRow & { id: string; done_by_name: string | null }) | null;
-  checkPhotos: { id: string; url: string | null; caption: string | null }[];
+  checkPhotos: { id: string; url: string | null; thumb?: string | null; caption: string | null }[];
   terms: WarrantyTerms;
   missing: string[];
   confirmedAt: string | null;
@@ -207,7 +208,8 @@ export async function warrantyCardOf(jobId: string, settings: Settings, opts: { 
     const paths = (files ?? []).map((f) => f.storage_path as string);
     const { data: signed } = paths.length ? await admin.storage.from(JOB_FILES_BUCKET).createSignedUrls(paths, 3600) : { data: [] as { path: string | null; signedUrl: string }[] };
     const urlOf = new Map((signed ?? []).filter((s) => s.path).map((s) => [s.path as string, s.signedUrl]));
-    checkPhotos = (files ?? []).map((f) => ({ id: f.id as string, url: urlOf.get(f.storage_path as string) ?? null, caption: (f.caption as string | null) ?? null }));
+    const thumbs = await thumbsFor(JOB_FILES_BUCKET, paths, 480);
+    checkPhotos = (files ?? []).map((f) => ({ id: f.id as string, url: urlOf.get(f.storage_path as string) ?? null, thumb: thumbs.get(f.storage_path as string) ?? null, caption: (f.caption as string | null) ?? null }));
   }
   const v = job.vehicle;
   return {

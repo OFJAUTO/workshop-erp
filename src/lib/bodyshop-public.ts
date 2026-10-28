@@ -7,6 +7,7 @@ import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { JOB_FILES_BUCKET } from "./work-data";
+import { thumbsFor } from "./media-urls";
 
 export type HandoverData = {
   job: BodyshopJobRow;
@@ -15,6 +16,9 @@ export type HandoverData = {
   filmText: string;
   beforeUrl: string | null;
   afterUrl: string | null;
+  /** Small pictures for the page (the viewer opens the sharp ones). */
+  beforeThumb: string | null;
+  afterThumb: string | null;
   finalCheck: string | null;
   advisor: { name: string; phone: string | null } | null;
   warranty: { certificateNo: string; installDate: string; validUntil: string } | null;
@@ -42,6 +46,7 @@ export async function loadHandover(token: string, settings: Settings): Promise<H
     const { data: signed } = await admin.storage.from(JOB_FILES_BUCKET).createSignedUrl(after.storage_path as string, 3600);
     afterUrl = signed?.signedUrl ?? null;
   }
+  const [beforeThumbs, afterThumbs] = await Promise.all([thumbsFor("vehicle-photos", [job.vehicle?.photo_path], 960), thumbsFor(JOB_FILES_BUCKET, [after?.storage_path as string | undefined], 960)]);
   const ppf = approved.kinds.includes("ppf") || approved.kinds.includes("coloured_ppf");
   const installDate = (job.gated_out_at ?? new Date().toISOString()).slice(0, 10);
   const years = Number(settings.ppf_warranty_years) || 10;
@@ -59,6 +64,8 @@ export async function loadHandover(token: string, settings: Settings): Promise<H
     filmText,
     beforeUrl,
     afterUrl,
+    beforeThumb: job.vehicle?.photo_path ? (beforeThumbs.get(job.vehicle.photo_path) ?? null) : null,
+    afterThumb: after?.storage_path ? (afterThumbs.get(after.storage_path as string) ?? null) : null,
     finalCheck: appt && (appt as { status: string }).status !== "cancelled" ? ((appt as { starts_at: string }).starts_at ?? null) : null,
     advisor: adv ? { name: adv.display_name, phone: advPhone } : null,
     warranty: ppf ? { certificateNo: `W-${job.job_number.replace(/^J-/, "")}`, installDate, validUntil } : null,
@@ -76,16 +83,21 @@ export async function loadUpdate(token: string) {
   if (!raw) return null;
   const job = raw as unknown as BodyshopJobRow;
   let photoUrl: string | null = null;
+  let photoThumb: string | null = null;
   if (u.photo_id) {
     const { data: f } = await admin.from("job_files").select("storage_path").eq("id", u.photo_id).maybeSingle();
     if (f?.storage_path) {
       const { data: signed } = await admin.storage.from(JOB_FILES_BUCKET).createSignedUrl(f.storage_path as string, 3600);
       photoUrl = signed?.signedUrl ?? null;
+      photoThumb = (await thumbsFor(JOB_FILES_BUCKET, [f.storage_path as string], 960)).get(f.storage_path as string) ?? null;
     }
   }
-  if (!photoUrl && job.vehicle?.photo_path) photoUrl = (await signCarPictures([job.vehicle.photo_path])).get(job.vehicle.photo_path) ?? null;
+  if (!photoUrl && job.vehicle?.photo_path) {
+    photoUrl = (await signCarPictures([job.vehicle.photo_path])).get(job.vehicle.photo_path) ?? null;
+    photoThumb = (await thumbsFor("vehicle-photos", [job.vehicle.photo_path], 960)).get(job.vehicle.photo_path) ?? null;
+  }
   const v = job.vehicle;
-  return { kind: u.kind as "arrived" | "film" | "ready", job, photoUrl, carTitle: [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ") || "Your car", plate: v?.has_plate ? formatPlate(v) : null, handoverToken: job.bodyshop_handover_token };
+  return { kind: u.kind as "arrived" | "film" | "ready", job, photoUrl, photoThumb, carTitle: [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ") || "Your car", plate: v?.has_plate ? formatPlate(v) : null, handoverToken: job.bodyshop_handover_token };
 }
 
 export const tomorrowIso = () => addDaysIso(new Date().toISOString().slice(0, 10), 1);
