@@ -101,8 +101,17 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
         void flush();
       }
     } catch {}
+    // A save that keeps failing is retried with growing gaps (4 s, 8 s, … up to 2 minutes) and not while hidden.
+    let tick = 0;
+    let lastLen = queue.current.length;
+    let misses = 0;
     const retry = setInterval(() => {
-      if (queue.current.length) void flush();
+      if (!queue.current.length) { misses = 0; return; }
+      if (document.visibilityState === "hidden") return;
+      misses = queue.current.length >= lastLen ? misses + 1 : 0;
+      lastLen = queue.current.length;
+      tick++;
+      if (tick % Math.min(30, 2 ** Math.min(5, Math.floor(misses / 3))) === 0) void flush();
     }, 4000);
     const online = () => void flush();
     window.addEventListener("online", online);
@@ -408,9 +417,18 @@ export function QuoteEditor({
   const [pending, start] = useTransition();
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Never under someone's fingers: the refresh waits until the typing stops.
+  // After saves the page refreshes at most every 10 seconds (the totals and blocks come from the server).
+  const lastRefresh = useRef(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refresh = useCallback(() => {
-    setDirty(new Set());
-    refreshWhenIdle(() => router.refresh());
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    const wait = Math.max(0, lastRefresh.current + 10_000 - Date.now());
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      lastRefresh.current = Date.now();
+      setDirty(new Set());
+      refreshWhenIdle(() => router.refresh());
+    }, wait);
   }, [router]);
   const onConfirm = useCallback((op: Op, message: string) => setConfirming({ op, message }), [setConfirming]);
   const { save, state, error, failed, retryFailed } = useQuoteAutosave(quotation.id, refresh, onConfirm);
@@ -496,12 +514,16 @@ export function QuoteEditor({
       }).catch(() => null);
     };
     beat();
-    const t = setInterval(beat, 30000);
+    // Only while the tab is in front: a hidden tab lets the lock run out (90 s) and takes it again on return.
+    const t = setInterval(() => { if (document.visibilityState === "visible") beat(); }, 45000);
+    const onVisible = () => { if (document.visibilityState === "visible") beat(); };
     const release = () => { void call("release"); };
     window.addEventListener("pagehide", release);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(t);
       window.removeEventListener("pagehide", release);
+      document.removeEventListener("visibilitychange", onVisible);
       release();
     };
   }, [quotation.id, readOnly, lockedBy]);

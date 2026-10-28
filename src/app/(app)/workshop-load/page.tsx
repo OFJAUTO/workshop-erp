@@ -18,7 +18,7 @@ export default async function WorkshopLoadPage() {
   const free = loads.filter((l) => l.status === "free").length;
   return (
     <>
-      <LiveRefresh tables={["work_sessions", "job_technicians", "work_pauses", "jobs"]} pollMs={30000} />
+      <LiveRefresh tables={["work_sessions", "job_technicians", "work_pauses", "jobs"]} />
       <PageHeader title="Workshop load" subtitle={`${working} working · ${loads.length - working - free} on a car with the clock off · ${free} free. Load: hours still to do on each technician's cars against the working hours of the week (green under 60%, amber to 90%, red above).`} />
       <Card className="flex flex-col gap-2">
         <TechnicianPicker technicians={loads} pick={false} />

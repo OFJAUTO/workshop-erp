@@ -162,8 +162,17 @@ function useAutosave(inspectionId: string) {
         void flush();
       }
     } catch {}
+    // A save that keeps failing is retried with growing gaps (4 s, 8 s, … up to 2 minutes) and not while hidden.
+    let tick = 0;
+    let lastLen = queue.current.length;
+    let misses = 0;
     const retry = setInterval(() => {
-      if (queue.current.length) void flush();
+      if (!queue.current.length) { misses = 0; return; }
+      if (document.visibilityState === "hidden") return;
+      misses = queue.current.length >= lastLen ? misses + 1 : 0;
+      lastLen = queue.current.length;
+      tick++;
+      if (tick % Math.min(30, 2 ** Math.min(5, Math.floor(misses / 3))) === 0) void flush();
     }, 4000);
     const online = () => void flush();
     window.addEventListener("online", online);

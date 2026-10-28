@@ -19,6 +19,7 @@ import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, methodsFor } from "@/lib/money-
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { isUuid } from "@/lib/uuid";
 import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 
 function refresh(jobId: string | null, invoiceId?: string) {
@@ -104,7 +105,13 @@ export async function recordPayment(formData: FormData) {
   // A card or transfer payment carries its proof (the card slip, the transfer screenshot) or it is not recorded.
   const proof = formData.get("proof");
   const proofFile = proof instanceof File && proof.size > 0 ? proof : null;
-  if ((method === "card" || method === "transfer") && !proofFile) redirect(`${back}${sep}error=${encodeURIComponent(method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first.")}`);
+  // The proof photo normally goes straight to storage from the browser (no size limit through the server), tied to
+  // the form's client key; a file sent with the form is still taken (an invoice without a job).
+  const clientKeyIn = blankToNull(formData.get("client_key"));
+  const proofJobId = jobIdIn ?? (invoiceId ? ((await loadInvoice(invoiceId))?.invoice.job_id ?? null) : null);
+  const { data: proofRows } = !proofFile && proofJobId && isUuid(clientKeyIn) ? await createAdminClient().from("job_files").select("id, storage_path").eq("job_id", proofJobId).eq("kind", "payment_proof").eq("ref_id", clientKeyIn).is("removed_at", null).order("created_at") : { data: [] };
+  const uploaded = (proofRows ?? []) as { id: string; storage_path: string }[];
+  if ((method === "card" || method === "transfer") && !proofFile && !uploaded.length) redirect(`${back}${sep}error=${encodeURIComponent(method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first.")}`);
   if (proofFile && proofFile.size > 25 * 1024 * 1024) redirect(`${back}${sep}error=${encodeURIComponent("The proof photo is too large (over 25 MB).")}`);
   const r = await recordPaymentCore(actorOf(staff), {
     invoiceId,
@@ -116,6 +123,11 @@ export async function recordPayment(formData: FormData) {
     notes: blankToNull(formData.get("notes")),
     clientKey: blankToNull(formData.get("client_key")),
   }, settings);
+  if (!r.error && r.paymentId && !proofFile && uploaded.length) {
+    const admin = createAdminClient();
+    await admin.from("payments").update({ proof_path: uploaded[0].storage_path, updated_by: staff.id }).eq("id", r.paymentId);
+    await admin.from("job_files").update({ ref_id: r.paymentId }).in("id", uploaded.map((u) => u.id));
+  }
   if (!r.error && r.paymentId && proofFile) {
     const admin = createAdminClient();
     const ext = proofFile.type.includes("png") ? "png" : proofFile.type.includes("webp") ? "webp" : proofFile.type.includes("pdf") ? "pdf" : "jpg";

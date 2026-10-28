@@ -7,8 +7,9 @@ export type CustomerVideo = { id: string; kind: string; url: string; duration_s:
 const LABELS: Record<string, string> = { video: "Walk-around video", video_exterior: "Exterior video", video_interior: "Interior video" };
 /** A signed address lives an hour; after this long the player asks for a fresh one before playing. */
 const STALE_MS = 40 * 60 * 1000;
-const POLL_MS = 8000;
-const POLL_FOR_MS = 2 * 60 * 60 * 1000;
+/** The checks slow down: 8 s at first, then 15, 30 and 60 s; after 20 minutes a button asks the customer to tap. */
+const pollGap = (n: number) => (n < 5 ? 8000 : n < 10 ? 15000 : n < 20 ? 30000 : 60000);
+const POLL_FOR_MS = 20 * 60 * 1000;
 
 type Feed = { videos: CustomerVideo[]; expected: string[]; complete: boolean; signedAt: number };
 
@@ -35,18 +36,36 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
     }
   }, [token]);
 
-  // While a video is still missing, ask again every few seconds; also when the page comes back to the front.
+  // While a video is still missing, ask again (more slowly over time, never while the page is hidden); also when the
+  // page comes back to the front, if something is still missing or the addresses are old.
+  const polls = useRef(0);
+  const [gaveUp, setGaveUp] = useState(false);
+  const feedRef = useRef(feed);
+  useEffect(() => { feedRef.current = feed; }, [feed]);
   useEffect(() => {
-    if (feed.complete) return;
-    if (Date.now() - started.current > POLL_FOR_MS) return;
-    const t = setTimeout(() => void refresh(), POLL_MS);
+    if (feed.complete || gaveUp) return;
+    const t = setTimeout(() => {
+      if (Date.now() - started.current > POLL_FOR_MS) { setGaveUp(true); return; }
+      if (document.visibilityState === "hidden") return;
+      polls.current++;
+      void refresh();
+    }, pollGap(polls.current));
     return () => clearTimeout(t);
-  }, [feed, refresh]);
+  }, [feed, refresh, gaveUp]);
   useEffect(() => {
-    const on = () => { if (document.visibilityState === "visible") void refresh(); };
+    const on = () => {
+      const f = feedRef.current;
+      if (document.visibilityState === "visible" && (!f.complete || Date.now() - f.signedAt > STALE_MS)) void refresh();
+    };
     document.addEventListener("visibilitychange", on);
     return () => document.removeEventListener("visibilitychange", on);
   }, [refresh]);
+  const checkAgain = () => {
+    started.current = Date.now();
+    polls.current = 0;
+    setGaveUp(false);
+    void refresh();
+  };
 
   // The newest file of each expected kind.
   const byKind = new Map<string, CustomerVideo>();
@@ -56,6 +75,11 @@ export function CustomerVideos({ token, initial, expected, complete, signedAt }:
 
   return (
     <div className="grid grid-cols-1 gap-4" data-customer-videos>
+      {gaveUp && !feed.complete ? (
+        <button type="button" onClick={checkAgain} className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-videos-check-again>
+          A video is still on its way – tap to check again
+        </button>
+      ) : null}
       {kinds.map((kind) => {
         const v = byKind.get(kind);
         return (

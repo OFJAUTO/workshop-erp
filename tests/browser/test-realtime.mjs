@@ -36,12 +36,18 @@ try {
   let waited = 0;
   while (calls.rsc === 0 && waited < 15000) { await sleep(500); waited += 500; }
   check("2: a change to a car refreshes the screen within seconds", calls.rsc > 0, `${waited} ms`);
+  const afterFirst = calls.rsc;
+  for (let i = 0; i < 3; i++) { await sql("update public.jobs set updated_at = now() where id = $1", [jobId]); await sleep(1200); }
+  const burst = calls.rsc - afterFirst;
+  await sleep(9000);
+  const folded = calls.rsc - afterFirst;
+  check("2b: a burst of changes is folded: no refresh inside the 10-second gap, one at its end", burst === 0 && folded >= 1 && folded <= 2, `during ${burst}, after ${folded}`);
 
   // A new notification rings the bell without asking the server.
   const before = calls.bell;
   const badgeText = async () => ((await page.locator("#header-bell-slot").textContent().catch(() => "")) ?? "").replace(/\D/g, "");
   const badge0 = await badgeText();
-  await sql("insert into public.notifications (id, staff_id, type, title, body, href) values (gen_random_uuid(), $1, 'e2e_live', 'E2E live bell check', 'Sent by the realtime test', $2)", [ownerId, `/jobs/${jobId}`]);
+  await sql("insert into public.notifications (staff_id, type, title, body, href) values ($1, 'e2e_live', 'E2E live bell check', 'Sent by the realtime test', $2)", [ownerId, `/jobs/${jobId}`]);
   let got = false;
   for (let i = 0; i < 20 && !got; i++) { await sleep(500); got = (await page.getByText("E2E live bell check").count()) > 0 || (await badgeText()) !== badge0; }
   check("3: a new notification reaches the bell through the live feed", got);
@@ -52,7 +58,7 @@ try {
   await browser.close();
 }
 
-// 4. With the live connection cut, the screen checks the server once a minute (the fallback).
+// 4. With the live connection cut, the screen checks the server every 2 minutes (the fallback, 28 Oct).
 const b2 = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
 let rsc2 = 0;
 await b2.context.routeWebSocket(/realtime/, (ws) => ws.close());
@@ -61,8 +67,11 @@ try {
   await go(b2.page, `${base}/dashboard`);
   await b2.page.waitForSelector(`[data-flash-id="${jobId}"]`, { timeout: 30000 });
   rsc2 = 0;
-  await sleep(80000);
-  check("4: with the live connection down, the screen falls back to about one check a minute", rsc2 >= 1 && rsc2 <= 2, `rsc ${rsc2}`);
+  await sleep(70000);
+  const early = rsc2;
+  await sleep(65000);
+  check("4: with the live connection down, nothing in the first minute (the fallback is every 2 minutes)", early === 0, `rsc ${early}`);
+  check("4: …then one check at 2 minutes", rsc2 >= 1 && rsc2 <= 2, `rsc ${rsc2}`);
 } finally {
   await b2.browser.close();
 }

@@ -127,7 +127,8 @@ export async function POST(request: NextRequest) {
   if (body.lock === "take") {
     if (lockHeldByOther) return NextResponse.json({ error: `${await lockerName()} is editing this quotation.`, lockedBy: await lockerName() }, { status: 423 });
     const taking = q.editing_by !== staff.id;
-    await admin.from("quotations").update({ editing_by: staff.id, editing_at: new Date().toISOString() }).eq("id", q.id);
+    const fresh = !taking && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 30_000;
+    if (!fresh) await admin.from("quotations").update({ editing_by: staff.id, editing_at: new Date().toISOString() }).eq("id", q.id);
     if (taking && q.job_id) {
       // The car's advisor hears when someone else starts on his quotation.
       const { data: job } = await admin.from("jobs").select("gated_in_by, job_number").eq("id", q.job_id).maybeSingle();

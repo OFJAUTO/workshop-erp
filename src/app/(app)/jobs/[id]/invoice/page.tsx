@@ -252,7 +252,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     {canRecord ? (
                       <details className="border-t border-line pt-2" data-record-block data-folded>
                         <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a payment before the proforma is sent</summary>
-                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
+                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
                       </details>
                     ) : null}
                   </div>
@@ -262,7 +262,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 return (
                   <div className="flex flex-col gap-2" data-record-block>
                     {creditDays ? <p className="text-sm font-semibold">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p> : <p className="text-sm font-semibold">Record the payment against {live!.number}.</p>}
-                    <PaymentForm invoiceId={live!.id} jobId={null} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
+                    <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
                     {creditDays && can(role, "gateOut") && acting ? <div><LinkButton href={`/jobs/${id}/gate-out`} size="md" tone="secondary">Gate out on credit</LinkButton></div> : null}
                   </div>
                 );

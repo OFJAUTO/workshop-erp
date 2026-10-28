@@ -62,5 +62,5 @@ export async function shortLinkResponse(code: string, prefix: "q" | "i" | "r" | 
 <p style="padding:24px">Opening… <a href="${safe}">Tap here if nothing happens.</a></p>
 </body>
 </html>`;
-  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" } });
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300, s-maxage=86400" } });
 }

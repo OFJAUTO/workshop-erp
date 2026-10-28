@@ -218,7 +218,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   return (
     <>
       {/* Section 10: inbound_scans is live and the net is 20 s, so an emailed scan report appears by itself. */}
-      <LiveRefresh tables={["jobs", "inspections", "road_tests", "work_sessions", "job_technicians", "part_items", "inbound_scans"]} jobId={id} pollMs={20000} />
+      <LiveRefresh tables={["jobs", "inspections", "road_tests", "work_sessions", "job_technicians", "part_items", "inbound_scans"]} jobId={id} />
       <PageHeader
         title={formatPlate(vehicle)}
         subtitle={

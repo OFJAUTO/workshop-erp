@@ -1,8 +1,20 @@
 {
-  "regions": ["bom1"],
+  "regions": [
+    "bom1"
+  ],
   "crons": [
-    { "path": "/api/cron/housekeeping", "schedule": "0 * * * *" },
-    { "path": "/api/cron/mailbox", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/zoho", "schedule": "*/5 * * * *" }
-  ]
+    {
+      "path": "/api/cron/housekeeping",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/mailbox",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/zoho",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  "ignoreCommand": "if [ -z \"$VERCEL_GIT_PREVIOUS_SHA\" ]; then exit 1; fi; git diff --quiet $VERCEL_GIT_PREVIOUS_SHA HEAD -- . ':(exclude)docs' ':(exclude)tests' ':(exclude)scripts' ':(exclude)supabase' ':(exclude).claude' ':(exclude)CLAUDE.md' ':(exclude)README.md'"
 }

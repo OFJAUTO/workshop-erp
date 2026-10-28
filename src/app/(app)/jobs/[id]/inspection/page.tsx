@@ -198,7 +198,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   return (
     <>
       {/* Section 10: the manager's view hears a new scan report (and the report itself) without a reload. */}
-      <LiveRefresh tables={["jobs", "inspections", "inbound_scans"]} jobId={id} pollMs={20000} />
+      <LiveRefresh tables={["jobs", "inspections", "inbound_scans"]} jobId={id} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Inspection · ${formatPlate(vehicle)}`}

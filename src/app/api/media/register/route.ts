@@ -46,10 +46,13 @@ export async function POST(request: NextRequest) {
   if (kind === "car_picture") {
     // The car's picture for the Cars page, the dashboard and the job card: a copy goes to the car's own folder.
     const { data: job } = await admin.from("jobs").select("vehicle_id").eq("id", jobId).maybeSingle();
-    const { data: file } = await admin.storage.from(GATE_IN_BUCKET).download(path);
-    if (job?.vehicle_id && file) {
+    if (job?.vehicle_id) {
       const dest = `${job.vehicle_id}/profile-${Date.now()}.jpg`;
-      const { error: copyError } = await admin.storage.from("vehicle-photos").upload(dest, Buffer.from(await file.arrayBuffer()), { contentType: file.type || "image/jpeg", upsert: false });
+      let { error: copyError } = await admin.storage.from(GATE_IN_BUCKET).copy(path, dest, { destinationBucket: "vehicle-photos" });
+      if (copyError) {
+        const { data: file } = await admin.storage.from(GATE_IN_BUCKET).download(path);
+        copyError = file ? (await admin.storage.from("vehicle-photos").upload(dest, Buffer.from(await file.arrayBuffer()), { contentType: file.type || "image/jpeg", upsert: false })).error : copyError;
+      }
       if (!copyError) await admin.from("vehicles").update({ photo_path: dest }).eq("id", job.vehicle_id);
     }
   }

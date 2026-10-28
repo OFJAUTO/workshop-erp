@@ -99,7 +99,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
   return (
     <>
       {/* Section 10: a new report appears in the lists by itself and flashes its row. */}
-      <LiveRefresh tables={["inbound_scans"]} pollMs={20000} />
+      <LiveRefresh tables={["inbound_scans"]} />
       <PageHeader title="Scan reports" subtitle={`Autel reports read from ${mailbox || "the scans mailbox"} every five minutes. Matched by the VIN (subject, body or inside the report) to the open job; the rest wait here.`} actions={canAttach ? <form action={checkMailboxNow}><Button type="submit" size="lg" data-check-mailbox>Check the mailbox now</Button></form> : undefined} />
       <div className="flex flex-wrap items-center gap-2 text-sm" data-mailbox-status>
         {!configured ? <Badge tone="amber">Mailbox not set up yet</Badge> : !connection ? <Badge tone="amber">Mailbox not connected yet</Badge> : connection.last_error ? <Badge tone="red">Mailbox problem</Badge> : <Badge tone="green">Connected as {connection.mailbox}</Badge>}

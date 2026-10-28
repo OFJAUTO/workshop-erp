@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
-import { FALLBACK_POLL_MS, hiddenTracker, startLive } from "@/lib/live-connection";
+import { FALLBACK_POLL_MS, MIN_REFRESH_GAP_MS, hiddenTracker, startLive } from "@/lib/live-connection";
 
 type Row = Record<string, unknown>;
 
@@ -44,9 +44,16 @@ export function LiveRefresh({ tables, jobId, pollMs = FALLBACK_POLL_MS, alwaysPo
         setUpdatedAt(Date.now());
       });
     };
+    // A burst of changes (Parts pricing, a technician's measurements) costs one refresh per 10 seconds at most:
+    // the first change shows at once, later ones are folded into one refresh at the end of the gap.
+    let lastRefresh = 0;
     const schedule = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(refresh, 300);
+      const wait = Math.max(300, lastRefresh + MIN_REFRESH_GAP_MS - Date.now());
+      timer.current = setTimeout(() => {
+        lastRefresh = Date.now();
+        refresh();
+      }, wait);
     };
     const flash = (row: Row | null | undefined) => {
       for (const id of [row?.id, row?.job_id]) {
@@ -79,7 +86,7 @@ export function LiveRefresh({ tables, jobId, pollMs = FALLBACK_POLL_MS, alwaysPo
         else if (!navigator.onLine) setOffline(true);
       },
     });
-    const always = alwaysPollMs && alwaysPollMs > 0 ? setInterval(refresh, Math.max(15000, alwaysPollMs)) : null;
+    const always = alwaysPollMs && alwaysPollMs > 0 ? setInterval(refresh, Math.max(FALLBACK_POLL_MS, alwaysPollMs)) : null;
     const onVisible = () => {
       if (document.visibilityState === "hidden") away.hide();
       else if (away.shouldCatchUp()) refresh();
@@ -122,11 +129,11 @@ export function LiveRefresh({ tables, jobId, pollMs = FALLBACK_POLL_MS, alwaysPo
   );
 }
 
-/** For pages without a login (the phone upload page): refresh on a timer. */
-export function PollRefresh({ ms = 5000 }: { ms?: number }) {
+/** For pages without a login (the phone upload page): refresh on a timer, only while the screen is on. */
+export function PollRefresh({ ms = 15000 }: { ms?: number }) {
   const router = useRouter();
   useEffect(() => {
-    const t = setInterval(() => router.refresh(), ms);
+    const t = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, Math.max(15000, ms));
     return () => clearInterval(t);
   }, [router, ms]);
   return null;

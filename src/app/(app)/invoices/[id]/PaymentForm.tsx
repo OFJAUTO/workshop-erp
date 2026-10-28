@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button, Input } from "@/components/ui";
 import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
+import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
+import { newUuid } from "@/lib/uuid";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -21,6 +23,7 @@ function RecordButton({ label }: { label: string }) {
 export function PaymentForm({
   invoiceId,
   jobId,
+  proofJobId = null,
   balance,
   action,
   charges,
@@ -34,6 +37,8 @@ export function PaymentForm({
 }: {
   invoiceId: string | null;
   jobId: string | null;
+  /** The job the invoice belongs to: the proof photo uploads straight to storage under it. */
+  proofJobId?: string | null;
   balance: number | null;
   action: (formData: FormData) => void;
   /** Bank charge per method, in percent. */
@@ -55,7 +60,8 @@ export function PaymentForm({
   const [reference, setReference] = useState("");
   const [confirming, setConfirming] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const [clientKey] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`));
+  const [clientKey] = useState(newUuid);
+  const [proofs, setProofs] = useState<JobFile[]>([]);
   const charge = charges[method] ?? 0;
   const value = mode === "full" && balance ? balance : Number(amount) || 0;
   const over = balance !== null && value > balance + 0.005;
@@ -107,7 +113,14 @@ export function PaymentForm({
         {method === "card" || method === "transfer" ? (
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
+            {proofJobId ? (
+              <>
+                <JobFileUpload jobId={proofJobId} kind="payment_proof" refId={clientKey} files={proofs} accept="any" label="Take photo / attach" compact removable onAdded={(f) => setProofs((x) => [...x, f])} onRemoved={(f) => setProofs((x) => x.filter((y) => y.id !== f.id))} />
+                {proofs.length === 0 ? <span className="text-xs font-semibold text-amber-bar" data-proof-missing>Attach the proof first.</span> : null}
+              </>
+            ) : (
             <input type="file" name="proof" accept="image/*,.pdf" required className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input />
+            )}
           </label>
         ) : null}
         <p className="text-xs text-muted">

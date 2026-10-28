@@ -25,7 +25,7 @@ async function shrinkPhoto(file: File): Promise<Blob> {
 
 /**
  * The shared section tablet: the section's cars in due order; tap a car, tap your face, type your PIN, and you are
- * clocked in (or out). Nothing else, no typing. Refreshes itself every half minute.
+ * clocked in (or out). Nothing else, no typing. Refreshes itself every two minutes while the screen is on.
  */
 export function SectionTablet({ section, cars, people }: { section: string; cars: TabletCar[]; people: TabletPerson[] }) {
   const router = useRouter();
@@ -38,8 +38,8 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
   useEffect(() => {
-    // A shared tablet has no login, so no live feed reaches it: a check every minute, only while the screen is on.
-    const t = setInterval(() => document.visibilityState === "visible" && router.refresh(), 60000);
+    // A shared tablet has no login, so no live feed reaches it: a check every two minutes, only while the screen is on.
+    const t = setInterval(() => document.visibilityState === "visible" && router.refresh(), 120000);
     return () => clearInterval(t);
   }, [router]);
   useEffect(() => {

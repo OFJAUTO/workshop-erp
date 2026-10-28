@@ -1,7 +1,9 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 
-/** While the live connection is down, a screen checks the server this often (never while it is up). */
-export const FALLBACK_POLL_MS = 60_000;
+/** While the live connection is down, a screen checks the server this often (never while it is up, never faster). */
+export const FALLBACK_POLL_MS = 120_000;
+/** A screen refreshes at most this often from live changes (the first change at once, the rest folded into one). */
+export const MIN_REFRESH_GAP_MS = 10_000;
 /** A tab hidden longer than this catches up once when it comes back (a phone may have slept without a word). */
 export const HIDDEN_CATCH_UP_MS = 5 * 60_000;
 
@@ -27,7 +29,7 @@ export function startLive(
     if (!poll) {
       poll = setInterval(() => {
         if (document.visibilityState === "visible") opts.fallback();
-      }, Math.max(4000, opts.fallbackMs ?? FALLBACK_POLL_MS));
+      }, Math.max(FALLBACK_POLL_MS, opts.fallbackMs ?? FALLBACK_POLL_MS));
     }
   };
   const up = () => {

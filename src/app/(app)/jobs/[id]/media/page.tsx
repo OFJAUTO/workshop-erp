@@ -42,7 +42,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
   return (
     <>
       {/* Live, and polled every few seconds while something is still missing: a phone upload shows here within seconds. */}
-      <LiveRefresh tables={["gate_in_media", "gate_ins"]} jobId={id} pollMs={check.complete ? 60000 : 4000} />
+      <LiveRefresh tables={["gate_in_media", "gate_ins"]} jobId={id} />
       <PageHeader
         title={`Photos and video · ${formatPlate(card.vehicle)}`}
         subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(card.vehicle)} · {card.job.job_number}</span><VinCopy vin={card.vehicle.vin} /></span>}

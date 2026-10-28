@@ -147,7 +147,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               </ul>
               {canPay && bal.balance > 0 ? (
                 <div className="border-t border-line pt-3">
-                  <PaymentForm invoiceId={invoice.id} jobId={null} balance={bal.balance} action={recordPayment} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={invoice.number} isProforma={invoice.kind === "proforma"} nextTaxNumber={invoice.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} />
+                  <PaymentForm invoiceId={invoice.id} jobId={null} proofJobId={invoice.job_id} balance={bal.balance} action={recordPayment} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={invoice.number} isProforma={invoice.kind === "proforma"} nextTaxNumber={invoice.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} />
                 </div>
               ) : null}
               {payable && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}

@@ -13,6 +13,9 @@ if (process.env.NODE_ENV === "production") {
 
 const nextConfig: NextConfig = {
   env: { NEXT_PUBLIC_APP_VERSION: APP_VERSION },
+  // A phone photo sent with a form (supplier "mark paid", film rolls, sticker settings) is usually 2-4 MB; the
+  // default limit was 1 MB. Vercel's own ceiling is 4.5 MB, so large files go straight to storage instead.
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   serverExternalPackages: ["@react-pdf/renderer", "mupdf", "nspell", "dictionary-en", "dictionary-en-gb"],
   agentRules: false,
   // The PDF routes read the document font and the logo from the public folder on the server.

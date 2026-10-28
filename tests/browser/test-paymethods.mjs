@@ -89,7 +89,11 @@ try {
     await form.waitFor({ timeout: 20000 });
     await form.locator(`[data-method="${m}"]`).click();
     if ((await form.locator("[data-amount-full]").count()) === 1) await form.locator("[data-amount-full]").click();
-    if (m === "card" || m === "transfer") await form.locator('input[name="proof"]').setInputFiles({ name: `${m}-slip.png`, mimeType: "image/png", buffer: png });
+    // 28 Oct: the slip goes straight to storage (no 1 MB form limit); the form sends only its key.
+    if (m === "card" || m === "transfer") {
+      await form.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: `${m}-slip.png`, mimeType: "image/png", buffer: png });
+      await until(async () => (await form.locator("[data-proof-missing]").count()) === 0, 40, 500);
+    }
     if (m === "cheque") {
       await form.locator('input[name="cheque_number"]').fill("200567");
       await form.locator('input[name="cheque_date"]').fill("2026-10-26");
