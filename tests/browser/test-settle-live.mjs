@@ -1,6 +1,8 @@
-// Card settlements, LIVE proof against OFJ TEST (27 October 2026): a card payment posts at its FULL amount into the
-// card clearing account with NO bank charge, and its settlement posts the transfer clearing -> bank (what arrived)
-// plus the actual fee as bank charges, both carrying the settlement number and statement reference. Run it only
+// Card settlements, LIVE proof against OFJ TEST (27 October 2026; 29 October in the bank's parts): a payment-link
+// payment of AED 10,000 posts at its FULL amount into the link clearing account with NO bank charge; its settlement
+// posts the transfer clearing -> bank for the NET (9,815.20) and ONE expense paid from the clearing account with the
+// MSF (175.00) on bank charges and the transaction fee (1.00) on the transaction fee account, each with the 5% tax,
+// so the VAT (8.80) is INPUT VAT - totals to the fils, all carrying the settlement number and statement reference. Run it only
 // when OFJ TEST's daily call allowance has room (with test:zoho3live). Seeds locally, drives the LIVE cron.
 //   node --env-file=.env.local tests/browser/test-settle-live.mjs   (local dev server)
 import { api, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
@@ -35,7 +37,7 @@ const jobId = seed.json?.jobId;
 const [job] = await sql("select customer_id from public.jobs where id = $1", [jobId]);
 const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active limit 1"))[0].id;
 // A deposit by card (no invoice needed): posts as an unapplied advance into Card machine clearing.
-const [p] = await sql("insert into public.payments (job_id, customer_id, method, amount_aed, bank_charge_aed, received_at, received_by, is_deposit, number, created_by, updated_by) values ($1, $2, 'card', 1234.50, 27.90, now() - interval '1 day', $3, true, $4, $3, $3) returning id, number", [jobId, job.customer_id, owner, `TRCT-S${RUN}`]);
+const [p] = await sql("insert into public.payments (job_id, customer_id, method, amount_aed, bank_charge_aed, received_at, received_by, is_deposit, number, created_by, updated_by) values ($1, $2, 'link', 10000.00, 176.00, now() - interval '1 day', $3, true, $4, $3, $3) returning id, number", [jobId, job.customer_id, owner, `TRCT-S${RUN}`]);
 const TODAY = new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
 const reconRow = async () => (await sql("select details from public.zoho_reconciliation where day = $1", [TODAY]))[0]?.details ?? null;
 const settleSection = (d) => (d?.sections ?? []).find((x) => x.label === "Card/link settlement transfers") ?? null;
@@ -44,8 +46,8 @@ const base = settleSection(await reconRow());
 check("0: the daily reconciliation has the settlement transfers line", !!base, JSON.stringify(base));
 
 await sql("insert into public.zoho_outbox (kind, record_id, job_id) values ('contact', $1, null) on conflict (kind, record_id) do update set status = 'pending', claimed_at = null", [job.customer_id]);
-const [st] = await sql("insert into public.card_settlements (number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, created_by, updated_by) values ($1, 'card', (now() + interval '4 hours')::date, 1, 1234.50, 1206.10, 28.40, $2, $3, $3) returning id, number", [`STL-E${RUN.slice(-4)}`, `E2E stmt ${RUN}`, owner]);
-await sql("update public.payments set settlement_id = $1, actual_fee_aed = 28.40 where id = $2", [st.id, p.id]);
+const [st] = await sql("insert into public.card_settlements (number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, msf_aed, txn_fee_aed, vat_aed, statement_ref, created_by, updated_by) values ($1, 'link', (now() + interval '4 hours')::date, 1, 10000.00, 9815.20, 184.80, 175.00, 1.00, 8.80, $2, $3, $3) returning id, number", [`STL-E${RUN.slice(-4)}`, `E2E stmt ${RUN}`, owner]);
+await sql("update public.payments set settlement_id = $1, actual_fee_aed = 176.00, actual_msf_aed = 175.00, actual_txn_fee_aed = 1.00, actual_vat_aed = 8.80 where id = $2", [st.id, p.id]);
 await sql("insert into public.zoho_outbox (kind, record_id) values ('settlement', $1)", [st.id]);
 await cron();
 const waitRow = await row("settlement", st.id);
@@ -54,12 +56,13 @@ check("1: the transfer WAITS while its payment has not reached Zoho", waitRow?.s
 check("1: the waiting payment was queued for it", !!depRow, JSON.stringify(depRow));
 const pr = await settled("deposit", p.id);
 check("1: the card payment posted", pr?.status === "synced", JSON.stringify(pr).slice(0, 300));
-check("1: at the FULL amount with NO bank charge in Zoho", Number(pr?.zoho_result?.amount) === 1234.5 && Number(pr?.zoho_result?.bank_charges) === 0, JSON.stringify(pr?.zoho_result));
+check("1: at the FULL amount (10,000) with NO bank charge in Zoho", Number(pr?.zoho_result?.amount) === 10000 && Number(pr?.zoho_result?.bank_charges) === 0, JSON.stringify(pr?.zoho_result));
 
 const sr = await settled("settlement", st.id);
 check("2: the settlement posted", sr?.status === "synced", JSON.stringify(sr).slice(0, 400));
-check("2: the transfer clearing -> bank carries what arrived (1,206.10)", !!sr?.zoho_result?.transfer_id && Number(sr?.zoho_result?.received) === 1206.1, JSON.stringify(sr?.zoho_result));
-check("2: the actual fee is a bank charges expense (28.40)", !!sr?.zoho_result?.fee_expense_id && Number(sr?.zoho_result?.fee) === 28.4);
+check("2: the transfer clearing -> bank carries the NET (9,815.20)", !!sr?.zoho_result?.transfer_id && Number(sr?.zoho_result?.received) === 9815.2, JSON.stringify(sr?.zoho_result));
+check("2: one expense from the clearing account: MSF 175.00 + fee 1.00 on their accounts, total 184.80", !!sr?.zoho_result?.fee_expense_id && Number(sr?.zoho_result?.fee) === 184.8 && Number(sr?.zoho_result?.msf) === 175 && Number(sr?.zoho_result?.txn) === 1 && Number(sr?.zoho_result?.lines) === 2, JSON.stringify(sr?.zoho_result));
+check("2: Zoho booked the VAT as input VAT to the fils (8.80)", Number(sr?.zoho_result?.input_vat) === 8.8 && Number(sr?.zoho_result?.vat) === 8.8, JSON.stringify(sr?.zoho_result));
 check("2: both carry the settlement number and the statement reference", String(sr?.zoho_result?.reference ?? "").includes(st.number) && String(sr?.zoho_result?.reference ?? "").includes(`E2E stmt ${RUN}`));
 // Idempotent: a second run adopts, never posts twice.
 await sql("update public.card_settlements set zoho_transfer_id = null, zoho_fee_id = null where id = $1", [st.id]);

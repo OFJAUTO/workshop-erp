@@ -36,9 +36,11 @@ export async function saveZohoMapping(formData: FormData) {
     if (v) map.paidFromBy[m.key] = v.slice(0, 200);
   }
   const bank = String(formData.get("map__bank_charges") ?? "").trim();
+  const bankTxn = String(formData.get("map__bank_txn_fees") ?? "").trim();
   const adv = String(formData.get("map__advances") ?? "").trim();
   const advRefund = String(formData.get("map__advances_refund") ?? "").trim();
   if (bank) map.bankCharges = bank.slice(0, 200);
+  map.bankTxnFees = (bankTxn || bank || map.bankCharges || "").slice(0, 200) || undefined;
   if (adv) map.advances = adv.slice(0, 200);
   if (advRefund) map.advancesRefund = advRefund.slice(0, 200);
   const missing = [
@@ -68,6 +70,7 @@ export async function useSuggestedMapping() {
     paidFrom: stored.paidFrom || SUGGESTED_MAP.paidFrom,
     paidFromBy: { ...SUGGESTED_MAP.paidFromBy, ...(stored.paidFromBy ?? {}) },
     bankCharges: stored.bankCharges || SUGGESTED_MAP.bankCharges,
+    bankTxnFees: stored.bankTxnFees || stored.bankCharges || SUGGESTED_MAP.bankTxnFees,
     advances: stored.advances || SUGGESTED_MAP.advances,
     advancesRefund: stored.advancesRefund || SUGGESTED_MAP.advancesRefund,
   };

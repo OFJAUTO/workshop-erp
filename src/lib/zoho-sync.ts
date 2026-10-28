@@ -79,13 +79,15 @@ export type ZohoAccountMap = {
   /** Per supplier-payment method; an empty one falls back to paidFrom. */
   paidFromBy?: Partial<Record<SupplierPayKey, string>>;
   bankCharges?: string;
+  /** The bank's fixed fee per transaction (payment link AED 1.00); empty = the bank charges account. */
+  bankTxnFees?: string;
   advances?: string;
   /** Reference only (no ERP refund records yet): where a credit-note refund would be paid from. */
   advancesRefund?: string;
 };
 
 /** The pre-fill when the live chart has no better match; also what "Create the suggested accounts" makes in OFJ TEST. */
-export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; advances: string; advancesRefund: string } = {
+export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; bankTxnFees: string; advances: string; advancesRefund: string } = {
   income: {
     labour: "Mechanical labour income",
     parts: "Spare parts income",
@@ -112,13 +114,14 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
   paidFrom: "Bank - AED",
   paidFromBy: { transfer: "Bank - AED", card: "Company card", cash: "Petty Cash", cheque: "Bank - AED" },
   bankCharges: "Bank Fees and Charges",
+  bankTxnFees: "Bank Fees and Charges",
   advances: "Customer advances",
   advancesRefund: "Bank - AED",
 };
 
 export function readZohoMap(settings: Settings): ZohoAccountMap {
   const raw = (settings.zoho_account_map ?? {}) as ZohoAccountMap;
-  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, advances: raw.advances, advancesRefund: raw.advancesRefund };
+  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, advances: raw.advances, advancesRefund: raw.advancesRefund };
 }
 
 /** True once the books have EVER gone live (the switch runs once; OFJ TEST is never written again after it). */
@@ -231,6 +234,9 @@ type Resolved = {
   /** Card/link settlements: the bank's actual fee goes here (resolved softly). */
   bankCharges?: string;
   bankChargesError?: string;
+  /** Card/link settlements: the fee per transaction (default the bank charges account). */
+  bankTxnFees?: string;
+  bankTxnFeesError?: string;
 };
 
 /** The account a handler needs, or its group's plain-words reason. */
@@ -330,6 +336,11 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap): Promi
     out.bankCharges = await resolve(map.bankCharges, "Bank charges (card and link fees)", "expense");
   } catch (e) {
     out.bankChargesError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    out.bankTxnFees = await resolve(map.bankTxnFees || map.bankCharges, "Bank transaction fees (payment link, per transaction)", "expense");
+  } catch (e) {
+    out.bankTxnFeesError = e instanceof Error ? e.message : String(e);
   }
   return out;
 }
@@ -1657,7 +1668,9 @@ async function syncCnRefundRow(org: string, accounts: Resolved, invoiceId: strin
 
 /* ----------------------------------------------------------- expenses ----------------------------------------------------------- */
 
-type ZohoExpense = { expense_id: string; total: number; status?: string; expense_receipt_name?: string | null; reference_number?: string };
+type ZohoExpense = { expense_id: string; total: number; sub_total?: number; status?: string; expense_receipt_name?: string | null; reference_number?: string };
+/** A line of an itemised expense: its own account and (for the reclaimable input VAT) the 5% tax. */
+type ExpenseLine = { account_id: string; amount: number; tax_id?: string; description: string };
 
 async function zohoExpenseById(org: string, id: string): Promise<ZohoExpense | null> {
   try {
@@ -1675,16 +1688,25 @@ async function expenseByReference(org: string, reference: string): Promise<ZohoE
   return found ? await zohoExpenseById(org, found.expense_id) : null;
 }
 
-async function createExpense(org: string, input: { accountId: string; paidThroughId: string; date: string; amount: number; reference: string; description: string }): Promise<ZohoExpense> {
+async function createExpense(org: string, input: { accountId: string; paidThroughId: string; date: string; amount: number; reference: string; description: string; lines?: ExpenseLine[]; expectTotal?: number }): Promise<ZohoExpense> {
   const existing = await expenseByReference(org, input.reference);
   if (existing) {
-    if (!near(existing.total, input.amount)) throw new ZohoError(`An expense with the reference ${input.reference} already exists in Zoho with a different amount (${existing.total.toFixed(2)} there, ${input.amount.toFixed(2)} here): the accountant checks it in Zoho.`);
+    if (!near(existing.total, input.expectTotal ?? input.amount)) throw new ZohoError(`An expense with the reference ${input.reference} already exists in Zoho with a different amount (${existing.total.toFixed(2)} there, ${input.amount.toFixed(2)} here): the accountant checks it in Zoho.`);
     return existing;
   }
   const j = await zohoFetch<{ expense?: ZohoExpense }>("/expenses", {
     org,
     method: "POST",
-    body: { account_id: input.accountId, paid_through_account_id: input.paidThroughId, date: input.date, amount: input.amount, reference_number: cut(input.reference, 100), description: cut(input.description, 100) },
+    body: {
+      account_id: input.accountId,
+      paid_through_account_id: input.paidThroughId,
+      date: input.date,
+      amount: input.amount,
+      reference_number: cut(input.reference, 100),
+      description: cut(input.description, 100),
+      // Itemised (a settlement's MSF and fee per payment, each with the 5% tax that books the input VAT).
+      ...(input.lines?.length ? { is_inclusive_tax: false, line_items: input.lines.map((l, i) => ({ account_id: l.account_id, amount: l.amount, ...(l.tax_id ? { tax_id: l.tax_id } : {}), description: cut(l.description, 100), item_order: i + 1 })) } : {}),
+    },
   });
   if (!j.expense) throw new ZohoError("Zoho did not return the new expense.");
   return j.expense;
@@ -1786,7 +1808,8 @@ type ZohoBankTxn = { transaction_id: string; reference_number?: string; amount?:
  */
 async function syncSettlementRow(org: string, accounts: Resolved, settlementId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
-  const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, statement_ref, is_active, zoho_transfer_id, zoho_fee_id").eq("id", settlementId).maybeSingle();
+  const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, msf_aed, txn_fee_aed, vat_aed, difference_aed, statement_ref, is_active, zoho_transfer_id, zoho_fee_id").eq("id", settlementId).maybeSingle();
+  const parts = data as { msf_aed: number | string | null; txn_fee_aed: number | string | null; vat_aed: number | string | null; difference_aed: number | string | null } | null;
   const st = data as { id: string; number: string; method: "card" | "link"; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; is_active: boolean; zoho_transfer_id: string | null; zoho_fee_id: string | null } | null;
   if (!st) throw new ZohoError("The settlement no longer exists in the ERP.");
   if (!st.is_active) {
@@ -1836,6 +1859,39 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
     await admin.from("card_settlements").update({ zoho_transfer_id: transferId }).eq("id", st.id);
   }
   let feeId = st.zoho_fee_id;
+  const msf = parts?.msf_aed === null || parts?.msf_aed === undefined ? null : round2(Number(parts.msf_aed) || 0);
+  if (!feeId && fee > 0 && msf !== null) {
+    // 29 October 2026: what the bank kept in its parts - each payment's MSF on the bank charges account, its fee per
+    // transaction on the transaction fee account, each line with the 5% tax so Zoho books the VAT as INPUT VAT
+    // (reclaimable). One line per payment and part keeps the VAT to the fils (the bank rounds it per transaction).
+    const txn = round2(Number(parts?.txn_fee_aed) || 0);
+    const vat = round2(Number(parts?.vat_aed) || 0);
+    const charges = needAccounts(accounts.bankCharges, accounts.bankChargesError);
+    const txnAccount = txn > 0 ? needAccounts(accounts.bankTxnFees, accounts.bankTxnFeesError) : charges;
+    const { data: payRows } = await admin.from("payments").select("number, actual_msf_aed, actual_txn_fee_aed").eq("settlement_id", st.id).order("number");
+    const pays = (payRows ?? []) as { number: string; actual_msf_aed: number | string | null; actual_txn_fee_aed: number | string | null }[];
+    const lines: ExpenseLine[] = [];
+    const split = pays.length && pays.every((p) => p.actual_msf_aed !== null) && near(pays.reduce((x, p) => x + (Number(p.actual_msf_aed) || 0), 0), msf) && near(pays.reduce((x, p) => x + (Number(p.actual_txn_fee_aed) || 0), 0), txn);
+    if (split) {
+      for (const p of pays) {
+        const m = round2(Number(p.actual_msf_aed) || 0);
+        const t = round2(Number(p.actual_txn_fee_aed) || 0);
+        if (m > 0) lines.push({ account_id: charges, amount: m, tax_id: accounts.taxId, description: `MSF · ${p.number}` });
+        if (t > 0) lines.push({ account_id: txnAccount, amount: t, tax_id: accounts.taxId, description: `Transaction fee · ${p.number}` });
+      }
+    } else {
+      if (msf > 0) lines.push({ account_id: charges, amount: msf, tax_id: accounts.taxId, description: `MSF · ${st.number}` });
+      if (txn > 0) lines.push({ account_id: txnAccount, amount: txn, tax_id: accounts.taxId, description: `Transaction fees · ${st.number}` });
+    }
+    const preTax = round2(msf + txn);
+    const z = await createExpense(org, { accountId: charges, paidThroughId: clearing, date, amount: preTax, reference, description: `${what} fees · ${st.number}`, lines, expectTotal: fee });
+    feeId = z.expense_id;
+    await admin.from("card_settlements").update({ zoho_fee_id: feeId }).eq("id", st.id);
+    const zTax = z.sub_total !== undefined ? round2(Number(z.total) - Number(z.sub_total)) : null;
+    if (!near(z.total, fee) || (zTax !== null && !near(zTax, vat))) throw new ZohoError(`Totals differ for the fees of ${st.number}: Zoho has ${Number(z.total).toFixed(2)}${zTax !== null ? ` (VAT ${zTax.toFixed(2)})` : ""}, the bank kept ${fee.toFixed(2)} (MSF ${msf.toFixed(2)} + fee ${txn.toFixed(2)} + VAT ${vat.toFixed(2)}). The accountant corrects the expense's tax in Zoho by hand.`);
+    const difference = round2(Number(parts?.difference_aed) || 0);
+    return { zohoId: transferId ?? feeId, result: { settlement: st.number, method: st.method, gross: round2(Number(st.gross_aed) || 0), received, fee, msf, txn, vat, input_vat: zTax ?? vat, lines: lines.length, ...(difference ? { difference, note: `AED ${difference.toFixed(2)} stays in the clearing account (saved anyway in the ERP)` } : {}), transfer_id: transferId, fee_expense_id: feeId, reference } };
+  }
   if (!feeId && fee > 0) {
     const z = await createExpense(org, { accountId: needAccounts(accounts.bankCharges, accounts.bankChargesError), paidThroughId: clearing, date, amount: fee, reference, description: `${what} fees · ${st.number}` });
     if (!near(z.total, fee)) throw new ZohoError(`Totals differ for the fee of ${st.number}: Zoho has ${z.total.toFixed(2)}, the ERP has ${fee.toFixed(2)}.`);
