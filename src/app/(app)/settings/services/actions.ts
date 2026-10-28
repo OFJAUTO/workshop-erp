@@ -9,6 +9,7 @@ import { blankToNull } from "@/lib/format";
 import { parseHours } from "@/lib/quotes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSettings } from "@/lib/settings";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 type Table = "service_categories" | "services";
 const DEPARTMENTS = ["mechanical", "bodyshop", "both"];
@@ -50,6 +51,7 @@ async function swap(table: Table, id: string, dir: "up" | "down", categoryId?: s
 function serviceFields(formData: FormData): Record<string, unknown> | string {
   const name = blankToNull(formData.get("name"));
   if (!name) return "Type the service name.";
+  if (name.length > LINE_TEXT_MAX) return tooLongWords(name.length);
   const department = String(formData.get("department") ?? "both");
   if (!DEPARTMENTS.includes(department)) return "Choose the department.";
   // One box: by hours or a fixed price (older forms still send the two separate fields).
@@ -69,7 +71,7 @@ function serviceFields(formData: FormData): Record<string, unknown> | string {
   const suggestFor = Array.from(new Set(formData.getAll("suggest_for").map((v) => String(v).trim().slice(0, 120)).filter(Boolean))).slice(0, 40);
   const installerRaw = String(formData.get("installer_hours") ?? "").replace(",", ".").trim();
   const installer = installerRaw === "" ? null : Math.max(0, Math.round(Number(installerRaw) * 100) / 100) || null;
-  return { position_ask: formData.get("position_ask") === "on", outside_work: formData.get("outside_work") === "on", installer_hours: installer, suggest_for: suggestFor, name: name.slice(0, 120), department, bodyshop_kind: (BODYSHOP_KINDS as readonly string[]).includes(String(formData.get("bodyshop_kind") ?? "")) ? String(formData.get("bodyshop_kind")) : null, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
+  return { position_ask: formData.get("position_ask") === "on", outside_work: formData.get("outside_work") === "on", installer_hours: installer, suggest_for: suggestFor, name, department, bodyshop_kind: (BODYSHOP_KINDS as readonly string[]).includes(String(formData.get("bodyshop_kind") ?? "")) ? String(formData.get("bodyshop_kind")) : null, price_aed: price, default_hours: hours, price_per: price !== null ? perRaw || "job" : "job", usual_quantity: price !== null ? usual : 1, time_allowance_hours: price !== null ? allowance : null, includes_oil_change: formData.get("includes_oil_change") === "on", description: blankToNull(formData.get("description"))?.slice(0, 500) ?? null, parts_requests: parts };
 }
 
 export async function addCategory(formData: FormData) {
@@ -155,7 +157,8 @@ export async function adoptCustomJob(name: string, formData: FormData) {
   const categoryId = String(formData.get("category_id") ?? "");
   if (!categoryId) back(null, "Choose the category.");
   const { data: last } = await admin.from("services").select("position").eq("category_id", categoryId).eq("is_active", true).order("position", { ascending: false }).limit(1).maybeSingle();
-  const { error } = await admin.from("services").insert({ name: name.trim().slice(0, 120), department: "both", price_aed: null, default_hours: null, category_id: categoryId, position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
+  if (name.trim().length > LINE_TEXT_MAX) back(null, tooLongWords(name.trim().length));
+  const { error } = await admin.from("services").insert({ name: name.trim(), department: "both", price_aed: null, default_hours: null, category_id: categoryId, position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
   if (error && !/unique|duplicate/i.test(error.message)) back(null, error.message);
   await dropCustomJob(name);
   back(`"${name}" added to the list.`);

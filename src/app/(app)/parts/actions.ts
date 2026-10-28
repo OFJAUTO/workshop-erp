@@ -18,6 +18,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { LINE_TEXT_MAX, lineTextOrError, tooLongWords } from "@/lib/text-limits";
 
 function refresh(jobId: string) {
   revalidatePath("/parts");
@@ -60,7 +61,9 @@ const PART_TYPES = ["genuine", "oem", "aftermarket", "used"];
 /** One row from the Parts form: part number, description, quantity, type, brand, cost, supplier, availability. */
 function readRow(formData: FormData, i: number, prefix = ""): { error?: string; row?: Record<string, unknown> } {
   const g = (k: string) => String(formData.getAll(`${prefix}${k}`)[i] ?? "").trim();
-  const description = g("description").slice(0, 200);
+  const d = lineTextOrError(g("description"));
+  if (d.error !== null) return { error: d.error };
+  const description = d.text;
   if (!description) return {};
   const qty = Math.max(1, Math.round(Number(g("quantity").replace(",", ".")) || 1));
   const type = g("part_type");
@@ -291,8 +294,8 @@ export async function noteCustomPartNames(names: string[]): Promise<void> {
   const settings = await getSettings();
   const pool = { ...((settings.part_pool_custom ?? {}) as Record<string, number>) };
   for (const raw of names) {
-    const name = raw.trim().slice(0, 120);
-    if (!name) continue;
+    const name = raw.trim();
+    if (!name || name.length > LINE_TEXT_MAX) continue;
     pool[name] = (Number(pool[name]) || 0) + 1;
   }
   await createAdminClient().from("settings").upsert({ key: "part_pool_custom", value: pool, label: "Custom parts used", description: "Custom part names typed by staff, with counts, offered to the owner to add to the pool." }, { onConflict: "key" });
@@ -390,7 +393,8 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   if (ownerAuto) Object.assign(approval, { discount_approval_at: new Date().toISOString(), discount_approval_by: staff.id, discount_approval_note: "Set by the owner (approved at once)" });
   const completeNow = complete && approvalStatus !== "pending";
   let previousCost: number | null = null;
-  let description = (row.name ?? "").trim().slice(0, 200);
+  let description = (row.name ?? "").trim();
+  if (description.length > LINE_TEXT_MAX) return { error: tooLongWords(description.length) };
   let requestId = row.requestId;
   const changes: string[] = [];
   let qtyChange: { from: number; to: number } | null = null;
@@ -491,11 +495,13 @@ export async function splitPart(jobId: string, partId: string, formData: FormDat
   if (!job || !job.is_open) return { error: "This job is closed." };
   let lines: { name: string; qty: number }[] = [];
   try {
-    lines = (JSON.parse(String(formData.get("lines") ?? "[]")) as { name?: unknown; qty?: unknown }[]).map((l) => ({ name: String(l.name ?? "").trim().slice(0, 200), qty: Math.max(0.01, Number(l.qty) || 1) })).filter((l) => l.name);
+    lines = (JSON.parse(String(formData.get("lines") ?? "[]")) as { name?: unknown; qty?: unknown }[]).map((l) => ({ name: String(l.name ?? "").trim(), qty: Math.max(0.01, Number(l.qty) || 1) })).filter((l) => l.name);
   } catch {
     return { error: "Could not read the lines." };
   }
   if (lines.length < 2) return { error: "Give at least two parts to split into." };
+  const tooLong = lines.find((l) => l.name.length > LINE_TEXT_MAX);
+  if (tooLong) return { error: tooLongWords(tooLong.name.length) };
   const { data: raw } = await admin.from("part_items").select(PART_SELECT).eq("id", partId).eq("job_id", jobId).eq("is_active", true).maybeSingle();
   if (!raw) return { error: "Part not found." };
   const p = toPart(raw as Record<string, unknown>);

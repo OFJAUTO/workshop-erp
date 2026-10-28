@@ -1,3 +1,4 @@
+import { LINE_TEXT_MAX } from "./text-limits";
 /**
  * The parts list gathered during the inspection: the technician picks parts from the owner's pool
  * (Settings > Parts list) under each finding, the list is reviewed at the end, the workshop manager
@@ -118,8 +119,8 @@ export function cleanPartsList(raw: unknown): PartsListEntry[] {
   for (const x of raw.slice(0, 200)) {
     if (!x || typeof x !== "object") continue;
     const e = x as Record<string, unknown>;
-    const name = String(e.name ?? "").trim().slice(0, 120);
-    if (!name) continue;
+    const name = String(e.name ?? "").trim();
+    if (!name || name.length > LINE_TEXT_MAX) continue;
     let id = String(e.id ?? "").trim().slice(0, 40) || newEntryId();
     while (ids.has(id)) id += "x";
     ids.add(id);

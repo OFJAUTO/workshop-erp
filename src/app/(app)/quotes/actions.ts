@@ -24,6 +24,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { chargeTotalsByJob } from "@/lib/supplier-charges";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 function refresh(jobId: string | null, quotationId?: string) {
   if (jobId) {
@@ -342,8 +343,9 @@ export async function setPartWarranty(partId: string, months: number): Promise<{
 /** A job typed by hand on a quotation, saved to the services list with one tap (category "Custom", the owner tidies it in Settings). */
 export async function saveCustomService(name: string, kind: "labour" | "service"): Promise<{ ok?: boolean; error?: string }> {
   const staff = await requirePermission("editQuotes");
-  const clean = name.trim().slice(0, 120);
+  const clean = name.trim();
   if (clean.length < 2) return { error: "Type the name first." };
+  if (clean.length > LINE_TEXT_MAX) return { error: tooLongWords(clean.length) };
   const admin = createAdminClient();
   const { data: dup } = await admin.from("services").select("id").eq("is_active", true).ilike("name", clean).limit(1);
   if ((dup ?? []).length) return { ok: true };
@@ -898,7 +900,8 @@ export async function setCustomerPartName(partId: string, formData: FormData): P
   if (!staff || staff.viewingAs) return { error: "Viewing only." };
   const role = staff.role_id as RoleId;
   if (!(role === "owner" || role === "service_advisor")) return { error: "The advisor or the owner rename a part for the customer." };
-  const name = String(formData.get("name") ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const name = String(formData.get("name") ?? "").replace(/\s+/g, " ").trim();
+  if (name.length > LINE_TEXT_MAX) return { error: tooLongWords(name.length) };
   const admin = createAdminClient();
   const { data: part } = await admin.from("part_items").select("id, job_id, description, customer_name").eq("id", partId).maybeSingle();
   if (!part) return { error: "Part not found." };

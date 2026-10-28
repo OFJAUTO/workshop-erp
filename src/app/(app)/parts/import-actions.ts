@@ -12,6 +12,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autoSavePartRow, syncLineForPart, type RowSave } from "./actions";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 type SavedMapping = { headings: string[]; mapping: ColumnMapping };
 
@@ -215,7 +216,11 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
     const { data: existingCharges } = await admin.from("supplier_charges").select("description, amount_aed, supplier_name").eq("job_id", jobId).eq("is_active", true);
     for (const c of chargeLines) {
       const amount = r2(c.total ?? (c.net ?? 0) * (c.qty ?? 1));
-      const description = (c.name || "Supplier charge").trim().slice(0, 200);
+      const description = (c.name || "Supplier charge").trim();
+      if (description.length > LINE_TEXT_MAX) {
+        failed.push({ name: "Supplier charge", error: tooLongWords(description.length) });
+        continue;
+      }
       const dup = (existingCharges ?? []).some((e) => Number(e.amount_aed) === amount && String(e.description).toLowerCase() === description.toLowerCase() && String(e.supplier_name).toLowerCase() === supplier!.name.toLowerCase());
       if (dup) continue;
       const { error } = await admin.from("supplier_charges").insert({ job_id: jobId, supplier_id: supplier.id, supplier_name: supplier.name, description, amount_aed: amount, import_id: importId, created_by: staff.id, updated_by: staff.id });

@@ -9,6 +9,7 @@ import { round2 } from "@/lib/money";
 import { STOCK_ITEM_SELECT, recordStockMovement, toStockItem } from "@/lib/stock";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSettings } from "@/lib/settings";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 const enc = encodeURIComponent;
 const back = (msg: { error?: string; message?: string }, extra = "") => redirect(`/parts/stock${extra}${extra ? "&" : "?"}${msg.error ? `error=${enc(msg.error)}` : `message=${enc(msg.message ?? "Done.")}`}`);
@@ -97,7 +98,8 @@ export async function createStockOrder(formData: FormData) {
       const q = Number(String(formData.get(`tool_qty__${n}`) ?? "").replace(",", "."));
       const c = Number(String(formData.get(`tool_cost__${n}`) ?? "").replace(",", "."));
       if (!d || !Number.isFinite(q) || q <= 0) continue;
-      lines.push({ stock_item_id: null, description: d.slice(0, 160), part_number: null, quantity: round2(q), unit_cost: round2(Number.isFinite(c) && c >= 0 ? c : 0) });
+      if (d.length > LINE_TEXT_MAX) back({ error: `Line ${n}: ${tooLongWords(d.length)}` }, "?order=1");
+      lines.push({ stock_item_id: null, description: d, part_number: null, quantity: round2(q), unit_cost: round2(Number.isFinite(c) && c >= 0 ? c : 0) });
     }
   }
   for (const i of orderType === "tools" ? [] : items) {

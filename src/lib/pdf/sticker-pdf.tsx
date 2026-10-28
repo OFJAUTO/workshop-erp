@@ -38,7 +38,7 @@ export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer>
                 </View>
               </View>
               <View style={{ width: "100%", backgroundColor: "#000", padding: `${1 * u} ${1.5 * u}`, flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={{ color: "#fff", fontSize: 2.7 * u, fontFamily: "Helvetica-Bold", flex: 1, marginRight: 2 * u }}>{s.name.toUpperCase().slice(0, 40)}</Text>
+                <Text style={{ color: "#fff", fontSize: (s.name.length > 80 ? 1.6 : s.name.length > 40 ? 2.1 : 2.7) * u, fontFamily: "Helvetica-Bold", flex: 1, marginRight: 2 * u }}>{s.name.toUpperCase()}</Text>
                 <Text style={{ color: "#fff", fontSize: 2.7 * u, fontFamily: "Helvetica-Bold" }}>{s.index} OF {s.count}</Text>
               </View>
             </Page>

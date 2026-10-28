@@ -5,6 +5,7 @@ import { round2 } from "@/lib/money";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoBooksNow, zohoConfigured, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
+import { positionsWords } from "@/lib/parts-list";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
@@ -688,8 +689,9 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
       lineDiscounts = round2(lineDiscounts + Math.max(0, discount));
       const word = l.price_display === "included" ? "Included" : "Complimentary";
       return {
+        // Zoho names are short (100): a longer description keeps its full text at the start of the description.
         name: cut(l.description, 100),
-        description: cut([comp ? word : null, l.details].filter(Boolean).join(" · "), 2000),
+        description: cut([l.description.length > 100 ? l.description : null, positionsWords(l.positions) || null, comp ? word : null, l.details].filter(Boolean).join(" · "), 2000),
         quantity: qty,
         rate,
         tax_id: accounts.taxId,
@@ -1055,7 +1057,7 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
       // Must match the invoice it credits, or Zoho refuses the association ("Place Of Supply is different").
       place_of_supply: "DU",
       line_items: lines.length
-        ? lines.map((l, i) => ({ name: cut(l.description, 100), quantity: 1, rate: l.amount_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey], item_order: i + 1 }))
+        ? lines.map((l, i) => ({ name: cut(l.description, 100), ...(l.description.length > 100 ? { description: cut(l.description, 2000) } : {}), quantity: 1, rate: l.amount_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey], item_order: i + 1 }))
         : [{ name: cut(cn.notes ?? `Credit against ${par.number}`, 100), quantity: 1, rate: cn.taxable_aed, tax_id: accounts.taxId, account_id: accounts.income[incomeKey] }],
       ...(cn.notes ? { notes: cut(cn.notes, 2000) } : {}),
     };

@@ -4,8 +4,9 @@ import { useEffect, useState, useRef } from "react";
 import { PositionsLine } from "@/components/PositionsLine";
 import { breakMinutesBetween, breakNow, type BreakLike } from "@/lib/working-time";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
-import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea, Input } from "@/components/ui";
+import { Badge, Button, Card, Notice, SectionLabel, Select, Input } from "@/components/ui";
 import { ReasonChips } from "@/components/ReasonChips";
+import { CountedTextarea } from "@/components/CountedTextarea";
 
 export type PanelLine = { id: string; title: string; details: string | null; positions?: string[] | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
 export type PanelPart = { id: string; description: string; positions?: string[] | null; quantity: number; state: "handed" | "ready" | "here" | "coming"; when: string | null; receivedBy: string | null; receivedAt: string | null };
@@ -197,8 +198,8 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
         ))}
         {reportOpen ? (
           <form action={reportAction} className="flex flex-col gap-2 rounded-control border border-ink p-3">
-            <label className="flex flex-col gap-1"><span className="text-sm font-semibold">What did you find?</span><Textarea name="remark" rows={2} required placeholder="For example: rear brake discs below minimum thickness" /></label>
-            <label className="flex flex-col gap-1"><span className="text-sm font-semibold">Parts needed <span className="font-medium text-muted">(optional)</span></span><Textarea name="parts_needed" rows={1} placeholder="For example: rear brake discs and pads" /></label>
+            <label className="flex flex-col gap-1"><span className="text-sm font-semibold">What did you find?</span><CountedTextarea name="remark" rows={2} required placeholder="For example: rear brake discs below minimum thickness" /></label>
+            <label className="flex flex-col gap-1"><span className="text-sm font-semibold">Parts needed <span className="font-medium text-muted">(optional)</span></span><CountedTextarea name="parts_needed" rows={1} placeholder="For example: rear brake discs and pads" /></label>
             {lines.length ? (
               <label className="flex flex-col gap-1"><span className="text-sm font-semibold">Related job <span className="font-medium text-muted">(optional)</span></span>
                 <Select name="work_line_id" defaultValue=""><option value="">None</option>{lines.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</Select>

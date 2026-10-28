@@ -17,3 +17,9 @@ export function textCounter(length: number, max = LINE_TEXT_MAX): { words: strin
   if (length > max) return { words: `${length.toLocaleString("en-GB")} / ${max.toLocaleString("en-GB")} characters – shorten by ${(length - max).toLocaleString("en-GB")}; nothing is saved until it fits`, over: true };
   return { words: `${length.toLocaleString("en-GB")} / ${max.toLocaleString("en-GB")} characters`, over: false };
 }
+
+/** A line description exactly as typed (trimmed), or the refusal words when it is over the limit. Never cuts. */
+export function lineTextOrError(raw: unknown, max = LINE_TEXT_MAX): { text: string; error: null } | { text: null; error: string } {
+  const text = String(raw ?? "").trim();
+  return text.length > max ? { text: null, error: tooLongWords(text.length, max) } : { text, error: null };
+}

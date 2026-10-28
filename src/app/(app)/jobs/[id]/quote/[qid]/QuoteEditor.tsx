@@ -604,6 +604,15 @@ export function QuoteEditor({
   };
   const setHeaderField = (fields: Partial<typeof header>, immediate = false) => {
     setHeader((h) => ({ ...h, ...fields }));
+    // The note to the customer above the limit stays in the box but is not saved (never half a text).
+    if (typeof fields.customer_note === "string" && fields.customer_note.trim().length > LINE_TEXT_MAX) {
+      const key = "header-customer_note";
+      if (timers.current[key]) {
+        clearTimeout(timers.current[key]);
+        delete timers.current[key];
+      }
+      return;
+    }
     const op = () => ({ header: fields });
     if (immediate) save(op());
     else debounced("header-" + Object.keys(fields).join(","), op);
@@ -1717,6 +1726,7 @@ export function QuoteEditor({
         <Card className="flex flex-col gap-2">
           <SectionLabel>Note to the customer</SectionLabel>
           <Textarea value={header.customer_note} onChange={(e) => setHeaderField({ customer_note: e.target.value })} rows={2} disabled={disabled} placeholder="Shown on the customer's page (optional)" aria-label="Note to the customer" />
+          <TextCounter length={header.customer_note.trim().length} />
         </Card>
 
         <Card className="flex flex-col gap-2" id="item-parts">

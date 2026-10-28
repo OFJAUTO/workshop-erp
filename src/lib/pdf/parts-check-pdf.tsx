@@ -91,7 +91,7 @@ export async function renderPartsCheckPdf(d: PartsCheckData): Promise<Buffer> {
         </View>
         <HeaderRow />
         {d.rows.map((r, i) => (
-          <View key={i} wrap={false} style={{ flexDirection: "row", borderBottomWidth: 0.75, borderBottomColor: LINE, paddingVertical: px(5), alignItems: "flex-start" }}>
+          <View key={i} wrap={r.description.length + (r.note?.length ?? 0) > 600} style={{ flexDirection: "row", borderBottomWidth: 0.75, borderBottomColor: LINE, paddingVertical: px(5), alignItems: "flex-start" }}>
             <View style={{ width: W.tick, paddingTop: px(1) }}><View style={{ width: px(13), height: px(13), borderWidth: 1, borderColor: INK }} /></View>
             <Text style={cell(W.no)}>{i + 1}</Text>
             <View style={{ flex: 1, paddingRight: px(4) }}>

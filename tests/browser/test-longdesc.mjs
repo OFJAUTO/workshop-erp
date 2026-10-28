@@ -69,6 +69,19 @@ try {
   }, [qid, shortLine.id, tooLong]);
   const stored3 = (await sql("select length(title)::int as n from public.quotation_lines where id = $1", [shortLine.id]))[0].n;
   check("3: the server refuses text above the limit and keeps the saved one", /Too long/.test(res.body) && stored3 === ok.length, `${res.status} ${res.body.slice(0, 120)} · ${stored3}`);
+  // 28 Oct: the other paths keep long text whole too.
+  const post = (body) => page.evaluate(async (b) => { const r = await fetch("/api/quote/save", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); return { status: r.status, body: await r.text() }; }, body);
+  const partWords = `E2E LONG PART ${"ENGINE MOUNT LEFT HAND WITH BRACKET AND HARDWARE ".repeat(9)}END`.trim();
+  const rp = await post({ quotationId: qid, opId: `e2e-longpart-${Date.now()}`, requestPart: { description: partWords, quantity: 1 } });
+  const reqLen = (await sql("select max(length(label))::int as n from public.part_requests where job_id = $1 and label ilike 'E2E LONG PART%'", [jobId]))[0]?.n ?? 0;
+  check("3b: a part asked from the quotation keeps its whole name (was cut at 200)", reqLen === partWords.length, `${reqLen} of ${partWords.length} · ${rp.status} ${rp.body.slice(0, 160)}`);
+  const note2500 = `E2E NOTE ${"Please note the car needs a follow-up visit. ".repeat(60)}`.slice(0, 2500);
+  const n1 = await post({ quotationId: qid, header: { customer_note: note2500 } });
+  const noteLen = (await sql("select length(customer_note)::int as n from public.quotations where id = $1", [qid]))[0]?.n ?? 0;
+  check("3c: the note to the customer keeps 2,500 characters (was cut at 2,000)", noteLen === note2500.trim().length, `${n1.status} · ${noteLen}`);
+  const n2 = await post({ quotationId: qid, header: { customer_note: "X".repeat(3200) } });
+  const noteLen2 = (await sql("select length(customer_note)::int as n from public.quotations where id = $1", [qid]))[0]?.n ?? 0;
+  check("3c: above 3,000 the note is refused and the saved one kept", n2.status === 400 && /Too long/.test(n2.body) && noteLen2 === noteLen, `${n2.status} · ${noteLen2}`);
 } finally {
   await browser.close();
 }

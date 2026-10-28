@@ -15,6 +15,7 @@ import { getCurrentDevice } from "@/lib/devices";
 import { verifyPin } from "@/lib/pin";
 import { ADDITIONAL_SELECT, sessionMinutes, type AdditionalWorkRow } from "@/lib/work-data";
 import { activeTechnicians, finishMyPart, keepWorkingThroughBreak, leaveJob, managerConfirmWork, pauseWork, rejectPause, startWorking, workBudget, type Actor } from "@/lib/work-flow";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -95,10 +96,11 @@ export async function reportAdditionalWork(jobId: string, formData: FormData) {
   const partsNeeded = blankToNull(formData.get("parts_needed"));
   const lineId = blankToNull(formData.get("work_line_id"));
   if (!remark || remark.length < 3) redirect(`${back}?error=${encodeURIComponent("Describe the additional work found.")}`);
+  if (remark.length > LINE_TEXT_MAX || (partsNeeded?.length ?? 0) > LINE_TEXT_MAX) redirect(`${back}?error=${encodeURIComponent(tooLongWords(Math.max(remark.length, partsNeeded?.length ?? 0)))}`);
   const admin = createAdminClient();
   const job = await jobRow(jobId);
   if (!job) redirect("/my-jobs");
-  const { data: created } = await admin.from("additional_work").insert({ job_id: jobId, technician_id: staff.id, work_line_id: lineId, remark: remark.slice(0, 1000), parts_needed: partsNeeded?.slice(0, 500) ?? null, created_by: staff.id, updated_by: staff.id }).select("id").single();
+  const { data: created } = await admin.from("additional_work").insert({ job_id: jobId, technician_id: staff.id, work_line_id: lineId, remark, parts_needed: partsNeeded ?? null, created_by: staff.id, updated_by: staff.id }).select("id").single();
   const ids = formData.getAll("file").map(String).filter(Boolean);
   if (created && ids.length) await admin.from("job_files").update({ ref_id: created.id }).in("id", ids);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "additional_work", note: `${staff.display_name} found additional work: ${remark}${partsNeeded ? ` (parts: ${partsNeeded})` : ""}`, created_by: staff.id });
@@ -130,9 +132,9 @@ export async function decideAdditionalWork(id: string, formData: FormData) {
   const settings = await getSettings();
   const { data: q, error } = await admin.from("quotations").insert({ kind: "quotation", job_id: a.job_id, customer_id: job.customer_id, vehicle_id: job.vehicle_id, validity_days: Number(settings.quote_validity_days) || 7, vat_percent: 5, created_by: job.gated_in_by, updated_by: staff.id }).select("id, number").single();
   if (error || !q) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not start the additional quotation.")}`);
-  await admin.from("quotation_lines").insert({ quotation_id: q.id, position: 0, line_type: "labour", title: a.remark.slice(0, 200), details: note ?? "Found by the technician during the work", group_label: "Additional work", source_type: "manual", labour_rate: labourRateFor(settings, job.department), quantity: 1, created_by: staff.id, updated_by: staff.id });
+  await admin.from("quotation_lines").insert({ quotation_id: q.id, position: 0, line_type: "labour", title: a.remark, details: note ?? "Found by the technician during the work", group_label: "Additional work", source_type: "manual", labour_rate: labourRateFor(settings, job.department), quantity: 1, created_by: staff.id, updated_by: staff.id });
   if (a.parts_needed) {
-    await admin.from("part_requests").insert({ job_id: a.job_id, source_type: "manual", source_key: `additional:${a.id}`, label: a.parts_needed.slice(0, 120), requested_text: `Additional work: ${a.remark}`.slice(0, 300), created_by: staff.id, updated_by: staff.id });
+    await admin.from("part_requests").insert({ job_id: a.job_id, source_type: "manual", source_key: `additional:${a.id}`, label: a.parts_needed, requested_text: `Additional work: ${a.remark}`, created_by: staff.id, updated_by: staff.id });
     await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job.job_number}`, body: `${a.parts_needed} (additional work)`, jobId: a.job_id, href: `/parts/${a.job_id}` });
   }
   await ensurePartRequests(a.job_id, staff.id);

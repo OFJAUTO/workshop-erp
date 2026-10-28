@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CATEGORY_ORDER, PAIR_CHOICES, PART_POSITIONS, SINGLE_POSITIONS, goesWithOffers, newEntryId, offerEntry, sortCategories, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { LINE_TEXT_MAX } from "@/lib/text-limits";
 
 /** A part sold per set is asked Front or Rear; the quantity counts sets. */
 const SET_POSITIONS = ["Front", "Rear"] as const;
@@ -82,8 +83,8 @@ export function PartPicker({
     });
   }
   function addCustom(raw: string) {
-    const name = raw.trim().slice(0, 120);
-    if (!name) return;
+    const name = raw.trim();
+    if (!name || name.length > LINE_TEXT_MAX) return;
     if (renaming) {
       onPick?.(name, null);
       return;

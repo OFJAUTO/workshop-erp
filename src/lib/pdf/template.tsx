@@ -319,7 +319,7 @@ export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLab
         </View>
       ) : null}
       {lines.map((l, i) => (
-        <View key={i} style={styles.tr} wrap={false}>
+        <View key={i} style={styles.tr} wrap={l.description.length + (l.details?.length ?? 0) > 600}>
           <Text style={styles.cNo}>{startAt + i}</Text>
           <View style={styles.cDesc}>
             <Text>
@@ -389,7 +389,7 @@ export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPe
         <Text style={cTot}>Total</Text>
       </View>
       {rows.map((r, i) => (
-        <View key={i} style={styles.tr} wrap={false}>
+        <View key={i} style={styles.tr} wrap={r.name.length + (r.sub?.length ?? 0) > 600}>
           <Text style={styles.cNo}>{i + 1}</Text>
           <Text style={cPn}>{r.partNumber ?? ""}</Text>
           <View style={styles.cDesc}>

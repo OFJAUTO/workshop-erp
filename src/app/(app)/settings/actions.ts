@@ -12,6 +12,7 @@ import { redirect } from "next/navigation";
 import { getSettings } from "@/lib/settings";
 import { DOC_KEYS, DOC_LABELS } from "@/lib/doc-reminder-defs";
 import { REASON_CONTEXTS } from "@/lib/reasons";
+import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 const NUMBER_KEYS = [
   "ppf_warranty_years",
@@ -522,7 +523,8 @@ export async function savePartCatalogue(_state: FormState, formData: FormData): 
   const seen = new Set<string>();
   let added = 0;
   for (const r of rows) {
-    const name = String(r.name ?? "").trim().slice(0, 120);
+    const name = String(r.name ?? "").trim();
+    if (name.length > LINE_TEXT_MAX) return { error: `${name.slice(0, 40)}…: ${tooLongWords(name.length)}` };
     const category = String(r.category ?? "").trim().slice(0, 80) || "Other";
     const position = Number(r.position) || 0;
     if (r.id && r.remove) {
@@ -552,7 +554,8 @@ export async function adoptCustomPart(name: string, formData: FormData) {
   const admin = createAdminClient();
   const category = String(formData.get("category") ?? "Other").trim().slice(0, 80) || "Other";
   const { data: last } = await admin.from("part_catalogue").select("position").order("position", { ascending: false }).limit(1).maybeSingle();
-  const { error } = await admin.from("part_catalogue").insert({ name: name.trim().slice(0, 120), category, needs_position: formData.get("needs_position") === "on", position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
+  if (name.trim().length > LINE_TEXT_MAX) redirect(`/settings/parts?error=${encodeURIComponent(tooLongWords(name.trim().length))}`);
+  const { error } = await admin.from("part_catalogue").insert({ name: name.trim(), category, needs_position: formData.get("needs_position") === "on", position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
   if (error && !/unique|duplicate/i.test(error.message)) redirect(`/settings/parts?error=${encodeURIComponent(error.message)}`);
   await dropCustom(name);
   revalidatePath("/", "layout");

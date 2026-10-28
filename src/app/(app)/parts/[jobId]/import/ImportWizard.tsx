@@ -392,7 +392,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                 return (
                   <div key={l.key} data-import-line={l.key} data-decided={d.confirmed ? "confirmed" : skipped ? "skipped" : "open"} data-duplicate={dup ? "true" : undefined} data-line-state={red ? "red" : amber ? "amber" : "ok"} className={`grid grid-cols-1 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7rem] gap-2 items-center rounded-control border px-2 py-1.5 ${dup || red ? "border-red-bar bg-red-soft" : amber ? "border-amber-bar bg-amber-soft" : d.confirmed ? "border-green bg-green-soft" : skipped ? "border-line bg-canvas opacity-70" : totalsBad ? "border-red-bar bg-white" : "border-line bg-white"}`}>
                     <div className="flex flex-col min-w-0 text-sm">
-                      <span className="font-bold truncate">{l.serial ? <span className="mr-1.5 font-semibold text-muted" data-line-serial>{l.serial}</span> : null}{l.description ?? <span className="text-muted">No description</span>}</span>
+                      <span className="font-bold break-words">{l.serial ? <span className="mr-1.5 font-semibold text-muted" data-line-serial>{l.serial}</span> : null}{l.description ?? <span className="text-muted">No description</span>}</span>
                       {l.flag && !l.problem ? <span className="text-xs font-semibold text-amber" data-line-flag>{l.flag}</span> : null}
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
                         {dup ? <span className="font-semibold text-red">Same match as another line: change one</span> : null}

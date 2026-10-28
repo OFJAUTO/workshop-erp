@@ -192,7 +192,11 @@ export async function POST(request: NextRequest) {
     if (p.package_key !== undefined) out.package_key = p.package_key ? String(p.package_key).slice(0, 60) : null;
     if (p.package_items !== undefined) out.package_items = p.package_items ? toSnapshot(p.package_items) : null;
     if (p.cut_method !== undefined) out.cut_method = p.cut_method === "hand" || p.cut_method === "machine" || p.cut_method === "mixed" ? p.cut_method : null;
-    if (p.cut_note !== undefined) out.cut_note = p.cut_note ? String(p.cut_note).trim().slice(0, 120) || null : null;
+    if (p.cut_note !== undefined) {
+      const cn = p.cut_note ? String(p.cut_note).trim() : "";
+      if (cn.length > LINE_TEXT_MAX) return tooLongWords(cn.length);
+      out.cut_note = cn || null;
+    }
     if (p.film_colour !== undefined) out.film_colour = p.film_colour ? String(p.film_colour).trim().slice(0, 60) || null : null;
     if (p.film_code !== undefined) out.film_code = p.film_code ? String(p.film_code).trim().slice(0, 40) || null : null;
     if (p.tint_percent !== undefined) { const tp = n(p.tint_percent); out.tint_percent = tp === null ? null : Math.min(100, Math.max(1, Math.round(tp))); }
@@ -334,10 +338,11 @@ export async function POST(request: NextRequest) {
 
   if (body.requestPart) {
     if (!q.job_id) return NextResponse.json({ error: "An estimate has no job for Parts to price. Type the part as a line instead." }, { status: 400 });
-    const description = String(body.requestPart.description ?? "").trim().slice(0, 200);
+    const description = String(body.requestPart.description ?? "").trim();
     if (!description) return NextResponse.json({ error: "Describe the part." }, { status: 400 });
+    if (description.length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(description.length) }, { status: 400 });
     const qty = Math.max(0.01, n(body.requestPart.quantity) ?? 1);
-    const reqPositions = Array.isArray(body.requestPart.positions) ? Array.from(new Set(body.requestPart.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8) : null;
+    const reqPositions = Array.isArray(body.requestPart.positions) ? Array.from(new Set(body.requestPart.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8) : [];
     const reqCatalogue = typeof body.requestPart.catalogue_id === "string" && /^[0-9a-f-]{36}$/i.test(body.requestPart.catalogue_id) ? body.requestPart.catalogue_id : null;
     // A part asked from under a finding keeps that finding, so it lands under the right labour line once priced.
     const srcType = body.requestPart.source_type && ["request", "item", "tyre"].includes(body.requestPart.source_type) ? body.requestPart.source_type : "manual";
@@ -525,7 +530,11 @@ export async function POST(request: NextRequest) {
     if (h.discount_scope !== undefined) patch.discount_scope = h.discount_scope === "labour_services" ? "labour_services" : "labour";
     // Commission goes through saveCommission in quotes/actions.ts (the owner's approval), never through this route.
     if (h.materials_cost_aed !== undefined) patch.materials_cost_aed = Math.max(0, n(h.materials_cost_aed) ?? 0);
-    if (h.customer_note !== undefined) patch.customer_note = h.customer_note ? String(h.customer_note).trim().slice(0, 2000) : null;
+    if (h.customer_note !== undefined) {
+      const note = h.customer_note ? String(h.customer_note).trim() : "";
+      if (note.length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(note.length) }, { status: 400 });
+      patch.customer_note = note || null;
+    }
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;
     if (h.film_rolls_est !== undefined) {

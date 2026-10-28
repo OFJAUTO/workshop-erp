@@ -5,6 +5,7 @@ import { technicianOnJob } from "./job-technicians";
 import { notifyManagers, notifyRoles } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { LINE_TEXT_MAX, tooLongWords } from "./text-limits";
 
 /**
  * Bodyshop findings inside the inspection (23 October 2026, section 7): a front-accident car has body damage as
@@ -68,7 +69,8 @@ export function cleanFinding(input: Record<string, unknown>): { panel: string; d
   const damage = Array.isArray(input.damage) ? Array.from(new Set(input.damage.map(String).filter((d) => DAMAGE_TYPES.some((t) => t.value === d)))) : [];
   const severity = SEVERITIES.some((s) => s.value === input.severity) ? String(input.severity) : null;
   const action = BODY_ACTIONS.some((a) => a.value === input.action) ? String(input.action) : null;
-  const remark = typeof input.remark === "string" ? input.remark.replace(/\s+/g, " ").trim().slice(0, 500) || null : null;
+  const remark = typeof input.remark === "string" ? input.remark.replace(/\s+/g, " ").trim() || null : null;
+  if (remark && remark.length > LINE_TEXT_MAX) return { error: tooLongWords(remark.length) };
   const h = Number(String(input.labour_hours ?? "").replace(",", "."));
   const labour_hours = input.labour_hours === null || input.labour_hours === undefined || input.labour_hours === "" || !Number.isFinite(h) ? null : Math.min(999, Math.max(0, Math.round(h * 100) / 100));
   return { panel, damage, severity, action, remark, labour_hours };
