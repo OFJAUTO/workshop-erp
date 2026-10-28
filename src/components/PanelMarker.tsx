@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CarOutline } from "@/components/CarOutline";
 import { Card, Input, SectionLabel } from "@/components/ui";
 import { DAMAGE_TYPES, SEVERITIES, damageWords, panelLabel, toneOf, type PanelMarks } from "@/lib/car-outline";
+import { clearPending, readPending, writePending } from "@/lib/pending-draft";
+import { reloadIfStale } from "@/lib/app-version";
 
 /**
  * Damage marked on the car outline - the same outline as the inspection's bodyshop findings - for the gate-in
@@ -17,19 +19,30 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingKey = () => `marks:${hook}:${typeof window === "undefined" ? "" : window.location.pathname}`;
   const push = (next: PanelMarks, slow = false) => {
     setMarks(next);
+    writePending(pendingKey(), next);
     const run = () => {
       setState("saving");
       chain.current = chain.current.then(async () => {
-        const r = await save(JSON.stringify(next)).catch(() => ({ error: "No connection. Try again." }));
-        if (r.error) { setState("error"); setError(r.error); } else { setState("saved"); setError(null); }
+        const r = await save(JSON.stringify(next)).catch((e) => ({ error: reloadIfStale(e) ? "A new version is loading…" : "No connection. Try again." }));
+        if (r.error) { setState("error"); setError(r.error); } else { clearPending(pendingKey()); setState("saved"); setError(null); }
       });
     };
     if (timer.current) clearTimeout(timer.current);
     if (slow) timer.current = setTimeout(run, 700);
     else run();
   };
+  // Marks tapped but never saved (a reload, a sleeping phone) come back and are saved.
+  useEffect(() => {
+    if (!canEdit) return;
+    const d = readPending<PanelMarks>(pendingKey());
+    if (!d || JSON.stringify(d) === JSON.stringify(initial)) return;
+    const t = setTimeout(() => push(d), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const mark = selected ? marks[selected] ?? { damage: [], note: null, severity: null } : null;
   const setMark = (panel: string, patch: Partial<PanelMarks[string]>, slow = false) => {
     const cur = marks[panel] ?? { damage: [], note: null, severity: null };

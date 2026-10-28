@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Textarea } from "@/components/ui";
 import { CopyText } from "@/components/CopyText";
+import { reloadIfStale } from "@/lib/app-version";
 
 /**
  * THE one trip component (section 7, 21 October 2026): pick-ups, deliveries, external trucks and the
@@ -44,7 +45,7 @@ export function TripActions({ kind, driverName, driverPhone, customerPhone = nul
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="md" tone={sentAt ? "secondary" : "primary"} disabled={pending}
             onClick={() => start(async () => {
-              try { await onMarkSent?.(); } catch { /* the WhatsApp window still opens */ }
+              try { await onMarkSent?.(); } catch (e) { /* the WhatsApp window still opens; an old version reloads */ reloadIfStale(e); }
               window.open(driverDigits ? `https://wa.me/${driverDigits}?text=${encodeURIComponent(driverText)}` : `https://wa.me/?text=${encodeURIComponent(driverText)}`, "_blank", "noopener");
               router.refresh();
             })} data-send-driver>
@@ -66,7 +67,7 @@ export function TripActions({ kind, driverName, driverPhone, customerPhone = nul
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" disabled={pending}
                 onClick={() => start(async () => {
-                  try { await onCustomerSend?.(message); } catch { /* the WhatsApp window still opens */ }
+                  try { await onCustomerSend?.(message); } catch (e) { /* the WhatsApp window still opens; an old version reloads */ reloadIfStale(e); }
                   window.open(custDigits ? `https://wa.me/${custDigits}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener");
                   setTellOpen(false);
                   router.refresh();

@@ -18,6 +18,8 @@ import { FloatingMenu } from "@/components/FloatingMenu";
 import { TyreBuilder } from "@/components/TyreBuilder";
 import { isGenericTyreName, isTyreName, parseTyreSpec, tyreName, tyreSizeIn, type TyreSpec } from "@/lib/tyres";
 import { undoImport } from "../import-actions";
+import { clearPending, readPending, writePending } from "@/lib/pending-draft";
+import { reloadIfStale } from "@/lib/app-version";
 
 export type TableRow = {
   key: string;
@@ -481,6 +483,17 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   }
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // Typing that never reached the server (a reload, a sleeping tablet) comes back and is saved again.
+  useEffect(() => {
+    const d = readPending<{ v: RowValues; name: string }>(pendingKey);
+    if (!d || readOnly) return;
+    const t = setTimeout(() => {
+      queue(d.v, d.name);
+      flushNow();
+    }, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const state = stateOf(row, v);
   const missing = state === "not_finished" ? rowMissing(v) : [];
@@ -499,8 +512,10 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const choice = customDays ? (`d${customDays}` as AvailabilityChoice) : baseChoice;
   const missingField = (f: string) => red && missing.some((m) => m.field === f);
 
+  const pendingKey = `parts:${jobId}:${row.key}`;
   function queue(nextV: RowValues, nextName: string) {
     latest.current = { v: nextV, name: nextName };
+    writePending(pendingKey, { v: nextV, name: nextName });
     setV(nextV);
     setName(nextName);
     onValues(nextName, nextV);
@@ -560,6 +575,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
         return;
       }
       setError(null);
+      if (latest.current.v === next && latest.current.name === nextName) clearPending(pendingKey);
       if (res.partId && res.partId !== partIdRef.current) {
         partIdRef.current = res.partId;
         setPartId(res.partId);
@@ -568,9 +584,13 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       if (res.complete) start(() => refreshWhenIdle(() => router.refresh()));
     });
     chain.current = run.catch(() => undefined);
-    await run;
+    await run.catch((e) => {
+      setSaving(false);
+      // A new version is live: the page reloads and the typed price comes back from the browser and saves again.
+      if (!reloadIfStale(e)) setError("Not saved: no connection. It is kept here and saves again when you edit.");
+    });
   }
-  const run = (fn: () => Promise<unknown>) => start(async () => { try { await fn(); } catch { /* a redirect ends the action */ } refreshWhenIdle(() => router.refresh()); });
+  const run = (fn: () => Promise<unknown>) => start(async () => { try { await fn(); } catch (e) { /* a redirect ends the action; a new version reloads */ if (reloadIfStale(e)) return; } refreshWhenIdle(() => router.refresh()); });
   const openMenu = () => {
     if (menu) {
       setMenu(null);

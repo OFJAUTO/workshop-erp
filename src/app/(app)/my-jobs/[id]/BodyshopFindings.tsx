@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CarOutline } from "@/components/CarOutline";
 import { Card, Input, SectionLabel, Textarea } from "@/components/ui";
 import { BODY_ACTIONS, DAMAGE_TYPES, SEVERITIES, actionLabel, damageWords, panelLabel, severityLabel, toneOf } from "@/lib/car-outline";
 import { LABOUR_HOUR_CHIPS } from "@/lib/inspection";
+import { onPageLeave } from "@/lib/app-version";
 
 export type BodyFindingState = { id?: string; panel: string; damage: string[]; severity: string | null; action: string | null; remark: string | null; labour_hours: number | null };
 export type BodyStateProps = { findings: BodyFindingState[]; openedAt: string | null; airbags: boolean | null; structural: boolean | null; checkedAt: string | null; checkedBy: string | null };
@@ -50,6 +51,15 @@ export function BodyshopFindings({
   // Saves still on their way: the server's state is taken only when the last one is back and nothing waits to be sent,
   // so an older answer never overwrites a newer tap.
   const pending = useRef(0);
+  // A remark still in its 700 ms wait when the page goes away (reload, sleeping tablet) is sent at once.
+  const waiting = useRef<BodyFindingState | null>(null);
+  useEffect(() => onPageLeave(() => {
+    if (!timer.current || !waiting.current) return;
+    clearTimeout(timer.current);
+    timer.current = null;
+    void fetch("/api/inspection/body", { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ inspectionId, op: "save", finding: waiting.current }) }).catch(() => null);
+    waiting.current = null;
+  }), [inspectionId]);
 
   const post = (payload: Record<string, unknown>) => {
     setSaving(true);
@@ -70,7 +80,10 @@ export function BodyshopFindings({
     const next = { ...finding(panel), ...patch };
     setState((s) => ({ ...s, findings: s.findings.some((f) => f.panel === panel) ? s.findings.map((f) => (f.panel === panel ? next : f)) : [...s.findings, next] }));
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-    if (slow) timer.current = setTimeout(() => { timer.current = null; post({ op: "save", finding: next }); }, 700);
+    if (slow) {
+      waiting.current = next;
+      timer.current = setTimeout(() => { timer.current = null; waiting.current = null; post({ op: "save", finding: next }); }, 700);
+    }
     else post({ op: "save", finding: next });
   };
   const tones = Object.fromEntries(state.findings.map((f) => [f.panel, toneOf(f)]));

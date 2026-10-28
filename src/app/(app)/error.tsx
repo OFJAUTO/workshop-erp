@@ -27,7 +27,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
   if (stale) {
     return (
       <Card className="flex max-w-xl flex-col gap-3" data-version-stale>
-        <p className="text-sm font-semibold">A new version of the system is live. Refresh the page to carry on; what you typed is kept.</p>
+        <p className="text-sm font-semibold">A new version of the system is live. Refresh the page to carry on; what was typed in the form comes back after the refresh.</p>
         <div><Button type="button" size="md" onClick={() => window.location.reload()}>Refresh</Button></div>
       </Card>
     );

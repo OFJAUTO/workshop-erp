@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { Button, Input } from "@/components/ui";
 import { markDepositRequested, prepareDepositRequest } from "./deposit-actions";
+import { reloadIfStale } from "@/lib/app-version";
 
 /**
  * "Send deposit request" (1.4, 21 October 2026): the message carries ONLY our short payment page
@@ -25,7 +26,7 @@ export function DepositRequestSend({ jobId, message, phoneDigits, requestedAt }:
 
   async function openDialog() {
     setBusy(true);
-    const r: { error?: string; shortLink?: string; host?: string | null } = await prepareDepositRequest(jobId).catch(() => ({ error: "Could not make the payment page." }));
+    const r: { error?: string; shortLink?: string; host?: string | null } = await prepareDepositRequest(jobId).catch((e) => (reloadIfStale(e) ? { error: "A new version is loading…" } : { error: "Could not make the payment page." }));
     setBusy(false);
     if (r.error || !r.shortLink) {
       setLinkError(r.error ?? "Could not make the payment page.");
@@ -38,7 +39,7 @@ export function DepositRequestSend({ jobId, message, phoneDigits, requestedAt }:
   async function saveLink() {
     setLinkError(null);
     setBusy(true);
-    const r: { error?: string; shortLink?: string; host?: string | null } = await prepareDepositRequest(jobId, link).catch(() => ({ error: "Could not save the link." }));
+    const r: { error?: string; shortLink?: string; host?: string | null } = await prepareDepositRequest(jobId, link).catch((e) => (reloadIfStale(e) ? { error: "A new version is loading…" } : { error: "Could not save the link." }));
     setBusy(false);
     if (r.error) {
       setHost(null);

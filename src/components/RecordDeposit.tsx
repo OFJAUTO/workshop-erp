@@ -7,6 +7,7 @@ import { JobFileUpload, type JobFile } from "./JobFileUpload";
 import { SendLinkDialog } from "./SendLinkDialog";
 import { Button, Input } from "./ui";
 import { newUuid } from "@/lib/uuid";
+import { reloadIfStale } from "@/lib/app-version";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const METHODS = [
@@ -84,7 +85,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
       fd.set("cheque_bank", chequeBank);
       fd.set("cheque_date", chequeDate);
     }
-    const r = await recordDepositPanel(fd).catch(() => ({ error: "Couldn't save – nothing was recorded. Try again or tell the owner." }) as RecordDepositResult);
+    const r = await recordDepositPanel(fd).catch((e) => ({ error: reloadIfStale(e) ? "A new version is loading – nothing was recorded, record it again in a moment." : "Couldn't save – nothing was recorded. Try again or tell the owner." }) as RecordDepositResult);
     setBusy(false);
     setConfirming(false);
     if ("error" in r) {

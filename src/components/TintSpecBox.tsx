@@ -7,6 +7,8 @@ import { Card, Input, SectionLabel } from "@/components/ui";
 import { CopyText } from "@/components/CopyText";
 import { addTintPreset, saveTintSpec } from "@/app/(app)/quotes/tint-actions";
 import { aboveLimit, emptyTintSpec, sameTintSpec, SHADES, TINT_WINDOWS, tintSummary, WINDSHIELD_COVERAGE, type TintRow, type TintShade, type TintSpec, type TintWindow } from "@/lib/tint";
+import { clearPending, readPending, writePending } from "@/lib/pending-draft";
+import { reloadIfStale } from "@/lib/app-version";
 
 const copyOf = (s: TintSpec): TintSpec => JSON.parse(JSON.stringify(s)) as TintSpec;
 const shadeLabel = (s: TintShade) => (s === "clear" ? "Clear" : String(s));
@@ -51,17 +53,26 @@ export function TintSpecBox({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const readOnly = !!lockedReason;
+  // A tint change typed but never saved comes back and is saved.
+  useEffect(() => {
+    const d = readPending<TintSpec>(`tint:${quotationId}`);
+    if (!d || readOnly || mode !== "draft") return;
+    const t = setTimeout(() => change(d), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const dirty = !sameTintSpec(spec, saved ?? emptyTintSpec());
 
   function persist(next: TintSpec) {
     setState({ kind: "saving" });
     chain.current = chain.current.then(async () => {
-      const r = await saveTintSpec(quotationId, next).catch(() => ({ error: "Not saved: no connection. Tap again." }) as { error: string });
+      const r = await saveTintSpec(quotationId, next).catch((e) => ({ error: reloadIfStale(e) ? "A new version is loading…" : "Not saved: no connection. Tap again." }) as { error: string });
       if ("error" in r && r.error) {
         setState({ kind: "error", text: r.error });
         return;
       }
       const ok = r as { logged?: boolean; message?: string | null; phone?: string | null };
+      clearPending(`tint:${quotationId}`);
       setSaved(next);
       setState({ kind: "saved", text: ok.logged ? "Saved and written down" : "Saved" });
       if (ok.message) setWhatsapp({ message: ok.message, phone: ok.phone ?? null });
@@ -74,6 +85,7 @@ export function TintSpecBox({
     setSpec(next);
     setWhatsapp(null);
     if (mode === "draft") {
+      writePending(`tint:${quotationId}`, next);
       if (timer.current) clearTimeout(timer.current);
       setState({ kind: "saving" });
       timer.current = setTimeout(() => persist(next), 450);

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Textarea } from "./ui";
 import { saveMediaDetails } from "@/lib/upload-client";
+import { clearPending, readPending, writePending } from "@/lib/pending-draft";
+import { reloadIfStale } from "@/lib/app-version";
 
 /** The words in a note, split on commas and line breaks. */
 const wordsOf = (text: string) => text.split(/[,\n]+/).map((w) => w.trim()).filter(Boolean);
@@ -23,6 +25,17 @@ export function DamageNote({ jobId, initial, token, chips = [] }: { jobId: strin
   const savedBefore = useRef(new Set<string>([initial.trim()]));
   const latest = useRef(value);
   useEffect(() => { latest.current = value; }, [value]);
+  // A note typed but never saved (a reload, a sleeping phone) comes back and is saved.
+  useEffect(() => {
+    const d = readPending<string>(`damage:${jobId}`);
+    if (d === null || d.trim() === initial.trim()) return;
+    const t = setTimeout(() => {
+      setValue(d);
+      void saveNow(d);
+    }, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Typed on another device: take the new note when the page refreshes, unless this one is mid-edit.
   const synced = useRef(initial);
@@ -45,12 +58,14 @@ export function DamageNote({ jobId, initial, token, chips = [] }: { jobId: strin
       setError(null);
       try {
         await saveMediaDetails(jobId, { damageNote: clean }, token);
+        if (latest.current.trim() === clean) clearPending(`damage:${jobId}`);
         lastSaved.current = clean;
         savedBefore.current.add(clean);
         synced.current = clean;
         setSavedValue(clean);
         setState(latest.current.trim() === clean ? "saved" : "idle");
       } catch (err) {
+        if (reloadIfStale(err)) return;
         setState("error");
         setError(err instanceof Error ? err.message : "Could not save.");
       }
@@ -58,6 +73,7 @@ export function DamageNote({ jobId, initial, token, chips = [] }: { jobId: strin
     return chain.current;
   }
   const queue = (text: string) => {
+    writePending(`damage:${jobId}`, text);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => saveNow(text), 1200);
   };

@@ -2,10 +2,11 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { APP_VERSION, BEFORE_RELOAD_EVENT, isStaleVersionError, reloadForNewVersion } from "@/lib/app-version";
+import { APP_VERSION, BEFORE_RELOAD_EVENT, STALE_EVENT, forgetFormSnapshot, isStaleVersionError, reloadForNewVersion, restoreForms, snapshotForms } from "@/lib/app-version";
 
-/** Customer and driver pages never show the bar (they still reload by themselves after a failed click). */
-const CUSTOMER_PAGE = /^\/(quote|invoice|proforma|approve|report|progress|handover|warranty|drive|lpo|terms|login|auth|u|m|d|s|q|i|r|k|p)(\/|$)/;
+/** Customer and driver pages never show the bar (they still reload by themselves after a failed click). The staff
+ * phone checklist (/u) and the quick sign-in (/k) are staff pages and do show it. */
+const CUSTOMER_PAGE = /^\/(quote|invoice|proforma|approve|report|progress|handover|warranty|drive|lpo|terms|login|auth|m|d|s|q|i|r|p)(\/|$)/;
 const CHECK_EVERY_MS = 10 * 60_000;
 
 /**
@@ -37,11 +38,29 @@ export function VersionGuard() {
       const r = e.reason as { message?: string } | string | undefined;
       if (isStaleVersionError(String(typeof r === "string" ? r : (r?.message ?? "")))) stale();
     };
+    // Every form on the page keeps what is typed across a version reload: all forms just before the reload, and
+    // a submitted form for 15 seconds (its click may be the one that meets the old version); restored once after.
+    const onBefore = () => snapshotForms();
+    const onSubmit = (e: Event) => {
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement)) return;
+      snapshotForms(form);
+      setTimeout(() => forgetFormSnapshot(form), 15_000);
+    };
+    const onStale = () => setNewer(true);
     window.addEventListener("error", onError, true);
     window.addEventListener("unhandledrejection", onRejection);
+    window.addEventListener(BEFORE_RELOAD_EVENT, onBefore);
+    window.addEventListener(STALE_EVENT, onStale);
+    document.addEventListener("submit", onSubmit, true);
+    const restore = setTimeout(() => restoreForms(), 400);
     return () => {
       window.removeEventListener("error", onError, true);
       window.removeEventListener("unhandledrejection", onRejection);
+      window.removeEventListener(BEFORE_RELOAD_EVENT, onBefore);
+      window.removeEventListener(STALE_EVENT, onStale);
+      document.removeEventListener("submit", onSubmit, true);
+      clearTimeout(restore);
     };
   }, []);
 

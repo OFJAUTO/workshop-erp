@@ -74,6 +74,7 @@ try {
     await rec.click();
     await rec.pressSequentially("490");
     await rec.blur();
+    await ab.page.locator("[data-settle-ref]").fill("E2E KEEP ME 778");
     await sleep(800);
     await ab.page.evaluate(() => { try { sessionStorage.removeItem("erp-version-reload-at"); } catch {} window.__oldTab = true; });
     await ab.page.route("**/*", (r) => (r.request().method() === "POST" && r.request().headers()["next-action"] ? r.fulfill({ status: 404, headers: { "x-nextjs-action-not-found": "1", "content-type": "text/plain" }, body: "Server action not found." }) : r.continue()));
@@ -84,8 +85,43 @@ try {
     check("3: a form whose server action the new deploy no longer has reloads the page instead of a dead click", ok3b);
     const settled = await sql("select settlement_id from public.payments where id = $1", [p3.id]);
     check("3: nothing was recorded by the refused click", !settled[0]?.settlement_id);
+    await ab.page.waitForSelector("[data-settle-ref]", { timeout: 30000 }).catch(() => null);
+    await sleep(1200);
+    const kept = await ab.page.locator("[data-settle-ref]").inputValue().catch(() => "");
+    check("3: what was typed in the form comes back after the reload", kept === "E2E KEEP ME 778", kept);
   } finally {
     await ab.browser.close();
+  }
+}
+
+// 3c. The Parts table: a price typed when the save meets the old version is kept, the page reloads, and it saves.
+{
+  const ob = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
+  try {
+    await go(ob.page, `${base}/parts/${jobId}`);
+    await ob.page.waitForSelector("[data-row-key] [aria-label='List price']", { timeout: 30000 });
+    await sleep(1500);
+    const rowKey = await ob.page.locator("[data-row-key]").filter({ has: ob.page.locator("[aria-label='List price']:not([disabled])") }).first().getAttribute("data-row-key");
+    const box = ob.page.locator(`[data-row-key="${rowKey}"] [aria-label='List price']`);
+    await ob.page.evaluate(() => { try { sessionStorage.removeItem("erp-version-reload-at"); } catch {} window.__oldTab = true; });
+    await ob.page.route("**/*", (r) => (r.request().method() === "POST" && r.request().headers()["next-action"] ? r.fulfill({ status: 404, headers: { "x-nextjs-action-not-found": "1", "content-type": "text/plain" }, body: "Server action not found." }) : r.continue()));
+    await box.click();
+    await box.pressSequentially("1234.5");
+    await box.blur();
+    const reloaded = await ob.page.waitForFunction(() => !window.__oldTab, null, { timeout: 20000 }).then(() => true).catch(() => false);
+    await ob.page.unroute("**/*");
+    check("3c: the Parts table save that meets the old version reloads the page", reloaded);
+    await ob.page.waitForSelector(`[data-row-key="${rowKey}"] [aria-label='List price']`, { timeout: 30000 }).catch(() => null);
+    let saved = null;
+    for (let i = 0; i < 16 && saved === null; i++) {
+      await sleep(1000);
+      const rows = await sql("select list_price_aed::text as lp from public.part_items where job_id = $1 and list_price_aed = 1234.5", [jobId]);
+      if (rows.length) saved = rows[0].lp;
+    }
+    check("3c: after the reload the typed price comes back and is saved (1,234.50)", saved !== null, String(saved));
+    await ob.page.screenshot({ path: "tests/browser/shots/version-parts-restored.png" });
+  } finally {
+    await ob.browser.close();
   }
 }
 
