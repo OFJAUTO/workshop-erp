@@ -17,7 +17,6 @@ import { loadCatalogue } from "@/lib/parts-catalogue";
 import { dubaiDate } from "@/lib/jobs";
 import { valuesOfPart, valuesOfRequest } from "@/lib/parts-pricing";
 import { type SupplierOption } from "@/lib/parts-rows";
-import { positionsWords } from "@/lib/parts-list";
 import { reasonsFor } from "@/lib/reasons";
 import { PARTS_BUCKET, PART_SELECT, REQUEST_SELECT, signPaths, toPart } from "@/lib/quote-data";
 import { type PartItem, type PartRequest } from "@/lib/quotes";
@@ -84,8 +83,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   // A server page: rendered once per request, today's date (Dubai) is read once.
   const today = dubaiDate();
   const orderLabel = (p: PartItem) => (p.order_status === "none" ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
-  // The request's positions and note; a part added by Parts (no request) shows its own positions.
-  const infoOf = (r: PartRequest | null, p?: PartItem) => [r ? [r.positions?.length ? positionsWords(r.positions) : "", r.note ?? ""].filter(Boolean).join(" · ") : p ? [p.positions?.length ? positionsWords(p.positions) : "", "Added by Parts"].filter(Boolean).join(" · ") : "", p?.availability_note ?? ""].filter(Boolean).join(" · ") || null;
+  // The request's note (the positions have their own line under the name); a part added by Parts says so.
+  const infoOf = (r: PartRequest | null, p?: PartItem) => [r ? (r.note ?? "") : p ? "Added by Parts" : "", p?.availability_note ?? ""].filter(Boolean).join(" · ") || null;
   const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
     key,
     requestId: p.part_request_id,
@@ -94,6 +93,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     original: p.original_description ?? null,
     techQty: Number(p.quantity) || 1,
     info: infoOf(r, p),
+    shownPositions: p.positions?.length ? p.positions : (r?.positions ?? null),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
     values: valuesOfPart(p, today),
     removed: p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
@@ -113,7 +113,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     const items = parts.filter((p) => p.part_request_id === r.id);
     // The row keeps the request's key once its part exists, so the screen never redraws under someone's fingers.
     if (items.length) items.forEach((p, i) => rows.push(rowOfPart(p, r, i === 0 ? `req:${r.id}` : p.id)));
-    else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, info: infoOf(r), values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
+    else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, info: infoOf(r), shownPositions: r.positions ?? null, values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
   }
   for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null, p.id));
 
@@ -132,7 +132,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [] });
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [] });
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
@@ -212,7 +212,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         <Card id="received" className="flex flex-col gap-2" data-received-card>
           <SectionLabel right={steps.find((s) => s.key === "received")?.detail ?? undefined}>Parts received</SectionLabel>
           {toReceive.length ? <p className="text-xs text-muted">Tick what arrived, press Mark received, choose the stickers and type the supplier invoice. A wrong or damaged part: use the LPO page.</p> : null}
-          <ReceivePanel jobId={jobId} canAct={!!canOrder} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p), poId: (rawById.get(p.id)?.po_id as string | null) ?? null }))} received={receivedParts.map((p) => ({ id: p.id, description: p.description, qty: Number(p.confirmed_quantity ?? p.quantity) || 1 }))} poTotals={Object.fromEntries(lpos.suppliers.map((s) => [s.po.id, s.po.total_cost_aed]))} />
+          <ReceivePanel jobId={jobId} canAct={!!canOrder} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, positions: p.positions ?? null, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p), poId: (rawById.get(p.id)?.po_id as string | null) ?? null }))} received={receivedParts.map((p) => ({ id: p.id, description: p.description, positions: p.positions ?? null, qty: Number(p.confirmed_quantity ?? p.quantity) || 1 }))} poTotals={Object.fromEntries(lpos.suppliers.map((s) => [s.po.id, s.po.total_cost_aed]))} />
         </Card>
       ) : null}
 

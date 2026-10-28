@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { signJobFiles } from "@/lib/work-data";
+import { PositionsLine } from "@/components/PositionsLine";
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -164,7 +165,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                   <ul className="divide-y divide-line text-sm">
                     {ls.map((l) => (
                       <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-3">
-                        <span className="flex-1 min-w-48 font-semibold uppercase">{l.description}{l.part_number ? <span className="text-muted font-normal"> · {l.part_number}</span> : null}{(l.hours === null ? l.details : detailsWithoutHours(l.details)) ? <span className="block text-xs text-muted font-normal whitespace-pre-line">{l.hours === null ? l.details : detailsWithoutHours(l.details)}</span> : null}</span>
+                        <span className="flex-1 min-w-48 font-semibold uppercase">{l.description}{l.part_number ? <span className="text-muted font-normal"> · {l.part_number}</span> : null}<PositionsLine positions={l.positions} />{(l.hours === null ? l.details : detailsWithoutHours(l.details)) ? <span className="block text-xs text-muted font-normal whitespace-pre-line">{l.hours === null ? l.details : detailsWithoutHours(l.details)}</span> : null}</span>
                         <span className="text-muted w-20 text-right">{l.hours !== null ? hoursQty(l.hours) : `× ${l.quantity}`}</span>
                         <span className="w-24 text-right">{m(l.unit_price)}</span>
                         <span className="w-28 text-right font-semibold">{l.amount_aed === 0 ? "Complimentary" : `AED ${m(l.amount_aed)}`}</span>

@@ -1,5 +1,6 @@
 import { Avatar, Button, Card, Input, LinkButton, SectionLabel } from "@/components/ui";
 import { CopyText } from "@/components/CopyText";
+import { positionsWords } from "@/lib/parts-list";
 import { formatDate } from "@/lib/format";
 import { formatWait, workingMinutesSince, type JobStatus } from "@/lib/jobs";
 import type { Planning } from "@/lib/planning";
@@ -74,7 +75,7 @@ export function PlanningCard({ jobId, status, plan, role, viewingAs, wt, technic
           {plan.missing.length ? (
             <label className="flex items-start gap-2 text-sm">
               <input type="checkbox" name="force" className="mt-1 h-5 w-5 accent-ink" />
-              <span><span className="font-semibold">Start with available parts.</span> Missing: {plan.missing.map((p) => `${p.description}${p.expected_date ?? p.delivery_date ? ` (${p.expected_date ?? p.delivery_date})` : ""}`).join(", ")}.</span>
+              <span><span className="font-semibold">Start with available parts.</span> Missing: {plan.missing.map((p) => `${p.description}${positionsWords(p.positions) ? ` · ${positionsWords(p.positions)}` : ""}${p.expected_date ?? p.delivery_date ? ` (${p.expected_date ?? p.delivery_date})` : ""}`).join(", ")}.</span>
             </label>
           ) : null}
           <div><Button type="submit" size="lg">Release to workshop</Button></div>

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { positionsWords } from "@/lib/parts-list";
+import { PositionsLine } from "@/components/PositionsLine";
 import { SharePdfButton } from "@/components/SharePdfButton";
 import { Button } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
 
-export type SupplierLpoLine = { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number };
+export type SupplierLpoLine = { id: string; part_item_id: string; description: string; positions?: string[] | null; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number };
 export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null };
 
 /**
@@ -25,7 +27,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
     `${po.number} · OFJ Automotive`,
     vin ? `VIN: ${vin}` : "",
     "",
-    ...po.lines.map((l) => `• ${l.part_number ? `${l.part_number} · ` : ""}${l.description} × ${l.quantity}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}` : ""}`),
+    ...po.lines.map((l) => `• ${l.part_number ? `${l.part_number} · ` : ""}${l.description}${positionsWords(l.positions) ? ` · ${positionsWords(l.positions)}` : ""} × ${l.quantity}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}` : ""}`),
     ...(po.charges ?? []).map((c) => `• ${c.description} · AED ${c.amount_aed.toFixed(2)}`),
     "",
     `Total before VAT: AED ${po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`,
@@ -47,7 +49,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
         {po.lines.map((l) => (
           <li key={l.id} className={`py-1.5 flex flex-wrap items-center gap-2 ${l.received_qty >= l.quantity ? "rounded-control bg-green-soft px-2 text-green" : ""}`} data-lpo-line data-line-received={l.received_qty >= l.quantity ? "1" : "0"}>
             {l.part_number ? <span className="font-mono text-xs font-semibold">{l.part_number}</span> : null}
-            <span className="font-semibold">{l.description}</span>
+            <span className="flex flex-col"><span className="font-semibold">{l.description}</span><PositionsLine positions={l.positions} /></span>
             <span className="text-muted">× {l.quantity} · AED {l.unit_cost.toFixed(2)}</span>
             {ordered ? (
               editing === l.part_item_id ? (

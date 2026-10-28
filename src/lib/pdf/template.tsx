@@ -598,7 +598,7 @@ export function qtyText(quantity: number, hours?: number | null) {
  * proforma and the tax invoice: only the title and the numbers change between them.
  * ------------------------------------------------------------------------------------------------------------------ */
 
-export type SectionLine = { description: string; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; /** "Complimentary" or "Included" (defaults to Complimentary). */ compWord?: string; /** The line's own discount: the green bold row under the description. */ discountPercent?: number; discountAmount?: number; tag?: string | null };
+export type SectionLine = { description: string; /** The short form (ALL 4, FRONT PAIR): its own small line under the name. */ positions?: string | null; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; /** "Complimentary" or "Included" (defaults to Complimentary). */ compWord?: string; /** The line's own discount: the green bold row under the description. */ discountPercent?: number; discountAmount?: number; tag?: string | null };
 
 const sec = StyleSheet.create({
   box: { borderWidth: 1, borderColor: RULE, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
@@ -648,6 +648,7 @@ export function SectionBox({ title, lines, subtotalLabel }: { title: string; lin
           <Text style={sec.no}>{i + 1}</Text>
           <View style={sec.desc}>
             <Text style={styles.lineTitle}>{cleanDocTitle(l.description)}</Text>
+            {l.positions ? <Text style={{ fontSize: px(10), fontWeight: 700, color: GREY, letterSpacing: 0.3, marginTop: px(1) }}>{l.positions}</Text> : null}
             {l.tag ? <Text style={[styles.tag, { color: GREY }]}>{l.tag.toUpperCase()}</Text> : null}
             {l.details ? <Text style={[styles.lineDetails, { fontSize: px(10.5) }]}>{l.details}</Text> : null}
             {l.discountAmount && l.discountAmount > 0.004 ? (

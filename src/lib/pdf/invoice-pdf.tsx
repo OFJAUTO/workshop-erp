@@ -29,6 +29,7 @@ function docLine(l: InvoiceLineRow): SectionLine {
   const disc = Number(l.discount_percent) || 0;
   return {
     description: l.description,
+    positions: positionsWords(l.positions) || null,
     details: l.hours !== null ? detailsWithoutHours(l.details) : l.details,
     qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
     rate: l.unit_price,

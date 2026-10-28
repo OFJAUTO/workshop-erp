@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { PositionsLine } from "@/components/PositionsLine";
 import { useRouter } from "next/navigation";
 import { Button, Card, Input, SectionLabel } from "@/components/ui";
 import { PartActions } from "@/app/(app)/parts/handover/[jobId]/PartActions";
@@ -58,7 +59,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
             <li key={p.id} data-part-take={p.id} data-ticked={on ? "1" : "0"}>
               <button type="button" disabled={!canAct} onClick={() => toggle(p.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control border px-2 text-left ${on ? "border-[#7FC195] bg-[#E8F5EC]" : "border-transparent bg-chip"}`}>
                 <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-green bg-green text-white" : "border-line-strong bg-white text-transparent"}`}>✓</span>
-                <span className="flex-1 font-semibold">{p.description}</span>
+                <span className="flex flex-1 flex-col"><span className="font-semibold">{p.description}</span><PositionsLine positions={p.positions} /></span>
                 <span>× {p.quantity}</span>
                 <span className="text-xs font-semibold text-muted">{p.state === "ready" ? "Ready at the desk" : "At the parts desk"}</span>
               </button>
@@ -68,7 +69,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
         {coming.map((p) => (
           <li key={p.id} className="flex items-center gap-2 px-2 py-1.5">
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-chip text-xs font-bold text-muted">…</span>
-            <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
+            <span className="flex flex-col"><span className="font-semibold">{p.description}</span><PositionsLine positions={p.positions} /></span><span className="text-muted">× {p.quantity}</span>
             <span className="ml-auto text-xs font-semibold text-muted">{p.when ? `On order, arrives ${p.when}` : "On order"}</span>
           </li>
         ))}
@@ -96,7 +97,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
             {received.map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-control border border-[#7FC195] bg-[#E8F5EC] px-2 py-2" data-part-received={p.id}>
                 <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
-                <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
+                <span className="flex flex-col"><span className="font-semibold">{p.description}</span><PositionsLine positions={p.positions} /></span><span className="text-muted">× {p.quantity}</span>
                 <span className="ml-auto text-xs font-semibold text-green">Received ✓{p.receivedBy ? ` ${p.receivedBy}` : ""}{p.receivedAt ? ` · ${p.receivedAt}` : ""}</span>
               </li>
             ))}
@@ -113,6 +114,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
               {received.map((p) => (
                 <li key={p.id} className="flex flex-col gap-1">
                   <span className="text-sm font-semibold">{p.description}</span>
+                  <PositionsLine positions={p.positions} />
                   <PartActions partId={p.id} back={`/my-jobs/${jobId}`} canExchange canNotNeeded={false} exchangeAction={exchangeAction} notNeededAction={exchangeAction} />
                 </li>
               ))}

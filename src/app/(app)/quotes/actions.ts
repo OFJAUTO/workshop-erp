@@ -15,8 +15,7 @@ import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, effectiveMarkupPercent, isUnchosen, marginToneOf, ownerApprovalReasons, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
-import { positionsQtyMismatch } from "@/lib/parts-list";
+import { aed, effectiveMarkupPercent, isUnchosen, marginToneOf, ownerApprovalReasons, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -532,10 +531,7 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
   const active = bundle.lines.filter((l) => l.is_active);
   // Ticked positions must match the quantity on per-unit lines (5 positions but qty 4 = one is wrong). Only the
   // owner may complete anyway (logged).
-  const mismatched = active
-    .filter((l) => !isUnchosen(l) && !l.left_off && (l.line_type === "part" || (l.line_type === "package" && !!l.price_per && l.price_per !== "job")))
-    .map((l) => ({ l, w: positionsQtyMismatch(l.positions, l.quantity) }))
-    .filter((x) => !!x.w);
+  const mismatched = active.map((l) => ({ l, w: positionsWarningOf(l) })).filter((x) => !!x.w);
   if (mismatched.length) {
     const words = mismatched.map((x) => `${x.l.title}: ${x.w}`).join(" · ");
     if (staff.role_id !== "owner") return { error: `Not complete yet: ${words}` };

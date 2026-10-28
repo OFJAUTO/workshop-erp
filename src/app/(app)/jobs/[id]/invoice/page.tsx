@@ -1,10 +1,11 @@
 import { VinCopy } from "@/components/VinCopy";
 import { signJobFiles } from "@/lib/work-data";
+import { PositionsLine } from "@/components/PositionsLine";
 import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatDateTime, formatDayTime, hoursQty } from "@/lib/format";
+import { detailsWithoutHours, formatDateTime, formatDayTime, hoursQty } from "@/lib/format";
 import { INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
@@ -359,7 +360,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 <ul className="divide-y divide-line text-sm">
                   {ls.map((l, i) => (
                     <li key={i} className="py-1.5 flex flex-wrap items-center gap-3">
-                      <span className="flex-1 min-w-40 font-semibold uppercase">{l.description}{l.section === "fees" ? <Badge tone="red">Fee</Badge> : null}</span>
+                      <span className="flex-1 min-w-40 font-semibold uppercase">{l.description}{l.section === "fees" ? <Badge tone="red">Fee</Badge> : null}<PositionsLine positions={l.positions} />{(l.hours === null ? l.details : detailsWithoutHours(l.details)) ? <span className="block whitespace-pre-line text-xs font-normal normal-case text-muted">{l.hours === null ? l.details : detailsWithoutHours(l.details)}</span> : null}</span>
                       <span className="text-muted w-16 text-right">{l.hours !== null ? hoursQty(l.hours) : `× ${l.quantity}`}</span>
                       <span className="w-24 text-right font-semibold">{l.amount_aed === 0 ? "Free" : `AED ${m(l.amount_aed)}`}</span>
                     </li>

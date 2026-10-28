@@ -2,7 +2,7 @@
 
 import type { WorkingTime } from "./working-time";
 import { customerAvailabilityWords, daysFromDate } from "./parts-rows";
-import { positionsWords } from "./parts-list";
+import { positionsQtyMismatch, positionsWords } from "./parts-list";
 
 export const LINE_TYPES = [
   { value: "labour", label: "Labour" },
@@ -935,3 +935,14 @@ export const JOB_POSITIONS = ["Front left", "Front right", "Rear left", "Rear ri
 
 /** "1,234.00" for the money columns of a document; the currency sits in the heading. */
 export const money = (n: number | null | undefined) => round2(n ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * The positions-vs-quantity warning of a quotation line ("5 positions ticked but qty is 4 – fix one"), or null.
+ * Only counted per-unit lines are checked: parts, and services priced per unit (a left-off or unchosen part never
+ * blocks). The editor draws it under the line; "Quotation complete" refuses on the same lines.
+ */
+export function positionsWarningOf(l: Pick<QuoteLine, "line_type" | "price_per" | "positions" | "quantity" | "left_off" | "option_group" | "chosen">): string | null {
+  if (isUnchosen(l as QuoteLine) || l.left_off) return null;
+  const perUnit = l.line_type === "part" || (l.line_type === "package" && !!l.price_per && l.price_per !== "job");
+  return perUnit ? positionsQtyMismatch(l.positions, l.quantity) : null;
+}

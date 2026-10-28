@@ -112,13 +112,13 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
       ])
     : [null, { data: null }, { data: [] as { display_name: string; department_id: string | null }[] }];
   const qcFailed = qc && qc.status === "failed" && inWork ? { round: qc.round, items: qc.items.filter((i) => i.result === "fail").map((i) => ({ label: i.label, remark: i.remark })) } : null;
-  const panelLines: PanelLine[] = work ? work.lines.map((l) => ({ id: l.id, title: l.title, details: l.details, hours_quoted: l.hours_quoted, status: l.status })) : [];
+  const panelLines: PanelLine[] = work ? work.lines.map((l) => ({ id: l.id, title: l.title, details: l.details, positions: l.positions ?? null, hours_quoted: l.hours_quoted, status: l.status })) : [];
   // One "Labour charges" line: the inspection's findings are the tasks.
   const inspectionTasks = work && bundle && hasLabourChargesLine(work.lines) ? tasksFromInspection(bundle.items) : [];
   const confirmerIds = Array.from(new Set((parts?.needed ?? []).map((p) => p.issue_confirmed_by).filter((x): x is string => !!x)));
   const { data: confirmers } = confirmerIds.length ? await createAdminClient().from("staff").select("id, display_name").in("id", confirmerIds) : { data: [] as { id: string; display_name: string }[] };
   const confirmerOf = new Map((confirmers ?? []).map((c) => [c.id, c.display_name]));
-  const panelParts: PanelPart[] = parts ? parts.needed.map((p) => ({ id: p.id, description: p.description, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, state: p.issue_status === "confirmed" ? "handed" : p.ready_for_handover_at ? "ready" : p.order_status === "received" || (p.availability === "in_stock" && p.received_qty > 0) ? "here" : "coming", when: p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : null, receivedBy: p.issue_confirmed_by ? confirmerOf.get(p.issue_confirmed_by) ?? null : null, receivedAt: p.issue_confirmed_at ? formatDayTime(p.issue_confirmed_at) : null })) : [];
+  const panelParts: PanelPart[] = parts ? parts.needed.map((p) => ({ id: p.id, description: p.description, positions: p.positions ?? null, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, state: p.issue_status === "confirmed" ? "handed" : p.ready_for_handover_at ? "ready" : p.order_status === "received" || (p.availability === "in_stock" && p.received_qty > 0) ? "here" : "coming", when: p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : null, receivedBy: p.issue_confirmed_by ? confirmerOf.get(p.issue_confirmed_by) ?? null : null, receivedAt: p.issue_confirmed_at ? formatDayTime(p.issue_confirmed_at) : null })) : [];
   const running: RunningSession[] = work ? work.sessions.filter((s) => !s.ended_at).map((s) => ({ since: s.started_at, name: work.names.get(s.technician_id) ?? "Technician", mine: s.technician_id === staff.id, throughBreak: !!s.through_break })) : [];
   const breakWindow = breakOf(settings, staff);
   const device = await getCurrentDevice();

@@ -1,5 +1,6 @@
 import { jobHasOilChange } from "./stickers";
 import { countedMinutes, type WorkingTime,breakMinutesBetween, type BreakLike } from "./working-time";
+import { positionsWords } from "./parts-list";
 import "server-only";
 import { LINE_SELECT, approvedQuotations, toLine } from "./quote-data";
 import { hasCostFloor, isHidden, isUnchosen, type QuoteLine } from "./quotes";
@@ -16,6 +17,7 @@ export type WorkLineRow = {
   position: number;
   title: string;
   details: string | null;
+  positions?: string[] | null;
   hours_quoted: number | null;
   assigned_to: string | null;
   status: "todo" | "in_progress" | "done";
@@ -44,7 +46,7 @@ export type WashRow = { id: string; job_id: string; done_by: string | null; done
 export type JobFileRow = { id: string; job_id: string; kind: string; ref_id: string | null; storage_path: string; content_type: string | null; caption: string | null; taken_at: string; uploaded_by: string | null };
 export type ShiftRow = { id: string; staff_id: string; shift_date: string; clock_in: string; clock_out: string | null; late_minutes: number };
 
-export const WORK_LINE_SELECT = "id, job_id, quotation_line_id, source, position, title, details, hours_quoted, assigned_to, status, done_at, done_by, notes, created_at";
+export const WORK_LINE_SELECT = "id, job_id, quotation_line_id, source, position, title, details, positions, hours_quoted, assigned_to, status, done_at, done_by, notes, created_at";
 export const WORK_SESSION_SELECT = "id, job_id, technician_id, started_at, ended_at, end_reason, pause_reason, minutes, through_break";
 export const ADDITIONAL_SELECT = "id, job_id, technician_id, work_line_id, remark, parts_needed, status, decided_by, decided_at, decision_note, quotation_id, created_at";
 export const QC_SELECT = "id, job_id, round, status, inspector_id, started_at, finished_at, mileage, mileage_unit, postscan_path, postscan_waived_reason, items, notes, created_at";
@@ -156,10 +158,10 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
     const twin = spare.find((e) => !!l.revised_from_line_id && e.quotation_line_id === l.revised_from_line_id) ?? spare.find((e) => e.title === l.title);
     if (twin) {
       spare.splice(spare.indexOf(twin), 1);
-      await admin.from("work_lines").update({ quotation_line_id: l.id, hours_quoted: hoursFor(l), details: l.details, updated_by: by }).eq("id", twin.id);
+      await admin.from("work_lines").update({ quotation_line_id: l.id, hours_quoted: hoursFor(l), details: l.details, positions: l.positions?.length ? l.positions : null, updated_by: by }).eq("id", twin.id);
       continue;
     }
-    rows.push({ job_id: jobId, quotation_line_id: l.id, source: "quotation", position: ++position, title: l.title, details: l.details, hours_quoted: hoursFor(l), created_by: by, updated_by: by });
+    rows.push({ job_id: jobId, quotation_line_id: l.id, source: "quotation", position: ++position, title: l.title, details: l.details, positions: l.positions?.length ? l.positions : null, hours_quoted: hoursFor(l), created_by: by, updated_by: by });
   }
   // Lines of a replaced version that nobody started are retired; started or finished ones stay as history.
   const stale = spare.filter((e) => e.status === "todo").map((e) => e.id);
@@ -183,12 +185,14 @@ export async function buildQcItems(jobId: string, settings: Settings, previous: 
   if (previous && previous.status === "failed") return previous.items.filter((i) => i.result === "fail").map((i) => ({ ...i, result: null, remark: null }));
   const admin = createAdminClient();
   const [{ data: lines }, { data: parts }] = await Promise.all([
-    admin.from("work_lines").select("id, title").eq("job_id", jobId).eq("is_active", true).order("position"),
-    admin.from("part_items").select("id, description, part_number, issue_status, return_status").eq("job_id", jobId).eq("is_active", true).neq("issue_status", "none").neq("return_status", "returned"),
+    admin.from("work_lines").select("id, title, positions").eq("job_id", jobId).eq("is_active", true).order("position"),
+    admin.from("part_items").select("id, description, part_number, positions, issue_status, return_status").eq("job_id", jobId).eq("is_active", true).neq("issue_status", "none").neq("return_status", "returned"),
   ]);
   const items: QcItem[] = [];
-  for (const l of lines ?? []) items.push({ key: `work:${l.id}`, kind: "work", label: l.title, result: null, remark: null });
-  for (const p of parts ?? []) items.push({ key: `part:${p.id}`, kind: "part", label: `${p.description}${p.part_number ? ` (${p.part_number})` : ""}: fitted?`, result: null, remark: null });
+  // The positions in the short form (FRONT PAIR, ALL 4) tell the inspector which wheel or side to look at.
+  const at = (ps: string[] | null | undefined) => (positionsWords(ps) ? ` · ${positionsWords(ps)}` : "");
+  for (const l of lines ?? []) items.push({ key: `work:${l.id}`, kind: "work", label: `${l.title}${at(l.positions)}`, result: null, remark: null });
+  for (const p of parts ?? []) items.push({ key: `part:${p.id}`, kind: "part", label: `${p.description}${p.part_number ? ` (${p.part_number})` : ""}${at(p.positions)}: fitted?`, result: null, remark: null });
   const general = Array.isArray(settings.qc_general_checks) ? (settings.qc_general_checks as string[]) : [];
   general.forEach((g, i) => items.push({ key: `general:${i}`, kind: "general", label: g, result: null, remark: null }));
   if (settings.sticker_service_required !== false && (await jobHasOilChange(jobId))) items.push({ key: "sticker:service", kind: "general", label: "Oil service sticker fitted and details correct", result: null, remark: null });

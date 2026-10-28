@@ -36,15 +36,17 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ jo
   };
   const rows: CheckRow[] = counted.map((p) => {
     const req = p.part_request_id ? reqOf.get(p.part_request_id as string) : null;
-    const positions = ((p.positions ?? req?.positions ?? []) as string[]) ?? [];
+    // The part's own positions, else its request's (an empty list on the part must not hide the request's).
+    const own = (p.positions ?? []) as string[];
+    const positions = own.length ? own : (((req?.positions ?? []) as string[]) ?? []);
     const note = [
-      positions.length ? positionsWords(positions) : "",
       (req?.note as string | null) ?? "",
       p.original_description && p.original_description !== p.description ? `Technician wrote: ${p.original_description}` : "",
       (p.availability_note as string | null) ?? "",
     ].filter(Boolean).join(" · ");
     return {
       description: String(p.description ?? ""),
+      positions: positionsWords(positions) || null,
       note: note || null,
       part_number: (p.part_number as string | null) || null,
       part_type: (p.part_type as string | null) || null,

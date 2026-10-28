@@ -1,5 +1,6 @@
 import { VinCopy } from "@/components/VinCopy";
 import { notFound } from "next/navigation";
+import { PositionsLine } from "@/components/PositionsLine";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
@@ -135,6 +136,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
                   <span className="w-6 shrink-0 text-muted font-semibold">{i + 1}.</span>
                   <span className="flex-1 min-w-0">
                     <span className="font-semibold uppercase">{l.title}</span>
+                    <PositionsLine positions={l.positions} />
                     {l.details ? <span className="block text-xs text-muted">{l.details}</span> : null}
                     {l.source === "additional" ? <span className="block text-xs text-muted">Additional work</span> : null}
                   </span>

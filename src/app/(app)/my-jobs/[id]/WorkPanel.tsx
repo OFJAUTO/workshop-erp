@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { PositionsLine } from "@/components/PositionsLine";
 import { breakMinutesBetween, breakNow, type BreakLike } from "@/lib/working-time";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Badge, Button, Card, Notice, SectionLabel, Select, Textarea, Input } from "@/components/ui";
 import { ReasonChips } from "@/components/ReasonChips";
 
-export type PanelLine = { id: string; title: string; details: string | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
-export type PanelPart = { id: string; description: string; quantity: number; state: "handed" | "ready" | "here" | "coming"; when: string | null; receivedBy: string | null; receivedAt: string | null };
+export type PanelLine = { id: string; title: string; details: string | null; positions?: string[] | null; hours_quoted: number | null; status: "todo" | "in_progress" | "done" };
+export type PanelPart = { id: string; description: string; positions?: string[] | null; quantity: number; state: "handed" | "ready" | "here" | "coming"; when: string | null; receivedBy: string | null; receivedAt: string | null };
 export type PanelFinding = { id: string; remark: string; parts_needed: string | null; status: "pending" | "approved" | "rejected"; decision_note: string | null; label: string; tone: "neutral" | "amber" | "green" | "red" | "ink" };
 export type QcFailed = { round: number; items: { label: string; remark: string | null }[] };
 export type RunningSession = { since: string; name: string; mine: boolean; throughBreak?: boolean };
@@ -170,6 +171,7 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
               <span className="w-6 shrink-0 text-muted font-semibold">{i + 1}.</span>
               <span className="flex-1 min-w-0">
                 <span className="text-[16px] font-bold leading-snug">{l.title}</span>
+                <PositionsLine positions={l.positions} />
                 {l.details ? <span className="block text-sm text-muted">{l.details}</span> : null}
               </span>
               {l.hours_quoted !== null ? <span className="text-sm font-semibold text-muted whitespace-nowrap">{l.hours_quoted.toFixed(1)} h</span> : null}

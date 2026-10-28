@@ -71,6 +71,8 @@ export function positionsWords(positions: string[] | null | undefined): string {
   if (s.size === 2 && rl && rr) return "REAR PAIR";
   if (s.size === 2 && fl && rl) return "LEFT SIDE";
   if (s.size === 2 && fr && rr) return "RIGHT SIDE";
+  if (s.size === 2 && s.has("front") && s.has("rear")) return "FRONT AND REAR";
+  if (s.size === 2 && s.has("left") && s.has("right")) return "LEFT AND RIGHT";
   return Array.from(new Set(positions.map((p) => p.trim().toUpperCase()))).join(", ");
 }
 
@@ -210,7 +212,7 @@ export function partsListLine(e: { name: string; qty: number; positions: string[
   if (e.unit === "set") return `${e.name}${e.positions.length ? ` · ${positionsWords(e.positions)}` : ""} · ${e.qty} set${e.qty === 1 ? "" : "s"}`;
   const words = positionsWords(e.positions);
   // A paired part reads "Lower control arm - front pair - 2".
-  if (/pair|all four/.test(words)) return `${e.name} - ${words} - ${e.qty}`;
+  if (/PAIR|ALL 4/.test(words)) return `${e.name} - ${words} - ${e.qty}`;
   return `${e.name} × ${e.qty}${e.positions.length ? ` · ${positionsWords(e.positions)}` : ""}`;
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { PositionsLine } from "@/components/PositionsLine";
 import { useRouter } from "next/navigation";
 import { Button, Input } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
@@ -9,7 +10,7 @@ import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, availabilityChoice, availa
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
-import { positionsWords, type CatalogueRow } from "@/lib/parts-list";
+import { type CatalogueRow } from "@/lib/parts-list";
 import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, splitPart } from "../actions";
 import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 import { bulkDeleteParts, undoBulkDelete } from "../bulk-actions";
@@ -47,6 +48,8 @@ export type TableRow = {
   waitingApproval: boolean;
   /** A new row from the picker: its positions go to the server with the first save. */
   positions?: string[];
+  /** The positions shown under the name (the part's own, else its request's): display only, never sent. */
+  shownPositions?: string[] | null;
 };
 
 type Action = (formData: FormData) => void | Promise<void>;
@@ -164,7 +167,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     const stamp = Date.now();
     setRows((p) => [
       ...p,
-      ...entries.map((e, i) => ({ key: `new:${stamp}-${i}`, requestId: null, partId: null, name: e.name, original: null, techQty: e.qty, info: [e.positions.length ? positionsWords(e.positions) : "", "Added by Parts"].filter(Boolean).join(" · "), values: { ...EMPTY, part_type: types[0] ?? "", qty: String(e.qty) }, positions: e.positions, optionGroup: null, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: false, removed: null, waitingApproval: false }) as TableRow),
+      ...entries.map((e, i) => ({ key: `new:${stamp}-${i}`, requestId: null, partId: null, name: e.name, original: null, techQty: e.qty, info: "Added by Parts", values: { ...EMPTY, part_type: types[0] ?? "", qty: String(e.qty) }, positions: e.positions, shownPositions: e.positions, optionGroup: null, unavailable: false, closedReason: null, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: false, removed: null, waitingApproval: false }) as TableRow),
     ]);
     const custom = entries.filter((e) => !e.catalogue_id).map((e) => e.name);
     if (custom.length) void noteCustomPartNames(custom);
@@ -615,7 +618,8 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
         {canPrice && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
         <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
-          <span className="block line-clamp-3 text-[13px] uppercase leading-[1.15]">{name}</span>
+          <span className="block break-words text-[13px] uppercase leading-[1.15]">{name}</span>
+          <PositionsLine positions={row.shownPositions ?? row.positions} className="leading-tight" />
         </button>
         {(isTyreName(name) || v.tyre_row) && !readOnly ? (
           <button type="button" onClick={() => setTyreOpen(true)} className={`h-9 shrink-0 rounded-control border px-2 text-xs font-bold ${v.tyre_row && (!v.tyre_brand || !v.tyre_size) ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong bg-white"}`} data-tyre-details>
@@ -747,16 +751,16 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
         ) : null}
       </div>
       {/* The status line: always there, always one line high, so the row never grows or shrinks */}
-      <div className={`${STATUS_LINE} h-5 flex items-center gap-2 min-w-0 text-[11px] leading-none`} data-status-line>
+      <div className={`${STATUS_LINE} min-h-5 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-[11px] leading-tight`} data-status-line>
         {row.removed ? <Chip tone="outline">Removed</Chip> : null}
         {row.waitingApproval && !row.removed ? <Chip tone="amber">Waiting for owner approval</Chip> : null}
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
         {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
         {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""} · Use</button> : null}
-        <span className="min-w-0 flex-1 truncate text-muted" title={notes}>{notes}</span>
+        <span className="min-w-0 flex-1 break-words text-muted">{notes}</span>
         {row.removed && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
-        <span className={`shrink-0 max-w-[60%] truncate ${tag.cls}`} title={tag.text} data-row-tag>{tag.text}</span>
+        <span className={`max-w-full break-words ${tag.cls}`} data-row-tag>{tag.text}</span>
       </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
       {removing ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason, disposition) => { const kind = removing; setRemoving(null); doRemove(kind, reason, disposition); }} /> : null}

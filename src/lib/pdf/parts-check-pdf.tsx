@@ -13,6 +13,8 @@ import { GREY, INK, LINE, PALE, px, styles } from "./template";
 
 export type CheckRow = {
   description: string;
+  /** The short form (ALL 4, FRONT PAIR) on its own small line under the name. */
+  positions?: string | null;
   note: string | null;
   part_number: string | null;
   part_type: string | null;
@@ -94,6 +96,7 @@ export async function renderPartsCheckPdf(d: PartsCheckData): Promise<Buffer> {
             <Text style={cell(W.no)}>{i + 1}</Text>
             <View style={{ flex: 1, paddingRight: px(4) }}>
               <Text style={{ fontSize: px(10.5), fontWeight: 700, textTransform: "uppercase" }}>{r.description}</Text>
+              {r.positions ? <Text style={{ fontSize: px(9), fontWeight: 700, color: GREY }}>{r.positions}</Text> : null}
               {r.note ? <Text style={{ fontSize: px(9), color: GREY }}>{r.note}</Text> : null}
             </View>
             <Text style={cell(W.pn)}>{r.part_number ?? ""}</Text>

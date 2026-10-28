@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { PositionsLine } from "@/components/PositionsLine";
 import { flushTimers, onPageLeave } from "@/lib/app-version";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
@@ -8,7 +9,7 @@ import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_A
 import { PartPicker } from "@/components/PartPicker";
 import { BodyshopFindings, type BodyStateProps } from "./BodyshopFindings";
 import { panelLabel } from "@/lib/car-outline";
-import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, positionsWords, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { batteryEntriesFrom, goesWithOffers, mergePartsList, newEntryId, offerEntry, partsListLine, suggestCatalogue, tyreEntriesFrom, withAutoEntries, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { ActionForm, type FormAction } from "@/components/forms";
 import { JumpButton, ProblemsBar, SubmitOutcome, jumpTo } from "@/components/FormAssist";
 import { PrescanToggle } from "@/components/PrescanToggle";
@@ -995,8 +996,7 @@ export function InspectionForm({
               const first = line.entries.find((e) => e.source === "item" || e.source === "custom") ?? line.entries[0];
               return (
                 <li key={line.key} className="py-2 flex flex-wrap items-center gap-2 text-sm">
-                  <span className="font-semibold">{line.name}</span>
-                  {line.positions.length ? <span className="text-muted">{positionsWords(line.positions)}</span> : null}
+                  <span className="flex flex-col"><span className="font-semibold">{line.name}</span><PositionsLine positions={line.positions} /></span>
                   <span className="text-xs text-muted">· {fromLabel(line)}</span>
                   {dupPositions(line).length ? <span className="text-[11px] font-semibold text-amber">Appears twice for {dupPositions(line).join(", ")}: check the quantity</span> : null}
                   <span className="ml-auto inline-flex items-center rounded-control border border-line-strong bg-white">

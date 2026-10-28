@@ -1,13 +1,14 @@
 "use client";
 
 import { newUuid } from "@/lib/uuid";
+import { PositionsLine } from "@/components/PositionsLine";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
 import { Button } from "@/components/ui";
 
-export type ReceiveRow = { id: string; description: string; qty: number; supplier: string | null; state: string | null; poId: string | null };
-export type ReceivedRow = { id: string; description: string; qty: number };
+export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null };
+export type ReceivedRow = { id: string; description: string; positions?: string[] | null; qty: number };
 type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
 
 // A real uuid: a supplier invoice scan uploaded before the save is tied to it in job_files.ref_id (a uuid column).
@@ -60,7 +61,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
                 <li key={r.id} data-receive-row={r.id}>
                   <button type="button" disabled={!canAct || panel} onClick={() => toggle(r.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
                     <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
-                    <span className="flex-1 font-semibold">{r.description}</span>
+                    <span className="flex flex-1 flex-col"><span className="font-semibold">{r.description}</span><PositionsLine positions={r.positions} /></span>
                     <span className="text-muted">× {r.qty}</span>
                     <span className="text-xs font-semibold text-muted">{r.supplier ? `${r.supplier} · ` : ""}{r.state ?? ""}</span>
                   </button>
@@ -86,7 +87,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
                   const sticker = !noSticker.has(r.id);
                   return (
                     <li key={r.id} className="flex items-center gap-3 min-h-11" data-sticker-row={r.id}>
-                      <span className="flex-1 font-semibold">{r.description}<span className="font-normal text-muted"> × {r.qty}</span></span>
+                      <span className="flex flex-1 flex-col"><span className="font-semibold">{r.description}<span className="font-normal text-muted"> × {r.qty}</span></span><PositionsLine positions={r.positions} /></span>
                       <button type="button" onClick={() => setNoSticker((u) => { const n = new Set(u); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} aria-pressed={sticker} data-sticker-switch className={`inline-flex min-h-9 items-center gap-1.5 rounded-control border px-3 text-xs font-bold ${sticker ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`}>
                         {sticker ? `Stickers × ${r.qty}` : "No sticker"}
                       </button>
@@ -113,7 +114,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
             {received.map((r) => (
               <li key={r.id} className="flex items-center gap-2 rounded-control bg-green-soft px-2 py-2" data-received-line={r.id}>
                 <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
-                <span className="font-semibold">{r.description}</span><span className="text-muted">× {r.qty}</span>
+                <span className="flex flex-col"><span className="font-semibold">{r.description}</span><PositionsLine positions={r.positions} /></span><span className="text-muted">× {r.qty}</span>
                 <span className="ml-auto text-xs font-semibold text-green">Received</span>
               </li>
             ))}

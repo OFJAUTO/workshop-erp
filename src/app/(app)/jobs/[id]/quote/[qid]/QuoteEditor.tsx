@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/components/PartPicker";
 import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
-import { goesWithOffers, positionsQtyMismatch, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
+import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry } from "@/lib/parts-list";
 import { PositionsLine } from "@/components/PositionsLine";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
@@ -23,7 +23,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
-import { INTERNAL_ONLY_LABEL, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { INTERNAL_ONLY_LABEL, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -191,7 +191,7 @@ const boxLabel = "flex flex-col gap-0.5 text-[11px] font-semibold text-muted";
 const POSITION_CHOICES: string[][] = [["Front"], ["Rear"], ["Front", "Rear"], ["Front left", "Front right"], ["Rear left", "Rear right"], ["Front left", "Front right", "Rear left", "Rear right"], ["Left"], ["Right"]];
 const positionChoiceLabel = (ps: string[]) => {
   const w = positionsWords(ps);
-  return w === "FRONT PAIR" ? "Front pair" : w === "REAR PAIR" ? "Rear pair" : w === "ALL 4" ? "All four" : ps.length === 2 && ps.includes("Front") && ps.includes("Rear") ? "Front and rear" : ps[0];
+  return w === "FRONT PAIR" ? "Front pair" : w === "REAR PAIR" ? "Rear pair" : w === "ALL 4" ? "All four" : w === "FRONT AND REAR" ? "Front and rear" : ps[0];
 };
 
 const STRIP_KEY = "erp-quote-strip";
@@ -887,6 +887,8 @@ export function QuoteEditor({
               onArrow={() => setPicker({ kind: isService ? "service" : "labour", replace: l.id })}
               onNext={() => setFocusTarget({ id: l.id, field: "amount" })}
             />
+            <PositionsLine positions={positions} />
+            {positionsWarningOf(l) ? <div className="px-1 text-[11px] font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
             {svc?.bodyshop_kind === "coloured_ppf" || svc?.bodyshop_kind === "tint" || (isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id]) ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted" data-bodyshop-detail>
                 {svc?.bodyshop_kind === "coloured_ppf" ? (<><Input value={l.film_colour ?? ""} onChange={(e) => patch(l.id, { film_colour: e.target.value })} placeholder="Film colour" disabled={disabled} className="min-h-8 w-32 text-xs" textCase="title" aria-label="Film colour" data-film-colour /><Input value={l.film_code ?? ""} onChange={(e) => patch(l.id, { film_code: e.target.value })} placeholder="Code" disabled={disabled} className="min-h-8 w-24 text-xs" textCase="upper" aria-label="Film code" data-film-code /></>) : null}
@@ -912,10 +914,9 @@ export function QuoteEditor({
                 {(settings.handcutSurcharge ?? 0) > 0 && (l.cut_method ?? "hand") === "hand" && !lines.some((x) => x.is_active && x.title === HANDCUT_SURCHARGE_TITLE) ? <span className="text-[11px] text-amber">Hand-cut surcharge AED {settings.handcutSurcharge} not on the quotation yet: tap Hand-cut to add it.</span> : null}
               </span>
             ) : null}
-            {positions.length || l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect || internal ? (
+            {l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect || internal ? (
               <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
                 {internal ? <span data-internal-badge><Badge tone="neutral">Internal cost only · not on the customer&apos;s documents</Badge></span> : null}
-                {positions.length ? <span className="font-semibold uppercase" data-line-positions>{positions.length === 2 && positions.includes("Front") && positions.includes("Rear") ? "FRONT AND REAR" : positionsWords(positions)}</span> : null}
                 {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
                 {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
                 {l.details ? <span className="whitespace-pre-wrap break-words rounded-full border border-line-strong px-2 font-semibold" data-line-note>Note: {l.details}</span> : null}
@@ -1443,7 +1444,7 @@ export function QuoteEditor({
                           </div>
                           <PositionsLine positions={l.positions} />
                           {partTypeText(l) ? <div><Badge tone="outline">{partTypeText(l)}</Badge></div> : null}
-                          {positionsQtyMismatch(l.positions, l.quantity) ? <div className="text-[11px] font-bold text-red" data-positions-mismatch>{positionsQtyMismatch(l.positions, l.quantity)}</div> : null}
+                          {positionsWarningOf(l) ? <div className="text-[11px] font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
                           <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-[11px] text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
