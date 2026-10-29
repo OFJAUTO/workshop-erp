@@ -50,9 +50,20 @@ function measure(rootSel) {
   const visible = (e) => { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return false; if (!shownInScrollers(e, r)) return false; const cs = getComputedStyle(e); if (cs.visibility === "hidden" || cs.display === "none") return false; for (let a = e; a && a !== root; a = a.parentElement) if (a.tagName === "DETAILS" && !a.open && a !== e.parentElement) return false; return true; };
   const all = [...root.querySelectorAll("button, a[href], input:not([type=hidden]), select, textarea, label, [role=button]")].filter(visible);
   const name = (e) => (e.getAttribute("aria-label") || e.textContent || e.getAttribute("placeholder") || e.tagName).trim().replace(/\s+/g, " ").slice(0, 40);
+  // The part of a control on screen: a sideways-scrolling strip (the part picker's categories on a phone) hides the
+  // rest by design, so only what the strip shows can stick out of the window.
+  const onScreen = (e) => {
+    const raw = e.getBoundingClientRect();
+    let left = raw.left, right = raw.right;
+    for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) {
+      if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(a).overflowX)) { const ar = a.getBoundingClientRect(); left = Math.max(left, ar.left); right = Math.min(right, ar.right); }
+    }
+    return { left, right };
+  };
   for (const e of all) {
     const r = e.getBoundingClientRect();
-    if (r.right > W + 1 || r.left < -1) out.push(`"${name(e)}" sticks out of the window`);
+    const x = onScreen(e);
+    if (x.right > W + 1 || x.left < -1) out.push(`"${name(e)}" sticks out of the window`);
     if (fixedRoot && (r.bottom > H + 1 || r.top < -1) && !scrollsBetween(e)) out.push(`"${name(e)}" is off the screen and cannot be scrolled to`);
     // Cut off by a container that hides overflow (inside the pop-up).
     for (let a = e.parentElement; a && a !== root.parentElement; a = a.parentElement) {
@@ -233,7 +244,7 @@ export async function runPopups() {
   await goto(p, "/dashboard");
   await check(p, "Notifications", "[data-bell-panel]", () => click(p, 'button[aria-label^="Notifications"]'), findings, shots);
   await goto(p, "/dashboard");
-  if (await p.locator("[data-search-input]").count()) await check(p, "Search results", "[data-search-results]", async () => { await p.locator("[data-search-input]").first().fill("J-0"); await sleep(1500); }, findings, shots);
+  if (await p.locator("[data-search-input]:visible").count()) await check(p, "Search results", "[data-search-results]", async () => { await p.locator("[data-search-input]:visible").first().fill("J-0"); await sleep(1500); }, findings, shots);
   await goto(p, "/recovery");
   if (await p.locator("details[data-change-price] summary").count()) await check(p, "Recovery: change price", "details[data-change-price][open]", () => click(p, "details[data-change-price] summary"), findings, shots);
 
@@ -267,6 +278,20 @@ export async function runPopups() {
     if (await c2.getByRole("button", { name: /Pay now/ }).count()) await check(c2, "Customer: Pay now", "[data-pay-now-sheet]", () => c2.getByRole("button", { name: /Pay now/ }).first().click(), findings, shots);
     else console.log("Customer: Pay now: no Pay now on this proforma (no payment gateway link) - skipped");
     await b2.close();
+  }
+
+  // Batch 29 Oct (2): the owner details panel (a customer's name on a car card) and the "Customer declined all work"
+  // window (on a car with nothing approved - seeded last, so it changes nothing above).
+  {
+    const o2 = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
+    await goto(o2.page, "/dashboard");
+    if (await o2.page.locator("[data-car-card] [data-customer-name]").count()) await check(o2.page, "Customer details panel", "[data-customer-panel]", () => o2.page.locator("[data-car-card] [data-customer-name]").first().click(), findings, shots);
+    else notReached.push("Customer details panel: no customer name on a car card");
+    const q2 = (await api("/api/e2e/stage", { stage: "quote" })).json;
+    await goto(o2.page, `/jobs/${q2.jobId}`);
+    if (await o2.page.locator("[data-declined-all]").count()) await check(o2.page, "Customer declined all work", "[data-declined-dialog]", () => click(o2.page, "[data-declined-all]"), findings, shots);
+    else notReached.push("Customer declined all work: the button did not show");
+    await o2.browser.close();
   }
 
   void browserForId;

@@ -178,7 +178,7 @@ export function PartPicker({
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button>
         </div>
         <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && q && !exact) { e.preventDefault(); addCustom(query); } }} placeholder="Type to find a part…" autoFocus spellCheck lang="en" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" aria-label="Find a part" />
-        <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-3 min-h-0 flex-1">
+        <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[180px_minmax(0,1fr)] gap-3 min-h-0 flex-1">
           <div className="flex sm:flex-col gap-1 overflow-auto" data-categories>
             {suggested.length ? tabBtn("suggested", "Suggested") : null}
             {tabBtn("most", "Most used")}

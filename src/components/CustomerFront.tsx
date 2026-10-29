@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Words } from "./Words";
 import { DocViewer } from "./DocViewer";
 import { Logo } from "./Logo";
 
@@ -41,7 +42,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
               <div className="flex items-stretch gap-3 text-[10px] sm:text-[10.5px] leading-[1.6]">
                 <div className="flex flex-col">
                   <span className="text-[11px] sm:text-xs font-bold tracking-[0.02em]">{company.legalName}</span>
-                  {company.address.map((a) => <span key={a} className="text-[#5F6368]">{a}</span>)}
+                  {company.address.map((a) => <Words key={a} text={a} className="text-[#5F6368]" />)}
                 </div>
                 {company.trn ? (
                   <div className="border-l border-[#D4D4D8] pl-3 flex flex-col justify-center gap-0.5">
@@ -71,7 +72,7 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
                     <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{b.title}</span>
                     <span className="text-sm font-bold uppercase">{b.strong}</span>
                     {b.rows.filter(([, v]) => v).map(([k, v]) => (
-                      <span key={k || String(v)}><span className="text-[#5F6368]">{k}{k ? " " : ""}</span>{v}</span>
+                      <span key={k || String(v)}><span className="text-[#5F6368]">{k}{k ? " " : ""}</span>{typeof v === "string" ? <Words text={v} /> : v}</span>
                     ))}
                   </div>
                 ))}

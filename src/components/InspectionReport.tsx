@@ -1,4 +1,5 @@
 import { CarOutline } from "./CarOutline";
+import { Words } from "./Words";
 import { CustomerVideoList } from "./CustomerVideoList";
 import { ViewerThumb } from "./PhotoViewer";
 import type { FrontBox } from "./CustomerFront";
@@ -178,7 +179,7 @@ export function InspectionReport({ data, refreshUrl, signedAt, withHead = false 
               <span className={SMALL_TITLE}>{b.title}</span>
               <span className="text-sm font-bold uppercase">{b.strong}</span>
               {b.rows.filter(([, v]) => v).map(([k, v]) => (
-                <span key={k || String(v)}><span className="text-[#5F6368]">{k}{k ? " " : ""}</span>{v}</span>
+                <span key={k || String(v)}><span className="text-[#5F6368]">{k}{k ? " " : ""}</span>{typeof v === "string" ? <Words text={v} /> : v}</span>
               ))}
             </div>
           ))}

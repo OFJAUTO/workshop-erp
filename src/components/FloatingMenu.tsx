@@ -11,15 +11,29 @@ import { createPortal } from "react-dom";
  */
 export function FloatingMenu({ anchor, onClose, width = 256, label, children, ...rest }: { anchor: HTMLElement | null; onClose: () => void; width?: number; label?: string; children: ReactNode } & HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; up: boolean } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; up: boolean; maxHeight: number } | null>(null);
   useLayoutEffect(() => {
     if (!anchor) return;
+    // Below the button, else above it; a menu taller than either side (a phone, 44 px rows) takes the larger side and
+    // scrolls inside itself, or the whole screen when neither side has room - never a bottom that cannot be reached.
     const place = () => {
       const r = anchor.getBoundingClientRect();
-      const h = ref.current?.offsetHeight ?? 320;
-      const up = window.innerHeight - r.bottom < h + 16 && r.top > h + 16;
+      const full = ref.current?.scrollHeight ?? 320;
+      // Both sides are counted inside the window (a button scrolled off the screen leaves no room on that side).
+      const below = Math.min(window.innerHeight, window.innerHeight - r.bottom) - 12;
+      const above = Math.min(window.innerHeight, r.top) - 12;
       const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.right - width));
-      setPos({ top: up ? Math.max(8, r.top - h - 4) : r.bottom + 4, left, up });
+      // Whatever the button does (a tablet turned with the menu open moves it off the screen), the menu stays inside the window.
+      const set = (top: number, up: boolean, maxHeight: number) => {
+        const h = Math.min(full, maxHeight);
+        setPos({ top: Math.max(8, Math.min(top, window.innerHeight - h - 8)), left, up, maxHeight });
+      };
+      if (full <= below) return set(r.bottom + 4, false, below);
+      if (full <= above) return set(r.top - full - 4, true, above);
+      const side = Math.max(below, above);
+      if (side < 200) return set(8, false, window.innerHeight - 16);
+      if (below >= above) return set(r.bottom + 4, false, below);
+      return set(8, true, above - 4);
     };
     place();
     window.addEventListener("resize", place);
@@ -40,7 +54,7 @@ export function FloatingMenu({ anchor, onClose, width = 256, label, children, ..
   return createPortal(
     <>
       <div className="fixed inset-0 z-[60]" onClick={onClose} data-menu-backdrop />
-      <div ref={ref} role="menu" aria-label={label} className="fixed z-[61] flex flex-col rounded-card border border-line bg-white p-1 text-sm shadow-xl" style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width }} data-floating-menu data-menu-up={pos?.up ? "1" : "0"} {...rest}>
+      <div ref={ref} role="menu" aria-label={label} className="fixed z-[61] flex flex-col overflow-y-auto rounded-card border border-line bg-white p-1 text-sm shadow-xl" style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width, maxHeight: pos?.maxHeight }} data-floating-menu data-menu-up={pos?.up ? "1" : "0"} {...rest}>
         {children}
       </div>
     </>,
