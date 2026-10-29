@@ -58,7 +58,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
   const row = (s: Scan) => (
     <li key={s.id} className="py-3 flex flex-col gap-2" data-flash-id={s.id}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <a href={urls.get(s.storage_path) ?? "#"} target="_blank" rel="noreferrer" className="font-bold underline underline-offset-4">{s.file_name ?? "scan.pdf"}</a>
+        <a href={urls.get(s.storage_path) ?? "#"} target="_blank" rel="noreferrer" title={s.file_name ?? "scan.pdf"} className="inline-block min-w-0 max-w-full truncate align-bottom font-bold underline underline-offset-4">{s.file_name ?? "scan.pdf"}</a>
         {s.kind ? <Badge tone="ink">{s.kind === "pre" ? "Pre-scan" : "Post-scan"}</Badge> : null}
         <Badge tone={s.status === "unmatched" ? "amber" : s.status === "ignored" ? "neutral" : "green"}>{s.status === "unmatched" ? "No matching car" : s.status === "ignored" ? "Ignored" : s.status === "attached" ? "Attached by hand" : "Matched by VIN"}</Badge>
         <span className="text-xs text-muted">{formatDateTime(s.received_at)}{s.from_email ? ` · from ${s.from_email}` : ""}</span>

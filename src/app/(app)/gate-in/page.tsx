@@ -148,13 +148,13 @@ export default async function GateInSearchPage({ searchParams }: { searchParams:
 
       <Card className="flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" data-gatein-modes>
-          <LinkButton href={modeLink("car")} tone={mode === "car" ? "primary" : "secondary"} size="lg" aria-pressed={mode === "car"} data-gatein-mode="car">
+          <LinkButton href={modeLink("car")} tone={mode === "car" ? "primary" : "secondary"} size="lg" className="!whitespace-normal text-center leading-tight" aria-pressed={mode === "car"} data-gatein-mode="car">
             Existing car
           </LinkButton>
-          <LinkButton href={modeLink("customer")} tone={mode === "customer" ? "primary" : "secondary"} size="lg" aria-pressed={mode === "customer"} data-gatein-mode="customer">
+          <LinkButton href={modeLink("customer")} tone={mode === "customer" ? "primary" : "secondary"} size="lg" className="!whitespace-normal text-center leading-tight" aria-pressed={mode === "customer"} data-gatein-mode="customer">
             Existing customer, new car
           </LinkButton>
-          <LinkButton href="/gate-in/new-car" tone="secondary" size="lg" data-gatein-mode="new">
+          <LinkButton href="/gate-in/new-car" tone="secondary" size="lg" className="!whitespace-normal text-center leading-tight" data-gatein-mode="new">
             New customer and car
           </LinkButton>
         </div>

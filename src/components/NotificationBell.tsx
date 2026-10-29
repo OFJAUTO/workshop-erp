@@ -251,7 +251,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
             if (ctx) ctx.resume().then(() => { setBlocked(false); sound("normal"); }).catch(() => {});
           }}
           data-overlap-ok
-          className="fixed bottom-0 inset-x-0 md:left-60 z-50 bg-ink text-white text-sm font-bold py-2 text-center"
+          className="fixed bottom-0 inset-x-0 nav:left-60 z-50 bg-ink text-white text-sm font-bold py-2 text-center"
         >
           Click here to turn on sounds for notifications
         </button>

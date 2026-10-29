@@ -27,6 +27,9 @@
 
   --radius-card: 14px;
   --radius-control: 10px;
+
+  /* The sidebar shows from 1,100 px; below it the black top bar with ☰ (29 October 2026). */
+  --breakpoint-nav: 68.75rem;
 }
 
 html {
@@ -75,6 +78,16 @@ input[type="number"]::-webkit-inner-spin-button {
   100% { transform: rotate(0); }
 }
 .bell-shake { animation: bell-shake 1s ease-in-out; transform-origin: 50% 0; }
+
+/* Touch screens (29 October 2026, batch section 2): the compact 36 px controls a computer uses (h-9 / min-h-9)
+   are 44 px under a finger - every button, picker and box on a tablet or phone. Outside the Tailwind layers on
+   purpose, so it wins over the utility classes; written as class attributes because Tailwind drops a plain rule
+   that names one of its own utility classes. */
+@media (pointer: coarse) {
+  [class~="h-9"] { height: 2.75rem; }
+  [class~="min-h-9"] { min-height: 2.75rem; }
+  [class~="h-9"][class~="w-9"] { width: 2.75rem; }
+}
 
 /* Printing the customer report: only the report, no buttons. */
 @media print {

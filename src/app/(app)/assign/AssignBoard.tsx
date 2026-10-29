@@ -1,11 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { assignJob } from "@/app/(app)/jobs/actions";
 import { Badge, Button, Card, ChoiceButtons, Empty, Textarea } from "@/components/ui";
 import { StaffPicker } from "@/components/StaffPicker";
+import { CarCard } from "@/components/CarCard";
 import type { TechnicianLoad } from "@/lib/technician-load";
 import type { Side } from "@/lib/teams";
 
@@ -55,29 +55,32 @@ export function AssignBoard({ cars, people }: { cars: BoardCar[]; people: Techni
       <div className="flex flex-col gap-2" data-assign-cars>
         {cars.length === 0 ? <Empty title="Nothing waiting to be assigned" /> : null}
         {cars.map((c) => (
-          <button key={c.id} type="button" onClick={() => pick(c.id)} data-assign-car={c.id} aria-pressed={selectedId === c.id}
-            className={`flex w-full items-center gap-3 rounded-card border bg-white p-3 text-left ${selectedId === c.id ? "border-ink ring-2 ring-ink" : c.tone === "red" ? "border-red-bar" : c.tone === "amber" ? "border-amber-bar" : "border-line"} ${c.canAssign ? "" : "opacity-70"}`}>
-            <span className="relative h-16 w-24 shrink-0 overflow-hidden rounded-control bg-chip">
-              {c.pictureUrl ? <Image src={c.pictureUrl} alt={c.plate} fill sizes="96px" className="object-cover" unoptimized /> : <span className="flex h-full w-full items-center justify-center text-[10px] font-bold uppercase text-faint">No photo</span>}
-            </span>
-            <span className="min-w-0 flex-1 flex flex-col gap-0.5">
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="text-[16px] font-extrabold tracking-[0.03em]">{c.plate}</span>
+          <CarCard
+            key={c.id}
+            onPick={() => pick(c.id)}
+            selected={selectedId === c.id}
+            tone={c.tone}
+            dim={!c.canAssign}
+            data-assign-car={c.id}
+            pictureUrl={c.pictureUrl}
+            plate={c.plate}
+            title={c.car}
+            sub={[c.customer, c.jobNumber]}
+            chips={
+              <>
                 {c.vip ? <Badge tone="ink">VIP</Badge> : null}
                 {c.high ? <Badge tone="outline">High priority</Badge> : null}
                 {c.doesNotRun ? <Badge tone="red">Does not run</Badge> : null}
                 <Badge tone="neutral">{c.department === "bodyshop" ? "Bodyshop" : c.department === "both" ? "Both sides" : "Mechanical"}</Badge>
-              </span>
-              <span className="truncate text-[14px] font-semibold">{c.car}</span>
-              <span className="truncate text-[13px] text-muted">{c.customer} · {c.jobNumber}</span>
-              <span className="text-[13px]"><span className="font-semibold">{c.need}</span> · waiting {c.waited}</span>
-            </span>
-          </button>
+              </>
+            }
+            status={{ line: c.need, detail: `waiting ${c.waited}` }}
+          />
         ))}
       </div>
 
       {/* RIGHT: tap a car, assign its people - the ONE team list. */}
-      <Card className="lg:sticky lg:top-4 flex flex-col gap-3 p-4" data-assign-panel>
+      <Card className="lg:sticky lg:top-20 nav:top-4 flex flex-col gap-3 p-4" data-assign-panel>
         {!selected ? (
           <p className="text-[14px] text-muted">Tap a car on the left to assign it.</p>
         ) : (

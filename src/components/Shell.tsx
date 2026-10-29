@@ -6,10 +6,12 @@ import { SidebarNav, type NavItem } from "./SidebarNav";
 import { BellDock } from "./BellDock";
 import { NotificationBell } from "./NotificationBell";
 import { ModeExit } from "./ModeExit";
+import { MobileTopBar } from "./MobileTopBar";
 
 /**
- * Black menu bar down the left, content using the full width.
- * On narrow screens the bar sits across the top instead.
+ * Black menu bar down the left, content using the full width. Narrower than 1,100 px (a tablet held upright, a phone)
+ * the sidebar folds away into the black top bar: ☰ + the OFJ logo + search + the bell, ☰ sliding the menu over the
+ * page (MobileTopBar). ONE layout for every staff page.
  */
 export function Shell({
   nav = [],
@@ -32,29 +34,46 @@ export function Shell({
   children: ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
-      <aside className="bg-sidebar text-white flex flex-row md:flex-col items-center md:items-stretch gap-3 md:gap-6 px-4 py-3 md:px-5 md:py-6 md:w-60 md:shrink-0 md:h-screen md:sticky md:top-0 overflow-x-auto md:overflow-y-auto">
-        <div className="flex items-center justify-center gap-2 shrink-0 md:mb-2">
-          <Link href="/home" className="shrink-0 flex items-center justify-center md:w-full" aria-label="Home">
-            <Logo onDark className="h-11 md:h-15" />
+    <div className="min-h-screen flex flex-col nav:flex-row">
+      <aside className="hidden nav:flex bg-sidebar text-white flex-col items-stretch gap-6 px-5 py-6 w-60 shrink-0 h-screen sticky top-0 overflow-y-auto" data-sidebar>
+        <div className="flex items-center justify-center gap-2 shrink-0 mb-2">
+          <Link href="/home" className="shrink-0 flex items-center justify-center w-full" aria-label="Home">
+            <Logo onDark className="h-15" />
           </Link>
         </div>
         {nav.length ? <SidebarNav items={nav} /> : null}
         {user ? (
           // The name or photo opens a small menu with Sign out, so nothing on the page can ever cover it.
-          <details className="relative shrink-0 ml-auto md:ml-0 md:mt-auto md:border-t md:border-white/15 md:pt-5">
+          <details className="relative shrink-0 mt-auto border-t border-white/15 pt-5">
             <summary className="list-none cursor-pointer flex items-center gap-3 min-h-11 rounded-control px-1 hover:bg-white/10" aria-label="Your menu">
               <Avatar name={user.name} photoUrl={user.photoUrl} size={40} />
-              <span className="hidden md:flex flex-col leading-tight min-w-0">
+              <span className="flex flex-col leading-tight min-w-0">
                 <span className="text-sm font-bold truncate">{user.name}</span>
                 <span className="text-xs text-white/70 truncate">{user.role}</span>
               </span>
-              <span className="hidden md:inline ml-auto text-xs text-white/60" aria-hidden>▾</span>
+              <span className="ml-auto text-xs text-white/60" aria-hidden>▾</span>
             </summary>
-            <div className="absolute right-0 top-full mt-2 md:top-auto md:bottom-full md:left-0 md:right-0 md:mt-0 md:mb-2 z-50 min-w-44 rounded-card border border-white/20 bg-sidebar p-2 shadow-xl">{footer}</div>
+            <div className="absolute bottom-full left-0 right-0 mb-2 z-50 min-w-44 rounded-card border border-white/20 bg-sidebar p-2 shadow-xl">{footer}</div>
           </details>
         ) : null}
       </aside>
+      <MobileTopBar
+        nav={nav}
+        account={
+          user ? (
+            <div className="flex flex-col gap-2" data-menu-account>
+              <div className="flex items-center gap-3">
+                <Avatar name={user.name} photoUrl={user.photoUrl} size={40} />
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="text-sm font-bold">{user.name}</span>
+                  <span className="text-xs text-white/70">{user.role}</span>
+                </span>
+              </div>
+              {footer}
+            </div>
+          ) : null
+        }
+      />
       <main className="flex-1 min-w-0 flex flex-col relative pb-28">
         {viewingAs && user ? (
           <div className="bg-amber-soft border-b-2 border-amber-bar px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -94,10 +113,10 @@ export function Shell({
 /** Same bar without a menu, for the login, tablet and setup pages. */
 export function PublicShell({ note, children }: { note?: ReactNode; children: ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
-      <aside className="bg-sidebar text-white flex flex-row md:flex-col items-center gap-3 px-4 py-3 md:px-5 md:py-6 md:w-60 md:shrink-0 md:h-screen md:sticky md:top-0">
-        <Logo onDark className="h-11 md:h-15" />
-        {note ? <span className="text-xs text-white/70 md:mt-2">{note}</span> : null}
+    <div className="min-h-screen flex flex-col nav:flex-row">
+      <aside className="bg-sidebar text-white flex flex-row nav:flex-col items-center gap-3 px-4 py-3 nav:px-5 nav:py-6 nav:w-60 nav:shrink-0 nav:h-screen nav:sticky nav:top-0">
+        <Logo onDark className="h-11 nav:h-15" />
+        {note ? <span className="text-xs text-white/70 nav:mt-2">{note}</span> : null}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col pb-28">{children}</main>
     </div>

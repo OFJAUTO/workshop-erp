@@ -1,4 +1,6 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { CarCard } from "@/components/CarCard";
+import { signCarPictures } from "@/lib/car-pictures";
 import { Badge, Card, Empty, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -20,10 +22,11 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const [{ data: jobs }, { data: recent }] = await Promise.all([
-    admin.from("jobs").select("id, job_number, stage_entered_at, wash_sent_at, promised_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).eq("status", "pending_wash").order("stage_entered_at"),
+    admin.from("jobs").select("id, job_number, stage_entered_at, wash_sent_at, promised_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, photo_path, make:vehicle_makes(name), model:vehicle_models(name))").eq("is_open", true).eq("status", "pending_wash").order("stage_entered_at"),
     admin.from("washes").select(WASH_SELECT + ", job:jobs(job_number), person:staff!washes_done_by_fkey(display_name)").eq("is_active", true).order("updated_at", { ascending: false }).limit(15),
   ]);
-  const rows = (jobs ?? []) as unknown as Row[];
+  const rows = (jobs ?? []) as unknown as (Row & { vehicle: (Row["vehicle"] & { photo_path?: string | null }) | null })[];
+  const pictures = await signCarPictures(rows.map((j) => j.vehicle?.photo_path));
   const waiting = rows.filter((j) => !j.wash_sent_at);
   const atWash = rows.filter((j) => !!j.wash_sent_at);
   const done = (recent ?? []) as unknown as (WashRow & { job: { job_number: string } | null; person: { display_name: string } | null })[];
@@ -31,15 +34,19 @@ export default async function WashPage({ searchParams }: { searchParams: Promise
   // The live picture for the "Is the car wash free?" question, from the rows already loaded.
   const toWashCar = (j: Row) => ({ id: j.id, plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number, title: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ") });
   const stateFor = (id: string) => ({ inWash: atWash.map(toWashCar), waiting: waiting.filter((j) => j.id !== id).map(toWashCar) });
-  const card = (j: Row) => (
-    <Card key={j.id} className="flex flex-col md:flex-row md:items-center gap-3">
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
-        <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : j.job_number}</span>
-        <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}{j.vehicle?.colour ? ` · ${j.vehicle.colour}` : ""} · {j.job_number}</span>
-        <span className="text-xs text-muted">{j.wash_sent_at ? `At the wash since ${formatDateTime(j.wash_sent_at)}` : `QC passed ${formatDateTime(j.stage_entered_at)}`}</span>
-      </div>
-      <WashForms jobId={j.id} atWash={!!j.wash_sent_at} canAct={canAct} washState={j.wash_sent_at ? null : stateFor(j.id)} sendAction={sendToWash.bind(null, j.id)} doneAction={washDone.bind(null, j.id)} skipAction={skipWash.bind(null, j.id)} />
-    </Card>
+  const card = (j: (typeof rows)[number]) => (
+    <CarCard
+      key={j.id}
+      href={`/jobs/${j.id}`}
+      pictureUrl={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null}
+      plate={j.vehicle ? formatPlate(j.vehicle) : j.job_number}
+      title={[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}
+      sub={[j.vehicle?.colour ?? null, j.job_number]}
+      status={{ line: j.wash_sent_at ? `At the wash since ${formatDateTime(j.wash_sent_at)}` : `QC passed ${formatDateTime(j.stage_entered_at)}` }}
+      actions={
+  <WashForms jobId={j.id} atWash={!!j.wash_sent_at} canAct={canAct} washState={j.wash_sent_at ? null : stateFor(j.id)} sendAction={sendToWash.bind(null, j.id)} doneAction={washDone.bind(null, j.id)} skipAction={skipWash.bind(null, j.id)} />
+      }
+    />
   );
   return (
     <>

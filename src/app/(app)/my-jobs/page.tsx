@@ -1,10 +1,8 @@
 import { HomeHeader } from "@/components/HomeHeader";
-import Link from "next/link";
-import { CarPicture } from "@/components/CarPicture";
+import { CarCard } from "@/components/CarCard";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { StageTrack } from "@/components/StageTrack";
-import {Badge, Button, Card, Empty, Notice} from "@/components/ui";
+import {Badge, Button, Empty, Notice} from "@/components/ui";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -110,46 +108,46 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
             const handed = parts.filter((p) => p.issue_status === "confirmed");
             const coming = parts.filter((p) => p.issue_status !== "confirmed" && p.order_status !== "received");
             return (
-              <Link key={j.id} href={`/my-jobs/${j.id}`} className="block">
-                <Card className="flex flex-col gap-3 hover:border-ink">
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full sm:w-44" />
-                    <div className="flex flex-col gap-2 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xl font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
-                        {vipIds.has(j.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
-                        <PriorityBadge priority={j.priority} />
-                        {j.comeback_of ? <Badge tone="red">Comeback</Badge> : null}
-                        <TimingBadge timing={timing} />
-                      </div>
-                      <span className="font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
-                      {j.gate_in?.dash_cam ? <Badge tone="red">Dash cam fitted: disconnect</Badge> : null}
-                      {j.requests?.filter((r) => r.is_active).length ? (
-                        <ol className="list-decimal pl-5 text-sm flex flex-col gap-0.5">
-                          {j.requests.filter((r) => r.is_active).sort((a, b) => a.position - b.position).map((r) => (
-                            <li key={r.id}>{r.text}</li>
-                          ))}
-                        </ol>
-                      ) : (
-                        <span className="text-sm">{j.gate_in?.customer_requests}</span>
-                      )}
-                      {parts.length ? (
-                        <span className="text-sm">
-                          <span className="font-semibold">Parts: </span>
-                          <span className="text-green font-semibold">✓ {handed.length} of {parts.length} handed over</span>
-                          {coming.length ? <span className="text-muted"> · {coming.map((p) => `${p.description} coming ${p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : "soon"}`).join(", ")}</span> : null}
-                        </span>
-                      ) : null}
-                    </div>
+              <CarCard
+                key={j.id}
+                href={`/my-jobs/${j.id}`}
+                pictureUrl={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null}
+                plate={j.vehicle ? formatPlate(j.vehicle) : "?"}
+                title={[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}
+                sub={[j.job_number, j.plan_start_date && j.status === "in_work" ? `start ${formatDate(j.plan_start_date + "T12:00:00+04:00")}` : null, j.promised_at ? `promised ${formatPromised(j.promised_at)}` : null]}
+                chips={
+                  <>
+                    {vipIds.has(j.customer_id) ? <Badge tone="ink">VIP</Badge> : null}
+                    <PriorityBadge priority={j.priority} />
+                    {j.comeback_of ? <Badge tone="red">Comeback</Badge> : null}
+                    <TimingBadge timing={timing} />
+                    {j.gate_in?.dash_cam ? <Badge tone="red">Dash cam fitted: disconnect</Badge> : null}
+                  </>
+                }
+                alerts={<Badge tone={line.tone}>{line.text}</Badge>}
+                stage={{ stage: j.stage, timing }}
+                extra={
+                  <div className="flex flex-col gap-2">
+                          {j.requests?.filter((r) => r.is_active).length ? (
+                            <ol className="list-decimal pl-5 text-sm flex flex-col gap-0.5">
+                              {j.requests.filter((r) => r.is_active).sort((a, b) => a.position - b.position).map((r) => (
+                                <li key={r.id}>{r.text}</li>
+                              ))}
+                            </ol>
+                          ) : (
+                            <span className="text-sm">{j.gate_in?.customer_requests}</span>
+                          )}
+                          {parts.length ? (
+                            <span className="text-sm">
+                              <span className="font-semibold">Parts: </span>
+                              <span className="text-green font-semibold">✓ {handed.length} of {parts.length} handed over</span>
+                              {coming.length ? <span className="text-muted"> · {coming.map((p) => `${p.description} coming ${p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : "soon"}`).join(", ")}</span> : null}
+                            </span>
+                          ) : null}
+
                   </div>
-                  <span className="flex flex-wrap items-center gap-2 text-sm font-bold">
-                    <Badge tone={line.tone}>{line.text}</Badge>
-                    {j.plan_start_date && j.status === "in_work" ? <span className="text-muted font-semibold">start {formatDate(j.plan_start_date + "T12:00:00+04:00")}</span> : null}
-                    {j.promised_at ? <span className="text-muted font-semibold">promised {formatPromised(j.promised_at)}</span> : null}
-                  </span>
-                  <StageTrack stage={j.stage} timing={timing} compact />
-                </Card>
-              </Link>
+                }
+              />
             );
           })}
         </div>

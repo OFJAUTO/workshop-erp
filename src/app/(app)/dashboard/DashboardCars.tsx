@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
-import { CarPicture } from "@/components/CarPicture";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
-import { StageTrack } from "@/components/StageTrack";
-import {Badge, Card, Empty, SectionLabel, Select} from "@/components/ui";
+import { CarCard } from "@/components/CarCard";
+import {Badge, Empty, SectionLabel, Select} from "@/components/ui";
 import { PENDING_GROUPS, STATUS_LABELS, type JobStatus, type Priority, type Stage, type Timing } from "@/lib/jobs";
 import { QuotePicker } from "@/components/QuotePicker";
 import type { QuotePickItem } from "@/lib/quote-history";
@@ -230,42 +228,39 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
             ) : null}
           </Empty>
         ) : (() => {
+          // The ONE car card (29 October 2026): on a tablet held upright or a phone the photo sits left of the plate and
+          // the details, the status, chips and the slim stage bar run full width underneath; nothing breaks or overlaps.
           const card = (j: DashRow, dim = false) => (
-            <Link key={j.id} href={`/jobs/${j.id}`} className={`block ${dim ? "opacity-75" : ""}`} data-flash-id={j.id}>
-              <Card className="flex flex-col md:flex-row md:items-center gap-5 hover:border-ink">
-                <CarPicture url={j.pictureUrl} alt={j.plate} className="w-full md:w-56" />
-                <div className="flex-1 min-w-0 flex flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.plate}</span>
-                    {j.vip ? <Badge tone="ink">VIP</Badge> : null}
-                    {j.loose ? <Badge tone="ink">Loose items</Badge> : null}
-                    <PriorityBadge priority={j.priority} />
-                    <TimingBadge timing={j.timing} />
-                    {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
-                    <AdvisorBadge name={j.advisorName} />
-                  </div>
-                  <span className="text-sm font-semibold">{j.title}</span>
-                  <span className="text-xs text-muted">
-                    {j.assignee ?? j.customer ?? "Not assigned"}
-                    {j.promisedLabel ? ` · ${j.promisedLabel}` : ""}
-                    {j.conditionShort ? ` · ${j.conditionShort}` : ""}
-                    {j.dashCam ? " · Dash cam" : ""}
-                    {j.majorDamage ? " · Major damage" : ""}
-                    {` · ${j.jobNumber}`}
-                  </span>
-                </div>
-                <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
-                    {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
-                    {j.priced ? <Badge tone="green">Priced</Badge> : null}
-                    {j.extraQuote ? <span className="inline-flex rounded-full bg-amber-soft px-2.5 py-1 text-[11px] font-bold text-amber" data-extra-quote-chip>{j.extraQuote}</span> : null}
-                    {j.quotes.length > 1 ? <QuotePicker items={j.quotes} /> : null}
-                  </span>
-                  <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
-                </div>
-              </Card>
-            </Link>
+            <CarCard
+              key={j.id}
+              href={`/jobs/${j.id}`}
+              dim={dim}
+              data-flash-id={j.id}
+              pictureUrl={j.pictureUrl}
+              plate={j.plate}
+              title={j.title}
+              sub={[j.customer ?? j.assignee ?? "Not assigned", j.conditionShort, j.jobNumber, j.promisedLabel, j.dashCam ? "Dash cam" : null, j.majorDamage ? "Major damage" : null]}
+              chips={
+                <>
+                  {j.vip ? <Badge tone="ink">VIP</Badge> : null}
+                  {j.loose ? <Badge tone="ink">Loose items</Badge> : null}
+                  <PriorityBadge priority={j.priority} />
+                  <TimingBadge timing={j.timing} />
+                  {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
+                  <AdvisorBadge name={j.advisorName} />
+                </>
+              }
+              status={{ line: j.statusLine || STATUS_LABELS[j.status] }}
+              alerts={
+                <>
+                  {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
+                  {j.priced ? <Badge tone="green">Priced</Badge> : null}
+                  {j.extraQuote ? <span className="inline-flex rounded-full bg-amber-soft px-2.5 py-1 text-[11px] font-bold text-amber" data-extra-quote-chip>{j.extraQuote}</span> : null}
+                </>
+              }
+              actions={j.quotes.length > 1 ? <QuotePicker items={j.quotes} /> : null}
+              stage={{ stage: j.stage, timing: j.timing, skip: j.loose ? ["inspection", "wash"] : undefined }}
+            />
           );
           if (!(advisorView && scope === "mine")) return <div className="flex flex-col gap-3">{visible.map((j) => card(j))}</div>;
           const mineRows = visible.filter((r) => r.mine);

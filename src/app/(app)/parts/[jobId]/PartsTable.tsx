@@ -392,7 +392,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
       ) : null}
       {showBar && onPricingDone && pricingLocked ? (
-        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
+        <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
             {costLine}
             <span className="inline-flex min-h-10 items-center gap-2 rounded-control bg-green-soft px-3 text-sm font-bold text-green" data-pricing-locked>✓ Pricing done{pricingDoneAt ? ` · ${formatDateTime(pricingDoneAt)}` : ""}</span>
@@ -402,7 +402,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
       ) : null}
       {showBar && onPricingDone && !pricingLocked ? (
-        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
+        <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
             {costLine}
             {reopenedAt ? <span className="text-xs font-semibold text-amber" data-pricing-editing>Editing: the advisor sees the old prices until you press Send updated prices</span> : pricingDoneAt ? <span className="text-xs font-semibold text-green">✓ Sent to the advisor, {formatDateTime(pricingDoneAt)}</span> : null}
@@ -429,7 +429,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
       ) : null}
       {showCost && !(showBar && onPricingDone) ? (
-        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
+        <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">{costLine}</div>
         </div>
       ) : null}

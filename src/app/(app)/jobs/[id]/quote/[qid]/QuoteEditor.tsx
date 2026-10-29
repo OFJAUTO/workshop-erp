@@ -1981,7 +1981,7 @@ export function QuoteEditor({
 
       {/* The decision, in a slim bar fixed to the bottom: finish, then send; afterwards the state and Send again */}
       {!disabled || (sent && canSend) ? (
-        <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
+        <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
             {!disabled ? <span className={`text-[11px] font-bold ${state === "offline" ? "text-amber" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
             {showProfit ? <span className={`text-xs font-extrabold ${marginTone}`} data-margin-chip data-margin-tone={tone3}>Profit {margin.toFixed(0)}%</span> : null}

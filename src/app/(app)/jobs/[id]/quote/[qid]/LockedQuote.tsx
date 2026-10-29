@@ -132,7 +132,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
           {ownerBox}
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 right-0 md:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-locked-bar>
+      <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-locked-bar>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs font-semibold">{statusText}</span>
           <span className="ml-auto flex flex-wrap items-center gap-2">{actions}</span>

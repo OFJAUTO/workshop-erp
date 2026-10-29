@@ -5,7 +5,7 @@ import type { CurrentStaff } from "@/lib/auth";
 /**
  * The top of every home screen: "Good morning, <first name>" (Dubai time: before 12, 12 to 5, after 5), the
  * date under it in bold dark grey, the one search bar for any car, and "Gate in a car" where the role has it.
- * On narrow screens the search drops to its own full-width row under the date. Acting as someone, their name
+ * Narrower than 1,100 px the search sits in the black top bar (MobileTopBar) instead. Acting as someone, their name
  * is the one greeted.
  */
 export function HomeHeader({ staff, gateIn = false, actions = null }: { staff: CurrentStaff; gateIn?: boolean; actions?: React.ReactNode }) {
@@ -24,13 +24,13 @@ export function HomeHeader({ staff, gateIn = false, actions = null }: { staff: C
           <p className="text-[17px] font-bold text-muted" data-home-date>{date}</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-3">
-          <div className="hidden md:block w-[20rem] xl:w-[26rem]"><TopSearch /></div>
+          <div className="hidden nav:block w-[20rem] xl:w-[26rem]"><TopSearch /></div>
           {gateIn ? <LinkButton href="/gate-in" size="lg">Gate in a car</LinkButton> : null}
           {actions}
           <span id="header-bell-slot" className="inline-flex shrink-0 items-center" />
         </div>
       </div>
-      <div className="md:hidden" data-search-row><TopSearch /></div>
+
     </div>
   );
 }

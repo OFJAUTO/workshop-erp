@@ -125,7 +125,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           {canBook ? (
             <div className="flex gap-1 rounded-control border border-line p-1">
               {(["me", "all"] as const).map((w) => (
-                <Link key={w} href={href(view, date, w)} className={`min-h-9 inline-flex items-center rounded-control px-4 text-sm font-bold ${who === w ? "bg-ink text-white" : "hover:bg-chip"}`}>
+                <Link key={w} href={href(view, date, w)} className={`min-h-11 inline-flex items-center rounded-control px-4 text-sm font-bold ${who === w ? "bg-ink text-white" : "hover:bg-chip"}`}>
                   {w === "me" ? "My bookings" : "Everyone"}
                 </Link>
               ))}
@@ -133,7 +133,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           ) : null}
           <div className="flex gap-1 rounded-control border border-line p-1">
             {(["day", "week", "month"] as CalendarView[]).map((v) => (
-              <Link key={v} href={href(v, date)} className={`min-h-9 inline-flex items-center rounded-control px-4 text-sm font-bold ${view === v ? "bg-ink text-white" : "hover:bg-chip"}`}>
+              <Link key={v} href={href(v, date)} className={`min-h-11 inline-flex items-center rounded-control px-4 text-sm font-bold ${view === v ? "bg-ink text-white" : "hover:bg-chip"}`}>
                 {v[0].toUpperCase() + v.slice(1)}
               </Link>
             ))}

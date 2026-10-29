@@ -1,5 +1,7 @@
 // THE pop-up layout check (28 October 2026, B3): every pop-up, window, sheet and three-dot menu the staff and the
-// customers use is opened on a seeded test car and measured at 1920 / 1366 / 1024 / 800:
+// customers use is opened on a seeded test car and measured at every size of the layout check (29 October 2026:
+// 1440x900, 1280x800, 1024x768, 800x1280, 768x1024 and a phone at 390x844; a pop-up that closes when the window
+// changes - the bell moves into the top bar below 1,100 px - is opened again at that size):
 //   - the box fits inside the window (or scrolls inside itself),
 //   - nothing inside is cut off by a container that hides its overflow (the discount window's "AE" fault),
 //   - no button or label has text wider than itself,
@@ -10,7 +12,7 @@
 import { pathToFileURL } from "node:url";
 import { api, base, browserFor, browserForId, cleanupDb, sleep, sql } from "./pw-lib.mjs";
 
-const WIDTHS = [1920, 1366, 1024, 800];
+const SIZES = [[1440, 900], [1280, 800], [1024, 768], [800, 1280], [768, 1024], [390, 844]];
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGklEQVR4nGP4z8BAEmIY1TCqYVTDqIbhqgEAOK8f8Rf2cHcAAAAASUVORK5CYII=", "base64");
 
 /** In the browser: the problems inside one open pop-up. */
@@ -85,9 +87,15 @@ async function check(page, label, rootSel, open, findings, shots) {
     notReached.push(`${label}: could not be opened (${String(e.message ?? e).split("\n")[0].slice(0, 80)})`);
     return;
   }
-  for (const w of WIDTHS) {
-    await page.setViewportSize({ width: w, height: 1000 });
+  for (const [w, h] of SIZES) {
+    await page.setViewportSize({ width: w, height: h });
     await sleep(400);
+    const stillOpen = await page.locator(rootSel).last().isVisible().catch(() => false);
+    if (!stillOpen) {
+      await open().catch(() => null);
+      await page.waitForSelector(rootSel, { state: "visible", timeout: 6000 }).catch(() => null);
+      await sleep(300);
+    }
     const problems = await page.evaluate(measure, rootSel).catch((e) => [`measuring failed: ${String(e).slice(0, 60)}`]);
     const slug = label.replace(/\W+/g, "-").toLowerCase();
     await page.screenshot({ path: `tests/browser/shots/layout/popup-${slug}-${w}.png` }).catch(() => null);

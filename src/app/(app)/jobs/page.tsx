@@ -1,8 +1,6 @@
-import Link from "next/link";
-import { CarPicture } from "@/components/CarPicture";
+import { CarCard } from "@/components/CarCard";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
-import { StageTrack } from "@/components/StageTrack";
-import { Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
+import { Badge, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
 import { formatDate } from "@/lib/format";
@@ -65,29 +63,24 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
           {rows.map((j) => {
             const timing = jobTiming(j.promised_at, j.is_open, clockFor(j));
             return (
-              <Link key={j.id} href={`/jobs/${j.id}`} className="block">
-                <Card className="flex flex-col md:flex-row md:items-center gap-5 hover:border-ink">
-                  <CarPicture url={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : "Car"} className="w-full md:w-48" />
-                  <div className="flex-1 min-w-0 flex flex-col gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[17px] font-extrabold tracking-[0.03em]">{j.vehicle ? formatPlate(j.vehicle) : "?"}</span>
-                      {j.job_kind === "loose" ? <Badge tone="ink">Loose items</Badge> : null}
-                      <PriorityBadge priority={j.priority} />
-                      <TimingBadge timing={timing} />
-                      {!j.is_open ? <Badge>Closed</Badge> : null}
-                    </div>
-                    <span className="text-sm font-semibold">{[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}</span>
-                    <span className="text-xs text-muted">
-                      {j.job_number} · {j.customer ? (j.customer.company_name ?? j.customer.full_name) + " · " : ""}
-                      {closed ? `Out ${formatDate(j.gated_out_at)}` : `In ${formatDate(j.gated_in_at)}`}
-                    </span>
-                  </div>
-                  <div className="md:flex-[2] min-w-0 flex flex-col gap-2.5">
-                    <span className="text-sm font-bold">{STATUS_LABELS[j.status]}</span>
-                    <StageTrack stage={j.stage} timing={timing} skip={j.job_kind === "loose" ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
-                  </div>
-                </Card>
-              </Link>
+              <CarCard
+                key={j.id}
+                href={`/jobs/${j.id}`}
+                pictureUrl={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null}
+                plate={j.vehicle ? formatPlate(j.vehicle) : "?"}
+                title={[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}
+                sub={[j.customer ? (j.customer.company_name ?? j.customer.full_name) : null, j.job_number, closed ? `Out ${formatDate(j.gated_out_at)}` : `In ${formatDate(j.gated_in_at)}`]}
+                chips={
+                  <>
+                    {j.job_kind === "loose" ? <Badge tone="ink">Loose items</Badge> : null}
+                    <PriorityBadge priority={j.priority} />
+                    <TimingBadge timing={timing} />
+                    {!j.is_open ? <Badge>Closed</Badge> : null}
+                  </>
+                }
+                status={{ line: STATUS_LABELS[j.status] }}
+                stage={{ stage: j.stage, timing, skip: j.job_kind === "loose" ? ["inspection", "wash"] : undefined }}
+              />
             );
           })}
         </div>

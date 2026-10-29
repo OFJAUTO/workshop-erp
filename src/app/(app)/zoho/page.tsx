@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow, type ZohoKind } from "@/lib/zoho-sync";
@@ -43,7 +43,7 @@ const aed = (n: number) => `AED ${Number(n).toLocaleString("en-GB", { minimumFra
 function resultWords(row: OutboxRow): string | null {
   const r = row.zoho_result as Record<string, unknown> | null;
   if (!r) return null;
-  if (r.manual === true) return `Done by hand by ${String(r.name ?? "accounts")} on ${String(r.at ?? "").slice(0, 10)}: ${String(r.note ?? "")}`;
+  if (r.manual === true) return `Done by hand by ${String(r.name ?? "accounts")} on ${formatDate(String(r.at ?? ""))}: ${String(r.note ?? "")}`;
   if (typeof r.skipped === "string") return r.skipped;
   if (row.kind === "invoice") {
     const z = r.zoho as { total?: number; vat?: number; balance?: number } | undefined;
@@ -142,7 +142,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Zoho Books sync"
-        subtitle={`One-way: the ERP posts its documents to Zoho. ${live ? "LIVE: writes go to the REAL organization." : stopped ? "STOPPED by the owner: nothing posts to any Zoho book until Resume; documents wait in the queue." : `Writes go to OFJ TEST only (${org ?? "no test organization picked"}); the REAL book (${ZOHO_REAL_ORG_ID}) stays read-only until go-live.`}`}
+        subtitle={`One-way: the ERP posts its documents to Zoho. ${live ? "LIVE: writes go to the REAL organization." : stopped ? "STOPPED by the owner: nothing posts to any Zoho book until Resume; documents wait in the queue." : `Writes go to OFJ TEST only (${org ?? "no test organization picked"}); the REAL book (${ZOHO_REAL_ORG_ID}) stays read-only until the books go live.`}`}
         actions={
           <span className="flex flex-wrap gap-2">
             <LinkButton href="/zoho/reconciliation" tone="secondary">Reconciliation</LinkButton>
@@ -181,7 +181,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
               <Card className="flex flex-wrap items-center gap-3" data-golive-review>
                 <SectionLabel>Go-live review</SectionLabel>
                 {reviewed.at ? (
-                  <p className="text-sm font-semibold text-green" data-golive-reviewed>Reviewed side by side by {reviewed.name ?? "accounts"} on {String(reviewed.at).slice(0, 10)}.</p>
+                  <p className="text-sm font-semibold text-green" data-golive-reviewed>Reviewed side by side by {reviewed.name ?? "accounts"} on {formatDate(String(reviewed.at))}.</p>
                 ) : (
                   <form action={tickGoLiveReview} className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-muted">Once OFJ TEST matches the ERP side by side, tick it here — the owner&apos;s go-live checklist turns green.</span>

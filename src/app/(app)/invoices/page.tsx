@@ -87,7 +87,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         </form>
         <div className="flex flex-wrap gap-1 text-xs font-bold" data-money-filters>
           {FILTERS.map((f) => (
-            <Link key={f.key} href={keep({ show: f.key })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${show === f.key ? "bg-ink text-white" : "bg-chip"}`} data-filter={f.key}>{f.label} · {counts[f.key]}</Link>
+            <Link key={f.key} href={keep({ show: f.key })} className={`min-h-11 inline-flex items-center rounded-control px-3 ${show === f.key ? "bg-ink text-white" : "bg-chip"}`} data-filter={f.key}>{f.label} · {counts[f.key]}</Link>
           ))}
         </div>
       </Card>

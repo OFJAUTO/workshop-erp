@@ -1,6 +1,7 @@
 import "server-only";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { formatDate } from "@/lib/format";
 import { ZOHO_REAL_ORG_ID, listAccounts, listTaxes, zohoConfigured, zohoConnection, zohoFetch } from "@/lib/zoho";
 import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, readZohoMap } from "@/lib/zoho-sync";
 
@@ -70,7 +71,7 @@ export async function goLiveChecklist(opts: { checkReal?: boolean } = {}): Promi
     key: "reviewed",
     label: "Accountant reviewed OFJ TEST side by side",
     ok: !!reviewed.at,
-    detail: reviewed.at ? `Ticked by ${reviewed.name ?? "accounts"} on ${String(reviewed.at).slice(0, 10)}` : "Mathew ticks this from his own login once the review is done.",
+    detail: reviewed.at ? `Ticked by ${reviewed.name ?? "accounts"} on ${formatDate(String(reviewed.at))}` : "Mathew ticks this from his own login once the review is done.",
   });
 
   // 2. The mapping has a name in every box.

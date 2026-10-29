@@ -615,7 +615,7 @@ export function InspectionForm({
 
       {requests.length ? (
         <>
-          <button type="button" onClick={() => setBarOpen((o) => !o)} className="sticky top-1 z-20 flex items-start gap-2 rounded-control border border-line bg-white/95 px-3 py-1.5 text-left text-xs shadow-sm backdrop-blur" aria-expanded={barOpen}>
+          <button type="button" onClick={() => setBarOpen((o) => !o)} className="sticky top-[4.5rem] nav:top-1 z-20 flex items-start gap-2 rounded-control border border-line bg-white/95 px-3 py-1.5 text-left text-xs shadow-sm backdrop-blur" aria-expanded={barOpen}>
             <span className="shrink-0 font-bold">Customer says:</span>
             <span className={barOpen ? "whitespace-pre-wrap" : "truncate"}>{requests.map((r, i) => `${i + 1}. ${r.text}`).join(barOpen ? "\n" : " · ")}</span>
           </button>

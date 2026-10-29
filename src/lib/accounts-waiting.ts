@@ -7,6 +7,7 @@ import type { ExtraWaiting } from "@/components/WaitingPanel";
 import { createAdminClient } from "./supabase/admin";
 import { loadUnsettled } from "./card-settlements";
 import { formatPlate } from "./types";
+import { formatDate } from "./format";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
 type PlateRow = Parameters<typeof formatPlate>[0];
@@ -189,7 +190,7 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
   // 7. A red reconciliation day (phase 4): the books differ somewhere until someone looks.
   const { data: redDays } = await admin.from("zoho_reconciliation").select("day, checked_at").eq("status", "red").order("day", { ascending: false }).limit(5);
   for (const d of (redDays ?? []) as { day: string; checked_at: string }[]) {
-    out.push({ jobId: `recon:${d.day}`, plate: "Zoho Books", car: null, what: `Reconciliation differs on ${String(d.day).slice(0, 10)}`, amount: null, actionLabel: "Open the reconciliation", href: "/zoho/reconciliation", always: true, urgency: "amber", since: d.checked_at });
+    out.push({ jobId: `recon:${d.day}`, plate: "Zoho Books", car: null, what: `Reconciliation differs on ${formatDate(`${String(d.day).slice(0, 10)}T12:00:00Z`)}`, amount: null, actionLabel: "Open the reconciliation", href: "/zoho/reconciliation", always: true, urgency: "amber", since: d.checked_at });
   }
   return out;
 }

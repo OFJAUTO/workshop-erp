@@ -6,10 +6,10 @@ import { usePathname } from "next/navigation";
 /** A menu entry; `badge` is a count of things waiting there (for example price requests for Parts). */
 export type NavItem = { href: string; label: string; badge?: number };
 
-export function SidebarNav({ items }: { items: NavItem[] }) {
+export function SidebarNav({ items }: { items: NavItem[]; /** Kept for the phone menu; the list is always one column now. */ vertical?: boolean }) {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-row md:flex-col gap-1 shrink-0">
+    <nav className="flex flex-col gap-1 shrink-0">
       {items.map((n) => {
         const active = pathname === n.href || (n.href !== "/home" && pathname.startsWith(n.href + "/")) || (n.href !== "/home" && pathname === n.href);
         return (

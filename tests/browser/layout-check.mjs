@@ -1,86 +1,103 @@
-// The automatic layout check: logs in as every role, opens every page in that role's menu, and at
-// 1920 / 1366 / 1024 / 800 wide fails when anything interactive overlaps something else, is cut off at
-// the right edge, or the page scrolls sideways. Screenshots land in tests/browser/shots/layout/.
-// Run after every batch, before reporting done:  npm run test:layout
+// The automatic layout check (29 October 2026, batch section 2): every page of every role's menu, the job-level
+// pages of a seeded test car and every customer page, at the computer, tablet and phone sizes, plus once with the
+// text at 130%. Fails on anything layout-rules.mjs finds: sideways scrolling, controls overlapping or cut off, text
+// on text, clipped text, a word broken across two lines, something sticking out of its card, a button too small for
+// a finger on a touch screen. Screenshots land in tests/browser/shots/layout/.
+//   npm run test:layout                       every role, the customer pages, then every pop-up
+//   ROLE=owner PART=1/2 npm run test:layout   one role (or the customer pages, ROLE=customer), optionally a slice of
+//                                             its pages so each run stays well under 15 minutes
+//   ROLE=popups npm run test:layout           the pop-ups only
 import { mkdirSync } from "node:fs";
-import { MANAGER_MECH, browserFor, browserForId, base, go, sql } from "./pw-lib.mjs";
+import { randomBytes } from "node:crypto";
+import { MANAGER_MECH, api, browserFor, browserForId, base, cleanupDb, go, sql } from "./pw-lib.mjs";
+import { measurePage } from "./layout-rules.mjs";
 
 mkdirSync("tests/browser/shots/layout", { recursive: true });
-const WIDTHS = [1920, 1366, 1024, 800];
+/** [width, height, touch]: a computer, a laptop, an Android tablet sideways and upright, an iPad both ways, a phone. */
+const SIZES = [
+  [1920, 1080, false],
+  [1440, 900, false],
+  [1366, 768, false],
+  [1280, 800, true],
+  [1024, 768, true],
+  [800, 1280, true],
+  [768, 1024, true],
+  [390, 844, true],
+];
+/** Once per page with the text at 130% (a person who set larger text on the tablet). */
+const BIG_TEXT = [800, 1280, true];
 const onlyRole = process.env.ROLE ?? "";
+// A quick check of only the pages a change touched: PAGES=/dashboard,/jobs SIZES=800x1280,1440x900 (no 130% pass).
+const onlyPages = (process.env.PAGES ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+const onlySizes = (process.env.SIZES ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+const [partNo, partOf] = (process.env.PART ?? "1/1").split("/").map((n) => Number(n) || 1);
 
-/** What counts as a problem on one page, measured inside the real browser. */
-async function problemsOn(page) {
-  return page.evaluate(() => {
-    const problems = [];
-    const doc = document.documentElement;
-    if (doc.scrollWidth > window.innerWidth + 1) problems.push(`horizontal scroll (page ${doc.scrollWidth}px in a ${window.innerWidth}px window)`);
-    const els = [...document.querySelectorAll("button, a[href], input, select, textarea, [role='button']")].filter((el) => {
-      if (el.closest("[aria-hidden='true']") || el.closest("[data-overlap-ok]") || el.closest("dialog")) return false;
-      // Chromium keeps layout boxes for content inside a CLOSED <details> (hidden-until-found): not on screen.
-      for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) {
-        if (!d.open && !(el.closest("summary") && d.contains(el.closest("summary")))) return false;
-      }
-      const cs = getComputedStyle(el);
-      if (cs.visibility === "hidden" || cs.display === "none" || Number(cs.opacity) === 0) return false;
-      const r = el.getBoundingClientRect();
-      if (r.width < 8 || r.height < 8) return false;
-      // Rows inside a sideways-scrolling strip clip themselves; what is scrolled out of such a strip is not on screen.
-      let n = el.parentElement;
-      while (n && n !== document.body) {
-        const ncs = getComputedStyle(n);
-        if ((ncs.overflowX === "auto" || ncs.overflowX === "scroll") && n.scrollWidth > n.clientWidth + 1) {
-          const nr = n.getBoundingClientRect();
-          if (r.right <= nr.left + 1 || r.left >= nr.right - 1) return false;
-        }
-        n = n.parentElement;
-      }
-      return true;
-    });
-    const rects = els.map((el) => ({ el, r: el.getBoundingClientRect() }));
-    const label = (el) => `${el.tagName.toLowerCase()} "${((el.textContent || el.getAttribute("aria-label") || el.getAttribute("placeholder") || "").trim()).slice(0, 40)}"`;
-    const inBottomBar = (el) => {
-      let n = el;
-      while (n && n !== document.body) {
-        const p = getComputedStyle(n).position;
-        if (p === "fixed" || p === "sticky") return n.getBoundingClientRect().top > window.innerHeight * 0.55;
-        n = n.parentElement;
-      }
-      return false;
-    };
-    const inSidewaysScroller = (el) => {
-      // A box clipped by its own overflow-x-auto strip can be scrolled into view: that is the strip working, not a cut-off.
-      let n = el.parentElement;
-      while (n && n !== document.body) {
-        const ncs = getComputedStyle(n);
-        if ((ncs.overflowX === "auto" || ncs.overflowX === "scroll") && n.scrollWidth > n.clientWidth + 1 && n.getBoundingClientRect().right <= window.innerWidth + 1) return true;
-        n = n.parentElement;
-      }
-      return false;
-    };
-    for (const { el, r } of rects) {
-      if (r.right > window.innerWidth + 1 && r.left < window.innerWidth - 4 && !inSidewaysScroller(el)) problems.push(`cut off at the right edge: ${label(el)}`);
+// The tablet and phone sizes are real touch screens (a coarse pointer, no hover), switched on the open page, so the
+// page's touch rules (44 px controls) apply exactly as on the device.
+const cdpOf = new WeakMap();
+async function setTouch(page, on) {
+  let s = cdpOf.get(page);
+  if (!s) {
+    s = { cdp: await page.context().newCDPSession(page), on: false };
+    cdpOf.set(page, s);
+  }
+  if (s.on === on) return;
+  await s.cdp.send("Emulation.setTouchEmulationEnabled", on ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+  s.on = on;
+}
+
+async function check(page, path, width, height, touch, big, tag, findings) {
+  await page.setViewportSize({ width, height });
+  await setTouch(page, touch);
+  try {
+    await go(page, `${base}${path}`);
+  } catch {
+    findings.push(`${tag} ${path} @${width}x${height}: the page did not load`);
+    return;
+  }
+  if (big) await page.addStyleTag({ content: "html { font-size: 130% !important; }" }).catch(() => null);
+  await page.waitForTimeout(big ? 700 : 400);
+  const problems = await page.evaluate(measurePage, { touch }).catch((e) => [`check failed: ${String(e).slice(0, 80)}`]);
+  const slug = path.replace(/\W+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "home";
+  await page.screenshot({ path: `tests/browser/shots/layout/${tag}-${slug}-${width}x${height}${big ? "-130" : ""}.png` }).catch(() => null);
+  const where = `${tag} ${path} @${width}x${height}${big ? " (text 130%)" : ""}`;
+  for (const p of problems) findings.push(`${where}: ${p}`);
+  if (problems.length) console.log(`FAIL ${where}\n  - ${problems.join("\n  - ")}`);
+  return problems.length;
+}
+
+async function checkPages(page, tag, paths, findings, counter) {
+  for (const path of paths) {
+    for (const [w, h, touch] of SIZES.filter(([w, h]) => !onlySizes.length || onlySizes.includes(`${w}x${h}`))) {
+      await check(page, path, w, h, touch, false, tag, findings);
+      counter.n++;
     }
-    for (let i = 0; i < rects.length; i++) {
-      for (let j = i + 1; j < rects.length; j++) {
-        const a = rects[i];
-        const b = rects[j];
-        if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
-        const ox = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
-        const oy = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
-        if (ox > 4 && oy > 4) {
-          if (inBottomBar(a.el) !== inBottomBar(b.el)) continue; // a bottom action bar floats over scrolled content by design
-          problems.push(`overlap: ${label(a.el)} ON ${label(b.el)} (${Math.round(ox)}×${Math.round(oy)}px)`);
-        }
-      }
-    }
-    return [...new Set(problems)].slice(0, 15);
-  });
+    if (onlySizes.length) continue;
+    await check(page, path, BIG_TEXT[0], BIG_TEXT[1], BIG_TEXT[2], true, tag, findings);
+    counter.n++;
+  }
+}
+
+/** The seeded test car (fixed test ids, removed by the clean-up): its job pages and its customer links. */
+async function seedPages() {
+  const ready = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const insp = (await sql("select id from public.inspections where job_id = $1 limit 1", [ready.jobId]))[0]?.id ?? null;
+  const reportToken = randomBytes(16).toString("base64url");
+  if (insp) await sql("insert into public.report_links (job_id, inspection_id, token, created_by, updated_by, opened_at, status) values ($1, $2, $3, $4, $4, now(), 'opened')", [ready.jobId, insp, reportToken, owner]);
+  const approvalToken = randomBytes(16).toString("base64url");
+  await sql("insert into public.approval_requests (job_id, token, status, sent_to_phone, sent_to_name, terms_text, created_by, opened_at) values ($1, $2, 'sent', '+971500000001', 'E2e Customer', 'Terms', $3, now())", [ready.jobId, approvalToken, owner]);
+  const qToken = (await sql("select token from public.quotations where id = $1", [ready.quotationId]))[0]?.token ?? null;
+  const job = ready.jobId;
+  return {
+    staff: [`/jobs/${job}`, `/jobs/${job}/quote/${ready.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
+    customer: [qToken ? `/quote/${qToken}` : null, ready.invoice?.token ? `/invoice/${ready.invoice.token}` : null, ready.invoice?.token ? `/proforma/${ready.invoice.token}` : null, insp ? `/report/${reportToken}` : null, `/approve/${approvalToken}`].filter(Boolean),
+  };
 }
 
 async function roleBrowser(role) {
-  if (role.id) return browserForId(role.id, { viewport: { width: 1920, height: 1100 } });
-  return browserFor(role.key, { viewport: { width: 1920, height: 1100 } });
+  if (role.id) return browserForId(role.id, { viewport: { width: 1440, height: 900 } });
+  return browserFor(role.key, { viewport: { width: 1440, height: 900 } });
 }
 
 const technicianId = (await sql("select id from public.staff where role_id = 'technician' and is_active order by display_name limit 1"))[0]?.id ?? null;
@@ -98,45 +115,43 @@ const roles = [
 ].filter(Boolean).filter((r) => !onlyRole || r.name === onlyRole);
 
 // Pages reached from inside another page (not in the menu) that still need checking.
-const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties"], accounts: ["/commissions"] };
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements"], accounts: ["/commissions", "/card-settlements"] };
 
-let pagesChecked = 0;
-let shots = 0;
+const counter = { n: 0 };
 const findings = [];
+const needSeed = !onlyRole || onlyRole === "owner" || onlyRole === "customer";
+const seeded = needSeed ? await seedPages() : { staff: [], customer: [] };
+const slice = (list) => {
+  if (partOf <= 1) return list;
+  const size = Math.ceil(list.length / partOf);
+  return list.slice((partNo - 1) * size, partNo * size);
+};
 for (const role of roles) {
   const { browser, page } = await roleBrowser(role);
   await go(page, `${base}/`);
-  // Every page in this role's menu, plus wherever the role landed.
-  const hrefs = await page.evaluate(() => [...document.querySelectorAll("aside a[href]")].map((a) => a.getAttribute("href")).filter((h) => h && h.startsWith("/") && !h.startsWith("/api")));
+  // Every page in this role's menu (the sidebar on a computer), plus wherever the role landed.
+  const hrefs = await page.evaluate(() => [...document.querySelectorAll("aside a[href], [data-menu-drawer] a[href]")].map((a) => a.getAttribute("href")).filter((h) => h && h.startsWith("/") && !h.startsWith("/api")));
   const landed = new URL(page.url()).pathname;
-  const targets = [...new Set([landed, ...hrefs, ...(EXTRA_PAGES[role.name] ?? [])])];
-  for (const path of targets) {
-    for (const width of WIDTHS) {
-      await page.setViewportSize({ width, height: 1050 });
-      try {
-        await go(page, `${base}${path}`);
-      } catch {
-        findings.push(`${role.name} ${path} @${width}: the page did not load`);
-        continue;
-      }
-      await page.waitForTimeout(500);
-      const problems = await problemsOn(page).catch((e) => [`check failed: ${String(e).slice(0, 80)}`]);
-      pagesChecked++;
-      const slug = path.replace(/\W+/g, "-").replace(/^-|-$/g, "") || "home";
-      await page.screenshot({ path: `tests/browser/shots/layout/${role.name}-${slug}-${width}.png` }).catch(() => null);
-      shots++;
-      for (const p of problems) findings.push(`${role.name} ${path} @${width}: ${p}`);
-      if (problems.length) console.log(`FAIL ${role.name} ${path} @${width}\n  - ${problems.join("\n  - ")}`);
-    }
-  }
+  const targets = slice([...new Set([landed, ...hrefs, ...(EXTRA_PAGES[role.name] ?? []), ...(role.name === "owner" ? seeded.staff : [])])]).filter((p) => !onlyPages.length || onlyPages.includes(p));
+  await checkPages(page, role.name, targets, findings, counter);
   await browser.close();
   console.log(`${role.name}: ${targets.length} pages done`);
 }
-// Every pop-up too (B3, 28 October 2026): with the full check, or alone with ROLE=popups.
+// The customer pages, without a login.
+if (!onlyRole || onlyRole === "customer") {
+  const { chromium } = await import("playwright-core");
+  const cb = await chromium.launch({ executablePath: process.env.E2E_BROWSER ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+  const page = await (await cb.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await checkPages(page, "customer", slice(seeded.customer), findings, counter);
+  await cb.close();
+  console.log(`customer: ${seeded.customer.length} pages done`);
+}
+if (needSeed) cleanupDb();
+// Every pop-up too: with the full check, or alone with ROLE=popups.
 if (!onlyRole || onlyRole === "popups") {
   const { runPopups } = await import("./popup-check.mjs");
   findings.push(...(await runPopups()));
 }
-console.log(`\n${pagesChecked} page views checked across ${roles.length} roles and ${WIDTHS.length} widths · ${shots} screenshots in tests/browser/shots/layout/`);
-console.log(findings.length ? `${findings.length} problems found` : "No overlaps, nothing cut off, no sideways scrolling.");
+console.log(`\n${counter.n} page views checked · sizes ${SIZES.map(([w, h]) => `${w}x${h}`).join(", ")} and ${BIG_TEXT[0]}x${BIG_TEXT[1]} with the text at 130% · screenshots in tests/browser/shots/layout/`);
+console.log(findings.length ? `${findings.length} problems found` : "No overlaps, nothing cut off, no text on text, no broken words, nothing out of its card, no sideways scrolling.");
 process.exit(findings.length ? 1 : 0);
