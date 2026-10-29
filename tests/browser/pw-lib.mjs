@@ -83,6 +83,15 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // A first visit compiles the page on the dev server, which can take longer than the usual 15 s.
 export const go = async (page, url) => { await page.goto(url, { waitUntil: "load", timeout: 60000 }); await sleep(1500); };
 export const settle = async (page) => { await page.waitForLoadState("load"); await sleep(1500); };
+/** Ready without a fixed wait: loaded, hydrated (the bell has docked into its slot on a staff page), fonts in, two frames drawn. */
+export async function pageReady(page) {
+  await page.waitForFunction(() => {
+    if (document.readyState !== "complete") return false;
+    const slots = document.querySelectorAll("#header-bell-slot, #topbar-bell-slot, [data-bell-fallback]");
+    return !slots.length || !!document.querySelector("#header-bell-slot button, #topbar-bell-slot button, [data-bell-fallback] button");
+  }, null, { timeout: 10000, polling: 100 }).catch(() => null);
+  await page.evaluate(() => document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))).catch(() => null);
+}
 /** Waits for a form's redirect: the URL changes and carries ?message= or ?error=. Never waits for "networkidle" (the notification poll never stops). */
 export const submitted = async (page) => { const before = page.url(); await page.waitForURL((u) => u.toString() !== before && /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null); await settle(page); };
 

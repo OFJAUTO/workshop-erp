@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions, sessionWindow } from "@/lib/session";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** Signs the test script in as one staff member on the local server, so it can read every page. Never in production. */
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   const body = (await request.json().catch(() => ({}))) as { role?: string; id?: string };

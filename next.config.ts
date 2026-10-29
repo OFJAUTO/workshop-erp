@@ -12,6 +12,8 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
+  // The local production test server (npm run test:server) builds into its own folder, never the dev server's.
+  ...(process.env.ERP_DIST_DIR ? { distDir: process.env.ERP_DIST_DIR } : {}),
   env: { NEXT_PUBLIC_APP_VERSION: APP_VERSION },
   // A phone photo sent with a form (supplier "mark paid", film rolls, sticker settings) is usually 2-4 MB; the
   // default limit was 1 MB. Vercel's own ceiling is 4.5 MB, so large files go straight to storage instead.

@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
  * screen makes them, so the numbering can be read back (C-00001, J-00001). Never in production.
  */
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   // Each call makes its own plate (the active plate is unique), unless the caller names one.

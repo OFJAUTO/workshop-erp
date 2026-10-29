@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { ZOHO_REAL_ORG_ID, ZohoError, zohoFetch } from "@/lib/zoho";
 import { beforeGoLiveStart, readZohoMap, reopenZoho, zohoWriteOrg, type ZohoKind } from "@/lib/zoho-sync";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * runs on a dev machine with no Zoho secret at all.
  */
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   const body = (await request.json().catch(() => ({}))) as { action?: string };

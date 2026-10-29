@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { ensureInspection } from "@/lib/inspection-data";
 import { newToken } from "@/lib/media";
@@ -31,7 +32,7 @@ const LVEH = ID("20"), LJOB = ID("21"), LIT1 = ID("22"), LIT2 = ID("23"), LREQ =
 const BVEH = ID("30"), BJOB = ID("31"), BQ = ID("32"), BGI = ID("33"), BAPPT = ID("34");
 
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number; /** A name for the labour line, given while the quotation is still a draft. */ labourTitle?: string; /** How the customer is expected to pay (set on the draft, before approval locks it). */ method?: string };

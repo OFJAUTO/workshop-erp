@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { createNextVersion, missingPricedParts, syncMissingParts } from "@/lib/quote-versions";
 import { notifyStaff } from "@/lib/notifications";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
  * only listed for the owner. Local only, behind the e2e secret; { "dryRun": true } reports without changing anything.
  */
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   const body = (await request.json().catch(() => ({}))) as { dryRun?: boolean; by?: string };

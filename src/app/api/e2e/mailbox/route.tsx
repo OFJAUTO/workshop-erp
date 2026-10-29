@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { Document, Page, Text, renderToBuffer } from "@react-pdf/renderer";
 import { processMail, type MailAttachmentIn } from "@/lib/mailbox";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
  * as the attachment; `imageBase64` attaches a picture. Never in production.
  */
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   const body = (await request.json().catch(() => ({}))) as { from?: string; subject?: string; text?: string; pdfText?: string; fileName?: string; imageBase64?: string; messageId?: string; connectTest?: { refreshToken: string } };

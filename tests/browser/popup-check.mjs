@@ -10,7 +10,7 @@
 // Not opened on purpose: Settings > Zoho Books (the mirror, the go-live switch): a dev machine must never load that
 // page while the real Zoho connection is live (it refreshes the live token); those controls are plain forms, not pop-ups.
 import { pathToFileURL } from "node:url";
-import { api, base, browserFor, browserForId, cleanupDb, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, pageReady, sleep, sql } from "./pw-lib.mjs";
 
 const SIZES = [[1440, 900], [1280, 800], [1024, 768], [800, 1280], [768, 1024], [390, 844]];
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGklEQVR4nGP4z8BAEmIY1TCqYVTDqIbhqgEAOK8f8Rf2cHcAAAAASUVORK5CYII=", "base64");
@@ -89,7 +89,7 @@ async function check(page, label, rootSel, open, findings, shots) {
   }
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
-    await sleep(400);
+    await pageReady(page);
     const stillOpen = await page.locator(rootSel).last().isVisible().catch(() => false);
     if (!stillOpen) {
       await open().catch(() => null);
@@ -110,7 +110,7 @@ async function check(page, label, rootSel, open, findings, shots) {
 
 /** Pop-ups the run could not reach (a seed or a button missing): listed loudly, but they are not layout faults. */
 const notReached = [];
-const goto = async (page, url) => { await page.goto(`${base}${url}`, { waitUntil: "load", timeout: 60000 }); await sleep(1500); };
+const goto = async (page, url) => { await page.goto(`${base}${url}`, { waitUntil: "load", timeout: 60000 }); await pageReady(page); };
 const click = (page, sel) => page.locator(sel).first().click({ timeout: 8000 });
 
 export async function runPopups() {

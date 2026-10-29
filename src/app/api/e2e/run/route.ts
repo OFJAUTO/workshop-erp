@@ -1,3 +1,4 @@
+import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { buildInvoiceDraft, nextDocumentNumber } from "@/lib/invoice-data";
 import { recordJobSummary } from "@/lib/job-summary";
@@ -27,7 +28,7 @@ const ID = (n: string) => `22222222-0000-4000-8000-00000000e2${n}`;
 const CUST = ID("01"), VEH = ID("02"), JOB1 = ID("03"), JOB2 = ID("04"), Q1 = ID("05"), Q2 = ID("06"), PA = ID("07"), PB = ID("08"), PC = ID("09"), GI1 = ID("0a"), GI2 = ID("0b"), INV1 = ID("0c"), INV2 = ID("0d");
 
 export async function POST(request: NextRequest) {
-  if (process.env.NODE_ENV === "production" || !process.env.E2E_SECRET || request.headers.get("x-e2e-secret") !== process.env.E2E_SECRET) {
+  if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
   const admin = createAdminClient();
