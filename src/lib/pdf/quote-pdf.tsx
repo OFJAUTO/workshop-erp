@@ -17,6 +17,8 @@ import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { cleanTintSpec, decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { DocumentTail, GREY, InfoBoxes, PackageSection, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
+import { additionalToOf } from "@/lib/quote-history-data";
+import { additionalLine } from "@/lib/quote-history";
 
 /**
  * The customer's quotation or estimate on the document template: the header, two grey boxes, three bordered boxes
@@ -74,11 +76,13 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const carName = vehicle ? [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ") : "";
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
   const discountLabel = discountLabelOf(q, { hasPackage: hasPackageLine(lines) });
+  // An additional quotation (29 October 2026): its own title and the quotation(s) it adds to.
+  const addsToLine = isEstimate ? null : additionalLine(await additionalToOf(q.job_id, q.number));
 
   const doc = (
     <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={[]} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
       <TitleRow
-        title={isEstimate ? "ESTIMATE" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
+        title={isEstimate ? "ESTIMATE" : addsToLine ? "ADDITIONAL QUOTATION" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
         meta={[
           { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },
           { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
@@ -86,6 +90,7 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           job ? { label: "Job card", value: job.job_number } : null,
         ]}
       />
+      {addsToLine ? <Text style={{ fontSize: px(12), fontWeight: 700, marginTop: px(-8), marginBottom: px(12) }}>{addsToLine}</Text> : null}
       <InfoBoxes
         boxes={[
           { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? customer.full_name : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },

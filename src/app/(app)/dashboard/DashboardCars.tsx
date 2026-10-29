@@ -7,6 +7,8 @@ import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { StageTrack } from "@/components/StageTrack";
 import {Badge, Card, Empty, SectionLabel, Select} from "@/components/ui";
 import { PENDING_GROUPS, STATUS_LABELS, type JobStatus, type Priority, type Stage, type Timing } from "@/lib/jobs";
+import { QuotePicker } from "@/components/QuotePicker";
+import type { QuotePickItem } from "@/lib/quote-history";
 
 /** One car on the dashboard, already shaped on the server so the list can be filtered and sorted here. */
 export type DashRow = {
@@ -44,6 +46,9 @@ export type DashRow = {
   /** Section 4: the advisor in charge (small badge on the card) and whether the car is the viewer's own. */
   advisorName: string | null;
   mine: boolean;
+  /** Section 1 (29 October 2026): every quotation of the car (owner and advisors), and the chip while an additional one waits. */
+  quotes: QuotePickItem[];
+  extraQuote: string | null;
 };
 
 /** The small advisor-in-charge badge: initial circle + name, on every car card. */
@@ -254,6 +259,8 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
                     <span className="text-sm font-bold">{j.statusLine || STATUS_LABELS[j.status]}</span>
                     {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
                     {j.priced ? <Badge tone="green">Priced</Badge> : null}
+                    {j.extraQuote ? <span className="inline-flex rounded-full bg-amber-soft px-2.5 py-1 text-[11px] font-bold text-amber" data-extra-quote-chip>{j.extraQuote}</span> : null}
+                    {j.quotes.length > 1 ? <QuotePicker items={j.quotes} /> : null}
                   </span>
                   <StageTrack stage={j.stage} timing={j.timing} skip={j.loose ? ["inspection", "wash"] : undefined} roadTest={j.status === "pending_road_test" ? "waiting" : null} />
                 </div>

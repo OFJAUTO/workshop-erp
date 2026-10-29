@@ -85,8 +85,10 @@ await section("1 our stock part after sending", async () => {
   const linkBefore = pageText(await (await fetch(`${base}/quote/${token}`)).text());
   check("1: while version 2 is a draft the customer's link says it is being updated", /being updated/i.test(linkBefore));
   await sql("update public.quotations set status = 'sent', sent_at = now(), sent_by = $2, completed_at = now() where id = $1", [v2, owner]);
-  const linkAfter = pageText(await (await fetch(`${base}/quote/${token}`)).text());
   const v2tok = (await sql("select token from public.quotations where id = $1", [v2]))[0]?.token;
+  // 29 October 2026: the old link says the quotation was updated and points to version 2, which opens on its own link.
+  const oldLink = pageText(await (await fetch(`${base}/quote/${token}`)).text());
+  const linkAfter = /This quotation has been updated/.test(oldLink) && v2tok ? pageText(await (await fetch(`${base}/quote/${v2tok}`)).text()) : oldLink;
   const pub = v2tok ? await fetch(`${base}/api/pdf/quote/${v2tok}`) : null;
   const pubText = pub && pub.ok ? await pdfText(Buffer.from(await pub.arrayBuffer())) : "";
   check("1: once sent, the customer's link opens version 2 and its PDF carries the part", /Updated on/.test(linkAfter) && /REAR BRAKE DISCS/.test(pubText), `link ${/Updated on/.test(linkAfter)} pdf ${pub?.status}`);

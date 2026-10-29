@@ -31,6 +31,9 @@ import { jobCharges } from "@/lib/supplier-charges";
 import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { severityLabel } from "@/lib/car-outline";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
+import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
+import { oldVersionBanner } from "@/lib/quote-history";
+import { loadJobQuotes, staffNames } from "@/lib/quote-history-data";
 
 export const dynamic = "force-dynamic";
 
@@ -130,6 +133,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
+  // An additional quotation (a later number on the job) does not carry the suppliers' charges: the original does.
+  const jobFamilies = await loadJobQuotes(id);
+  const isOriginalQuote = !jobFamilies.length || jobFamilies[0].number === q.number;
   const editorSettings = {
     labourRate: labourRateFor(settings, job?.department ?? null, vehicle?.make?.name ?? null),
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
@@ -142,7 +148,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     batteryWarrantyMonths: Number(settings.battery_warranty_months) || 12,
     technicianCostRate: Number(settings.technician_cost_rate_aed) || 0,
     bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
-    supplierCharges: q.job_id ? await (async () => { const cs = await jobCharges(q.job_id!); return { total: cs.reduce((a, c) => a + c.amount_aed, 0), words: cs.map((c) => `${c.description.toLowerCase()} · ${c.supplier_name}`).join(", ") }; })() : undefined,
+    supplierCharges: q.job_id && isOriginalQuote ? await (async () => { const cs = await jobCharges(q.job_id!); return { total: cs.reduce((a, c) => a + c.amount_aed, 0), words: cs.map((c) => `${c.description.toLowerCase()} · ${c.supplier_name}`).join(", ") }; })() : undefined,
     handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
     costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec),
@@ -168,6 +174,16 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           packageCost,
   };
   const tone = q.status === "approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
+  // Section 1 (29 October 2026): an old version says so in grey, with who replaced it and when; it opens read-only.
+  const newerVersion = bundle.versions.filter((v) => v.version > q.version).sort((a, b) => a.version - b.version)[0] ?? null;
+  const versionNames = await staffNames(bundle.versions.map((v) => v.created_by));
+  // An approved version stays the approved one until its newer version is approved; any other older version is replaced.
+  const oldBanner = newerVersion
+    ? q.status === "approved"
+      ? `A newer version (v${newerVersion.version}) was started on ${formatDateTime(newerVersion.created_at)}${versionNames.get(newerVersion.created_by ?? "") ? ` by ${versionNames.get(newerVersion.created_by ?? "")}` : ""}. This approved version stands until v${newerVersion.version} is approved.`
+      : oldVersionBanner(bundle.versions, q.id, (sid) => (sid ? (versionNames.get(sid) ?? null) : null))
+    : null;
+  const shownLock = oldBanner && lock.locked ? { ...lock, banner: oldBanner } : lock;
   const urgentCount = bundle.lines.filter((l) => l.urgency === "urgent" && !isHidden(l)).length;
   const leftOutCount = bundle.lines.filter((l) => l.urgency !== "urgent" && !isHidden(l)).length;
 
@@ -206,15 +222,17 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
       {q.owner_approved_at && !approvalStands && q.status === "draft" ? <div data-owner-approval-stale><Notice tone="info">Changed since the owner approved it ({approvalNow.join("; ")}). Sending asks the owner again.</Notice></div> : null}
       {approvalStands && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
+      {oldBanner && !lock.locked ? (
+        <div className="rounded-card border border-line-strong bg-[#EDEDEF] px-4 py-3 text-sm font-bold text-[#3F3F46]" data-old-version-banner>
+          {oldBanner}
+        </div>
+      ) : null}
       {bundle.versions.length > 1 ? (
-        <p className="text-xs text-muted">
-          Versions:{" "}
-          {bundle.versions.map((v) => (
-            <Link key={v.id} href={`/jobs/${id}/quote/${v.id}`} className={`underline underline-offset-4 mr-2 ${v.id === q.id ? "font-bold text-ink" : ""}`}>
-              v{v.version} ({QUOTE_STATUS_LABELS[v.status as keyof typeof QUOTE_STATUS_LABELS] ?? v.status})
-            </Link>
-          ))}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-sm" data-quote-version-bar>
+          <span className="font-semibold text-muted">Versions of {q.number}:</span>
+          <QuoteVersionSelect jobId={id} versions={bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status }))} selectedId={q.id} />
+          {newerVersion ? <Link href={`/jobs/${id}/quote/${bundle.versions[bundle.versions.length - 1].id}`} className="font-semibold underline underline-offset-4" data-open-newest>Open the newest (v{bundle.versions[bundle.versions.length - 1].version})</Link> : null}
+        </div>
       ) : null}
 
       {q.status === "urgent_requested" && canSend ? (
@@ -242,7 +260,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         packages={packagesOf(settings)} department={job?.department ?? null}
         settings={editorSettings}
         readOnly={!canEdit}
-        lock={lock}
+        lock={shownLock}
         lockedBy={lockedBy}
         showProfit
         canSend={canSend}

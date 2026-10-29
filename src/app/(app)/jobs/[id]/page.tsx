@@ -36,9 +36,9 @@ import { latestQc, loadWash, loadWork } from "@/lib/work-data";
 import { markReadyToInvoice } from "../../invoices/actions";
 import { followUpDone } from "../gate-out-actions";
 import { ReadySendControl } from "./ReadySendControl";
-import { aed, quoteState } from "@/lib/quotes";
+import { quoteState } from "@/lib/quotes";
 import { ROAD_TEST_CHOICES, ROAD_TEST_DECISION_LABELS, ROAD_TEST_SELECT, roadTestLine, type RoadTestRow } from "@/lib/road-test";
-import { newQuotation, startQuotation } from "../../quotes/actions";
+import { startQuotation } from "../../quotes/actions";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, bankFeesOf } from "@/lib/settings";
 import { reasonsFor } from "@/lib/reasons";
@@ -78,6 +78,9 @@ import { StaffPicker } from "@/components/StaffPicker";
 import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
 import { sidesOfDepartment } from "@/lib/job-sides";
 import { bodyshopScopeOf, maySignAftercare } from "@/lib/team-scope";
+import { QuotationList } from "@/components/QuotationList";
+import { loadJobQuotes } from "@/lib/quote-history-data";
+import { anyApproved } from "@/lib/quote-history";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +103,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
   if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
-  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }] = await Promise.all([
+  const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }, quoteFamilies] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
     admin.from("move_requests").select("id, reason, status, to_status, decision_reason, decided_at, created_at, requester:staff!move_requests_requested_by_fkey(display_name), decider:staff!move_requests_decided_by_fkey(display_name)").eq("job_id", id).order("created_at", { ascending: false }),
@@ -110,6 +113,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     loadQuoteSummary(id),
     admin.from("part_items").select(PART_SELECT).eq("job_id", id).eq("is_active", true).order("created_at"),
     admin.from("inbound_scans").select("id, kind, file_name, received_at").eq("job_id", id).eq("is_active", true).neq("status", "ignored").order("received_at", { ascending: false }),
+    // Section 1 (29 October 2026): every quotation of the job and its versions; none is ever hidden.
+    loadJobQuotes(id),
   ]);
   const roadTest = (rt as RoadTestRow | null) ?? null;
   const partItems = ((partRows ?? []) as Record<string, unknown>[]).map(toPart);
@@ -282,7 +287,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const seesPrices = role === "owner" || role === "accounts" || role === "service_advisor";
   // The quotation exists for the owner and the advisors; nobody else sees the card or a link to it.
   const seesQuote = role === "owner" || role === "service_advisor";
-  const quoteOpenStatuses = ["draft", "pending_owner", "sent", "opened"];
   const myMove = role === "owner" || step.actorRole === role || (step.actorRole === "gate_in" && can(role, "editGateIn"));
 
   // Waiting for a technician: how long, against the assignment target.
@@ -308,7 +312,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // never just "the stage moved on"; in progress = amber; not started = grey. Full-strength fills - the old
   // tile used bg-green-soft/50, which reads as white (why the earlier fix looked like coloured text only).
   const trackStages = (loose ? STAGE_ORDER.filter((s) => !LOOSE_SKIP_STAGES.includes(s as Stage)) : STAGE_ORDER) as Stage[];
-  const quoteApproved = latestQuote ? latestQuote.status === "approved" : null;
+  // Approved work stays approved while an additional quotation waits: the Approval step never jumps back.
+  const quoteApproved = quoteFamilies.length ? anyApproved(quoteFamilies) : latestQuote ? latestQuote.status === "approved" : null;
   const trackWithAdvance = hasDeposit ? trackStages.flatMap((st) => (st === "approval" ? [st, "advance" as const] : [st])) : trackStages;
   const stageDone = (s: string, i: number): boolean => {
     if (!job.is_open) return true;
@@ -632,19 +637,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
         {seesQuote ? (
-        <Card id="quotation" className={tile(quoteBox)} data-stage-card="quotation" data-state={quoteBox}>
-          <span className={boxTitle(quoteBox)}>{tick(quoteBox)}Quotation</span>
+        <Card id="quotation" className={`${tile(quoteBox)}${quoteFamilies.length > 1 ? " col-span-2" : ""}`} data-stage-card="quotation" data-state={quoteBox}>
+          <span className={boxTitle(quoteBox)}>{tick(quoteBox)}{quoteFamilies.length > 1 ? `Quotations · ${quoteFamilies.length}` : "Quotation"}</span>
           <span className="text-sm font-semibold">{qState.text}</span>
-          {latestQuote ? (
-            <span className="text-xs text-muted">
-              {latestQuote.number} v{latestQuote.version}
-              {` · ${aed(latestQuote.status === "approved" ? latestQuote.approved_total_aed : latestQuote.total_aed)}`}
-              {latestQuote.sent_at ? ` · sent ${formatDayTime(latestQuote.sent_at)}` : ""}
-              {latestQuote.opened_at ? ` · opened ${formatDayTime(latestQuote.opened_at)}` : ""}
-              {latestQuote.responded_at ? ` · ${latestQuote.approver_name} ${formatDayTime(latestQuote.responded_at)}` : ""}
-              {latestQuote.responded_at && latestQuote.status === "approved" ? (latestQuote.viewed_full_at && latestQuote.viewed_full_at <= latestQuote.responded_at ? " · opened the full quotation before approving" : " · approved without opening the full quotation") : ""}
-            </span>
-          ) : null}
+          <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} />
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (loose || inspection?.inspection.status === "approved" || role === "owner") ? (
               <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
@@ -656,16 +652,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-4 text-sm font-bold text-muted" aria-disabled="true">Start quotation</span>
                 <span className="text-xs text-muted">{inspection ? "After the workshop manager approves the inspection report" : "After the inspection"}</span>
               </span>
-            ) : null}
-            {latestQuote ? (
-              <LinkButton href={`/jobs/${id}/quote/${latestQuote.id}`} tone={quoteOpenStatuses.includes(latestQuote.status) && canQuote ? "primary" : "secondary"} size="md">
-                {quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (qState.key === "ready" ? "Send quotation" : qState.key === "finish" || qState.key === "pending_parts" ? "Finish the quotation" : "Open quotation") : "Open quotation"}
-              </LinkButton>
-            ) : null}
-            {latestQuote && !quoteOpenStatuses.includes(latestQuote.status) && canQuote ? (
-              <form action={newQuotation.bind(null, id)}>
-                <Button type="submit" tone="secondary" size="md">New quotation</Button>
-              </form>
             ) : null}
           </div>
         </Card>

@@ -260,9 +260,13 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", open.map((r) => String(r.id))).eq("is_active", true);
   const charges = await chargeTotalsByJob(Array.from(new Set(open.map((r) => r.job.id))));
   let total = 0;
+  // A job with an original and an additional quotation: the suppliers' charges on its parts count once, not per quotation.
+  const charged = new Set<string>();
   for (const r of open) {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges: charges.get(r.job.id) ?? 0, ...feeOpts(settings, r.expected_payment_method) });
+    const supplierCharges = charged.has(r.job.id) ? 0 : (charges.get(r.job.id) ?? 0);
+    charged.add(r.job.id);
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges, ...feeOpts(settings, r.expected_payment_method) });
     total += totals.profit;
   }
   return round2(total);
@@ -292,10 +296,16 @@ export async function approvedQuoteProfits(settings: Settings, fromIso: string):
   const rows = ((qs ?? []) as unknown as (Record<string, unknown> & { job: { id: string; department: string | null } | null })[]);
   if (!rows.length) return [];
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", rows.map((r) => String(r.id))).eq("is_active", true);
-  const charges = await chargeTotalsByJob(Array.from(new Set(rows.map((r) => r.job?.id).filter((x): x is string => !!x))));
+  const jobIds = Array.from(new Set(rows.map((r) => r.job?.id).filter((x): x is string => !!x)));
+  const charges = await chargeTotalsByJob(jobIds);
+  // The suppliers' charges on a job's parts ride on its FIRST approved quotation only (an additional quotation never counts them again).
+  const { data: firsts } = jobIds.length ? await admin.from("quotations").select("id, job_id, responded_at").in("job_id", jobIds).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("responded_at") : { data: [] as { id: string; job_id: string; responded_at: string }[] };
+  const firstOf = new Map<string, string>();
+  for (const f of (firsts ?? []) as { id: string; job_id: string }[]) if (!firstOf.has(f.job_id)) firstOf.set(f.job_id, f.id);
   return rows.map((r) => {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges: r.job?.id ? charges.get(r.job.id) ?? 0 : 0, ...feeOpts(settings, r.expected_payment_method) });
+    const supplierCharges = r.job?.id && firstOf.get(r.job.id) === String(r.id) ? (charges.get(r.job.id) ?? 0) : 0;
+    const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges, ...feeOpts(settings, r.expected_payment_method) });
     return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: totals.profit, net: totals.net };
   });
 }

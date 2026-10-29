@@ -28,6 +28,8 @@ import { DepositsWaiting } from "./DepositsWaiting";
 import { WaitingPanel, type ExtraWaiting } from "@/components/WaitingPanel";
 import { HomeHeader } from "@/components/HomeHeader";
 import { workSidesForJobs } from "@/lib/staff-picker";
+import { loadQuoteHistory } from "@/lib/quote-history-data";
+import { additionalWaitingChip, pickItems } from "@/lib/quote-history";
 
 type Row = JobRow & {
   parts_pricing_done_at?: string | null;
@@ -94,6 +96,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   ]);
   // Documents not sent (report, quotation, proforma, tax invoice, the customer's reply), one line per car.
   const docAlerts = await loadDocAlerts(all.map((j) => j.id), settings);
+  // Section 1 (29 October 2026): every quotation of each car (the picker) and the additional-quotation chip.
+  const quoteHistory = await loadQuoteHistory(all.map((j) => j.id));
+  const seesQuotes = role === "owner" || role === "service_advisor";
   const invoicedJobs = new Map(((invoiced ?? []) as unknown as { job_id: string; number: string; total_aed: number | string; kind: "proforma" | "tax_invoice" }[]).map((i) => [i.job_id, i]));
   const toSend = all.filter((j) => invoicedJobs.has(j.id) && !(j as unknown as { ready_sent_at: string | null }).ready_sent_at);
   const awaitingPayment = all.filter((j) => j.status === "pending_payment");
@@ -160,6 +165,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       // Section 4: the advisor in charge, as a small badge, and whether this car is the viewer's own.
       advisorName: ((j as unknown as { advisor: { display_name: string } | null }).advisor?.display_name ?? null),
       mine: ((j as unknown as { advisor_id: string | null }).advisor_id ?? j.gated_in_by) === staff.id,
+      quotes: seesQuotes ? pickItems(j.id, quoteHistory.get(j.id) ?? []) : [],
+      extraQuote: additionalWaitingChip(quoteHistory.get(j.id) ?? [], now.getTime())?.text ?? null,
     };
   });
 

@@ -12,6 +12,9 @@ import { formatPlate, type VehiclePhotoRow, type VehicleRow } from "@/lib/types"
 import { addVehiclePhoto, setVehicleActive, setVehicleProfilePhoto } from "../actions";
 import { PhotoUploadForm } from "./PhotoUploadForm";
 import { ProfilePhotoForm } from "./ProfilePhotoForm";
+import { QuotePicker } from "@/components/QuotePicker";
+import { loadQuoteHistory } from "@/lib/quote-history-data";
+import { pickItems } from "@/lib/quote-history";
 
 type Row = VehicleRow & {
   make: { name: string } | null;
@@ -58,6 +61,8 @@ export default async function VehiclePage({
     supabase.from("jobs").select("id, job_number, status, gated_in_at, gated_out_at, is_open").eq("vehicle_id", id).order("gated_in_at", { ascending: false }),
   ]);
   const visits = (visitRows ?? []) as { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean }[];
+  // Section 1 (29 October 2026): each visit's quotations, every one reachable (owner and advisors).
+  const visitQuotes = role === "owner" || role === "service_advisor" ? await loadQuoteHistory(visits.map((j) => j.id)) : new Map();
 
   const allPaths = [...photos.map((p) => p.storage_path), ...(v.photo_path ? [v.photo_path] : [])];
   const signed = allPaths.length ? await supabase.storage.from("vehicle-photos").createSignedUrls(allPaths, 3600) : { data: [] };
@@ -137,7 +142,7 @@ export default async function VehiclePage({
             ) : (
               <ul className="flex flex-col divide-y divide-line">
                 {visits.map((j) => (
-                  <li key={j.id} className="py-2.5">
+                  <li key={j.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5" data-visit={j.job_number}>
                     {can(role, "viewJobs") ? (
                       <Link href={`/jobs/${j.id}`} className="flex flex-wrap items-baseline gap-x-3 hover:underline underline-offset-4">
                         <span className="font-bold">{j.job_number}</span>
@@ -151,6 +156,7 @@ export default async function VehiclePage({
                         <span className="text-sm text-muted">{STATUS_LABELS[j.status]}</span>
                       </span>
                     )}
+                    <QuotePicker items={pickItems(j.id, visitQuotes.get(j.id) ?? [])} />
                   </li>
                 ))}
               </ul>

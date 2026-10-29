@@ -118,7 +118,8 @@
     "test:fees5": "node --env-file=.env.local tests/browser/test-fees5.mjs",
     "test:mtr": "node tests/settlement-report-check.mjs",
     "test:viewer7": "node --env-file=.env.local tests/browser/test-viewer7.mjs",
-    "test:report8": "node --env-file=.env.local tests/browser/test-report8.mjs"
+    "test:report8": "node --env-file=.env.local tests/browser/test-report8.mjs",
+    "test:quotehist1": "node --env-file=.env.local tests/browser/test-quotehist1.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

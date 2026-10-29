@@ -6,6 +6,7 @@ import { dubaiDate } from "./jobs";
 import { recordOwnerReport } from "./owner-report";
 import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { approvedQuotations } from "./quote-data";
 
 /** Closes a job at gate-out or delivery: the stamp, the history line, the follow-up date, the owner's report. */
 export async function closeJob(jobId: string, by: string | null, byName: string, how: string) {
@@ -28,9 +29,12 @@ export async function closeJob(jobId: string, by: string | null, byName: string,
 export async function updatePackageCostHistory(jobId: string): Promise<void> {
   const admin = createAdminClient();
   const settings = await getSettings();
-  const { data: q } = await admin.from("quotations").select("id, materials_cost_aed").eq("job_id", jobId).eq("status", "approved").order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (!q) return;
-  const { data: pkgLines } = await admin.from("quotation_lines").select("package_key").eq("quotation_id", q.id).eq("is_active", true).not("package_key", "is", null);
+  // Every approved quotation of the job (the original and any additional one), never only the newest.
+  const approved = await approvedQuotations(jobId);
+  if (!approved.length) return;
+  const { data: qRows } = await admin.from("quotations").select("id, materials_cost_aed").in("id", approved.map((a) => a.id));
+  const q = { materials_cost_aed: (qRows ?? []).reduce((a, r) => a + (Number(r.materials_cost_aed) || 0), 0) };
+  const { data: pkgLines } = await admin.from("quotation_lines").select("package_key").in("quotation_id", approved.map((a) => a.id)).eq("is_active", true).not("package_key", "is", null);
   const keys = Array.from(new Set((pkgLines ?? []).map((l) => l.package_key as string).filter(Boolean)));
   if (!keys.length) return;
   const [film, share, labour, { data: trips }] = await Promise.all([

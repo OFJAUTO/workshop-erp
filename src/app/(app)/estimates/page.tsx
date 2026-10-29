@@ -8,6 +8,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { EstimateMenu } from "./EstimateMenu";
+import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,9 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   if (staff.role_id !== "owner") query = query.eq("created_by", staff.id);
   const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];
+  // Section 1 (29 October 2026): every version of each estimate stays one tap away (old versions open read-only).
+  const { data: versionRows } = rows.length ? await admin.from("quotations").select("id, number, version, status").eq("kind", "estimate").eq("is_active", true).in("number", Array.from(new Set(rows.map((r) => r.number)))) : { data: [] as { id: string; number: string; version: number; status: string }[] };
+  const versionsOf = (n: string) => ((versionRows ?? []) as { id: string; number: string; version: number; status: string }[]).filter((v) => v.number === n).map((v) => ({ id: v.id, version: Number(v.version) || 1, status: v.status }));
   const followDays = Number(settings.estimate_followup_days) || 2;
   const needsFollowUp = (r: Row) => (r.status === "sent" || r.status === "opened") && olderThanDays(r.sent_at, followDays);
   // Cancelled (sent, then withdrawn) and expired (past "valid until" without a reply) share one folded section at the end.
@@ -67,6 +71,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
                 {r.creator ? ` · ${r.creator.display_name}` : ""}
               </span>
             </Link>
+            {versionsOf(r.number).length > 1 ? <QuoteVersionSelect base="/estimates/" versions={versionsOf(r.number)} selectedId={r.id} /> : null}
             <EstimateMenu id={r.id} number={r.number} status={r.status} neverSent={!r.sent_at} canManage={mayManage(r)} />
           </Card>
         ));

@@ -42,7 +42,7 @@ export type QuoteBundle = {
   parts: PartItem[];
   requests: PartRequest[];
   events: { id: number; event_type: string; note: string | null; created_at: string; by_name: string | null }[];
-  versions: { id: string; version: number; status: string; created_at: string }[];
+  versions: { id: string; version: number; status: string; created_at: string; created_by: string | null }[];
   customer: { id: string; full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null;
   vehicle: { id: string; kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year: number | null; variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
   job: { id: string; job_number: string; status: string; department: string | null; assigned_to: string | null; gated_in_by: string; is_open: boolean; inspection_fee_due: boolean; comeback_free?: boolean } | null;
@@ -78,7 +78,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
     quotation.job_id ? admin.from("part_items").select(PART_SELECT).eq("job_id", quotation.job_id).eq("is_active", true).order("created_at") : Promise.resolve({ data: [] }),
     quotation.job_id ? admin.from("part_requests").select(REQUEST_SELECT).eq("job_id", quotation.job_id).eq("is_active", true).order("created_at") : Promise.resolve({ data: [] }),
     admin.from("quotation_events").select("id, event_type, note, created_at, created_by").eq("quotation_id", id).order("created_at", { ascending: false }),
-    admin.from("quotations").select("id, version, status, created_at").eq("number", quotation.number).eq("kind", quotation.kind).order("version"),
+    admin.from("quotations").select("id, version, status, created_at, created_by").eq("number", quotation.number).eq("kind", quotation.kind).eq("is_active", true).order("version"),
     admin.from("customers").select("id, full_name, company_name, phone, email, trn").eq("id", quotation.customer_id).maybeSingle(),
     quotation.vehicle_id ? admin.from("vehicles").select("kind, id, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", quotation.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
     quotation.job_id ? admin.from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, inspection_fee_due, inspection_fee_aed, comeback_free").eq("id", quotation.job_id).maybeSingle() : Promise.resolve({ data: null }),

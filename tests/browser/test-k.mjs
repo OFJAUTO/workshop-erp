@@ -99,7 +99,13 @@ await section("1 quote builder and revision", async () => {
   await page.reload();
   await until(async () => ((await page.locator("[data-labour-boxes]").count()) ? 1 : null), 30, 500);
   await page.locator("button", { hasText: /^Quotation complete$/ }).click();
-  const asked = await until(async () => ((await page.locator("[data-markup-ask]").count()) ? 1 : null), 30, 500);
+  // Since 18 October the low-profit question comes first when the margin is red: answered "Send anyway", as an advisor would.
+  const asked = await until(async () => {
+    if (await page.locator("[data-low-profit-ask]").count()) { await page.locator("[data-low-profit-send]").click(); return null; }
+    if (await page.locator("[data-parts-ask]").count()) { await page.locator("[data-parts-leave]").click(); return null; }
+    if (await page.locator("[data-deposit-skip]").count()) { await page.locator("[data-deposit-skip]").click(); return null; }
+    return (await page.locator("[data-markup-ask]").count()) ? 1 : null;
+  }, 30, 500);
   const stateNow = (await sql("select completed_at, markup_skipped_at, (select string_agg(markup_percent::text, ',') from public.quotation_lines l where l.quotation_id = q.id and l.line_type = 'part' and l.is_active) as markups from public.quotations q where id = $1", [v1]))[0];
   check("B13: 'Parts markup is still at the minimum 5%. Set it now?' appears once", !!asked, `${JSON.stringify(stateNow)} · ${(await page.locator("[data-blocker], .border-red-bar").allTextContents().catch(() => [])).join(" | ").slice(0, 200)} · ${String(await page.textContent("body")).match(/Not complete yet[^.]*|part requests still with Parts|not yet agreed[^.]*/)?.[0] ?? "no error text"}`);
   if (asked) {
@@ -155,11 +161,14 @@ await section("1 quote builder and revision", async () => {
 
   // Send version 2 and let the customer approve it again.
   await sql("update public.quotations set status = 'sent', sent_at = now(), sent_by = $2, completed_at = now() where id = $1", [v2, owner]);
-  const link = await fetch(`${base}/quote/${token}`);
-  const linkText = pageText(await link.text());
-  const v2total = await linkTotal(token);
-  check("A2: the customer's existing link opens version 2 with 'Updated on' and version 2's total", link.status === 200 && /Updated on/.test(linkText) && /Revised quotation/i.test(linkText) && v2total > 0 && v2total !== total1, `status ${link.status} · totals ${total1} -> ${v2total} · ${linkText.slice(0, 160)}`);
+  // 29 October 2026: the customer's existing (version 1) link says the quotation was updated and points to version 2.
   const v2token = (await sql("select token from public.quotations where id = $1", [v2]))[0]?.token;
+  const oldLink = pageText(await (await fetch(`${base}/quote/${token}`)).text());
+  check("A2: the customer's existing link says 'This quotation has been updated' and points to version 2", /This quotation has been updated/.test(oldLink) && !!v2token && v2token !== token, oldLink.slice(0, 200));
+  const link = await fetch(`${base}/quote/${v2token}`);
+  const linkText = pageText(await link.text());
+  const v2total = await linkTotal(v2token);
+  check("A2: version 2's link shows 'Updated on' and version 2's total", link.status === 200 && /Updated on/.test(linkText) && /Revised quotation/i.test(linkText) && v2total > 0 && v2total !== total1, `status ${link.status} · totals ${total1} → ${v2total} · ${linkText.slice(0, 200)}`);
   const ap2 = await approveViaLink(v2token, v2total);
   const loc2 = ap2.headers.get("location") ?? "";
   check("A2: the approval of version 2 is accepted", ap2.status < 400 && !/error=/.test(loc2), `status ${ap2.status} · ${decodeURIComponent(loc2).slice(-200)}`);
@@ -169,8 +178,9 @@ await section("1 quote builder and revision", async () => {
   check("A2: the job keeps its stage (work and parts carry on, nothing reset)", jobAfter2?.status === jobAfter1?.status, `${jobAfter1?.status} -> ${jobAfter2?.status}`);
   const np = (await sql("select order_status from public.part_items where id = $1", [newPart]))[0];
   check("A2: the new part goes to Parts for ordering as normal", np?.order_status === "to_order", JSON.stringify(np));
-  const linkAfter = pageText(await (await fetch(`${base}/quote/${token}`)).text());
-  check("A2: the link shows only version 2 (approved), never version 1", /Approved/.test(linkAfter) && !/version 1/i.test(linkAfter));
+  const linkAfter = pageText(await (await fetch(`${base}/quote/${v2token}`)).text());
+  const oldAfter = pageText(await (await fetch(`${base}/quote/${token}`)).text());
+  check("A2: version 2's link shows it approved; the old link still only points onward", /Approved/.test(linkAfter) && /This quotation has been updated/.test(oldAfter) && !/Approved on/.test(oldAfter));
   const internal = await fetchAs(`/jobs/${jobId}/quote/${v1}`, "owner");
   const internalText = internal.buf ? pageText(internal.buf.toString("utf8")) : "";
   check("A2: version 1 is still visible internally as replaced", internal.status === 200 && /version 1/.test(internalText) && /Replaced by a newer version/.test(internalText));
@@ -281,7 +291,8 @@ await section("4 rules and data", async () => {
   const s2 = ps.partsSteps({ jobStatus: "waiting_parts", pricingDoneAt: "x", pricingReopenedAt: "y", parts: [part({ order_status: "received", received_qty: 1 })], mainLpoStatus: "approved", toOrder: 0 }).map((s) => `${s.key}:${s.state}`).join(" ");
   const s3 = ps.partsSteps({ jobStatus: "waiting_parts", pricingDoneAt: "x", pricingReopenedAt: null, parts: [part({ from_stock: true, order_status: "received", received_qty: 1, po_id: null })], mainLpoStatus: null, toOrder: 0 }).map((s) => `${s.key}:${s.state}`).join(" ");
   check("B15: ordered parts half received: Parts received is current with '1 of 2 received'", s1 === "pricing:done approval:done lpo:done received:current handover:later", s1);
-  check("B15: Edit pricing sends the later steps back to grey", s2 === "pricing:current approval:later lpo:later received:later handover:later", s2);
+  // Since 18 October a finished step stays done: Edit pricing makes Pricing the current step again and leaves the rest as they were.
+  check("B15: Edit pricing makes Pricing the current step again; finished steps stay done", s2.startsWith("pricing:current approval:done lpo:done received:done"), s2);
   check("B15: parts from our stock skip the LPO steps and land on Handover", s3 === "pricing:done approval:done lpo:done received:done handover:current", s3);
   const svc = await sql("select lower(name) as n, line_kind, price_aed from public.services where is_active and lower(name) in ('labour charges','minor service','major service','software update','software reset','coding / programming')");
   const by = Object.fromEntries(svc.map((s) => [s.n, s]));

@@ -7,6 +7,7 @@ import { dubaiDate, workingTimeOf } from "./jobs";
 import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { bodyshopPeople } from "./bodyshop";
+import { approvedQuotations } from "./quote-data";
 
 /**
  * The complimentary 10-day after-care check on package jobs (20 October 2026). Booked by itself the
@@ -24,9 +25,10 @@ export async function ensureAftercare(jobId: string, by: string | null): Promise
   const admin = createAdminClient();
   const { data: existing } = await admin.from("aftercare_checks").select("id").eq("job_id", jobId).limit(1);
   if (existing?.length) return;
-  const { data: q } = await admin.from("quotations").select("id").eq("job_id", jobId).eq("status", "approved").eq("is_active", true).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (!q) return;
-  const { data: pkgLines } = await admin.from("quotation_lines").select("package_items").eq("quotation_id", q.id).eq("is_active", true).not("package_items", "is", null);
+  // A package with the after-care check on ANY approved quotation of the job (original or additional).
+  const approved = await approvedQuotations(jobId);
+  if (!approved.length) return;
+  const { data: pkgLines } = await admin.from("quotation_lines").select("package_items").in("quotation_id", approved.map((a) => a.id)).eq("is_active", true).not("package_items", "is", null);
   const wants = (pkgLines ?? []).some((l) => (l.package_items as { aftercare_check?: boolean } | null)?.aftercare_check);
   if (!wants) return;
   const settings = await getSettings();

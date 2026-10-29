@@ -17,6 +17,8 @@ import { QuoteResponse } from "./QuoteResponse";
 import { TintCard } from "@/components/TintCard";
 import { aboveLimit, cleanTintSpec, decorateTint, lineIsTint, tintSummary } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
+import { additionalToOf } from "@/lib/quote-history-data";
+import { additionalLine } from "@/lib/quote-history";
 
 export const dynamic = "force-dynamic";
 
@@ -48,14 +50,25 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       <main className="mx-auto max-w-2xl px-4 py-8">{children}</main>
     </div>
   );
-  // The link always opens the latest version the customer was sent: an older link follows the number to the newest one.
-  const { data: byToken } = await admin.from("quotations").select("id, kind, number, status, cancelled_at").eq("token", token).maybeSingle();
+  // An older version's link says the quotation was updated and offers the newest version the customer was sent;
+  // the old version itself can never be approved (29 October 2026).
+  const { data: byToken } = await admin.from("quotations").select("id, kind, number, status, cancelled_at, version").eq("token", token).maybeSingle();
   if (!byToken) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const { data: latest } = await admin.from("quotations").select("id, kind, status, valid_until, viewed_full_at, token, version, sent_at").eq("number", byToken.number).eq("kind", byToken.kind).eq("is_active", true).not("status", "in", "(draft,pending_owner,cancelled)").order("version", { ascending: false }).limit(1).maybeSingle();
   const row = latest ?? null;
   // A sent estimate or quotation withdrawn by the workshop (section 4, 23 October 2026).
   if (!row && byToken.status === "cancelled" && byToken.cancelled_at) return plain(<Notice tone="info">This {byToken.kind === "estimate" ? "estimate" : "quotation"} has been withdrawn. Please contact OFJ Automotive for an updated one.</Notice>);
   if (!row) return plain(<Notice tone="info">This quotation is being updated. The new version will be sent to you shortly.</Notice>);
+  if (row.id !== byToken.id && Number(row.version) > Number(byToken.version) && row.token) {
+    const kindWord = row.kind === "estimate" ? "estimate" : "quotation";
+    return plain(
+      <div className="flex flex-col gap-4 rounded-lg bg-white p-6 text-center shadow-sm" data-quote-updated>
+        <p className="text-xl font-extrabold">This {kindWord} has been updated</p>
+        <p className="text-sm text-[#5F6368]">You opened an older version ({byToken.number} v{byToken.version}). Please look at the latest version (v{row.version}){row.sent_at ? `, sent on ${formatDate(row.sent_at)}` : ""}.</p>
+        <a href={`/quote/${row.token}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white" data-quote-latest>View the latest version</a>
+      </div>,
+    );
+  }
   const liveToken = row.token ?? token;
   const isEstimate = row.kind === "estimate";
 
@@ -92,7 +105,10 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const customerName = q.sent_to_name ?? customer?.company_name ?? customer?.full_name ?? "Customer";
   const carName = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
-  const title = isEstimate ? "Estimate" : q.version > 1 ? "Revised quotation" : "Quotation";
+  // An additional quotation says so, with the quotation(s) it adds to: extra work, not a replacement.
+  const addsTo = isEstimate ? [] : await additionalToOf(q.job_id, q.number);
+  const addsToLine = additionalLine(addsTo);
+  const title = isEstimate ? "Estimate" : addsTo.length ? "Additional quotation" : q.version > 1 ? "Revised quotation" : "Quotation";
   const open = q.status === "sent" || q.status === "opened";
   const meta = [
     { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },
@@ -135,6 +151,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         contact={<ContactButtons phone={company.phone} label="Questions or changes?" />}
       >
         {statusNotes}
+        {addsToLine ? <p className="text-sm font-semibold" data-additional-to>{addsToLine}</p> : null}
         {row.version > 1 && row.sent_at ? <p className="text-xs font-semibold text-[#5F6368]" data-updated-on>Updated on {formatDateTime(row.sent_at)}</p> : null}
         <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">
           <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{isEstimate ? "Estimate total" : "Total"} including VAT</span>

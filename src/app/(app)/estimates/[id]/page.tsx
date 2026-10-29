@@ -18,6 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { reviseQuotation } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
+import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { EstimateMenu } from "../EstimateMenu";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
@@ -76,6 +77,14 @@ export default async function EstimatePage({ params, searchParams }: { params: P
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {/* Section 1 (29 October 2026): an old version says so; every version is one pick away. */}
+      {bundle.versions.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm" data-quote-version-bar>
+          {q.version < Math.max(...bundle.versions.map((v) => v.version)) ? <span className="rounded-card border border-line-strong bg-[#EDEDEF] px-3 py-2 font-bold text-[#3F3F46]" data-old-version-banner>OLD VERSION – v{q.version} of {bundle.versions.length}, kept for the record</span> : null}
+          <span className="font-semibold text-muted">Versions of {q.number}:</span>
+          <QuoteVersionSelect base="/estimates/" versions={bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status }))} selectedId={q.id} />
+        </div>
+      ) : null}
       {q.status === "cancelled" ? <Notice tone="info">Cancelled{q.cancel_reason ? `: ${q.cancel_reason}` : ""}. Kept because the customer saw it; their link says it was withdrawn.</Notice> : null}
       {accepted ? (
         <Card className="flex flex-col gap-2 border-green">

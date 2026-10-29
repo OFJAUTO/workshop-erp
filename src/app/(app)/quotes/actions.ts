@@ -25,6 +25,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { chargeTotalsByJob } from "@/lib/supplier-charges";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
+import { loadJobQuotes } from "@/lib/quote-history-data";
 
 function refresh(jobId: string | null, quotationId?: string) {
   if (jobId) {
@@ -556,7 +557,7 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
   // so answering the markup or deposit question afterwards never tells the owner twice.
   let lowProfit: { marginPct: number; profit: number; net: number } | null = null;
   if (q.kind === "quotation") {
-    const t = quoteTotals(bundle.lines, q, { technicianCostRate: Number((settings.technician_cost_rate_by_department as Record<string, number> | null)?.[bundle.job?.department ?? "mechanical"]) || Number(settings.technician_cost_rate_aed) || 0, supplierCharges: q.job_id ? (await chargeTotalsByJob([q.job_id])).get(q.job_id) ?? 0 : 0 });
+    const t = quoteTotals(bundle.lines, q, { technicianCostRate: Number((settings.technician_cost_rate_by_department as Record<string, number> | null)?.[bundle.job?.department ?? "mechanical"]) || Number(settings.technician_cost_rate_aed) || 0, supplierCharges: q.job_id && (await loadJobQuotes(q.job_id))[0]?.number === q.number ? (await chargeTotalsByJob([q.job_id])).get(q.job_id) ?? 0 : 0 });
     const limits = { yellow: Number(settings.quote_margin_yellow_percent) || 30, red: Number(settings.quote_margin_red_percent) || 20 };
     const marginPct = t.net > 0 ? (t.profit / t.net) * 100 : 0;
     if (marginToneOf(t.profit, t.net, limits) === "red") {
