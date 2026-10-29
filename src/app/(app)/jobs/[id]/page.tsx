@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { CustomerName } from "@/components/CustomerPanel";
 import { AFTERCARE_POINTS, aftercareOf } from "@/lib/aftercare";
 import { AftercareMessage, AftercareSignoff } from "./AftercareCard";
 import { signOffAftercare } from "../aftercare-actions";
@@ -357,6 +358,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicleTitle(vehicle)}</span>
             <span>· {job.job_number}</span>
+            {seesCustomerDetails && (customer ?? customerPublic) ? <span data-job-customer>· <CustomerName name={(customer ?? customerPublic)!.company_name ?? (customer ?? customerPublic)!.full_name} jobId={id} className="font-semibold text-ink" /></span> : null}
             {!loose ? <VinCopy vin={vehicle.vin} /> : null}
             <PriorityBadge priority={job.priority} />
             {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
@@ -531,7 +533,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               <p className="text-[16px] font-semibold whitespace-pre-wrap">{gateIn?.customer_requests}</p>
             )}
           </section>
-          {loose ? <ItemsCard jobId={id} items={looseItems} broughtBy={job.brought_by} assessmentNote={job.assessment_note} photoUrls={itemPhotoUrls} canPrint={job.is_open && !staff.viewingAs} /> : null}
+          {loose ? <ItemsCard jobId={id} items={seesCustomerDetails ? looseItems : looseItems.map((i) => ({ ...i, collector_name: null }))} broughtBy={job.brought_by} assessmentNote={job.assessment_note} photoUrls={itemPhotoUrls} canPrint={job.is_open && !staff.viewingAs} /> : null}
         </div>
 
         <section className="rounded-card bg-track border border-ink p-5 flex flex-col gap-3">
@@ -605,7 +607,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={tile(approvalBox)} data-stage-card="approval" data-state={approvalBox}>
           <span className={boxTitle(approvalBox)}>{tick(approvalBox)}Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
-          <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} />
+          {seesCustomerDetails ? <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} /> : job.first_approval_at ? <span className="text-sm font-semibold" data-approval-plain>Approved {formatDayTime(job.first_approval_at)}</span> : latestApproval ? <span className="text-sm font-semibold" data-approval-plain>{approvalState.text}</span> : null}
           <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" size="md" className="mt-auto" data-gate-in-details>
             Gate-in details
           </LinkButton>
@@ -630,7 +632,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               </LinkButton>
             ) : null}
           </div>
-          {canSendReport || reportLink ? <ReportSendControl jobId={id} link={reportLink} shortLink={reportLink?.token ? await shortFor(`${PRODUCTION_SITE_URL}/report/${reportLink.token}`) : null} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : null}
+          {seesCustomerDetails && (canSendReport || reportLink) ? <ReportSendControl jobId={id} link={reportLink} shortLink={reportLink?.token ? await shortFor(`${PRODUCTION_SITE_URL}/report/${reportLink.token}`) : null} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : reportLink?.sent_at ? <span className="text-xs text-muted" data-report-plain>Sent to the customer {formatDayTime(reportLink.sent_at)}</span> : null}
           {reportLink?.sent_at && inspection && inspection.inspection.updated_at > reportLink.sent_at ? (
             <span className="text-xs font-semibold text-amber-bar" data-report-changed>Changed after it was sent. The customer&apos;s link always shows the latest; use Send again to tell them, or keep it internal.</span>
           ) : null}

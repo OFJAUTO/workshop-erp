@@ -1,5 +1,6 @@
 import "server-only";
-import type { CurrentStaff } from "@/lib/auth";
+import { getCurrentStaff, type CurrentStaff } from "@/lib/auth";
+import { seesCustomers } from "@/lib/customer-data";
 import type { BookingKind, CollectMethod } from "@/lib/calendar";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
@@ -43,7 +44,7 @@ export async function loadAppointmentFormData(supabase: Client): Promise<{ custo
 }
 
 export const APPOINTMENT_SELECT =
-  "id, kind, department, customer_id, vehicle_id, vehicle_text, reason, starts_at, duration_minutes, advisor_id, status, job_id, notes, cancel_reason, collect_address, collect_method, reminder_sent_at, reminder_notified_at, notified_hour_before_at, notified_evening_before_at, missed_notified_at, is_active, created_at, created_by, updated_at, updated_by, customer:customers(full_name, company_name, phone, is_vip), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), advisor:staff!appointments_advisor_id_fkey(id, display_name, colour), job:jobs(job_number, gated_out_at, is_open)";
+  "id, kind, department, customer_id, vehicle_id, vehicle_text, reason, starts_at, duration_minutes, advisor_id, status, job_id, notes, cancel_reason, collect_method, reminder_sent_at, reminder_notified_at, notified_hour_before_at, notified_evening_before_at, missed_notified_at, is_active, created_at, created_by, updated_at, updated_by, customer:customers(full_name, company_name, phone, is_vip), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), advisor:staff!appointments_advisor_id_fkey(id, display_name, colour), job:jobs(job_number, gated_out_at, is_open)";
 
 export type AppointmentFull = {
   id: string;
@@ -76,8 +77,9 @@ export type AppointmentFull = {
   job: { job_number: string; gated_out_at: string | null; is_open: boolean } | null;
 };
 
+/** The customer's name for the owner, advisors and accounts; everyone else reads the car (29 October 2026). */
 export function appointmentCustomerName(a: AppointmentFull) {
-  return a.customer?.company_name ?? a.customer?.full_name ?? "Customer";
+  return a.customer?.company_name ?? a.customer?.full_name ?? appointmentCarText(a);
 }
 
 export function appointmentCarText(a: AppointmentFull) {
@@ -106,8 +108,22 @@ export function reminderTemplateFor(kind: BookingKind, settings: { whatsapp_remi
   }
 }
 
-/** Roles that may not read customers still get the name (never the phone): a narrow server-side read. */
+/**
+ * The customer's name and the collection address, read by the server (29 October 2026, batch 2 section 1): only for
+ * the owner, advisors and accounts. Everyone else gets neither - the booking reads as the car - and the address is not
+ * readable by the login role at all.
+ */
 export async function fillCustomerNames(_supabase: Client, appts: AppointmentFull[]) {
+  const viewer = await getCurrentStaff();
+  if (!seesCustomers(viewer?.role_id)) {
+    for (const a of appts) Object.assign(a, { customer: null, collect_address: null });
+    return;
+  }
+  if (appts.length) {
+    const { data: addr } = await createAdminClient().from("appointments").select("id, collect_address").in("id", appts.map((a) => a.id));
+    const addrOf = new Map((addr ?? []).map((r) => [r.id as string, r.collect_address as string | null]));
+    for (const a of appts) a.collect_address = addrOf.get(a.id) ?? null;
+  }
   const missing = appts.filter((a) => !a.customer);
   if (!missing.length) return;
   const { data } = await createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", Array.from(new Set(missing.map((a) => a.customer_id))));

@@ -1,16 +1,18 @@
 "use client";
 
+import { openCustomerPanel } from "./CustomerPanel";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Hit = { href: string; plate: string; title: string; customer: string | null; stage: string; pictureUrl: string | null; open: boolean };
+type Hit = { href: string; plate: string; title: string; customer: string | null; jobId?: string | null; stage: string; pictureUrl: string | null; open: boolean };
 
 /**
  * The one search bar at the top of every home screen: any car, open or gone - plate, customer, VIN or job
  * number. Results drop down as you type (from two letters), each with the photo, plate, model, customer and
  * stage; one tap opens the job card.
  */
-export function TopSearch() {
+/** `customers`: the person may find a car by its customer (owner, advisors, accounts); the words follow it. */
+export function TopSearch({ customers = true }: { customers?: boolean }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
@@ -54,7 +56,7 @@ export function TopSearch() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => { if (hits) setOpen(true); }}
-        placeholder="Search any car: plate, customer, VIN, job number…"
+        placeholder={customers ? "Search any car: plate, customer, VIN, job number…" : "Search any car: plate, VIN, job number…"}
         aria-label="Search any car"
         spellCheck={false}
         className="h-12 w-full rounded-full bg-chip pl-10 pr-4 text-sm font-semibold text-ink placeholder:text-muted outline-none focus:ring-2 focus:ring-ink border-0"
@@ -67,8 +69,8 @@ export function TopSearch() {
           ) : (
             <ul className="divide-y divide-line">
               {hits.map((h) => (
-                <li key={h.href}>
-                  <button type="button" onClick={() => { setOpen(false); setQ(""); router.push(h.href); }} className="flex w-full items-center gap-3 p-2.5 text-left hover:bg-canvas" data-search-hit>
+                <li key={h.href} className="flex items-center">
+                  <button type="button" onClick={() => { setOpen(false); setQ(""); router.push(h.href); }} className="flex min-w-0 flex-1 items-center gap-3 p-2.5 text-left hover:bg-canvas" data-search-hit>
                     {h.pictureUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={h.pictureUrl} alt="" className="h-10 w-16 shrink-0 rounded-control object-cover bg-chip" />
@@ -79,6 +81,11 @@ export function TopSearch() {
                     </span>
                     {!h.open ? <span className="shrink-0 rounded-full bg-chip px-2 py-0.5 text-[11px] font-bold text-muted">Gone</span> : null}
                   </button>
+                  {h.customer && h.jobId ? (
+                    <button type="button" onClick={() => { setOpen(false); openCustomerPanel({ jobId: h.jobId }); }} className="min-h-11 shrink-0 px-3 text-xs font-bold underline decoration-dotted underline-offset-4" data-search-customer>
+                      Customer
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>

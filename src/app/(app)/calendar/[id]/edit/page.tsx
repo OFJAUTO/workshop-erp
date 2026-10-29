@@ -5,7 +5,7 @@ import { dubaiDateOf, dubaiTimeOf } from "@/lib/calendar";
 import { createClient } from "@/lib/supabase/server";
 import { updateAppointment } from "../../actions";
 import { AppointmentForm } from "../../AppointmentForm";
-import { APPOINTMENT_SELECT, appointmentCustomerName, canEditAppointment, loadAppointmentFormData, type AppointmentFull } from "../../form-data";
+import { APPOINTMENT_SELECT, appointmentCustomerName, canEditAppointment, fillCustomerNames, loadAppointmentFormData, type AppointmentFull } from "../../form-data";
 
 export default async function EditAppointmentPage({ params }: { params: Promise<{ id: string }> }) {
   const staff = await requirePermission("bookAppointments");
@@ -15,6 +15,7 @@ export default async function EditAppointmentPage({ params }: { params: Promise<
   if (!data) notFound();
   const a = data as unknown as AppointmentFull;
   if (!canEditAppointment(staff, a)) redirect(`/calendar/${id}?error=${encodeURIComponent("Only the person this booking belongs to, or the owner, can change it.")}`);
+  await fillCustomerNames(supabase, [a]);
 
   return (
     <>

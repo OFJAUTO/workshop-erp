@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   await notifyManagers(job?.department ?? null, {
     type: "job_awaiting_assignment",
     title: `${carText} approved, waiting to be assigned`,
-    body: `${job?.job_number ?? ""} · approved by ${name}`,
+    body: `${job?.job_number ?? ""} · approved by the customer`,
     jobId: req.job_id,
     href: `/jobs/${req.job_id}`,
   });

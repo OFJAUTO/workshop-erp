@@ -10,7 +10,7 @@ import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 export const dynamic = "force-dynamic";
 
 /**
- * The top search: any car, open or gone, by plate, customer, VIN or job number. Eight best hits, open cars first.
+ * The top search: any car, open or gone, by plate, VIN, job number or (owner, advisors, accounts only) customer. Eight best hits, open cars first.
  * A quotation or estimate number ("Q-00030", "q30", "E-00012") opens that quotation's newest version, for the owner
  * and the advisors (29 October 2026): an older quotation is never lost behind a newer one.
  */
@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
   const compact = `%${q.replace(/[^\p{L}\p{N}]/gu, "")}%`;
   const [{ data: vehicles }, { data: customers }, { data: byNumber }] = await Promise.all([
     admin.from("vehicles").select("id").or(`plate_number.ilike.${compact},vin.ilike.${like}`).limit(25),
-    admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like},phone.ilike.${compact}`).limit(25),
+    // Only the owner, advisors and accounts may find a car by its customer's name or phone (29 October 2026).
+    can(staff.role_id as RoleId, "viewCustomers") ? admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like},phone.ilike.${compact}`).limit(25) : Promise.resolve({ data: [] as { id: string }[] }),
     admin.from("jobs").select("id").ilike("job_number", like).limit(10),
   ]);
   const vehicleIds = (vehicles ?? []).map((v) => v.id);
@@ -50,6 +51,7 @@ export async function GET(request: NextRequest) {
   const pictures = await signCarPictures(rows.map((r) => r.vehicle?.photo_path));
   const hits = rows.map((r) => ({
     href: `/jobs/${r.id}`,
+    jobId: seesCustomers ? r.id : null,
     plate: r.vehicle ? formatPlate(r.vehicle) : r.job_number,
     title: [r.vehicle?.make?.name, r.vehicle?.model?.name, r.vehicle?.model_year].filter(Boolean).join(" "),
     customer: seesCustomers ? (nameOf.get(r.customer_id) ?? null) : null,

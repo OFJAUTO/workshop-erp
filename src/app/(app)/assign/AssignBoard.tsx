@@ -13,7 +13,7 @@ export type BoardCar = {
   id: string;
   plate: string;
   car: string;
-  customer: string;
+  customer: string | null;
   jobNumber: string;
   department: string | null;
   pictureUrl: string | null;
@@ -65,7 +65,8 @@ export function AssignBoard({ cars, people }: { cars: BoardCar[]; people: Techni
             pictureUrl={c.pictureUrl}
             plate={c.plate}
             title={c.car}
-            sub={[c.customer, c.jobNumber]}
+            customer={c.customer ? { name: c.customer, jobId: c.id } : null}
+            sub={[c.jobNumber]}
             chips={
               <>
                 {c.vip ? <Badge tone="ink">VIP</Badge> : null}

@@ -102,17 +102,21 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const photos = (photoRows ?? []) as { id: string; storage_path: string; caption: string | null; content_type: string | null }[];
   const photoUrls = await signJobFiles(photos.map((p) => p.storage_path));
   const photoFiles = photos.map((p) => ({ id: p.id, path: p.storage_path, url: photoUrls[p.storage_path] ?? null, caption: p.caption, contentType: p.content_type }));
-  const customerName = data.customer?.company_name ?? data.customer?.full_name ?? "Customer";
+  // Customer details only for the owner, advisors and accounts (29 October 2026): a manager or team leader sees the car,
+  // and the customer messages (name, phone, links to the customer's pages) are sent by the office.
+  const seesCust = can(role, "viewCustomers");
+  const cust = seesCust ? data.customer : null;
+  const customerName = cust?.company_name ?? cust?.full_name ?? "Customer";
   const carName = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
-  const phoneDigits = (data.customer?.phone ?? "").replace(/[^\d]/g, "");
-  const fill = (tpl: string, link: string) => tpl.replaceAll("[make model]", [v?.make?.name, v?.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", v ? formatPlate(v) : "").replaceAll("[name]", greetingNameOf(data.customer)).replaceAll("[link]", link);
+  const phoneDigits = (cust?.phone ?? "").replace(/[^\d]/g, "");
+  const fill = (tpl: string, link: string) => tpl.replaceAll("[make model]", [v?.make?.name, v?.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", v ? formatPlate(v) : "").replaceAll("[name]", greetingNameOf(cust)).replaceAll("[link]", link);
   const updateStates: UpdateState[] = [];
   for (const kind of ["arrived", "film", "ready"] as const) {
     const u = updates.find((x) => x.kind === kind);
-    const long = kind === "ready" ? (job.bodyshop_handover_token ? `${PRODUCTION_SITE_URL}/handover/${job.bodyshop_handover_token}` : null) : u ? `${PRODUCTION_SITE_URL}/progress/${u.token}` : null;
+    const long = !seesCust ? null : kind === "ready" ? (job.bodyshop_handover_token ? `${PRODUCTION_SITE_URL}/handover/${job.bodyshop_handover_token}` : null) : u ? `${PRODUCTION_SITE_URL}/progress/${u.token}` : null;
     const link = long ? await shortFor(long) : null;
     const tpl = String(kind === "arrived" ? settings.whatsapp_bodyshop_arrived_template : kind === "film" ? settings.whatsapp_bodyshop_film_template : settings.whatsapp_bodyshop_ready_template);
-    updateStates.push({ kind, title: kind === "arrived" ? "Your car has arrived" : kind === "film" ? "Film is going on" : "Your car is ready for collection", photoId: u?.photo_id ?? null, token: u?.token ?? null, sentAt: u?.sent_at ?? null, message: link ? fill(tpl, link) : null });
+    updateStates.push({ kind, title: kind === "arrived" ? "Your car has arrived" : kind === "film" ? "Film is going on" : "Your car is ready for collection", photoId: u?.photo_id ?? null, token: seesCust ? (u?.token ?? null) : null, sentAt: u?.sent_at ?? null, message: link ? fill(tpl, link) : null });
   }
   const booked = job.status === "booked";
   const statusLabel = booked ? "Booked, not arrived" : job.status === "in_work" ? "In the bodyshop" : job.status === "ready" || job.status === "pending_payment" ? "Ready, waiting for the handover" : job.status === "closed" ? "Handed over" : job.status.replaceAll("_", " ");
@@ -396,7 +400,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         <Card id="updates" className="flex flex-col gap-3" data-updates-card>
           <SectionLabel>Customer updates (one photo, one line, three moments)</SectionLabel>
           <UpdatesPanel jobId={jobId} updates={updateStates} photos={photoFiles} afterPhotoId={job.bodyshop_after_photo_id} phoneDigits={managerScope || canQuote ? phoneDigits : ""} canAct={managerScope || canQuote} onPhoto={updatePhotoAction.bind(null, jobId)} onSent={updateSentAction.bind(null, jobId)} onAfterPhoto={afterPhotoAction.bind(null, jobId)} />
-          {job.bodyshop_handover_token ? <p className="text-xs text-muted">Handover page: <Link href={`/handover/${job.bodyshop_handover_token}`} target="_blank" className="font-semibold underline underline-offset-4">{site}/handover/{job.bodyshop_handover_token.slice(0, 8)}…</Link>{kinds.includes("ppf") || kinds.includes("coloured_ppf") ? <> · <Link href={`/api/pdf/warranty/${job.bodyshop_handover_token}`} target="_blank" className="font-semibold underline underline-offset-4">Warranty certificate (PDF)</Link></> : null}</p> : null}
+          {seesCust && job.bodyshop_handover_token ? <p className="text-xs text-muted">Handover page: <Link href={`/handover/${job.bodyshop_handover_token}`} target="_blank" className="font-semibold underline underline-offset-4">{site}/handover/{job.bodyshop_handover_token.slice(0, 8)}…</Link>{kinds.includes("ppf") || kinds.includes("coloured_ppf") ? <> · <Link href={`/api/pdf/warranty/${job.bodyshop_handover_token}`} target="_blank" className="font-semibold underline underline-offset-4">Warranty certificate (PDF)</Link></> : null}</p> : null}
         </Card>
       ) : null}
 

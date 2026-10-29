@@ -10,6 +10,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
+import { seesCustomers } from "@/lib/customer-data";
 import { electricalTasks } from "@/lib/bodyshop";
 import { electricalDoneAction } from "../bodyshop/actions";
 import { AssignBoard, type BoardCar } from "./AssignBoard";
@@ -57,8 +58,8 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
   const loads = await technicianLoads(settings, side);
   const requestsOf = (jobId: string) => ((requestRows ?? []) as { job_id: string; text: string }[]).filter((r) => r.job_id === jobId).map((r) => r.text);
   const rows = ((jobs ?? []) as unknown as Row[]).filter((j) => jobConcernsSide(j.department, side));
-  // The customer's name for the card (never the phone): a narrow server-side read.
-  const { data: custNames } = rows.length ? await createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", Array.from(new Set(rows.map((j) => j.customer_id)))) : { data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] };
+  // The customer's name for the card: only for a person who may see customers (29 October 2026: workshop managers see the car only).
+  const { data: custNames } = rows.length && seesCustomers(staff.role_id) ? await createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", Array.from(new Set(rows.map((j) => j.customer_id)))) : { data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] };
   const custOf = new Map((custNames ?? []).map((c) => [c.id, c]));
   for (const j of rows) j.customer = custOf.get(j.customer_id) ?? null;
   void load;
@@ -74,7 +75,7 @@ export default async function AssignPage({ searchParams }: { searchParams: Promi
       id: j.id,
       plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number,
       car: [j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ") || "Car",
-      customer: j.customer?.company_name ?? j.customer?.full_name ?? "Customer",
+      customer: j.customer?.company_name ?? j.customer?.full_name ?? null,
       jobNumber: j.job_number,
       department: j.department,
       pictureUrl: j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null,

@@ -1,4 +1,5 @@
 import { formatDate } from "@/lib/format";
+import { seesCustomers } from "@/lib/customer-data";
 import { partsWithNoHome } from "@/lib/handover";
 import { CarThumb } from "@/components/CarThumb";
 import { signCarPictures } from "@/lib/car-pictures";
@@ -35,6 +36,8 @@ const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_
 
 export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string }> }) {
   const staff = await requirePermission("priceParts");
+  // Customers are for the owner, advisors and accounts only (29 October 2026): Parts find a car by plate, job number or VIN.
+  const seesCust = seesCustomers(staff.role_id);
   const { message, error, q: rawQ } = await searchParams;
   const q = String(rawQ ?? "").trim().slice(0, 60);
   const admin = createAdminClient();
@@ -115,7 +118,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     const like = `%${q.replace(/[%_,()]/g, " ").trim()}%`;
     const [{ data: vj }, { data: cj }, { data: nj }] = await Promise.all([
       admin.from("vehicles").select("id").or(`plate_number.ilike.${like},vin.ilike.${like}`).limit(60),
-      admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like}`).limit(60),
+      seesCust ? admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like}`).limit(60) : Promise.resolve({ data: [] as { id: string }[] }),
       admin.from("jobs").select("id").ilike("job_number", like).limit(60),
     ]);
     const ors = [
@@ -140,7 +143,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
         <span className="font-extrabold uppercase">{j.vehicle ? formatPlate(j.vehicle) : "—"}</span>
         <span className="text-sm uppercase">{car}</span>
         <span className="text-sm text-muted">{j.job_number}</span>
-        {j.customer ? <span className="text-sm text-muted uppercase">{j.customer.company_name ?? j.customer.full_name}</span> : null}
+        {seesCust && j.customer ? <span className="text-sm text-muted uppercase">{j.customer.company_name ?? j.customer.full_name}</span> : null}
         <PartsSteps size="dots" steps={steps} />
         <span className={`ml-auto text-xs font-semibold ${allDone && !gone ? "text-green" : "text-muted"}`}>{gone ? `Gated out${j.gated_out_at ? ` ${formatDate(j.gated_out_at)}` : ""}` : allDone ? "All parts handed over" : (STATUS_LABELS[j.status as JobStatus] ?? j.status)}</span>
       </Link>
@@ -156,7 +159,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       <WaitingPanel staff={staff} />
 
       <form method="get" className="flex flex-wrap items-center gap-2" data-parts-search-form>
-        <Input name="q" defaultValue={q} placeholder="Find a car: plate, job number, VIN or customer (gone-out cars too)" aria-label="Find a car" className="min-w-64 flex-1" data-parts-search />
+        <Input name="q" defaultValue={q} placeholder={seesCust ? "Find a car: plate, job number, VIN or customer (gone-out cars too)" : "Find a car: plate, job number or VIN (gone-out cars too)"} aria-label="Find a car" className="min-w-64 flex-1" data-parts-search />
         <Button type="submit" size="md" tone="secondary">Search</Button>
         {q ? <LinkButton href="/parts" tone="ghost" size="md">Clear</LinkButton> : null}
       </form>

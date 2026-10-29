@@ -1,5 +1,6 @@
 "use client";
 
+import type { JobCustomer } from "@/lib/customer-view";
 import { useState, useSyncExternalStore } from "react";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { CarCard } from "@/components/CarCard";
@@ -16,7 +17,10 @@ export type DashRow = {
   jobNumber: string;
   plate: string;
   title: string;
-  customer: string | null;
+  /** The job's customer: only ever filled for the owner, advisors and accounts. */
+  customer: JobCustomer | null;
+  /** The people on the car, for the "Tech · …" tag. */
+  people: string[];
   assignee: string | null;
   vin: string | null;
   pictureUrl: string | null;
@@ -239,7 +243,9 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
               pictureUrl={j.pictureUrl}
               plate={j.plate}
               title={j.title}
-              sub={[j.customer ?? j.assignee ?? "Not assigned", j.conditionShort, j.jobNumber, j.promisedLabel, j.dashCam ? "Dash cam" : null, j.majorDamage ? "Major damage" : null]}
+              customer={j.customer ? { name: j.customer.name, jobId: j.id, contact: j.customer.contact, arrived: j.customer.arrived } : null}
+              staffNames={j.people}
+              sub={[j.conditionShort, j.jobNumber, j.promisedLabel, j.dashCam ? "Dash cam" : null, j.majorDamage ? "Major damage" : null]}
               chips={
                 <>
                   {j.vip ? <Badge tone="ink">VIP</Badge> : null}

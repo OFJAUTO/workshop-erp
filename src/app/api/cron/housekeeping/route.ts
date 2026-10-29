@@ -110,7 +110,8 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   for (const r of stale ?? []) {
     const job = r.job as unknown as { job_number: string; is_open: boolean; gated_in_by: string | null } | null;
     if (!job?.is_open) continue;
-    await notifyStaff([r.sent_by, job.gated_in_by].filter((x): x is string => !!x), {
+    // The person who sent the link (owner or advisor): never the gate-in person, who may not see customers (29 October 2026).
+    await notifyStaff([r.sent_by].filter((x): x is string => !!x), {
       type: "approval_reminder",
       title: `Approval link not opened for ${hours} hours`,
       body: `${job.job_number} · sent to ${r.sent_to_name ?? r.sent_to_phone}. Consider calling the customer.`,

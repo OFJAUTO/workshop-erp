@@ -6,6 +6,8 @@ import { nameCase } from "@/lib/name-case";
 import { CarPicture } from "./CarPicture";
 import { StageBar } from "./StageBar";
 import { Words } from "./Words";
+import { CustomerName } from "./CustomerPanel";
+import { StaffTag } from "./StaffTag";
 
 /**
  * THE car card (29 October 2026, batch section 2): the dashboard, Jobs, My jobs, To assign, Car wash and the
@@ -25,7 +27,15 @@ export type CarCardProps = {
   plate: string;
   /** Make, model, year: shown in capitals. */
   title: string;
-  /** "Customer · condition · J-00016": the empty parts are left out; names start with a capital. */
+  /**
+   * The job's customer (29 October 2026, batch 2 section 1): only ever passed for the owner, advisors and accounts.
+   * The name opens the owner details panel; a company shows its contact person; a car the customer did not drive in
+   * gets its own small line.
+   */
+  customer?: { name: string; jobId?: string | null; customerId?: string | null; contact?: string | null; arrived?: string | null } | null;
+  /** The people on the car: their own "Tech · Moayad +1" tag next to the advisor's, never in the customer line. */
+  staffNames?: string[];
+  /** "condition · J-00016 · …" after the customer: the empty parts are left out. */
   sub?: (string | null | false | undefined)[];
   /** Small chips by the plate: days in stage, priority, VIP, the advisor. They wrap. */
   chips?: ReactNode;
@@ -44,8 +54,8 @@ export type CarCardProps = {
   tone?: "red" | "amber" | "none";
 } & Record<`data-${string}`, string | number | boolean | undefined>;
 
-export function CarCard({ href, onPick, pictureUrl, plate, title, sub = [], chips, status, alerts, stage, extra, actions, dim = false, selected = false, tone = "none", ...rest }: CarCardProps) {
-  const subLine = sub.filter((x): x is string => !!x && !!String(x).trim()).map((x, i) => (i === 0 ? nameCase(x) : x)).join(" · ");
+export function CarCard({ href, onPick, pictureUrl, plate, title, customer = null, staffNames = [], sub = [], chips, status, alerts, stage, extra, actions, dim = false, selected = false, tone = "none", ...rest }: CarCardProps) {
+  const subLine = sub.filter((x): x is string => !!x && !!String(x).trim()).join(" · ");
   return (
     <div {...rest} className={`@container relative rounded-card border bg-white ${selected ? "border-ink ring-2 ring-ink" : tone === "red" ? "border-red-bar" : tone === "amber" ? "border-amber-bar" : "border-line"} hover:border-ink ${dim ? "opacity-75" : ""}`} data-car-card>
       {/* The card's own link sits under the content: tapping anywhere opens the car, buttons above it keep their own taps. */}
@@ -60,8 +70,25 @@ export function CarCard({ href, onPick, pictureUrl, plate, title, sub = [], chip
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="text-[17px] font-extrabold uppercase tracking-[0.03em] whitespace-nowrap" data-car-plate>{plate}</span>
             {title ? <Words text={title} className="text-sm font-semibold uppercase" data-car-title /> : null}
-            {subLine ? <Words text={subLine} className="text-xs text-muted" data-car-sub /> : null}
-            {chips ? <span className="mt-0.5 flex flex-wrap items-center gap-1.5" data-car-chips>{chips}</span> : null}
+            {customer || subLine ? (
+              <span className="text-xs text-muted" data-car-sub>
+                {customer ? (
+                  <span data-car-customer>
+                    <CustomerName name={nameCase(customer.name)} jobId={customer.jobId} customerId={customer.customerId} className="font-semibold text-ink" />
+                    {customer.contact ? <Words text={` · ${customer.contact}`} /> : null}
+                  </span>
+                ) : null}
+                {customer && subLine ? " · " : null}
+                {subLine ? <Words text={subLine} /> : null}
+              </span>
+            ) : null}
+            {customer?.arrived ? <span className="text-xs text-muted" data-car-arrived>{customer.arrived}</span> : null}
+            {chips || staffNames.length ? (
+              <span className="mt-0.5 flex flex-wrap items-center gap-1.5" data-car-chips>
+                {chips}
+                <StaffTag names={staffNames} />
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex min-w-0 flex-col gap-2.5 @[60rem]:flex-1">

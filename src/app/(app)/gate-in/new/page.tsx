@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CustomerName } from "@/components/CustomerPanel";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Card, DescriptionList, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -108,9 +109,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             {gateInOnly ? (
               <span className="font-bold">{v.customer?.company_name ?? v.customer?.full_name}</span>
             ) : (
-              <Link href={`/customers/${v.customer?.id}`} className="font-bold hover:underline underline-offset-4">
-                {v.customer?.company_name ?? v.customer?.full_name}
-              </Link>
+              <CustomerName name={v.customer?.company_name ?? v.customer?.full_name ?? "Customer"} customerId={v.customer?.id} className="font-bold" />
             )}
             <span className="text-sm text-muted">{v.customer?.phone}</span>
             {v.customer?.is_vip && v.customer.vip_note ? (

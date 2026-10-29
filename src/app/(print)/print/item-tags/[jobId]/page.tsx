@@ -24,7 +24,8 @@ export default async function ItemTagsPage({ params }: { params: Promise<{ jobId
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, gated_in_at, job_kind, customer:customers(full_name, company_name)").eq("id", jobId).maybeSingle();
   if (!job) notFound();
-  const customer = job.customer as unknown as { full_name: string; company_name: string | null } | null;
+  // The customer's name is printed only when the owner, an advisor or accounts prints the tags (29 October 2026).
+  const customer = can(role, "viewCustomers") ? (job.customer as unknown as { full_name: string; company_name: string | null } | null) : null;
   const items = await loadJobItems(jobId);
   const settings = await getSettings();
   const ss = stickerSettings(settings);

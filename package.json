@@ -121,7 +121,8 @@
     "test:report8": "node --env-file=.env.local tests/browser/test-report8.mjs",
     "test:quotehist1": "node --env-file=.env.local tests/browser/test-quotehist1.mjs",
     "test:tablet2": "node --env-file=.env.local tests/browser/test-tablet2.mjs",
-    "test:server": "node --env-file=.env.local scripts/test-server.mjs"
+    "test:server": "node --env-file=.env.local scripts/test-server.mjs",
+    "test:customers1": "node --env-file=.env.local tests/browser/test-customers1.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

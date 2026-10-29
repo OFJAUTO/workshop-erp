@@ -210,7 +210,7 @@ export default async function VehiclePage({
                   {v.customer.phone} · {v.customer.customer_number}
                 </span>
               </Link>
-            ) : pub ? (
+            ) : seesCustomers && pub ? (
               <p className="font-bold">{pub.company_name ?? pub.full_name}</p>
             ) : (
               <p className="text-sm text-muted">Customer details are not shown for your role.</p>

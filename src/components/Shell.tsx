@@ -15,6 +15,7 @@ import { MobileTopBar } from "./MobileTopBar";
  */
 export function Shell({
   nav = [],
+  searchCustomers = true,
   user,
   footer,
   viewingAs = null,
@@ -23,6 +24,8 @@ export function Shell({
   children,
 }: {
   nav?: NavItem[];
+  /** May this person find a car by its customer? (the search box's words) */
+  searchCustomers?: boolean;
   user?: { id: string; name: string; role: string; photoUrl: string | null };
   footer?: ReactNode;
   /** The workshop's notification sounds from Settings. */
@@ -59,6 +62,7 @@ export function Shell({
       </aside>
       <MobileTopBar
         nav={nav}
+        searchCustomers={searchCustomers}
         account={
           user ? (
             <div className="flex flex-col gap-2" data-menu-account>

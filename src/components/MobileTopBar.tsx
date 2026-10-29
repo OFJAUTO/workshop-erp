@@ -13,7 +13,7 @@ import { TopSearch } from "./TopSearch";
  * menu over the page; ✕, a tap outside, Escape or the phone's back button close it, and it closes after a page is
  * picked. Wider screens keep the sidebar (the Shell hides this bar there).
  */
-export function MobileTopBar({ nav, account }: { nav: NavItem[]; /** The person's name and the Sign out form, at the bottom of the menu. */ account?: ReactNode }) {
+export function MobileTopBar({ nav, account, searchCustomers = true }: { nav: NavItem[]; /** The person's name and the Sign out form, at the bottom of the menu. */ account?: ReactNode; searchCustomers?: boolean }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const pushed = useRef(false);
@@ -75,7 +75,7 @@ export function MobileTopBar({ nav, account }: { nav: NavItem[]; /** The person'
           <Logo onDark className="h-9" />
         </Link>
         <div className="min-w-0 flex-1 [&_input]:min-h-11" data-top-search>
-          <TopSearch />
+          <TopSearch customers={searchCustomers} />
         </div>
         <span id="topbar-bell-slot" className="inline-flex shrink-0 items-center" />
       </header>

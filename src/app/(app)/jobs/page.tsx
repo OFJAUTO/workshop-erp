@@ -1,4 +1,5 @@
 import { CarCard } from "@/components/CarCard";
+import { jobCustomersFor, jobPeopleFor } from "@/lib/customer-data";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { Badge, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -39,7 +40,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
     for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
     return 0;
   });
-  const pictures = await signCarPictures(rows.map((j) => j.vehicle?.photo_path));
+  const [pictures, jobCustomers, jobPeople] = await Promise.all([signCarPictures(rows.map((j) => j.vehicle?.photo_path)), jobCustomersFor(role, rows.map((j) => j.id)), jobPeopleFor(rows.map((j) => j.id))]);
 
   return (
     <>
@@ -69,7 +70,9 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                 pictureUrl={j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null}
                 plate={j.vehicle ? formatPlate(j.vehicle) : "?"}
                 title={[j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" ")}
-                sub={[j.customer ? (j.customer.company_name ?? j.customer.full_name) : null, j.job_number, closed ? `Out ${formatDate(j.gated_out_at)}` : `In ${formatDate(j.gated_in_at)}`]}
+                customer={jobCustomers.has(j.id) ? { name: jobCustomers.get(j.id)!.name, jobId: j.id, contact: jobCustomers.get(j.id)!.contact, arrived: jobCustomers.get(j.id)!.arrived } : null}
+                staffNames={jobPeople.get(j.id) ?? []}
+                sub={[j.job_number, closed ? `Out ${formatDate(j.gated_out_at)}` : `In ${formatDate(j.gated_in_at)}`]}
                 chips={
                   <>
                     {j.job_kind === "loose" ? <Badge tone="ink">Loose items</Badge> : null}

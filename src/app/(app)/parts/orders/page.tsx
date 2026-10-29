@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { seesCustomers } from "@/lib/customer-data";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -37,7 +38,8 @@ const TABS = [
  * main LPO linked from its supplier LPOs, cancelled ones kept.
  */
 export default async function PurchaseOrdersPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; tab?: string; q?: string; supplier?: string }> }) {
-  await requirePermission("viewPurchaseOrders");
+  const staff = await requirePermission("viewPurchaseOrders");
+  const seesCust = seesCustomers(staff.role_id);
   const { message, error, tab = "", q = "", supplier = "" } = await searchParams;
   const settings = await getSettings();
   const admin = createAdminClient();
@@ -60,7 +62,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   const needle = q.trim().toLowerCase();
   const carLine = (po: PurchaseOrderRow) => {
     const j = po.job_id ? jobOf.get(po.job_id) : null;
-    return j ? { plate: j.vehicle ? formatPlate(j.vehicle) : "", car: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "), job: j.job_number, vin: j.vehicle?.vin ?? "", customer: j.customer?.company_name ?? j.customer?.full_name ?? "", open: j.is_open } : null;
+    return j ? { plate: j.vehicle ? formatPlate(j.vehicle) : "", car: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "), job: j.job_number, vin: j.vehicle?.vin ?? "", customer: seesCust ? (j.customer?.company_name ?? j.customer?.full_name ?? "") : "", open: j.is_open } : null;
   };
   const matches = (po: PurchaseOrderRow) => {
     if (!needle) return true;

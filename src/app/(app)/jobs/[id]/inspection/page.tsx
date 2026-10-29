@@ -183,7 +183,8 @@ export default async function InspectionReportPage({ params }: { params: Promise
     loadReportData(card, bundle, roadTest, settings, { thumbs: true }),
     createAdminClient().from("report_links").select("token").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
-  const reportToken = (reportLink?.token as string | undefined) ?? null;
+  // The customer's report link (and its PDF) carries the customer's name and phone: only for the owner, advisors and accounts.
+  const reportToken = can(role, "viewCustomers") ? ((reportLink?.token as string | undefined) ?? null) : null;
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const previewSignedAt = Date.now();
 

@@ -1,4 +1,5 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { jobCustomersFor, jobPeopleFor } from "@/lib/customer-data";
 import {Card, SectionLabel} from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
@@ -86,7 +87,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     all.length ? createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", customerIds) : Promise.resolve({ data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] }),
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
   ]);
-  const nameOf = new Map((names ?? []).map((n) => [n.id, n]));
   // The order here matches the queries below: the invoices, then the running clocks (a swap once put invoices under "On the clock" as NaN:NaN).
   const [profit, { data: invoiced }, { data: clocked }] = await Promise.all([
     role === "owner" ? dailyProfit(settings) : Promise.resolve(null),
@@ -104,7 +104,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const awaitingPayment = all.filter((j) => j.status === "pending_payment");
   const onClock = (clocked ?? []) as unknown as { id: string; job_id: string; started_at: string; technician: { display_name: string } | null; job: { job_number: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null } | null } | null }[];
   const vipIds = new Set((names ?? []).filter((v) => v.is_vip).map((v) => v.id));
-  const seesCustomers = can(role, "viewCustomers");
+  // THE job's customer (owner, advisors, accounts only) and the people on each car (29 October 2026).
+  const [jobCustomers, jobPeople] = await Promise.all([jobCustomersFor(role, all.map((j) => j.id)), jobPeopleFor(all.map((j) => j.id))]);
   const now = new Date();
 
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
@@ -141,7 +142,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       jobNumber: j.job_number,
       plate: j.vehicle ? formatPlate(j.vehicle) : "?",
       title: [j.vehicle?.make?.name, j.vehicle?.model?.name, j.vehicle?.variant, j.vehicle?.model_year].filter(Boolean).join(" "),
-      customer: seesCustomers ? (nameOf.get(j.customer_id)?.company_name ?? nameOf.get(j.customer_id)?.full_name ?? null) : null,
+      customer: jobCustomers.get(j.id) ?? null,
+      people: jobPeople.get(j.id) ?? [],
       assignee: j.assignee?.display_name ?? null,
       vin: j.vehicle?.vin ?? null,
       pictureUrl: j.vehicle?.photo_path ? (pictures.get(j.vehicle.photo_path) ?? null) : null,

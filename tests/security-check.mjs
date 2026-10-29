@@ -13,7 +13,7 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const ref = url.replace(/^https:\/\//, "").replace(/\.supabase\.co\/?$/, "");
 const client = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
 await client.connect();
-const q = async (sql) => (await client.query(sql)).rows;
+const q = async (sql, params) => (await client.query(sql, params)).rows;
 
 let failed = 0;
 const check = (name, ok, detail = "") => { console.log(`${ok ? "OK  " : "FAIL"} ${name}${!ok && detail ? ` · ${detail}` : ""}`); if (!ok) failed++; };
@@ -105,6 +105,57 @@ for (const [path, label] of PROBES) {
       await client.query("rollback");
     }
     check("a team leader's login reads no prices, costs or money files", seen.length === 0, seen.join(", "));
+  }
+}
+
+// 7. Customer details (29 October 2026, batch 2 section 1): a workshop login - workshop manager, technician, Parts,
+//    QC, team leader - reads no customer, contact, approval request or personal column (pickup address, who brought
+//    loose items, the owner report, the collector at gate-out, a booking's collection address). Each role is probed
+//    with a real person's id inside a rolled-back transaction; nothing is written.
+{
+  const PRIVATE_COLUMNS = [["gate_ins", "location_address"], ["gate_ins", "location_name"], ["jobs", "brought_by"], ["jobs", "owner_report"], ["gate_outs", "collector_name"], ["gate_outs", "collector_phone"], ["gate_outs", "delivered_to"], ["gate_outs", "delivery_address"], ["job_items", "collector_name"], ["appointments", "collect_address"]];
+  // The login role itself (every role) has no SELECT on the private columns: the server reads them for the customer roles.
+  const granted = [];
+  for (const [t, c] of PRIVATE_COLUMNS) {
+    const ok = (await q("select has_column_privilege('authenticated', $1, $2, 'SELECT') as ok", [`public.${t}`, c]))[0]?.ok;
+    if (ok) granted.push(`${t}.${c}`);
+  }
+  check("the login role cannot read the personal columns (pickup address, collectors, owner report)", granted.length === 0, granted.join(", "));
+  for (const role of ["workshop_manager", "technician", "parts", "qc_inspector", "team_leader"]) {
+    const person = (await q("select id, display_name from public.staff where role_id = $1 and is_active and display_name not ilike 'E2e %' order by display_name limit 1", [role]))[0];
+    if (!person) {
+      console.log(`SKIP no active ${role} to probe`);
+      continue;
+    }
+    const seen = [];
+    await client.query("begin");
+    try {
+      await client.query("set local role authenticated");
+      await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: person.id, role: "authenticated" })]);
+      for (const t of ["customers", "customer_contacts", "approval_requests"]) {
+        await client.query("savepoint p");
+        try {
+          const n = Number((await client.query(`select count(*)::int as n from public.${t}`)).rows[0].n);
+          if (n > 0) seen.push(`${t} (${n})`);
+          await client.query("release savepoint p");
+        } catch {
+          await client.query("rollback to savepoint p");
+        }
+      }
+      for (const [t, c] of PRIVATE_COLUMNS) {
+        await client.query("savepoint p");
+        try {
+          const n = Number((await client.query(`select count(${c})::int as n from public.${t}`)).rows[0].n);
+          seen.push(`${t}.${c} readable (${n})`);
+          await client.query("release savepoint p");
+        } catch {
+          await client.query("rollback to savepoint p");
+        }
+      }
+    } finally {
+      await client.query("rollback");
+    }
+    check(`a ${role.replace("_", " ")}'s login (${person.display_name}) reads no customer data`, seen.length === 0, seen.join(", "));
   }
 }
 

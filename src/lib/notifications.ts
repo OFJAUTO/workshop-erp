@@ -215,7 +215,18 @@ export async function jobAdvisorIds(jobId: string | null | undefined): Promise<s
     admin.from("job_followers").select("staff_id").eq("job_id", jobId).eq("is_active", true),
   ]);
   if (!job) return [];
-  return Array.from(new Set([job.advisor_id ?? job.gated_in_by, ...(follows ?? []).map((f) => f.staff_id)].filter((x): x is string => !!x)));
+  // No advisor yet: the person who gated the car in when they may see customers (owner, advisor, accounts); a gate-in
+  // person never receives customer news (29 October 2026) - every active advisor does, so one of them takes the car.
+  let inCharge: string[] = job.advisor_id ? [job.advisor_id] : [];
+  if (!inCharge.length && job.gated_in_by) {
+    const { data: g } = await admin.from("staff").select("role_id").eq("id", job.gated_in_by).maybeSingle();
+    if (g && ["owner", "service_advisor", "accounts"].includes(g.role_id as string)) inCharge = [job.gated_in_by];
+  }
+  if (!inCharge.length) {
+    const { data: advisors } = await admin.from("staff").select("id").eq("role_id", "service_advisor").eq("is_active", true);
+    inCharge = (advisors ?? []).map((a) => a.id as string);
+  }
+  return Array.from(new Set([...inCharge, ...(follows ?? []).map((f) => f.staff_id)].filter((x): x is string => !!x)));
 }
 
 export async function notifyJobAdvisors(jobId: string | null | undefined, n: NotificationInput, opts: { except?: string | null } = {}) {

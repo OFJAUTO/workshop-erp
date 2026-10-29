@@ -20,6 +20,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { mediaChecklist } from "@/lib/media";
 import { MediaGallery } from "../MediaGallery";
+import { CustomerName } from "@/components/CustomerPanel";
 
 /**
  * Section 9: ONE staff page with everything recorded at gate-in - the details, the car and customer,
@@ -84,7 +85,7 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
                 Photos and video
               </LinkButton>
             ) : null}
-            {latestApproval?.token ? (
+            {seesCustomerDetails && latestApproval?.token ? (
               <LinkButton href={`/approve/${latestApproval.token}?preview=1`} tone="secondary" target="_blank" data-view-as-customer>
                 View as customer
               </LinkButton>
@@ -123,7 +124,7 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
           <SectionLabel>Vehicle and customer</SectionLabel>
           <DescriptionList
             items={[
-              { label: "Customer", value: seesCustomerDetails && customer ? <Link href={`/customers/${customer.id}`} className="font-semibold underline underline-offset-4">{customerName}</Link> : customerName },
+              ...(seesCustomerDetails ? [{ label: "Customer", value: <CustomerName name={customerName} jobId={id} className="font-semibold" /> }] : []),
               ...(seesCustomerDetails && customer ? [{ label: "Phone", value: customer.phone }, { label: "Customer number", value: customer.customer_number }] : []),
               { label: "Car", value: <Link href={`/vehicles/${vehicle.id}`} className="font-semibold underline underline-offset-4">{vehicleTitle(vehicle)}</Link> },
               { label: "Plate", value: formatPlate(vehicle) },

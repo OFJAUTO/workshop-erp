@@ -83,7 +83,7 @@ export default async function VehiclesPage({
                 plate={formatPlate(v)}
                 title={[v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ") || "Make and model not set"}
                 subtitle={[v.model_year, v.colour].filter(Boolean).join(" · ")}
-                owner={seesCustomers || role === "workshop_manager" ? (nameOf.get(v.customer_id)?.company_name ?? nameOf.get(v.customer_id)?.full_name ?? null) : null}
+                owner={seesCustomers ? (nameOf.get(v.customer_id)?.company_name ?? nameOf.get(v.customer_id)?.full_name ?? null) : null}
                 badges={
                   <>
                     {vipIds.has(v.customer_id) ? <Badge tone="ink">VIP</Badge> : null}

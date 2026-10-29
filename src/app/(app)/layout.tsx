@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { FormGuard } from "@/components/FormGuard";
 import { IdleLock } from "./IdleLock";
 import { ModeGuard, type TabMode } from "./ModeGuard";
+import { CustomerPanelHost } from "@/components/CustomerPanel";
 import { getCurrentDevice } from "@/lib/devices";
 
 /** The browser tab says whose screens these are while the owner views or acts as someone. */
@@ -95,9 +96,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <>
       <Suspense fallback={null}><FormGuard /></Suspense>
       <Suspense fallback={null}><ModeGuard serverMode={tabMode} /></Suspense>
+      {can(role, "viewCustomers") ? <CustomerPanelHost /> : null}
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
+        searchCustomers={can(role, "viewCustomers")}
         nav={nav}
         user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
         sounds={{ tone: String(settings.notification_tone || "marimba"), ownerTone: String(settings.notification_tone_owner || "chord"), remindMinutes: Number(settings.notification_remind_minutes) || 2 }}

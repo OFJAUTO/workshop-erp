@@ -41,7 +41,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     .eq("token", token)
     .maybeSingle();
   if (!req) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
-  const card = await loadJobCard(admin, req.job_id);
+  const card = await loadJobCard(admin, req.job_id, { customerPage: true });
   if (!card || !card.gateIn) return plain(<Notice tone="error">This job card is no longer available.</Notice>);
   const { vehicle, gateIn, requests, media, mediaUrls, job } = card;
 

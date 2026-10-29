@@ -88,7 +88,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
           <DescriptionList
             items={[
               { label: "Type", value: BOOKING_KIND_LABELS[a.kind] },
-              { label: "Customer", value: <Link href={`/customers/${a.customer_id}`} className="font-semibold hover:underline underline-offset-4">{appointmentCustomerName(a)}</Link> },
+              ...(a.customer ? [{ label: "Customer", value: <Link href={`/customers/${a.customer_id}`} className="font-semibold hover:underline underline-offset-4">{appointmentCustomerName(a)}</Link> }] : []),
               ...(a.customer?.phone ? [{ label: "Phone", value: a.customer.phone }] : []),
               ...(a.department ? [{ label: "Department", value: JOB_DEPARTMENTS.find((d) => d.value === a.department)?.label ?? a.department }] : []),
               { label: "Car", value: a.vehicle_id ? <Link href={`/vehicles/${a.vehicle_id}`} className="font-semibold hover:underline underline-offset-4">{appointmentCarText(a)}</Link> : appointmentCarText(a) },
