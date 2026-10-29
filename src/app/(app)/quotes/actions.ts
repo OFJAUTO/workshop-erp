@@ -1,5 +1,6 @@
 "use server";
 
+import { declinedItemsOf, declinedNote, saveDeclinedWork } from "@/lib/declined";
 import { invoicesForLock, loadQuoteLock, refuseIfLocked } from "@/lib/quote-lock-server";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { liveInvoicesOf } from "@/lib/quote-lock";
@@ -800,6 +801,10 @@ export async function declineToGateOut(quotationId: string, formData: FormData) 
   const { data: parts } = await admin.from("part_items").select("id").eq("job_id", q.job_id).eq("is_active", true);
   await dropParts(q.job_id, (parts ?? []).map((p) => p.id), staff, "declined");
   await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, declined_out_at: now, declined_charge_invoice_id: invoiceId, inspection_fee_due: false, updated_by: staff.id }).eq("id", q.job_id);
+  // The declined work is saved for the next visit with its status, and listed on the charge's invoice (29 October 2026).
+  const declinedItems = await declinedItemsOf(q.job_id, settings);
+  await saveDeclinedWork(q.job_id, declinedItems, staff, settings);
+  if (invoiceId && declinedItems.length) await admin.from("invoices").update({ notes: declinedNote(declinedItems), updated_by: staff.id }).eq("id", invoiceId);
   await admin.from("job_events").insert({ job_id: q.job_id, event_type: "status_change", from_status: job.status, to_status: "ready", note: `${q.number} declined: the car goes to gate-out (${staff.display_name}).${chargeText || " No charge: the car leaves free."}`, created_by: staff.id });
   await logQuoteEvent(q.id, q.job_id, staff.id, "declined_to_gate_out", `Proceed to gate-out chosen by ${staff.display_name}${chargeText}`);
   const n = { type: "job_declined_out", title: `${job.job_number} declined: make sure the car is put back together and ready for collection`, body: `The customer declined ${q.number}. Open parts requests are cancelled.${chargeText}`, jobId: q.job_id, href: `/jobs/${q.job_id}` };

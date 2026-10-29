@@ -52,7 +52,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const admin = createAdminClient();
   // Declined work from earlier visits, and accepted estimates waiting for this car.
   const [{ data: declined }, { data: estimates }] = await Promise.all([
-    gateInOnly ? Promise.resolve({ data: [] as { id: string; title: string; details: string | null; amount_aed: number | null; declined_at: string }[] }) : admin.from("declined_work").select("id, title, details, amount_aed, declined_at").eq("vehicle_id", v.id).eq("is_active", true).order("declined_at", { ascending: false }).limit(10),
+    gateInOnly ? Promise.resolve({ data: [] as { id: string; title: string; details: string | null; amount_aed: number | null; declined_at: string; severity: string | null }[] }) : admin.from("declined_work").select("id, title, details, amount_aed, declined_at, severity").eq("vehicle_id", v.id).eq("is_active", true).is("done_at", null).order("declined_at", { ascending: false }).limit(10),
     admin.from("quotations").select("id, number, total_aed, responded_at, approver_name").eq("kind", "estimate").eq("vehicle_id", v.id).eq("status", "approved").eq("is_active", true).order("responded_at", { ascending: false }),
   ]);
   const { data: attachedJobs } = (estimates ?? []).length ? await admin.from("jobs").select("estimate_id").in("estimate_id", (estimates ?? []).map((e) => e.id)) : { data: [] };
@@ -150,7 +150,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
               <ul className="flex flex-col divide-y divide-line text-sm">
                 {declined.map((d) => (
                   <li key={d.id} className="py-2 flex flex-col">
-                    <span className="font-semibold">{d.title}</span>
+                    <span className="font-semibold">{d.title}{d.severity ? <span className={d.severity === "Advisory" ? "font-normal text-muted" : "font-bold text-red"}> · {d.severity}</span> : null}</span>
                     <span className="text-xs text-muted">{d.details ? `${d.details} · ` : ""}{d.amount_aed != null ? `AED ${Number(d.amount_aed).toLocaleString("en-GB")} · ` : ""}declined {formatDate(d.declined_at)}</span>
                   </li>
                 ))}

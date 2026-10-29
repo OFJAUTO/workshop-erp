@@ -1,4 +1,7 @@
 import { VinCopy } from "@/components/VinCopy";
+import { DeclinedAllButton } from "@/components/DeclinedAllButton";
+import { TimeSpentPanel } from "@/components/TimeSpentPanel";
+import { timeSpentOf } from "@/lib/time-spent";
 import { CustomerName } from "@/components/CustomerPanel";
 import { AFTERCARE_POINTS, aftercareOf } from "@/lib/aftercare";
 import { AftercareMessage, AftercareSignoff } from "./AftercareCard";
@@ -315,6 +318,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const trackStages = (loose ? STAGE_ORDER.filter((s) => !LOOSE_SKIP_STAGES.includes(s as Stage)) : STAGE_ORDER) as Stage[];
   // Approved work stays approved while an additional quotation waits: the Approval step never jumps back.
   const quoteApproved = quoteFamilies.length ? anyApproved(quoteFamilies) : latestQuote ? latestQuote.status === "approved" : null;
+  // Batch 29 Oct (2), section 2: the owner and advisors record "the customer declined all work" while nothing is approved;
+  // the owner, advisors and accounts see the time spent on the car.
+  const mayDeclineAll = (role === "owner" || role === "service_advisor") && !staff.viewingAs && job.is_open && !job.declined_out_at && !quoteApproved && !loose && (!!inspection || quoteFamilies.length > 0);
+  const timeSpent = role === "owner" || role === "service_advisor" || role === "accounts" ? await timeSpentOf(id, settings) : null;
   const trackWithAdvance = hasDeposit ? trackStages.flatMap((st) => (st === "approval" ? [st, "advance" as const] : [st])) : trackStages;
   const stageDone = (s: string, i: number): boolean => {
     if (!job.is_open) return true;
@@ -643,6 +650,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className={boxTitle(quoteBox)}>{tick(quoteBox)}{quoteFamilies.length > 1 ? `Quotations · ${quoteFamilies.length}` : "Quotation"}</span>
           <span className="text-sm font-semibold">{qState.text}</span>
           <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} />
+          {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(job.inspection_fee_aed) || 0} isOwner={role === "owner"} /></div> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (loose || inspection?.inspection.status === "approved" || role === "owner") ? (
               <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
@@ -768,6 +776,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
       </div>
+      {timeSpent ? <TimeSpentPanel t={timeSpent} /> : null}
       {!job.is_open && job.followup_due_at && !job.followup_done_at && can(role, "sendApproval") ? (
         <Card className="flex flex-wrap items-center gap-3 border-ink">
           <span className="text-sm font-semibold">Follow-up due {formatPromised(job.followup_due_at)}: call or message the customer and ask how the car is.</span>

@@ -1,4 +1,6 @@
 import { invoicesForLock } from "@/lib/quote-lock-server";
+import { DeclinedAllButton } from "@/components/DeclinedAllButton";
+import { anyApproved } from "@/lib/quote-history";
 import { packagesOf } from "@/lib/packages";
 import { quoteLockOf } from "@/lib/quote-lock";
 import { VinCopy } from "@/components/VinCopy";
@@ -7,7 +9,7 @@ import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { notFound, redirect } from "next/navigation";
 import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { installerHistoryFor } from "@/lib/bodyshop";
 import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, packageCostingOf, approvalReasonsNow } from "@/lib/quote-data";
@@ -43,7 +45,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
   const { message, error, send, approve } = await searchParams;
-  const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open").eq("id", id).maybeSingle();
+  const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open, inspection_fee_aed").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
   const [bundle, settings, site] = await Promise.all([loadQuotation(qid), getSettings(), getSiteUrl()]);
@@ -136,6 +138,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   // An additional quotation (a later number on the job) does not carry the suppliers' charges: the original does.
   const jobFamilies = await loadJobQuotes(id);
   const isOriginalQuote = !jobFamilies.length || jobFamilies[0].number === q.number;
+  // "Customer declined all work" (batch 29 Oct (2), section 2): while nothing on the car is approved.
+  const mayDeclineAll = canSend && jobOpen && !declinedOut && !anyApproved(jobFamilies);
+  // The work the customer declined on earlier visits of this car, still not done: a reminder while quoting.
+  const { data: declinedBefore } = q.vehicle_id ? await createAdminClient().from("declined_work").select("id, title, severity, declined_at").eq("vehicle_id", q.vehicle_id).eq("is_active", true).is("done_at", null).neq("job_id", id).order("declined_at", { ascending: false }).limit(12) : { data: [] as { id: string; title: string; severity: string | null; declined_at: string }[] };
   const editorSettings = {
     labourRate: labourRateFor(settings, job?.department ?? null, vehicle?.make?.name ?? null),
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
@@ -304,6 +310,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               </form>
             </Card>
           ) : null}
+          {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(declinedRow?.inspection_fee_aed) || 0} isOwner={isOwner} /></div> : null}
           {canSend && ["sent", "opened", "expired"].includes(q.status) ? (
             <details className="text-sm" data-mark-declined>
               <summary className="cursor-pointer font-semibold underline underline-offset-4 min-h-11 flex items-center">Mark as declined</summary>
@@ -338,6 +345,20 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
             </Card>
           ) : null}
         </div>
+        {(declinedBefore ?? []).length ? (
+          <Card className="flex flex-col gap-2" data-declined-last-time>
+            <SectionLabel right={`${(declinedBefore ?? []).length}`}>Declined on earlier visits</SectionLabel>
+            <ul className="flex flex-col divide-y divide-line text-sm">
+              {(declinedBefore ?? []).map((d) => (
+                <li key={d.id} className="py-1.5">
+                  <span className="font-semibold">{d.title}</span>
+                  {d.severity ? <span className={d.severity === "Advisory" ? "text-muted" : "font-bold text-red"}> · {d.severity}</span> : null}
+                  <span className="text-xs text-muted"> · {formatDate(d.declined_at)}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        ) : null}
         <Card className="flex flex-col gap-2">
           <SectionLabel right={`${bundle.events.length}`}>History</SectionLabel>
           <ul className="flex flex-col divide-y divide-line text-xs">

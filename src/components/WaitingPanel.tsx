@@ -4,6 +4,8 @@ import { getSettings, bankFeesOf } from "@/lib/settings";
 import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { loadWaitingOnYou, type Urgency, type WaitingItem } from "@/lib/waiting";
 import { RecordDeposit, type RecordDepositData } from "./RecordDeposit";
+import { markDeclinedCalled } from "@/app/(app)/jobs/declined-actions";
+import { declinedFollowUps } from "@/lib/declined";
 import { Button, Card, LinkButton } from "./ui";
 import type { BankFees } from "@/lib/bank-fees";
 
@@ -26,7 +28,7 @@ export type ExtraWaiting = {
   /** A longer explanation, shown on hover (the line itself stays short). */
   hint?: string;
   /** The exact action right on the row instead of a link. */
-  inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData } | { kind: "cheque_clear"; paymentId: string };
+  inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData } | { kind: "cheque_clear"; paymentId: string } | { kind: "declined_called"; ids: string[] };
 };
 
 type RowItem = WaitingItem & { amount?: string | null; urgency: Urgency; inline?: ExtraWaiting["inline"] };
@@ -52,6 +54,13 @@ function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankF
           <input type="hidden" name="return_to" value="/dashboard" />
           <Button type="submit" size="md" data-cheque-cleared>{i.actionLabel}</Button>
         </form>
+      ) : i.inline?.kind === "declined_called" ? (
+        <span className="flex flex-wrap items-center gap-2">
+          <LinkButton href={i.href} size="md" tone="secondary">Open</LinkButton>
+          <form action={markDeclinedCalled.bind(null, i.inline.ids.join(","))}>
+            <Button type="submit" size="md" data-declined-called>{i.actionLabel}</Button>
+          </form>
+        </span>
       ) : i.inline?.kind === "confirm_payment" ? (
         <form action={verifyPaymentAction.bind(null, i.inline.paymentId)}>
           <input type="hidden" name="return_to" value="/dashboard" />
@@ -70,8 +79,11 @@ function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankF
  * then grey (when you can), oldest first within each; an amber task older than a day turns red. One line per
  * job per task, and every button opens the exact action (or does it right here). Empty: "Nothing waiting ✓".
  */
-export async function WaitingPanel({ staff, extra = [] }: { staff: CurrentStaff; extra?: ExtraWaiting[] }) {
+export async function WaitingPanel({ staff, extra: given = [] }: { staff: CurrentStaff; extra?: ExtraWaiting[] }) {
   const settings = await getSettings();
+  // The advisor's calls about declined work, due after the set number of days (29 October 2026).
+  const followUps = (await declinedFollowUps(staff)).map((d): ExtraWaiting => ({ jobId: d.jobId, plate: d.plate, car: d.car, what: d.what, amount: null, actionLabel: "Called ✓", href: d.href, always: true, urgency: "amber", since: d.since, inline: { kind: "declined_called", ids: d.ids } }));
+  const extra = [...given, ...followUps];
   const items = await loadWaitingOnYou(staff, settings);
   const owner = staff.role_id === "owner";
   const charges = bankFeesOf(settings);

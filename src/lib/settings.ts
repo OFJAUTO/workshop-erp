@@ -78,6 +78,8 @@ const DEFAULTS = {
   whatsapp_invoice_template: "Dear [name],\n\nThank you for your payment.\n\nThe tax invoice for your *[make model]* ([plate]) is here:\n[link]\n\nOFJ Automotive",
   whatsapp_followup_template:
     "Dear [name],\n\nThank you for choosing OFJ Automotive for your *[make model]* ([plate]). We hope everything is running well.\n\nIf anything needs our attention, please let us know.\n\nOFJ Automotive",
+  /** Days after a customer declined work before the advisor is reminded to call them about it (29 October 2026). */
+  declined_followup_days: 14,
   /** Hours a sent proforma may wait unpaid before the job card turns amber and the owner is told once. */
   payment_waiting_hours: 24,
   /** Supplier LPOs by email go out from this Google Workspace mailbox (the service account must be allowed to send as it). */

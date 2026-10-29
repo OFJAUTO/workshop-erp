@@ -68,7 +68,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   const ids = invoices.map((i) => i.invoice.id);
   const jobIds = Array.from(new Set(invoices.map((i) => i.invoice.job_id).filter((x): x is string => !!x)));
   const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }, { data: hiddenRows }, { data: trips }, { data: clockings }, { data: quotes }, { data: comRows }] = await Promise.all([
-    admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed").in("invoice_id", ids).eq("is_active", true),
+    admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed, description").in("invoice_id", ids).eq("is_active", true),
     admin.from("payments").select(PAYMENT_SELECT).in("invoice_id", ids).eq("is_active", true),
     jobIds.length ? admin.from("work_sessions").select("job_id, minutes, started_at, ended_at").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("stock_issues").select("job_id, quantity, unit_cost").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
@@ -86,10 +86,18 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
   const chargeTotals = await chargeTotalsByJob(jobIds);
+  // A car the customer declined (or an invoice that is only INSPECTION CHARGES, the manual way): its cost is the real
+  // clocked time on the car - gate-in, inspection, road test, QC, work - booked as labour, never a typed "our cost".
+  const { data: declinedJobs } = jobIds.length ? await admin.from("jobs").select("id").in("id", jobIds).not("declined_out_at", "is", null) : { data: [] as { id: string }[] };
+  const declinedSet = new Set((declinedJobs ?? []).map((j) => j.id as string));
+  const isInspectionOnly = (jobId: string | null, ls: { section: string; description?: string | null }[]) => !!jobId && (declinedSet.has(jobId) || (ls.length > 0 && ls.every((l) => l.section !== "parts" && /inspection charge/i.test(l.description ?? ""))));
+  const inspectionJobs = invoices.filter(({ invoice }) => isInspectionOnly(invoice.job_id, ((lines ?? []) as { invoice_id: string; section: string; description: string | null }[]).filter((l) => l.invoice_id === invoice.id))).map(({ invoice }) => invoice.job_id as string);
+  const { timeSpentFor } = await import("./time-spent");
+  const clockedOf = await timeSpentFor(inspectionJobs, settings);
   // The comebacks of these jobs (our fault), to take their losses off the original job.
   const { data: cbJobs } = jobIds.length && !filter.noComebacks ? await admin.from("jobs").select("id, comeback_of").in("comeback_of", jobIds).in("comeback_cause", ["workmanship", "faulty_part"]) : { data: [] as { id: string; comeback_of: string }[] };
   const cbProfits = (cbJobs ?? []).length ? await jobProfits(settings, { jobIds: (cbJobs ?? []).map((c) => c.id), noComebacks: true }) : [];
-  const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string }[]).filter((l) => l.invoice_id === id);
+  const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string; description: string | null }[]).filter((l) => l.invoice_id === id);
   return invoices.map(({ invoice, job }) => {
     const ls = byInvoice(invoice.id);
     const partsCost = round2(ls.filter((l) => l.section === "parts").reduce((a, l) => a + Number(l.cost_aed), 0));
@@ -99,7 +107,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       .map((l) => ({ line_type: l.line_type as LineType, fee_kind: l.fee_kind, quantity: Number(l.quantity) || 1, unit_cost: l.unit_cost === null ? null : Number(l.unit_cost) }));
     const hiddenCost = round2(hidden.filter((l) => !l.fee_kind && l.line_type !== "recovery").reduce((a, l) => a + lineCost(l), 0));
     // The suppliers' own charges on the job's parts (courier, freight) are an internal cost too.
-    const otherCost = round2(ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0));
+    const inspectionOnly = isInspectionOnly(invoice.job_id, ls);
+    const otherCost = round2((inspectionOnly ? 0 : ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0)) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0));
     // The recovery cost: the drivers' real prices once any trip carries one; the quotation's hidden recovery lines until then.
     const jobTrips = ((trips ?? []) as { job_id: string; price_aed: number | string | null; delivered_at: string | null; status: string }[]).filter((t) => t.job_id === invoice.job_id);
     const tripCost = round2(jobTrips.reduce((a, t) => a + (Number(t.price_aed) || 0), 0));
@@ -120,7 +129,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const materialsCost = round2(jobQuotes.reduce((a, x) => a + (Number(x.materials_cost_aed) || 0), 0));
     const clockMinutes = ((clockings ?? []) as { job_id: string; minutes: number | null }[]).filter((c) => c.job_id === invoice.job_id).reduce((a, c) => a + (Number(c.minutes) || 0), 0);
     const minutes = clockMinutes + ((sessions ?? []) as { job_id: string; minutes: number | null; started_at: string; ended_at: string | null }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + (s.minutes ?? (s.ended_at ? Math.round((Date.parse(s.ended_at) - Date.parse(s.started_at)) / 60000) : 0)), 0);
-    const labourCost = round2((minutes / 60) * costRateFor(settings, job?.department));
+    const labourMinutes = inspectionOnly && invoice.job_id ? (clockedOf.get(invoice.job_id)?.clockedMinutes ?? minutes) : minutes;
+    const labourCost = round2((labourMinutes / 60) * costRateFor(settings, job?.department));
     const stockCost = round2(((stock ?? []) as { job_id: string; quantity: number | string; unit_cost: number | string }[]).filter((s) => s.job_id === invoice.job_id).reduce((a, s) => a + Number(s.quantity) * Number(s.unit_cost), 0));
     const pays = ((payments ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.invoice_id === invoice.id);
     // The bank charge: the quotation's estimate until a payment is recorded; then each payment's estimate, replaced
@@ -154,7 +164,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       partsCost,
       otherCost,
       stockCost,
-      labourMinutes: minutes,
+      labourMinutes,
       labourCost,
       bankCharges,
       bankChargesActual,

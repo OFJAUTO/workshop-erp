@@ -144,6 +144,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
           </div>
         )}
         {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
+        {invoice.notes ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{invoice.notes}</p> : null}
         {workmanship ? <p className="rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-workmanship><span className="font-bold">Workmanship warranty: {workmanship.period}, valid until {formatDate(workmanship.until)}</span></p> : null}
         {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={wCard.status} /> : null}
         {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}

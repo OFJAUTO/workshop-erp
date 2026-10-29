@@ -208,7 +208,7 @@ export async function createDepositInvoice(jobId: string, paymentId: string, amo
     .select("id, number")
     .single();
   if (error || !inv) return { error: error?.message ?? "Could not make the deposit invoice." };
-  await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: taxable, amount_aed: taxable, vat_aed: vat, total_aed: total, cost_aed: null, quotation_line_id: null, part_item_id: null });
+  await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: taxable, amount_aed: taxable, vat_aed: vat, total_aed: total, cost_aed: 0, quotation_line_id: null, part_item_id: null });
   await admin.from("payments").update({ invoice_id: inv.id, deposit_invoice_number: inv.number, updated_by: by }).eq("id", paymentId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for the deposit (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
   return { id: inv.id as string, number: inv.number as string };
@@ -245,7 +245,11 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
     .select("id, number, token")
     .single();
   if (error || !inv) return { error: error?.message ?? "Could not make the invoice." };
-  await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: amount, amount_aed: amount, vat_aed: vat, total_aed: total, cost_aed: null, quotation_line_id: null, part_item_id: null, created_by: by, updated_by: by });
+  const { error: lineErr } = await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: amount, amount_aed: amount, vat_aed: vat, total_aed: total, cost_aed: 0, quotation_line_id: null, part_item_id: null, created_by: by, updated_by: by });
+  if (lineErr) {
+    await admin.from("invoices").update({ is_active: false, status: "cancelled", updated_by: by }).eq("id", inv.id);
+    return { error: `Could not add the line to the invoice: ${lineErr.message}` };
+  }
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for ${description} (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
   await tryEnqueueZoho("invoice", String(inv.id), jobId, by);
   return { id: inv.id as string, number: inv.number as string, token: inv.token as string, total };

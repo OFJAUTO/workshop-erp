@@ -213,6 +213,8 @@ export type JobRow = {
   /** Section 8: the fee for THIS car if no work is approved (null = the Settings default), and a pending lower-fee request. */
   advisor_id?: string | null;
   inspection_fee_aed?: number | string | null;
+  declined_out_at?: string | null;
+  declined_charge_invoice_id?: string | null;
   inspection_fee_request_aed?: number | string | null;
   inspection_fee_request_by?: string | null;
   parts_state: "none" | "ordering" | "ordered" | "received" | "issued";
