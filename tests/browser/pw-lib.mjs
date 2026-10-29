@@ -31,6 +31,17 @@ async function open(cookies, opts) {
   const browser = await chromium.launch({ executablePath: EDGE, headless: true });
   const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1024, height: 768 }, hasTouch: !!opts.touch, isMobile: !!opts.mobile });
   await context.addCookies(cookies);
+  // Waiting on you is closed by default (29 October 2026); the tests that act on its rows open it after every load, as
+  // a person taps the bar. A test of the bar itself passes { waitingOpen: false }.
+  if (opts.waitingOpen !== false) {
+    await context.addInitScript(() => {
+      const openAll = () => document.querySelectorAll("[data-waiting-panel] details:not([open])").forEach((d) => { d.open = true; });
+      window.addEventListener("load", () => {
+        openAll();
+        new MutationObserver(openAll).observe(document.body, { childList: true, subtree: true });
+      });
+    });
+  }
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
   page.on("pageerror", (e) => console.log("PAGE ERROR", e.message));

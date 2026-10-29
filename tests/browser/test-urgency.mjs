@@ -20,7 +20,7 @@ const acc = await browserFor("accounts", { viewport: { width: 1500, height: 1200
 const page = acc.page;
 await page.goto(`${base}/dashboard`, { waitUntil: "load" });
 await page.waitForTimeout(2200);
-check("open by default with the urgent count", (await page.locator("[data-waiting-panel] details[open]").count()) === 1 && /urgent/.test((await page.locator("[data-waiting-summary]").textContent()) ?? ""));
+check("the list opens with the urgent count (the test helper taps the bar)", (await page.locator("[data-waiting-panel] details[open]").count()) === 1 && /urgent/.test((await page.locator("[data-waiting-summary]").textContent()) ?? ""));
 const urgencies = await page.locator("[data-waiting-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-urgency")));
 check("red first, then amber, then grey", urgencies.length >= 3 && urgencies.join(",") === [...urgencies].sort((a, b) => ({ red: 0, amber: 1, grey: 2 })[a] - ({ red: 0, amber: 1, grey: 2 })[b]).join(","), urgencies.join(","));
 check("the three classes all present", urgencies.includes("red") && urgencies.includes("amber") && urgencies.includes("grey"));

@@ -74,8 +74,8 @@ function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankF
 }
 
 /**
- * "WAITING ON YOU (N) · n urgent": the one box at the top of every person's first page, holding everything
- * whose next step is theirs. OPEN by default whenever it has items; red (urgent) first, then amber (today),
+ * "WAITING ON YOU · N · n URGENT": the one bar at the top of every person's first page, holding everything
+ * whose next step is theirs. CLOSED by default (a tap opens it); red (urgent) first, then amber (today),
  * then grey (when you can), oldest first within each; an amber task older than a day turns red. One line per
  * job per task, and every button opens the exact action (or does it right here). Empty: "Nothing waiting ✓".
  */
@@ -104,17 +104,26 @@ export async function WaitingPanel({ staff, extra: given = [] }: { staff: Curren
   ].sort((a, b) => (ORDER[a.urgency] - ORDER[b.urgency]) || String(a.since).localeCompare(String(b.since)));
   if (all.length === 0) {
     return (
-      <Card className="py-3" data-waiting-panel>
-        <p className="text-sm font-bold text-green" data-waiting-empty>Nothing waiting ✓</p>
+      <Card className="py-2.5" data-waiting-panel>
+        <p className="flex min-h-11 items-center text-sm font-extrabold uppercase tracking-[0.08em] text-green" data-waiting-empty>Nothing waiting ✓</p>
       </Card>
     );
   }
   const urgent = all.filter((i) => i.urgency === "red").length;
+  // CLOSED by default (29 October 2026, batch 2 section 3): one slim bar, red and bold when anything is urgent. A tap
+  // anywhere on it opens the list; the counts keep updating live while it is closed (the page's live refresh).
   return (
-    <Card className="border-ink py-3" data-waiting-panel>
-      <details open>
-        <summary className="flex min-h-10 cursor-pointer items-center gap-2 text-sm font-extrabold uppercase tracking-[0.08em]" data-waiting-summary>
-          Waiting on you ({all.length}){urgent ? <span className="text-red normal-case tracking-normal" data-waiting-urgent>· {urgent} urgent</span> : null}
+    <Card className={`py-2.5 ${urgent ? "!border-red-bar" : "border-ink"}`} data-waiting-panel data-waiting-count={all.length} data-waiting-urgent-count={urgent}>
+      <details className="group">
+        <summary className={`flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 text-sm font-extrabold uppercase tracking-[0.08em] [&::-webkit-details-marker]:hidden ${urgent ? "text-red" : "text-ink"}`} data-waiting-summary data-urgent={urgent ? "true" : "false"}>
+          <span>
+            Waiting on you · {all.length}
+            {urgent ? <span data-waiting-urgent> · {urgent} urgent</span> : null}
+          </span>
+          <span className="ml-auto normal-case tracking-normal underline underline-offset-4">
+            <span className="group-open:hidden" data-waiting-see>See list ▾</span>
+            <span className="hidden group-open:inline" data-waiting-hide>Hide list ▴</span>
+          </span>
         </summary>
         <ul className="mt-1 divide-y divide-line">
           {all.map((i, idx) => <Row key={`${i.jobId}-${idx}`} i={i} owner={owner} charges={charges} />)}
