@@ -125,7 +125,7 @@ export function SettingsForm({
                   <option value="aed">AED</option>
                 </Select>
               </Field>
-              <Field label="Next invoice number" hint="Numbering continues from here (INV-00001 and so on).">
+              <Field label="Next invoice number" hint="Numbering continues from here (INV‑00001 and so on).">
                 <Input name="next_invoice_number" defaultValue={v.next_invoice_number} inputMode="numeric" required />
               </Field>
               <Field label="Consumables line (AED)" hint="Default amount of the standard Consumables line on an invoice.">

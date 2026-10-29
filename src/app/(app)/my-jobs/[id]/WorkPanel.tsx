@@ -50,7 +50,7 @@ export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakW
   return (
     <div className="flex flex-col items-center gap-1 py-2 text-center">
       <span className="text-xs font-bold uppercase tracking-[0.1em] text-muted">{locked ? "Clock stopped" : left < 0 ? "Over the time" : "Time left"}</span>
-      <span className={`text-5xl sm:text-6xl font-extrabold tabular-nums leading-none ${tone}`}>{budget > 0 ? (left < 0 ? `+${fmtHm(left)}` : fmtHm(left)) : fmtHm(used)}</span>
+      <span className={`text-5xl sm:text-6xl font-extrabold tabular-nums leading-tight ${tone}`}>{budget > 0 ? (left < 0 ? `+${fmtHm(left)}` : fmtHm(left)) : fmtHm(used)}</span>
       <span className="text-sm font-semibold text-muted">{budget > 0 ? `of ${hoursCharged} h charged · used ${fmtHm(used)}` : "no hours quoted on this car"}</span>
       {running.length ? <span className="text-xs font-semibold text-green">Working now: {running.map((r) => r.name).join(", ")}</span> : null}
     </div>

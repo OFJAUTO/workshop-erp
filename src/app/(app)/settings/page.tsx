@@ -198,12 +198,14 @@ export default async function SettingsPage() {
             <SectionLabel>Recovery rates</SectionLabel>
             <p className="text-xs text-muted">The normal price of a trip: the minimum, or the kilometres one way from the workshop times the rate, whichever is more. A claim more than the flag % above it is marked on the Recovery page with the suggested price.</p>
             <form action={saveRecoveryRates} className="flex flex-col gap-2">
-              <div className="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center gap-2 text-xs font-bold uppercase tracking-[0.06em] text-muted"><span>Truck</span><span>Min AED</span><span>AED / km</span></div>
+              {/* One block per truck: its name, then its two boxes side by side, each labelled - fits the narrowest card. */}
               {(Object.keys(RATE_KIND_LABELS) as RateKind[]).map((k) => (
-                <div key={k} className="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center gap-2" data-rate-row={k}>
+                <div key={k} className="flex flex-col gap-1" data-rate-row={k}>
                   <span className="text-sm font-semibold">{RATE_KIND_LABELS[k]}</span>
-                  <Input name={`${k}_min`} defaultValue={String(recoveryRates[k].min)} inputMode="decimal" aria-label={`${RATE_KIND_LABELS[k]} minimum`} />
-                  <Input name={`${k}_per_km`} defaultValue={String(recoveryRates[k].per_km)} inputMode="decimal" aria-label={`${RATE_KIND_LABELS[k]} AED per km`} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex min-w-0 flex-col gap-0.5 text-xs font-semibold text-muted">Minimum (AED)<Input name={`${k}_min`} defaultValue={String(recoveryRates[k].min)} inputMode="decimal" aria-label={`${RATE_KIND_LABELS[k]} minimum`} /></label>
+                    <label className="flex min-w-0 flex-col gap-0.5 text-xs font-semibold text-muted">AED per km<Input name={`${k}_per_km`} defaultValue={String(recoveryRates[k].per_km)} inputMode="decimal" aria-label={`${RATE_KIND_LABELS[k]} AED per km`} /></label>
+                  </div>
                 </div>
               ))}
               <label className="flex items-center gap-2 text-sm font-semibold">Flag a trip above expected by <Input name="flag_percent" defaultValue={String(recoveryFlag)} inputMode="decimal" style={{ width: "4.5rem" }} aria-label="Flag percent" data-rate-flag /> %</label>

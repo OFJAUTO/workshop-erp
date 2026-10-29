@@ -59,8 +59,8 @@ export function ChecklistEditor({ action, initial, initialComplaints = {} }: { a
                   // Tap to go round the three answer styles: Good / Average / Bad, OK / Required, Good / Low / Empty (A/C gas).
                   const nextStyle: ItemStyle = style === "grade" ? "job" : style === "job" ? "gas" : "grade";
                   return (
-                    <li key={it.key} className="flex items-center gap-2">
-                      <Input value={it.label} onChange={(e) => setItem(si, ii, { label: e.target.value })} className="flex-1" aria-label="Item name" />
+                    <li key={it.key} className="flex flex-wrap items-center gap-2">
+                      <Input value={it.label} onChange={(e) => setItem(si, ii, { label: e.target.value })} className="min-w-[12rem] flex-1" aria-label="Item name" />
                       <button
                         type="button"
                         onClick={() => setItem(si, ii, { style: nextStyle })}

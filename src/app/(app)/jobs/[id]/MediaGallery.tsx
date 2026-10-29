@@ -80,16 +80,16 @@ function RemoveX({ onRemove, label }: { onRemove: () => void; label: string }) {
     <div className="absolute inset-x-1 top-1 z-10 flex items-center justify-between gap-1 rounded-control border border-line bg-white/95 px-2 py-1 text-xs shadow" data-remove-ask>
       <span className="font-semibold">Remove?</span>
       <span className="flex gap-1">
-        <button type="button" className="rounded-control bg-ink px-2 py-1 font-bold text-white disabled:opacity-50" disabled={busy} onClick={() => { setBusy(true); onRemove(); }} data-remove-yes>
+        <button type="button" className="min-h-9 rounded-control bg-ink px-2 py-1 font-bold text-white disabled:opacity-50" disabled={busy} onClick={() => { setBusy(true); onRemove(); }} data-remove-yes>
           Yes
         </button>
-        <button type="button" className="rounded-control border border-line px-2 py-1 font-bold" onClick={() => setAsk(false)} data-remove-no>
+        <button type="button" className="min-h-9 rounded-control border border-line px-2 py-1 font-bold" onClick={() => setAsk(false)} data-remove-no>
           No
         </button>
       </span>
     </div>
   ) : (
-    <button type="button" onClick={() => setAsk(true)} className="absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-white/90 text-sm font-bold shadow hover:bg-white" aria-label={`Remove: ${label}`} data-media-remove>
+    <button type="button" onClick={() => setAsk(true)} className="absolute right-1 top-1 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white/90 text-sm font-bold shadow hover:bg-white" aria-label={`Remove: ${label}`} data-media-remove>
       ×
     </button>
   );

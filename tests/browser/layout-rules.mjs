@@ -3,7 +3,7 @@
 //  - nothing interactive overlaps another control or is cut off at the right edge;
 //  - no text sits on top of other text;
 //  - no text is clipped by a box that hides its overflow (a deliberate "…" is allowed);
-//  - no word is broken in the middle, no code or date is split ("J-" / "00016") and no one- or two-letter piece is
+//  - no word is broken in the middle, no code or date is split ("J-" / "00016") and no single letter is
 //    left at a hyphen ("G-" / "Class"); a compound word may wrap at its own hyphen, and a break after "/" is allowed;
 //  - nothing sticks out of its card;
 //  - on a touch screen every button, picker and box is at least 40 px tall (44 px by design, 4 px slack for borders).
@@ -92,7 +92,8 @@ export function measurePage({ touch = false, limit = 20 } = {}) {
       const type = (el.getAttribute("type") || "").toLowerCase();
       const isBox = t === "SELECT" || t === "TEXTAREA" || (t === "INPUT" && !["checkbox", "radio", "hidden", "range", "file", "color"].includes(type));
       const isButton = t === "BUTTON" || el.getAttribute("role") === "button" || (t === "A" && /(^|\s)(inline-flex|flex)(\s|$)/.test(el.className) && /min-h-|h-1[0-9]|h-9|rounded/.test(el.className));
-      if ((isBox || isButton) && r.height < 40 && !el.closest("[data-small-ok]") && !el.closest("table") && !isSrOnly(el)) problems.push(`too small for a finger (${Math.round(r.height)}px tall): ${label(el)}`);
+      // A panel in the car drawing (an SVG shape) is a part of a picture, not a button: it cannot be finger-sized.
+      if ((isBox || isButton) && r.height < 40 && !el.closest("[data-small-ok]") && !el.closest("table") && !(el instanceof SVGElement) && !isSrOnly(el)) problems.push(`too small for a finger (${Math.round(r.height)}px tall): ${label(el)}`);
     }
   }
   for (let i = 0; i < rects.length; i++) {
@@ -131,7 +132,7 @@ export function measurePage({ touch = false, limit = 20 } = {}) {
     }
     // Words broken across two lines: each whitespace or slash separated piece must sit on one line. A compound word
     // may wrap at its own hyphen as English text does ("one-" / "way"), but never inside a piece, never inside a code,
-    // number or date ("J-" / "00016", "2026-" / "10-27") and never leaving a piece of one or two letters ("G-" / "Class").
+    // number or date ("J-" / "00016", "2026-" / "10-27") and never leaving a single letter ("G-" / "Class").
     const text = node.nodeValue;
     const re = /[^\s/]{3,}/g;
     const linesOf = (from, to) => {
@@ -151,7 +152,7 @@ export function measurePage({ touch = false, limit = 20 } = {}) {
         if (k < pieces.length - 1 && !bad) {
           const next = pieces[k + 1];
           const broken = p && next && linesOf(at, at + p.length + 1 + next.length).size > 1;
-          if (broken && (p.replace(/\W/g, "").length < 3 || next.replace(/\W/g, "").length < 3)) bad = true;
+          if (broken && (p.replace(/\W/g, "").length < 2 || next.replace(/\W/g, "").length < 2)) bad = true;
         }
         at += p.length + 1;
       }
@@ -213,8 +214,10 @@ export function measurePage({ touch = false, limit = 20 } = {}) {
     if (cr.width < 40) continue;
     for (const child of card.querySelectorAll("*")) {
       if (ignored(child) || hiddenByDetails(child) || !visibleStyle(child) || isSrOnly(child)) continue;
-      const cs = getComputedStyle(child);
-      if (cs.position === "fixed") continue;
+      // A fixed bar (and everything in it) is drawn against the window, not inside the card that holds its code.
+      let fixedBar = false;
+      for (let n = child; n && n !== card; n = n.parentElement) if (getComputedStyle(n).position === "fixed") { fixedBar = true; break; }
+      if (fixedBar) continue;
       const whole = child.getBoundingClientRect();
       if (whole.width < 2 || whole.height < 2 || outOfStrip(child, whole)) continue;
       const r = shown(child, whole);

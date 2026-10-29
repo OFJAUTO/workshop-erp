@@ -1,6 +1,7 @@
 import { Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
+import { Words } from "@/components/Words";
 import { createClient } from "@/lib/supabase/server";
 import type { AuditRow } from "@/lib/types";
 
@@ -34,11 +35,19 @@ function changes(row: AuditRow): string[] {
   return out.length ? out : ["No visible change"];
 }
 
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A value in plain words: times and days as the screens print them, an id shortened, a JSON value spaced so it wraps between its parts. */
 function show(v: unknown): string {
   if (v === null || v === undefined || v === "") return "empty";
   if (typeof v === "boolean") return v ? "yes" : "no";
-  const s = typeof v === "string" ? v : JSON.stringify(v);
-  return s.length > 60 ? s.slice(0, 57) + "…" : s;
+  if (typeof v === "string" && ISO_TIME.test(v)) return formatDateTime(v);
+  if (typeof v === "string" && ISO_DAY.test(v)) return formatDate(`${v}T12:00:00Z`);
+  if (typeof v === "string" && (UUID.test(v) || (v.length > 24 && !/\s/.test(v)))) return `${v.slice(0, 8)}…`;
+  const s = typeof v === "string" ? v : JSON.stringify(v).replaceAll(',"', ', "').replaceAll('":', '": ');
+  return s.length > 80 ? s.slice(0, 77) + "…" : s;
 }
 
 function label(row: AuditRow): string {
@@ -105,7 +114,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
                   </span>
                   <span className="text-xs text-muted flex flex-col">
                     {changes(r).map((c, i) => (
-                      <span key={i}>{c}</span>
+                      <Words key={i} text={c} />
                     ))}
                   </span>
                 </span>

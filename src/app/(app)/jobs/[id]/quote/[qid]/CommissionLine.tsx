@@ -109,11 +109,11 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
       <dd className="text-right">
         <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
           {set ? <span className={commission.status === "pending" ? "text-amber font-semibold" : ""}>{aed(amount)}</span> : <span>{aed(0)}</span>}
-          {!disabled && !set && !editing ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="min-h-7 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-add>+ Add</button> : null}
+          {!disabled && !set && !editing ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-add>+ Add</button> : null}
           {!disabled && set && !editing ? (
             <>
-              <button type="button" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} className="min-h-7 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-edit>Edit</button>
-              <button type="button" disabled={pending} onClick={() => { const fd = new FormData(); fd.set("to", ""); onLocal?.({ to: null, kind: null, value: null, status: null }); run(() => saveCommission(quotationId, fd)); }} className="min-h-7 px-1.5 text-[11px] font-bold text-red" data-commission-remove>Remove</button>
+              <button type="button" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-edit>Edit</button>
+              <button type="button" disabled={pending} onClick={() => { const fd = new FormData(); fd.set("to", ""); onLocal?.({ to: null, kind: null, value: null, status: null }); run(() => saveCommission(quotationId, fd)); }} className="min-h-9 px-1.5 text-[11px] font-bold text-red" data-commission-remove>Remove</button>
             </>
           ) : null}
         </span>
@@ -138,7 +138,7 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
       {commission.status === "declined" && !editing ? (
         <div className="col-span-2 text-[11px] font-semibold text-red" data-commission-declined>
           Commission declined by the owner{commission.decisionNote ? `: ${commission.decisionNote}` : ""}.
-          {!disabled ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="ml-2 underline underline-offset-4" data-commission-add>+ Add again</button> : null}
+          {!disabled ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="ml-2 inline-flex min-h-9 items-center underline underline-offset-4" data-commission-add>+ Add again</button> : null}
         </div>
       ) : null}
     </>

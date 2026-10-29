@@ -46,9 +46,9 @@ export function PackagesEditor({ initial, action }: { initial: BodyshopPackage[]
                 <div key={j} className="flex flex-wrap items-center gap-2 lg:flex-nowrap" data-package-item>
                   <span className="min-w-0 flex-1 basis-56"><Input value={it.label} onChange={(e) => editItem(i, j, { label: e.target.value })} placeholder="Full body PPF" aria-label="Included item" textCase="sentence" /></span>
                   <span className="w-44 shrink-0"><Input value={it.warranty ?? ""} onChange={(e) => editItem(i, j, { warranty: e.target.value })} placeholder="Warranty (10 years)" aria-label="Warranty" /></span>
-                  <span className="flex shrink-0 items-center gap-2">
+                  <span className="flex min-w-0 max-w-full items-center gap-2">
                     <button type="button" onClick={() => editItem(i, j, { only_if: on ? null : "the car has one" })} aria-pressed={on} className={`min-h-11 shrink-0 whitespace-nowrap rounded-control border px-3 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`} data-only-if-toggle>{on ? "Only if ✓" : "Only if…"}</button>
-                    {on ? <span className="w-52 shrink-0"><Input value={it.only_if ?? ""} onChange={(e) => editItem(i, j, { only_if: e.target.value })} placeholder="the car has a panoramic roof" aria-label="Only if the car…" className="text-xs" data-only-if-text /></span> : null}
+                    {on ? <span className="w-52 min-w-0 shrink"><Input value={it.only_if ?? ""} onChange={(e) => editItem(i, j, { only_if: e.target.value })} placeholder="the car has a panoramic roof" aria-label="Only if the car…" className="text-xs" data-only-if-text /></span> : null}
                     <button type="button" onClick={() => edit(i, { items: p.items.filter((_, m) => m !== j) })} className="min-h-11 min-w-11 shrink-0 rounded-control text-base font-bold text-red hover:bg-chip" aria-label="Remove item" data-item-remove>×</button>
                   </span>
                 </div>

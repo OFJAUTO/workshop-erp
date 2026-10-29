@@ -1,5 +1,6 @@
 "use client";
 
+import { Words } from "@/components/Words";
 import type { ReactNode } from "react";
 import { PositionsLine } from "@/components/PositionsLine";
 import { Badge, Card, SectionLabel } from "@/components/ui";
@@ -48,7 +49,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                   <li key={l.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2" data-locked-line data-line-id={l.id}>
                     <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted">{i + 1}</span>
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="flex flex-wrap items-center gap-2"><span className="font-semibold uppercase">{l.title || "(no name)"}</span>{l.urgency === "urgent" ? <Badge tone="red">Urgent</Badge> : null}{l.dangerous ? <Badge tone="red">Dangerous</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}</span><PositionsLine positions={l.positions} />
+                      <span className="flex flex-wrap items-center gap-2"><Words text={l.title || "(no name)"} className="font-semibold uppercase" />{l.urgency === "urgent" ? <Badge tone="red">Urgent</Badge> : null}{l.dangerous ? <Badge tone="red">Dangerous</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}</span><PositionsLine positions={l.positions} />
                       {detailOf(l) ? <span className="text-xs text-muted">{detailOf(l)}</span> : null}
                       {l.details ? <span className="text-xs text-muted">Note: {l.details}</span> : null}
                       {showProfit && l.outside_work ? <span className="text-xs text-muted">Outside work, our cost {aed(lineCost(l))}</span> : null}
@@ -63,6 +64,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
           <Card className="flex flex-col gap-2">
             <SectionLabel right={`${parts.length}`}>Parts</SectionLabel>
             {parts.length === 0 ? <p className="text-sm text-muted">No parts on this quotation.</p> : (
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
@@ -75,7 +77,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                     return (
                       <tr key={l.id} className={off ? "opacity-50" : ""} data-locked-line data-line-id={l.id}>
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{i + 1}</td>
-                        <td className="py-2 pr-2 align-top"><span className="font-semibold uppercase">{l.title}</span><PositionsLine positions={l.positions} />{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
+                        <td className="py-2 pr-2 align-top"><Words text={l.title} className="font-semibold uppercase" /><PositionsLine positions={l.positions} />{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
                         {showProfit ? <><td className="py-2 pr-2 align-top text-right text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right text-muted">{aed(markupBoth(l).aed)}</td></> : null}
                         <td className="py-2 pr-2 align-top text-right">{off ? "" : aed(lineUnitPrice(l))}</td>
@@ -85,6 +87,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </Card>
           {others.length ? (
@@ -97,7 +100,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                     <li key={l.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2" data-locked-line data-line-id={l.id}>
                       <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted">{i + 1}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="flex flex-wrap items-center gap-2"><span className="font-semibold">{l.title}</span>{hidden ? <Badge tone="neutral">Internal cost only</Badge> : null}</span>
+                        <span className="flex flex-wrap items-center gap-2"><Words text={l.title} className="font-semibold" />{hidden ? <Badge tone="neutral">Internal cost only</Badge> : null}</span>
                         {(l.quantity || 1) > 1 ? <span className="text-xs text-muted">{l.quantity} × {aed(l.unit_price)}</span> : null}
                         {hidden && showProfit ? <span className="text-xs text-muted">Costs us {aed(lineCost(l))}</span> : null}
                         {l.details ? <span className="text-xs text-muted">Note: {l.details}</span> : null}

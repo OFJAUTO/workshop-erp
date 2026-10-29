@@ -21,7 +21,7 @@ function StatusLine({ tone, text, onAgain }: { tone: keyof typeof TONE_CLASS; te
       {onAgain ? (
         <>
           {" · "}
-          <button type="button" onClick={onAgain} className="underline underline-offset-4 font-bold text-ink">
+          <button type="button" onClick={onAgain} className="inline-flex min-h-9 items-center underline underline-offset-4 font-bold text-ink">
             Send again
           </button>
         </>

@@ -167,7 +167,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
         ) : null}
         {staff.role_id === "owner" && !staff.viewingAs ? (
           <form action={backfillZoho}>
-            <Button type="submit" tone="secondary" size="md" data-zoho-backfill>Backfill: queue everything already in the ERP</Button>
+            <Button type="submit" tone="secondary" size="md" className="!whitespace-normal text-center" data-zoho-backfill>Backfill: queue everything already in the ERP</Button>
           </form>
         ) : null}
         <span className="text-xs text-muted">The sync also runs by itself every five minutes.</span>

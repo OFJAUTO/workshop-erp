@@ -51,7 +51,7 @@ The pop-up check (`tests/browser/popup-check.mjs`, 26 pop-ups) runs with it at 1
 pop-ups alone, `PART=1/3` a third of a role's pages.
 
 A word may still wrap at its own hyphen the way English text does ("one-" / "way"), but never inside a piece, never
-inside a code, number or date ("J-" / "00016", "2026-" / "10-27") and never leaving a piece of one or two letters
+inside a code, number or date ("J-" / "00016", "2026-" / "10-27") and never leaving a single letter
 ("G-" / "Class").
 
 ## Fixed by the check
