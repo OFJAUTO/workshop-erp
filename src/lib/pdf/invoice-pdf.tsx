@@ -1,3 +1,4 @@
+import { isPickupShownByPackage, packagesGivePickup } from "../packages";
 import { customerCompWord } from "../complimentary";
 import { compReasonForJob } from "../quote-data";
 import "server-only";
@@ -95,7 +96,9 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
     const tw = lineTintWords(l, null, tintSpec, tintLimit);
     return tw ? { ...d, details: [d.details, tw].filter(Boolean).join(" · ") } : d;
   });
-  const fees = lines.filter((l) => l.section === "fees").map(docLine);
+  // Section 6.3: the package badge shows the free pick-up once; its AED 0 line is left off the customer's copy.
+  const pickupInPackage = packagesGivePickup(pkgRows.map((l) => l.package_items));
+  const fees = lines.filter((l) => l.section === "fees" && !(pickupInPackage && isPickupShownByPackage({ description: l.description }, Number(l.amount_aed) || 0))).map(docLine);
   const parts = lines.filter((l) => l.section === "parts").map(docLine);
   const sum = (ls: SectionLine[]) => round2(ls.reduce((a, l) => a + l.amount, 0));
   // The lines' own discounts (line 1's 22%): the sections show the pre-discount figure, the green row takes it off.

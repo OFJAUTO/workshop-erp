@@ -160,7 +160,7 @@ export function TintSpecBox({
             <div key={w.key} className="flex flex-col gap-1.5 py-2" data-tint-row={w.key}>
               <span className="text-sm font-bold">{w.label} <span className="text-[11px] font-semibold text-muted">darkness %</span></span>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Chip on={!row.on} label="None" data={`${w.key}:none`} disabled={readOnly} onClick={() => setRow(w.key, { on: false, shade: null, double: false })} />
+                <Chip on={!row.on} label="Not needed" data={`${w.key}:none`} disabled={readOnly} onClick={() => setRow(w.key, { on: false, shade: null, double: false })} />
                 <ShadeChips k={w.key} row={row} withClear limit={limit} disabled={readOnly} onPick={(s) => pickShade(w.key, s)} />
               </div>
               <DoubleTick k={w.key} row={row} disabled={readOnly} onChange={(v) => setRow(w.key, { double: v })} />
@@ -176,7 +176,7 @@ export function TintSpecBox({
           {spec.roofFitted ? (
             <>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Chip on={!spec.rows.roof.on} label="None" data="roof:none" disabled={readOnly} onClick={() => setRow("roof", { on: false, shade: null, double: false })} />
+                <Chip on={!spec.rows.roof.on} label="Not needed" data="roof:none" disabled={readOnly} onClick={() => setRow("roof", { on: false, shade: null, double: false })} />
                 <ShadeChips k="roof" row={spec.rows.roof} withClear limit={limit} disabled={readOnly} onPick={(s) => pickShade("roof", s)} />
               </div>
               <DoubleTick k="roof" row={spec.rows.roof} disabled={readOnly} onChange={(v) => setRow("roof", { double: v })} />

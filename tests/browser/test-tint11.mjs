@@ -48,9 +48,9 @@ await page.locator('[data-tint-chip="rear_window:70"]').click();
 await page.locator('[data-tint-chip="roof:70"]').click();
 await page.locator('[data-tint-double="roof"]').check();
 const s2 = await until(async () => { const s = await specOf(qid); return s?.rows?.rear_window?.shade === 70 && s?.rows?.roof?.double === true ? s : null; });
-check("1: rear sides & rear window 70, roof 70 double layer saved", !!s2);
-check("1: the split words: 'front sides 50% darkness · rear sides & rear window 70% darkness'", /front sides 50% darkness · rear sides & rear window 70% darkness \(above the legal limit – customer's request\) · roof 70% darkness, double layer/.test((await page.locator("[data-tint-box] [data-tint-summary]").textContent()) ?? ""), await page.locator("[data-tint-box] [data-tint-summary]").textContent());
-check("1: darker than the legal limit (50) says so: customer's request", /Rear side windows 70% darkness, Rear window 70% darkness, Sunroof \/ panoramic roof 70% darkness/.test((await page.locator("[data-tint-above-limit]").textContent()) ?? ""));
+check("1: rear sides & rear screen 70, roof 70 double layer saved", !!s2);
+check("1: the split words: 'front sides 50% darkness · rear sides & rear screen 70% darkness'", /front sides 50% darkness · rear sides & rear screen 70% darkness \(above the legal limit – customer's request\) · roof 70% darkness, double layer/.test((await page.locator("[data-tint-box] [data-tint-summary]").textContent()) ?? ""), await page.locator("[data-tint-box] [data-tint-summary]").textContent());
+check("1: darker than the legal limit (50) says so: customer's request", /Rear side windows 70% darkness, Rear screen 70% darkness, Sunroof \/ panoramic roof 70% darkness/.test((await page.locator("[data-tint-above-limit]").textContent()) ?? ""));
 check("1: the double layer says double film and the extra hour", /1 window double layer: double film and 1 h more fitting/.test((await page.locator("[data-tint-double-note]").textContent()) ?? ""));
 await page.locator("[data-tint-box]").scrollIntoViewIfNeeded();
 await page.screenshot({ path: shot("tint11-1-box.png"), clip: (await page.locator("[data-tint-box]").boundingBox()) ?? undefined });
@@ -72,7 +72,7 @@ check("1: the owner saves the box as a one-tap preset", !!(await until(async () 
 
 /* ---------------- 2. The shade on the tint items of the documents (never in the package itself) ---------------- */
 const pdf = await pdfText(`/api/pdf/quotation/${qid}`, await cookieHeader("owner"));
-check("2: the quotation PDF adds the shades to the tint items", /side & rear windows · front sides 50% darkness · rear sides & rear window 70% darkness \(above the legal limit – customer's request\)/i.test(pdf.text) && /Panoramic roof film · 70% darkness, double layer \(above the legal limit/i.test(pdf.text) && /Windshield heat-rejection film · clear/i.test(pdf.text), pdf.text.match(/OFJ ceramic.{0,200}/i)?.[0] ?? String(pdf.status));
+check("2: the quotation PDF adds the shades to the tint items", /heat-rejection tint – front side windows 50% darkness · rear side windows & rear screen 70% darkness \(above the legal limit – customer's request\)/i.test(pdf.text) && /Panoramic roof film · 70% darkness, double layer \(above the legal limit/i.test(pdf.text) && /Windshield heat-rejection film · clear/i.test(pdf.text), pdf.text.match(/OFJ ceramic.{0,200}/i)?.[0] ?? String(pdf.status));
 check("2: the package itself stores no shade", !JSON.stringify((await sql("select package_items from public.quotation_lines where quotation_id = $1 and package_key is not null", [qid]))[0]?.package_items ?? {}).includes("darkness"));
 await go(page, `${base}/jobs/${jobId}`);
 check("2: the job card shows the tint choice", /Tint: windshield clear heat-rejection · front sides 50% darkness/.test((await page.locator("[data-tint-summary]").first().textContent()) ?? ""));
@@ -87,9 +87,9 @@ const SPEC_B = { rows: { windshield: { on: true, coverage: "clear", shade: "clea
 await sql("update public.quotations set tint_spec = $2::jsonb where id = $1", [bq, JSON.stringify(SPEC_B)]);
 const { browser: cb, page: cp } = await browserFor("owner", { viewport: { width: 480, height: 1300 } });
 await go(cp, `${base}/quote/${bToken}`);
-check("3: the link shows the window tint card with the shades", /front sides 50% darkness · rear sides & rear window 70% darkness \(above the legal limit – customer's request\)/.test((await cp.locator("[data-tint-card]").textContent()) ?? ""), (await cp.locator("[data-tint-card]").textContent().catch(() => "")) ?? "none");
+check("3: the link shows the window tint card with the shades", /front sides 50% darkness · rear sides & rear screen 70% darkness \(above the legal limit – customer's request\)/.test((await cp.locator("[data-tint-card]").textContent()) ?? ""), (await cp.locator("[data-tint-card]").textContent().catch(() => "")) ?? "none");
 await cp.getByText("Approved", { exact: true }).click();
-check("3: approving asks the customer to tick 'Above the legal limit – my request'", (await cp.locator("[data-tint-ack]").count()) === 1 && /Rear side windows 70% darkness, Rear window 70% darkness is darker than the legal limit of 50% darkness/.test((await cp.locator("[data-tint-ack]").textContent()) ?? ""));
+check("3: approving asks the customer to tick 'Above the legal limit – my request'", (await cp.locator("[data-tint-ack]").count()) === 1 && /Rear side windows 70% darkness, Rear screen 70% darkness is darker than the legal limit of 50% darkness/.test((await cp.locator("[data-tint-ack]").textContent()) ?? ""));
 await cp.screenshot({ path: shot("tint11-3-ack.png") });
 const noAck = await fetch(`${base}/api/quote/${bToken}`, { method: "POST", redirect: "manual", body: new URLSearchParams({ action: "approve", approver_name: "Stage Customer", agree: "on", removal_ack: "on" }) });
 check("3: without the tick the server refuses the approval", noAck.status === 303 && /tint/i.test(decodeURIComponent(noAck.headers.get("location") ?? "")) && (await sql("select status from public.quotations where id = $1", [bq]))[0].status !== "approved", noAck.headers.get("location") ?? String(noAck.status));
@@ -107,7 +107,7 @@ check("4: after approval the box stays changeable until the tint stage starts", 
 await ap.locator('[data-tint-chip="rear_window:50"]').click();
 await ap.locator("[data-tint-save]").click();
 const ev = await until(async () => (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'tint_changed' order by created_at desc limit 1", [bq]))[0]);
-check("4: the change is written down old → new", !!ev && /rear sides & rear window 70% darkness → .*front sides & rear window 50% darkness · rear sides 70% darkness/.test(ev.note), ev?.note ?? "none");
+check("4: the change is written down old → new", !!ev && /rear sides & rear screen 70% darkness → .*front sides & rear screen 50% darkness · rear sides 70% darkness/.test(ev.note), ev?.note ?? "none");
 await ap.locator("[data-tint-whatsapp]").waitFor({ timeout: 15000 }).catch(() => null);
 check("4: the prepared 'updated tint choice' WhatsApp appears next to it", (await ap.locator("[data-tint-whatsapp]").count()) === 1 && /updated tint choice/.test((await ap.locator("[data-tint-message]").textContent().catch(() => "")) ?? ""), (await ap.locator("[data-tint-box]").textContent().catch(() => ""))?.slice(-300));
 await ap.locator("[data-tint-box]").scrollIntoViewIfNeeded();
@@ -141,14 +141,14 @@ const photo = await until(async () => (await sql("select id, storage_path from p
 check("6: the installer's photo after fitting is saved with his PIN", !!photo && /tint photo saved/.test((await page.locator("[data-tablet-note]").textContent().catch(() => "")) ?? ""));
 await page.context().clearCookies({ name: "erp_device" });
 await go(page, `${base}/bodyshop/${bsJob}`);
-check("6: the bodyshop page shows the tint choice big, with the photo", /front sides & rear window 50% darkness · rear sides 70% darkness/.test((await page.locator("[data-tint-card-staff] [data-tint-summary]").textContent()) ?? "") && (await page.locator('[data-tint-photos="1"]').count()) === 1);
+check("6: the bodyshop page shows the tint choice big, with the photo", /front sides & rear screen 50% darkness · rear sides 70% darkness/.test((await page.locator("[data-tint-card-staff] [data-tint-summary]").textContent()) ?? "") && (await page.locator('[data-tint-photos="1"]').count()) === 1);
 await page.locator("[data-tint-card-staff]").scrollIntoViewIfNeeded();
 await page.screenshot({ path: shot("tint11-6-bodyshop.png"), clip: (await page.locator("[data-tint-card-staff]").boundingBox()) ?? undefined });
 await api("/api/e2e/stage", { stage: "bodyshop", at: "ready" });
 const pf = (await sql("select token from public.invoices where job_id = $1 and kind = 'proforma' and is_active order by created_at desc limit 1", [bsJob]))[0];
 if (pf?.token) {
   const inv = await pdfText(`/api/pdf/invoice/${pf.token}`);
-  check("6: the proforma puts the shades under the tint lines", /front sides & rear window 50% darkness · rear sides 70% darkness/i.test(inv.text), inv.text.match(/tint.{0,160}/i)?.[0] ?? String(inv.status));
+  check("6: the proforma puts the shades under the tint lines", /front sides & rear screen 50% darkness · rear sides 70% darkness/i.test(inv.text), inv.text.match(/tint.{0,160}/i)?.[0] ?? String(inv.status));
 } else check("6: the proforma puts the shades under the tint lines", false, "no proforma on the ready seed");
 
 /* ---------------- 7. Settings: the legal limit (owner) ---------------- */

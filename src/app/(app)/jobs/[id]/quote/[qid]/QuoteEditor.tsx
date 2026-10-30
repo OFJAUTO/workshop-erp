@@ -28,6 +28,7 @@ import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimateParts, waitingWords } from "@/lib/estimate-parts";
 import { parseNumber } from "@/lib/price-import";
 import { CompBox } from "@/app/(app)/quotes/CompBox";
+import { PackageItemsToggle } from "@/components/PackageItemsToggle";
 import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/complimentary";
 import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
@@ -1016,7 +1017,7 @@ export function QuoteEditor({
               </span>
             ) : null}
             {l.side === "bodyshop" ? <span className="self-start rounded-full bg-chip px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em]" data-side-badge="bodyshop">Bodyshop · bodyshop rate{l.details ? ` · ${l.details}` : ""}</span> : null}
-            {l.package_items ? <span className="whitespace-pre-line px-1 text-[11px] leading-relaxed text-muted" data-package-items>{packageDetailsText(l.package_items)}</span> : null}
+            {l.package_items ? <PackageItemsToggle raw={l.package_items} disabled={!!disabled} onChange={(next) => patch(l.id, { package_items: next } as Partial<QuoteLine>, true)} /> : null}
             {ppfInstallLine(l, svc?.bodyshop_kind ?? null) ? (
               // Section 10: the PPF cutting method, approved with the quotation and printed under the PPF item.
               <span className="flex flex-wrap items-center gap-1.5 px-1 pt-0.5" data-cut-method={l.cut_method ?? "hand"}>

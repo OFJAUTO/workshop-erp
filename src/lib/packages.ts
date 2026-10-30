@@ -31,7 +31,8 @@ export type PackageSnapshot = {
   time_in_workshop: string;
   pickup_dropoff: boolean;
   aftercare_check: boolean;
-  items: { label: string; warranty: string | null }[];
+  /** off: marked "Not needed" on this quotation (section 6.5, 30 October 2026) - never on the customer's copy, never costed. */
+  items: { label: string; warranty: string | null; off?: boolean }[];
 };
 
 export function cleanPackages(input: unknown): BodyshopPackage[] {
@@ -85,7 +86,7 @@ export function toSnapshot(raw: unknown): PackageSnapshot | null {
     time_in_workshop: String(r.time_in_workshop ?? ""),
     pickup_dropoff: r.pickup_dropoff !== false,
     aftercare_check: r.aftercare_check !== false,
-    items: (r.items as Record<string, unknown>[]).map((i) => ({ label: String(i?.label ?? ""), warranty: i?.warranty ? String(i.warranty) : null })).filter((i) => i.label),
+    items: (r.items as Record<string, unknown>[]).map((i) => ({ label: String(i?.label ?? ""), warranty: i?.warranty ? String(i.warranty) : null, ...(i?.off === true ? { off: true } : {}) })).filter((i) => i.label),
   };
 }
 
@@ -103,7 +104,11 @@ export function packageParts(raw: unknown): { name: string; items: { label: stri
   const complimentary = s.items.filter((i) => isComp(i.label)).map((i) => i.label.trim());
   if (s.pickup_dropoff && !complimentary.some(isPickup)) complimentary.push("Complimentary pick-up & drop-off");
   if (s.aftercare_check && !complimentary.some(isAftercare)) complimentary.push("Complimentary 10-day after-care check");
-  return { name: s.name, items: s.items.filter((i) => !isComp(i.label)), complimentary, completion: s.time_in_workshop || null };
+  // An item marked "Not needed" leaves the customer's copy (and a complimentary one its badge).
+  const live = s.items.filter((i) => !i.off);
+  const comp = live.filter((i) => isComp(i.label)).map((i) => i.label.trim());
+  const offComp = s.items.filter((i) => i.off && isComp(i.label)).map((i) => i.label.trim().toLowerCase());
+  return { name: s.name, items: live.filter((i) => !isComp(i.label)), complimentary: complimentary.filter((c) => comp.includes(c) || !offComp.includes(c.toLowerCase())), completion: s.time_in_workshop || null };
 }
 
 /** The customer's words under the package line: every surface (link, proforma, tax invoice, PDFs) uses the same text. */
@@ -167,3 +172,10 @@ export function packageDocOf(raw: unknown, opts: { car?: string | null; decorate
     explain: opts.ppfNote ? (opts.ppfExplain ?? null) : null,
   };
 }
+
+/** A package on the document already shows "Complimentary pick-up & drop-off" as its badge (section 6.3, 30 October 2026). */
+export function packagesGivePickup(snapshots: unknown[]): boolean {
+  return snapshots.some((s) => (packageParts(s)?.complimentary ?? []).some((c) => /pick[\s-]?up/i.test(c) && /drop[\s-]?off/i.test(c)));
+}
+/** The free pick-up / drop-off line that the package badge already shows: left off the customer's copy, its cost stays internal. */
+export const isPickupShownByPackage = (l: { line_type?: string | null; description?: string | null; title?: string | null }, amount: number) => amount === 0 && (l.line_type === "recovery" || (/pick[\s-]?up/i.test(l.title ?? l.description ?? "") && /drop[\s-]?off/i.test(l.title ?? l.description ?? "")));

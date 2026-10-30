@@ -14,8 +14,8 @@ export const TINT_WINDOWS: { key: TintWindow; label: string; short: string }[] =
   { key: "windshield", label: "Windshield", short: "windshield" },
   { key: "front_sides", label: "Front side windows", short: "front sides" },
   { key: "rear_sides", label: "Rear side windows", short: "rear sides" },
-  { key: "rear_window", label: "Rear window", short: "rear window" },
-  { key: "roof", label: "Sunroof / panoramic roof", short: "roof" },
+  { key: "rear_window", label: "Rear screen", short: "rear screen" },
+  { key: "roof", label: "Sunroof / glass roof", short: "roof" },
 ];
 export const SHADES: TintShade[] = ["clear", 5, 10, 15, 20, 30, 35, 40, 50, 60, 70];
 export const WINDSHIELD_COVERAGE: { key: "none" | "clear" | "strip" | "full"; label: string }[] = [
@@ -118,13 +118,45 @@ export function tintWordsFor(label: string, spec: TintSpec | null, limit = 0): s
   return tintSummary(spec, limit);
 }
 
-/** The decorate hook for packageDocOf: a tint item gets " · 50% darkness" added; nothing else changes. */
-export function decorateTint(spec: TintSpec | null, limit = 0): (label: string) => string {
-  return (label) => {
-    let w = tintWordsFor(label, spec, limit);
-    if (w && /heat[\s-]?rejection/i.test(label)) w = w.replace(/^clear heat-rejection/, "clear");
-    return w ? `${label} · ${w}` : label;
+/** The windows a tint item names, in the customer's words (section 6.4, 30 October 2026). */
+const ITEM_WINDOW_WORDS: Record<TintWindow, string> = { windshield: "windshield", front_sides: "front side windows", rear_sides: "rear side windows", rear_window: "rear screen", roof: "sunroof / glass roof" };
+const listWords = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} & ${xs[xs.length - 1]}`);
+
+/**
+ * A tint item's words on the customer's copy, from the windows actually chosen (section 6.4): "OFJ ceramic heat
+ * rejection film – side & rear windows" with only the rear chosen at 30% reads "OFJ ceramic heat rejection film – rear
+ * side windows & rear screen · 30% darkness"; different shades are listed per window group. An item whose windows are
+ * all "Not needed" keeps its name (switch the item itself off on the package).
+ */
+export function tintItemLabel(label: string, spec: TintSpec | null, limit = 0): string {
+  if (!spec || (!isTintText(label) && !/heat[\s-]?rejection/i.test(label))) return label;
+  const l = label.toLowerCase();
+  const keys: TintWindow[] = /wind(shield|screen)/.test(l) ? ["windshield"] : /roof|sunroof|panoramic/.test(l) ? ["roof"] : /side|rear|door/.test(l) ? ["front_sides", "rear_sides", "rear_window"] : TINT_WINDOWS.map((w) => w.key);
+  const on = keys.filter((k) => spec.rows[k].on && spec.rows[k].shade !== null && (k !== "roof" || spec.roofFitted));
+  if (!on.length) return label;
+  const over = aboveLimit(spec, limit);
+  const wordsOf = (k: TintWindow) => {
+    let w = rowWords(k, spec.rows[k]) ?? "";
+    if (/heat[\s-]?rejection/i.test(label)) w = w.replace(/^clear heat-rejection/, "clear");
+    return `${w}${over.some((a) => a.key === k) ? ` (${ABOVE_LIMIT_WORDS})` : ""}`;
   };
+  const groups: { keys: TintWindow[]; words: string }[] = [];
+  for (const k of on) {
+    const w = wordsOf(k);
+    const g = groups.find((x) => x.words === w);
+    if (g) g.keys.push(k);
+    else groups.push({ keys: [k], words: w });
+  }
+  // An item that names one window (a windshield film) keeps its own wording and gets the darkness.
+  if (keys.length === 1) return `${label} · ${groups[0].words}`;
+  const base = label.split(/\s+[–—-]\s+/)[0].trim();
+  if (groups.length === 1) return `${base} – ${listWords(groups[0].keys.map((k) => ITEM_WINDOW_WORDS[k]))} · ${groups[0].words}`;
+  return `${base} – ${groups.map((g) => `${listWords(g.keys.map((k) => ITEM_WINDOW_WORDS[k]))} ${g.words}`).join(" · ")}`;
+}
+
+/** The decorate hook for packageDocOf: a tint item names the windows chosen and their darkness; nothing else changes. */
+export function decorateTint(spec: TintSpec | null, limit = 0): (label: string) => string {
+  return (label) => tintItemLabel(label, spec, limit);
 }
 
 /** The whole specification in one line, for the job card, the tablet and the WhatsApp message. */

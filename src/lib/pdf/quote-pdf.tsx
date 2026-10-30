@@ -1,3 +1,4 @@
+import { isPickupShownByPackage, packagesGivePickup } from "../packages";
 import { customerCompWord } from "../complimentary";
 import "server-only";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
@@ -71,7 +72,10 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const pkgLines = lines.filter((l) => blockOf(l) === "labour" && !!l.package_key);
   const services = lines.filter((l) => blockOf(l) === "labour" && !l.package_key).map(toDoc);
   const parts = lines.filter((l) => blockOf(l) === "parts").map(toDoc);
-  const others = lines.filter((l) => blockOf(l) === "other").map(toDoc);
+  // Section 6.3: a package that shows "Complimentary pick-up & drop-off" as its badge says it once - the free recovery
+  // line is left off the customer's copy (its cost stays internal), and an empty Other charges section is not printed.
+  const pickupInPackage = packagesGivePickup(pkgLines.map((l) => l.package_items));
+  const others = lines.filter((l) => blockOf(l) === "other" && !(pickupInPackage && isPickupShownByPackage(l, lineTotal(l)))).map(toDoc);
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), q.token ? qrPng(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : Promise.resolve(null)]);

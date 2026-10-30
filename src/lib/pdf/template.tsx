@@ -659,7 +659,12 @@ export function SectionBox({ title, lines, subtotalLabel }: { title: string; lin
           </View>
           <Text style={sec.qty}>{l.qty}</Text>
           {l.complimentary ? (
-            <Text style={[sec.rate, { width: px(84 + 96), color: GREEN, fontWeight: 700 }]}>{l.compWord ?? "Complimentary"}</Text>
+            // "COMPLIMENTARY (value AED 12,350.00)": the word, then the value on its own line - an amount never splits.
+            <View style={{ width: px(84 + 96) }}>
+              {(l.compWord ?? "Complimentary").split(/\s+(?=\(value )/).map((w, k) => (
+                <Text key={k} style={[sec.rate, { width: px(84 + 96), color: GREEN, fontWeight: 700 }, k ? { fontSize: px(10), fontWeight: 600 } : {}]}>{w}</Text>
+              ))}
+            </View>
           ) : (
             <>
               <Text style={sec.rate}>{moneyDigits(l.rate)}</Text>
@@ -761,9 +766,10 @@ const pkg = StyleSheet.create({
   price: { fontSize: px(15), fontWeight: 800, color: INK, textAlign: "right", marginTop: px(2) },
   listHead: { flexDirection: "row", justifyContent: "space-between", marginHorizontal: px(14), paddingBottom: px(4), borderBottomWidth: 1, borderBottomColor: INK },
   listHeadText: { fontSize: px(8.5), fontWeight: 700, color: GREY, letterSpacing: 0.8, textTransform: "uppercase" },
-  item: { flexDirection: "row", alignItems: "center", marginHorizontal: px(14), paddingVertical: px(6.5), borderBottomWidth: 0.75, borderBottomColor: LINE, gap: px(8) },
-  itemText: { flex: 1, fontSize: px(11), color: INK },
-  warranty: { width: px(150), fontSize: px(10), color: GREY, textAlign: "right" },
+  item: { flexDirection: "row", alignItems: "flex-start", marginHorizontal: px(14), paddingVertical: px(6.5), borderBottomWidth: 0.75, borderBottomColor: LINE, gap: px(8) },
+  // No flex on a Text inside a column: react-pdf then mis-measures it and the next line is drawn on top (30 Oct 2026).
+  itemText: { fontSize: px(11), color: INK },
+  warranty: { fontSize: px(10), color: GREY, textAlign: "right" },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: px(6), paddingHorizontal: px(14), paddingTop: px(10) },
   badge: { flexDirection: "row", alignItems: "center", gap: px(4), backgroundColor: GREEN_SOFT, borderRadius: px(10), paddingVertical: px(4), paddingHorizontal: px(9) },
   badgeText: { fontSize: px(9.5), fontWeight: 700, color: GREEN },
@@ -814,18 +820,18 @@ export function PackageSection({ doc, price, subtotal, discount = null }: { doc:
           </View>
           {doc.items.map((i, k) => (
             <View key={k} style={pkg.item} wrap={false}>
-              <Tick />
+              <View style={{ paddingTop: px(1.6) }}><Tick /></View>
               <View style={{ flex: 1 }}>
                 <Text style={pkg.itemText}>{i.label}</Text>
                 {i.note ? <Text style={{ fontSize: px(9.5), fontWeight: 700, color: INK, marginTop: px(1.5) }}>{i.note}</Text> : null}
                 {i.note && doc.explain && doc.items.findIndex((x) => !!x.note) === k ? (
                   <View style={{ flexDirection: "row", alignItems: "flex-start", gap: px(4), marginTop: px(2) }}>
-                    <InfoMark />
-                    <Text style={{ flex: 1, fontSize: px(8.5), color: GREY }}>{doc.explain}</Text>
+                    <View style={{ paddingTop: px(1) }}><InfoMark /></View>
+                    <View style={{ flex: 1 }}><Text style={{ fontSize: px(8.5), color: GREY }}>{doc.explain}</Text></View>
                   </View>
                 ) : null}
               </View>
-              <Text style={pkg.warranty}>{i.warranty ?? ""}</Text>
+              <View style={{ width: px(150), paddingTop: px(1) }}><Text style={pkg.warranty}>{i.warranty ?? ""}</Text></View>
             </View>
           ))}
         </>
