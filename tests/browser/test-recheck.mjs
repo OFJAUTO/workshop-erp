@@ -86,6 +86,8 @@ try {
   await op.locator("[data-start-work]").click();
   const stage = await until(async () => (await sql("select id, key, section, status from public.bodyshop_stages where job_id = $1", [rj.id]))[0] ?? null);
   check("C one stage: the PPF team's final check (free)", !!stage && stage.key === "recheck" && stage.section === "ppf", JSON.stringify(stage));
+  await go(op, `${base}/bodyshop/${rj.id}`);
+  check("C the visit has no release sign-off and no customer-update card (nothing is handed back but the checklist)", (await op.locator("[data-signoff-card]").count()) === 0 && (await op.locator("[data-updates-card]").count()) === 0);
 
   /* ---------------- D ---------------- */
   const { browser: tb, page: tp } = leader ? await (await import("./pw-lib.mjs")).browserForId(leader.id, { viewport: { width: 800, height: 1280 } }) : await browserFor("owner", { viewport: { width: 800, height: 1280 } });

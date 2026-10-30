@@ -91,6 +91,8 @@ It is linked to the original job (`jobs.recheck_of`, `linkRecheck` in `src/lib/r
 - From the final-check day, the car shows in the advisor's Waiting on you as "Book the PPF final check". It stays there until the car comes in for its recheck visit, the check is done, or the owner activates the warranty.
 - Assumption: "booked" means the car came in for its PPF RECHECK visit. The calendar slot made automatically at gate-out is not a confirmed booking.
 
+**The recheck visit's bodyshop page** shows no Release sign-off card and no customer-update card (found in the proof screenshots and fixed): only the checklist is handed back.
+
 **Typed "PPF RECHECK" lines.** Only J-00862 (Dubai EE 57530, G63) has one. No earlier job of that car is in the ERP to link it to.
 
 ## 4. Recovery driver photo (live in the morning; the pick-up contact now)
@@ -125,6 +127,8 @@ This replaces the single fixed fee, and the 21 October chips (750 / 1,000 / 1,50
 
 **What the customer sees:** "AED 1,050.00 including VAT (AED 1,000 + VAT)", in English and Arabic. With no fee, the customer page says nothing about a fee.
 
+**Not chosen yet.** A car whose fee is not chosen yet reads "Inspection fee: not chosen yet" (amber) on the job card, never the old fixed AED 750 (found in the proof screenshots and fixed).
+
 **Locked at the customer's approval.** After that only the owner changes it, on the job card ("Change the inspection fee (owner)"), with a reason that is logged.
 
 **Declined all work.** "Customer declined all work" charges this job's fee plus VAT.
@@ -141,8 +145,8 @@ This replaces the single fixed fee, and the 21 October chips (750 / 1,000 / 1,50
 |---|---|
 | `npm run test:addest` (sections A–E, C with `REAL_ESTIMATE=E-00035` on the real car; the extra estimate it makes there is removed and the numbering put back) | 40 |
 | `npm run test:estparts` | 24 |
-| `npm run test:recheck` | 12 |
-| `npm run test:feechoice` | 17 |
+| `npm run test:recheck` | 13 |
+| `npm run test:feechoice` | 18 |
 | `npm run test:driveupload` (now with the pick-up contact) | 12 |
 
 Screenshots are in `tests/browser/shots/addest|estparts|recheck|feechoice|driveupload`.

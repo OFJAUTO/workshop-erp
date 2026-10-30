@@ -127,7 +127,9 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const statusLabel = booked ? "Booked, not arrived" : job.status === "in_work" ? "In the bodyshop" : job.status === "ready" || job.status === "pending_payment" ? "Ready, waiting for the handover" : job.status === "closed" ? "Handed over" : job.status.replaceAll("_", " ");
   const openClockBy = new Set(clockings.filter((c) => !c.ended_at).map((c) => c.staff_id));
   const stripOrRefit = stages.some((s) => s.key === "strip" || s.key === "refit" || s.key === "repair");
-  const needsSignoff = stages.length > 0 && (job.status === "ready" || job.status === "pending_payment" || job.status === "in_work");
+  // A PPF recheck visit (30 October 2026) is handed back after its checklist: no release sign-off, no customer updates.
+  const recheckVisit = job.job_kind === "recheck";
+  const needsSignoff = !recheckVisit && stages.length > 0 && (job.status === "ready" || job.status === "pending_payment" || job.status === "in_work");
   const stageTone = (s: StageRow) => (s.status === "done" ? "done" : s.due_date && s.due_date < today ? "red" : s.due_date === today ? "amber" : "normal");
   const kindWords = kinds.map((k) => BODYSHOP_KIND_LABELS[k as BodyshopKind] ?? k);
 
@@ -413,7 +415,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         </Card>
       ) : null}
 
-      {!booked && stages.length ? (
+      {!booked && !recheckVisit && stages.length ? (
         <Card id="updates" className="flex flex-col gap-3" data-updates-card>
           <SectionLabel>Customer updates (one photo, one line, three moments)</SectionLabel>
           <UpdatesPanel jobId={jobId} updates={updateStates} photos={photoFiles} afterPhotoId={job.bodyshop_after_photo_id} phoneDigits={managerScope || canQuote ? phoneDigits : ""} canAct={managerScope || canQuote} onPhoto={updatePhotoAction.bind(null, jobId)} onSent={updateSentAction.bind(null, jobId)} onAfterPhoto={afterPhotoAction.bind(null, jobId)} />

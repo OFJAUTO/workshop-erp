@@ -34,8 +34,13 @@ async function jobBeforeApproval() {
   await sql("update public.jobs set first_approval_at = null, status = 'pending_approval', stage = 'approval', advisor_id = $2, inspection_fee_choice = null, inspection_fee_aed = null where id = $1", [jobId, advisor.id]);
   return jobId;
 }
+let badgeChecked = false;
 async function openLinkWindow(page, jobId) {
   await go(page, `${base}/jobs/${jobId}`);
+  if (!badgeChecked) {
+    badgeChecked = true;
+    check("A the job card says the fee is not chosen yet (never the old fixed AED 750)", /Inspection fee: not chosen yet/.test((await page.locator('[data-fee-badge="not_chosen"]').textContent().catch(() => "")) ?? ""));
+  }
   await page.getByRole("button", { name: "Create the approval link" }).click();
   await page.locator("[data-fee-choice-box]").waitFor({ timeout: 15000 });
 }
