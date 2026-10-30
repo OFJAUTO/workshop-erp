@@ -1,3 +1,4 @@
+import { uninvoicedCompCost } from "./comp-data";
 import "server-only";
 import { dubaiDate } from "./jobs";
 import { round2 } from "./money";
@@ -226,10 +227,12 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
   const target = Number(settings.daily_profit_target_aed) || 0;
   const yellowPercent = Number(settings.profit_target_yellow_percent) || 80;
   const monthStart = `${date.slice(0, 7)}-01`;
-  const [all, { data: pays }, inProgress] = await Promise.all([
+  const [all, { data: pays }, inProgress, comp] = await Promise.all([
     jobProfits(settings, { from: dayStart(monthStart), to: dayStart(addDays(date, 1)) }),
     createAdminClient().from("payments").select("amount_aed, method, cheque_status, status, received_at, cleared_at").gte("received_at", dayStart(date)).lt("received_at", dayStart(addDays(date, 1))).eq("is_active", true),
     approvedNotInvoicedProfit(settings),
+    // Section 5.4 (30 October 2026): complimentary work that left with no tax invoice is a real cost on the day it left.
+    uninvoicedCompCost(settings, dayStart(monthStart), dayStart(addDays(date, 1))),
   ]);
   const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
   const today = all.filter((p) => dayOf(p.invoice.issued_at) === date);
@@ -239,9 +242,11 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
   const DAY_IDS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
   let days = 0;
   for (let d = monthStart; d < date; d = addDays(d, 1)) if (!workingDays.size || workingDays.has(DAY_IDS[new Date(`${d}T12:00:00Z`).getUTCDay()])) days++;
-  const earlierProfit = round2(earlier.reduce((a, p) => a + p.profit, 0));
+  const compToday = comp.byDay.get(date) ?? 0;
+  const compEarlier = round2(comp.total - compToday);
+  const earlierProfit = round2(earlier.reduce((a, p) => a + p.profit, 0) - compEarlier);
   const carry = round2(earlierProfit - days * target);
-  const invoicedProfit = round2(today.reduce((a, p) => a + p.profit, 0));
+  const invoicedProfit = round2(today.reduce((a, p) => a + p.profit, 0) - compToday);
   const collected = round2(((pays ?? []) as { amount_aed: number | string; method: string; cheque_status: string | null; status: string }[]).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + Number(p.amount_aed), 0));
   const effective = round2(invoicedProfit + carry);
   const percent = target > 0 ? Math.round((effective / target) * 100) : 0;

@@ -21,3 +21,7 @@ export async function schemaReady(table: string, columns: string): Promise<boole
 
 /** Section 8 (final km and the cluster photo at gate-out): migration 20261201100000_gate_out_mileage. */
 export const gateOutMileageReady = () => schemaReady("gate_outs", "mileage_out, mileage_unreadable_reason, odometer_file_id");
+
+/** Section 5 (complimentary jobs: a reason, the owner's approval, the cost to us): migration 20261201130000_complimentary_jobs. */
+export const compReady = () => schemaReady("quotations", "comp_reason, comp_original_job_id, comp_note, comp_status, comp_cost_aed");
+export const COMP_SELECT = "comp_reason, comp_original_job_id, comp_note, comp_status, comp_decided_by, comp_decided_at, comp_decision_note, comp_normal_aed, comp_cost_aed, comp_cost_detail";

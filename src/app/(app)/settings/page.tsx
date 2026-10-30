@@ -42,7 +42,7 @@ export default async function SettingsPage() {
   let docLimits: Record<string, { amber: number; red: number | string }> = {};
   let reasonPresets: Record<string, string[]> = {};
   let breakTimes: Record<string, Record<string, string>> = {};
-  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: true, advisor_labour_discount: false, customer_documents_uppercase: false };
+  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: true, advisor_labour_discount: false, comp_tax_invoice: false, customer_documents_uppercase: false };
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
@@ -61,7 +61,7 @@ export default async function SettingsPage() {
     else if (row.key === "tyre_models") listTexts.tyre_models = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([b, ms]) => `${b}: ${(ms ?? []).join(", ")}`).join("\n");
     else if (row.key === "inspection_limits") limits = { ...limits, ...((row.value as Record<string, number>) ?? {}) };
     else if (row.key === "prescan_gate_enabled") prescanGate = row.value === true;
-    else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button" || row.key === "test_mode_enabled" || row.key === "advisor_labour_discount" || row.key === "customer_documents_uppercase") flags[row.key] = row.value === true;
+    else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button" || row.key === "test_mode_enabled" || row.key === "advisor_labour_discount" || row.key === "comp_tax_invoice" || row.key === "customer_documents_uppercase") flags[row.key] = row.value === true;
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
     else if (row.key === "recovery_providers" || row.key === "labour_hours_memory" || row.key === "recovery_rates" || row.key === "recovery_flag_percent") continue;

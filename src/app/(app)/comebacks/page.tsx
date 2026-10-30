@@ -1,3 +1,4 @@
+import { compCostOf, loadCompJobs } from "@/lib/comp-data";
 import Link from "next/link";
 import { Badge, Card, Empty, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -48,10 +49,25 @@ export default async function ComebacksPage({ searchParams }: { searchParams: Pr
   };
   const label = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "Asia/Dubai" }).format(new Date(`${month}-01T12:00:00+04:00`));
   const ours = rows.filter((r) => isOurFault(r.comeback_cause)).length;
+  // Section 5.4 (30 October 2026): complimentary rework (our mistake or warranty) approved this month, by original job.
+  const rework = role === "owner" ? (await loadCompJobs(await getSettings(), { from, to: next.toISOString() })).filter((c) => c.reason !== "goodwill") : [];
   return (
     <>
       <PageHeader title="Comebacks" subtitle={`${label} · ${rows.length} car${rows.length === 1 ? "" : "s"} back · ${ours} our fault${role === "owner" ? ` · cost AED ${Math.round(totalLoss).toLocaleString("en-GB")}${claimed ? `, AED ${Math.round(claimed).toLocaleString("en-GB")} claimed back` : ""}` : ""}`} actions={<span className="flex gap-2"><Link href={`/comebacks?month=${shift(-1)}`} className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold">Previous month</Link><Link href={`/comebacks?month=${shift(1)}`} className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold">Next month</Link></span>} />
       {rows.length === 0 ? <Empty title="No comebacks this month" /> : null}
+      {rework.length ? (
+        <Card className="flex flex-col gap-2" data-comp-rework>
+          <SectionLabel right={`AED ${Math.round(rework.reduce((a, c) => a + compCostOf(c), 0)).toLocaleString("en-GB")}`}>Complimentary rework (our mistake / warranty)</SectionLabel>
+          <ul className="flex flex-col divide-y divide-line text-sm">
+            {rework.map((c) => (
+              <li key={c.quotationId} className="flex flex-wrap items-baseline justify-between gap-2 py-1.5">
+                <span>{c.jobId ? <Link href={`/jobs/${c.jobId}`} className="font-bold underline underline-offset-4">{c.plate || c.jobNumber}</Link> : c.number} <span className="text-muted">· {c.reasonLabel}{c.originalJobId ? <> · original <Link href={`/jobs/${c.originalJobId}`} className="underline underline-offset-4">{c.originalJobNumber}</Link></> : null}</span></span>
+                <span className="font-semibold">Rework: AED {compCostOf(c).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       {rows.length ? (
         <Card className="p-0 overflow-hidden">
           <SectionLabel>Cars</SectionLabel>

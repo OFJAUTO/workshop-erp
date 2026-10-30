@@ -1,3 +1,5 @@
+import { compApprovalReason, compCost, compLinesOf, type CompCost } from "./complimentary";
+import { COMP_SELECT, compReady } from "./schema-ready";
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
@@ -74,6 +76,12 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
   const { data: q } = await admin.from("quotations").select(QUOTE_SELECT).eq("id", id).maybeSingle();
   if (!q) return null;
   const quotation = toQuote(q as Record<string, unknown>);
+  // Section 5 (30 October 2026): the complimentary reason and decision, once the database has them.
+  if (await compReady()) {
+    const { data: comp } = await admin.from("quotations").select(COMP_SELECT).eq("id", id).maybeSingle();
+    if (comp) Object.assign(quotation, comp, { comp_normal_aed: comp.comp_normal_aed === null ? null : Number(comp.comp_normal_aed), comp_cost_aed: comp.comp_cost_aed === null ? null : Number(comp.comp_cost_aed) });
+    if (comp?.comp_original_job_id) quotation.comp_original_job_number = (await admin.from("jobs").select("job_number").eq("id", comp.comp_original_job_id).maybeSingle()).data?.job_number ?? null;
+  }
   const [{ data: lines }, { data: parts }, { data: requests }, { data: events }, { data: versions }, { data: customer }, { data: vehicle }, { data: job }, inspection, { data: creator }] = await Promise.all([
     admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", id).eq("is_active", true).order("position"),
     quotation.job_id ? admin.from("part_items").select(PART_SELECT).eq("job_id", quotation.job_id).eq("is_active", true).order("created_at") : Promise.resolve({ data: [] }),
@@ -290,9 +298,18 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
 }
 
 /** The reasons this quotation needs the owner NOW (B3): one computation for the send, the quote page and the save route. */
-export function approvalReasonsNow(bundle: Pick<QuoteBundle, "quotation" | "lines">, settings: Settings, discountByOwner: boolean): string[] {
+export function approvalReasonsNow(bundle: Pick<QuoteBundle, "quotation" | "lines"> & { job?: QuoteBundle["job"] }, settings: Settings, discountByOwner: boolean): string[] {
   const totals = quoteTotals(bundle.lines, bundle.quotation, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
-  return ownerApprovalReasons(bundle.quotation, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 }, { discountByOwner });
+  const reasons = ownerApprovalReasons(bundle.quotation, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 }, { discountByOwner });
+  // Section 5 (30 October 2026): anything free goes to the owner with its reason - except a free comeback the owner
+  // already decided (the warranty repair) and the free pick-up of a PPF package. Dormant until the reason can be saved.
+  const q = bundle.quotation;
+  const decidedComeback = !!(bundle.job as { comeback_free?: boolean } | null | undefined)?.comeback_free;
+  if (q.comp_reason !== undefined && !decidedComeback) {
+    const comp = compApprovalReason(bundle.lines, q, q.comp_original_job_number ?? null);
+    if (comp) reasons.push(comp);
+  }
+  return reasons;
 }
 
 export async function refreshQuoteTotals(quotationId: string, settings: Settings, by: string, opts: { reopen?: boolean } = {}) {
@@ -551,4 +568,40 @@ export async function packageCostingForQuote(settings: Settings, q: { vehicle_id
   const car = v as unknown as { variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
   const base = await packageCostingOf(settings, [car?.make?.name, car?.model?.name, car?.variant].filter(Boolean).join(" "), q.film_rolls_est ?? null, q.tint_spec, q.vehicle_id ?? null);
   return costingWithRolls(base);
+}
+
+/**
+ * Section 5 (30 October 2026): what the free part of a quotation costs us, from THE calculation with the same costing as
+ * the editor (film, tint, ceramic and consumables worked out; labour at the cost rates). Null when nothing is free.
+ */
+export async function compCostForBundle(bundle: Pick<QuoteBundle, "quotation" | "lines"> & { job?: QuoteBundle["job"] }, settings: Settings): Promise<{ cost: CompCost; what: string[] } | null> {
+  const q = bundle.quotation;
+  if (q.comp_reason === undefined || (bundle.job as { comeback_free?: boolean } | null | undefined)?.comeback_free) return null;
+  const free = compLinesOf(bundle.lines, q);
+  if (!free.length) return null;
+  const costing = await packageCostingForQuote(settings, q as { vehicle_id?: string | null; film_rolls_est?: number | null; tint_spec?: unknown }, true);
+  const technician = Number(settings.technician_cost_rate_aed) || 0;
+  const bodyshop = Number(settings.bodyshop_cost_rate_aed) || costing?.ratePerHour || 50;
+  return { cost: compCost(free, q, { technicianCostRate: technician, bodyshopRate: bodyshop, packageCosting: costing }, { technician, bodyshop }), what: free.map((l) => l.title || "line") };
+}
+
+/** The complimentary box's choices (section 5): this customer's and this car's earlier jobs, newest first. Null until the database has it. */
+export async function compJobChoices(q: Pick<QuoteRow, "job_id" | "customer_id" | "vehicle_id">, job?: { comeback_free?: boolean } | null): Promise<{ jobs: { id: string; label: string }[]; decidedComeback: boolean } | null> {
+  if (!(await compReady())) return null;
+  const admin = createAdminClient();
+  const ors = [q.customer_id ? `customer_id.eq.${q.customer_id}` : null, q.vehicle_id ? `vehicle_id.eq.${q.vehicle_id}` : null].filter(Boolean).join(",");
+  if (!ors) return { jobs: [], decidedComeback: !!job?.comeback_free };
+  const { data } = await admin.from("jobs").select("id, job_number, gated_in_at, gated_out_at").or(ors).not("gated_in_at", "is", null).order("gated_in_at", { ascending: false }).limit(40);
+  const day = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Dubai" }).format(new Date(iso)) : "");
+  return {
+    jobs: (data ?? []).filter((j) => j.id !== q.job_id).map((j) => ({ id: j.id, label: `${j.job_number} · in ${day(j.gated_in_at)}${j.gated_out_at ? ` · out ${day(j.gated_out_at)}` : " · still with us"}` })),
+    decidedComeback: !!job?.comeback_free,
+  };
+}
+
+/** The reason the job's approved free work is free (section 5.6), for the invoice's wording; null before the migration or when none. */
+export async function compReasonForJob(jobId: string | null | undefined): Promise<string | null> {
+  if (!jobId || !(await compReady())) return null;
+  const { data } = await createAdminClient().from("quotations").select("comp_reason").eq("job_id", jobId).eq("status", "approved").not("comp_reason", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return (data as { comp_reason?: string | null } | null)?.comp_reason ?? null;
 }

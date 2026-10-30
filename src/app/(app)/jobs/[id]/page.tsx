@@ -1,3 +1,4 @@
+import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
 import { DamageSection } from "@/components/DamageSection";
 import { DamageFoundAfter } from "@/components/DamageFoundAfter";
 import { loadCarDamage, damageAfterReady } from "@/lib/damage-data";
@@ -819,6 +820,23 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       </div>
       {visitMileage ? <MileagePanel m={visitMileage} /> : null}
       {timeSpent ? <TimeSpentPanel t={timeSpent} /> : null}
+      {role === "owner" || role === "accounts" ? await (async () => {
+        // Section 5.4 (30 October 2026): free work on this car (approved figure → actual), and rework done later on this job.
+        const [free, rework] = await Promise.all([loadCompJobs(settings, { jobIds: [id] }), reworkByOriginal(settings, [id])]);
+        const later = rework.get(id);
+        if (!free.length && !later) return null;
+        const a = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return (
+          <Card className="flex flex-col gap-1.5 border-amber-bar" data-job-comp>
+            {free.map((c) => (
+              <p key={c.quotationId} className="text-sm" data-job-comp-free><span className="font-bold">Complimentary ({c.reasonLabel}{c.originalJobNumber ? ` of ${c.originalJobNumber}` : ""}):</span> normal price {a(c.normal)} · {c.actualCost !== null ? <>approved at {a(c.cost)} → actual {a(c.actualCost)}</> : <>cost to us {a(c.cost)}</>}</p>
+            ))}
+            {later ? <p className="text-sm" data-job-rework><span className="font-bold">Rework: {a(later.total)}</span> <span className="text-muted">· done later free of charge on {later.jobs.map((c) => c.jobNumber ?? c.number).join(", ")} - a cost of this job</span></p> : null}
+            {later ? <p className="text-xs text-muted">Counted as a real cost in the daily profit; never in an advisor&apos;s bonus.</p> : null}
+            {free.length && !later ? <p className="text-xs text-muted">{free.some((c) => compCostOf(c) > 0) ? "Counted as a real cost in the daily profit; never in an advisor's bonus." : ""}</p> : null}
+          </Card>
+        );
+      })() : null}
       {!job.is_open && job.followup_due_at && !job.followup_done_at && can(role, "sendApproval") ? (
         <Card className="flex flex-wrap items-center gap-3 border-ink">
           <span className="text-sm font-semibold">Follow-up due {formatPromised(job.followup_due_at)}: call or message the customer and ask how the car is.</span>

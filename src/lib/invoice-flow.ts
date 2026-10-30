@@ -1,3 +1,4 @@
+import { noChargeJob } from "./comp-data";
 import "server-only";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type InvoiceRow } from "./invoice-data";
@@ -37,6 +38,13 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   const pro = rows.find((i) => i.kind === "proforma" && !i.deposit_for_quotation_id);
   if (pro) return pro;
 
+  // Section 5.7 (30 October 2026): a wholly complimentary job gets no tax invoice by default - the customer gets the
+  // job completion note "No charge" and the cost stays internal (Settings can switch the AED 0 invoice back on).
+  if (await noChargeJob(jobId, settings)) {
+    const { data: logged } = await admin.from("job_events").select("id").eq("job_id", jobId).eq("event_type", "no_charge").limit(1);
+    if (!logged?.length) await admin.from("job_events").insert({ job_id: jobId, event_type: "no_charge", note: "Complimentary job: no tax invoice. The customer gets the job completion note \"No charge\"; the cost is recorded internally.", created_by: actor?.id ?? null });
+    return null;
+  }
   const draft = await buildInvoiceDraft(jobId, settings);
   if (!draft.lines.length) return null;
   const by = actor?.id ?? job.gated_in_by;

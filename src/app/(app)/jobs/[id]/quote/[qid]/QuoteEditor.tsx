@@ -27,6 +27,8 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimateParts, waitingWords } from "@/lib/estimate-parts";
 import { parseNumber } from "@/lib/price-import";
+import { CompBox } from "@/app/(app)/quotes/CompBox";
+import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/complimentary";
 import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
@@ -315,6 +317,7 @@ export function QuoteEditor({
   discountBy = null,
   viewerName = null,
   lock = null,
+  comp = null,
 }: {
   quotation: QuoteRow;
   lines: QuoteLine[];
@@ -361,6 +364,8 @@ export function QuoteEditor({
   reviseReasons?: string[];
   /** The owner's approval box (above the limit) or the revision request, shown under "Before sending". */
   ownerBox?: ReactNode;
+  /** Section 5 (30 October 2026): the complimentary box - the earlier jobs to pick from, and whether the owner already decided (a free comeback). Null until the database has it. */
+  comp?: { jobs: { id: string; label: string }[]; decidedComeback: boolean } | null;
   /** Who gave the labour discount (B3): the words on the line follow them, not the person looking. */
   discountBy?: { name: string; owner: boolean } | null;
   /** The person on screen: a discount changed here and not yet reloaded is theirs. */
@@ -709,7 +714,11 @@ export function QuoteEditor({
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
   const liveFixed = expectedMethod === "link" ? (settings.bankFixedLink ?? 0) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankFixedCard ?? 0);
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: settings.costing ? costingWithRolls(settings.costing, header.film_rolls_est === null || header.film_rolls_est === undefined ? null : Number(header.film_rolls_est)) : null });
+  const liveCosting = settings.costing ? costingWithRolls(settings.costing, header.film_rolls_est === null || header.film_rolls_est === undefined ? null : Number(header.film_rolls_est)) : null;
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: liveCosting });
+  // Section 5: what is free on this quotation and what it costs us, from the same calculation.
+  const compFree = comp && !comp.decidedComeback ? compLinesOf(lines, q) : [];
+  const compCostNow = compFree.length ? compCost(compFree, q, { technicianCostRate: settings.technicianCostRate ?? 0, bodyshopRate: settings.bodyshopRate ?? 0, packageCosting: liveCosting, clockedHours: settings.clockedHours ?? null }, { technician: settings.technicianCostRate ?? 0, bodyshop: settings.bodyshopRate ?? settings.costing?.ratePerHour ?? 0 }) : null;
   // THE profit list (section 3): the same lines everywhere; they add up to the total cost.
   const profitList = profitLines(totals, { technician: settings.technicianCostRate ?? 0, bodyshop: settings.bodyshopRate ?? settings.costing?.ratePerHour ?? 0 });
   // Film rolls (section 3.3): raised freely; below the usual figure a note is required (the server checks too).
@@ -793,13 +802,15 @@ export function QuoteEditor({
   };
   const namedLabour = labourLines.filter((l) => l.title.trim());
   const labourDone = namedLabour.filter(finishedLine).length;
-  const blockers = sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm });
+  const compBlock = compFree.length ? compProblem(q) : null;
+  const blockers = [...sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm }), ...(compBlock ? [{ key: "comp", label: compBlock }] : [])];
   // Who gave the discount (B3): changed on this screen and not saved back yet = the viewer; otherwise the stored giver.
   // An unknown giver counts as not the owner, exactly as the server does.
   const discountChangedHere = Number(header.discount_value ?? 0) !== Number(quotation.discount_value ?? 0) || (header.discount_kind ?? null) !== (quotation.discount_kind ?? null) || (header.discount_scope ?? "labour") !== (quotation.discount_scope ?? "labour");
   const discountGiver = discountChangedHere && viewerName ? { name: viewerName, owner: isOwner } : discountBy;
   const discountByOwnerNow = discountGiver?.owner === true;
-  const reasons = ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove }, { discountByOwner: discountByOwnerNow });
+  const compReason = compFree.length ? compApprovalReason(lines, q, quotation.comp_original_job_number ?? null) : null;
+  const reasons = [...ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove }, { discountByOwner: discountByOwnerNow }), ...(compReason ? [compReason] : [])];
   /** The owner's approval still covers what the quotation asks now (the send's own rule). */
   const approvalStands = !!quotation.owner_approved_at && approvalCovers(quotation.owner_approval_reason ?? null, reasons);
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
@@ -1852,6 +1863,9 @@ export function QuoteEditor({
           <TextCounter length={header.customer_note.trim().length} />
         </Card>
 
+        {compFree.length && compCostNow && comp ? (
+          <CompBox quotationId={quotation.id} what={compFree.map((l) => l.title || "line")} cost={compCostNow} reason={quotation.comp_reason ?? null} originalJobId={quotation.comp_original_job_id ?? null} note={quotation.comp_note ?? null} status={quotation.comp_status ?? null} decisionNote={quotation.comp_decision_note ?? null} jobs={comp.jobs} isOwner={isOwner} disabled={!!disabled || sent} />
+        ) : null}
         <Card className="flex flex-col gap-2" id="item-parts">
           <SectionLabel>{sent ? (isQuotation ? "Sent" : "Estimate sent") : "Before sending"}</SectionLabel>
           {sent ? (

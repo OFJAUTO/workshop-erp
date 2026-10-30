@@ -1,3 +1,5 @@
+import { goodwillThisYear } from "@/lib/comp-data";
+import { getSettings as getSettingsForGoodwill } from "@/lib/settings";
 import Link from "next/link";
 import { Badge, Button, Card, DescriptionList, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -79,6 +81,16 @@ export default async function CustomerPage({
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
+      {staff.role_id === "owner" || staff.role_id === "accounts" ? await (async () => {
+        const g = await goodwillThisYear(await getSettingsForGoodwill(), c.id);
+        return g ? (
+          <Card className="flex flex-wrap items-center gap-x-4 gap-y-1" data-goodwill-year>
+            <SectionLabel>Goodwill this year</SectionLabel>
+            <span className="text-sm font-bold">AED {g.total.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-xs text-muted">{g.count} job{g.count === 1 ? "" : "s"} · normal value AED {g.normal.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </Card>
+        ) : null;
+      })() : null}
       {c.is_vip && c.vip_note ? (
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>

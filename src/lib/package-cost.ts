@@ -157,3 +157,15 @@ export function costingWithRolls(c: PackageCostingBase, rollsEst?: number | null
   const typed = rollsEst ?? c.rollsEst;
   return { ...c, rolls: typed !== null && typed !== undefined && Number.isFinite(typed) && typed > 0 ? typed : c.defaultRolls };
 }
+
+/**
+ * Film on a PPF line that is not a package (a mirror housing, a bumper): its share of a whole car's film, by its
+ * installer hours against a whole car's (30 October 2026, night batch section 5.3: a complimentary PPF job never shows
+ * materials of 0). One hour of an 80-hour car at 1 roll of AED 1,429 is AED 17.86.
+ */
+export function plainPpfFilm(l: { hours?: number | null; installer_hours?: number | null; hours_estimate?: number | null; title?: string | null }, c: PackageCosting): number {
+  const hours = Number(l.installer_hours) || Number(l.hours_estimate) || Number(l.hours) || 1;
+  const share = Math.min(1, hours / Math.max(1, c.packageHours || 80));
+  const matte = /\bmatte?\b|\bstealth\b/i.test(l.title ?? "");
+  return r2(share * Math.max(0.1, c.rolls || 1) * (matte ? c.filmRollPriceMatte : c.filmRollPriceGloss));
+}

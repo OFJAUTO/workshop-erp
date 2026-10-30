@@ -1,3 +1,5 @@
+import { customerCompWord } from "../complimentary";
+import { compReasonForJob } from "../quote-data";
 import "server-only";
 import { customerWarrantyTitle } from "@/lib/warranty";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
@@ -25,7 +27,7 @@ const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credi
 const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", credit_note: "Credit note no." } as const;
 
 /** One invoice line in the section box: description, a small grey line of details, qty, rate, amount. Never a part number. */
-function docLine(l: InvoiceLineRow): SectionLine {
+function docLineOf(l: InvoiceLineRow, compReason: string | null = null): SectionLine {
   const comp = l.price_display === "complimentary" || l.price_display === "included";
   const disc = Number(l.discount_percent) || 0;
   return {
@@ -36,7 +38,7 @@ function docLine(l: InvoiceLineRow): SectionLine {
     rate: l.unit_price,
     amount: l.amount_aed,
     complimentary: comp || l.amount_aed === 0,
-    compWord: comp ? (l.price_display === "included" ? "Included" : "Complimentary") : undefined,
+    compWord: comp ? customerCompWord({ price_display: (l.price_display ?? null) as "complimentary" | "included" | "normal" | null }, compReason, null) : undefined,
     discountPercent: disc > 0 ? disc : undefined,
     discountAmount: disc > 0 ? round2(l.unit_price * l.quantity - l.amount_aed) : undefined,
   };
@@ -84,6 +86,9 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const serviceRows = lines.filter((l) => l.section === "services" && !l.package_items);
   // Section 11: the job's tint specification puts the shades on the tint lines and package items.
   const tintSpec = await tintSpecForJob(invoice.job_id);
+  // Section 5.6: the free work's wording follows its reason (goodwill / our mistake / warranty).
+  const compReason = await compReasonForJob(invoice.job_id);
+  const docLine = (l: InvoiceLineRow) => docLineOf(l, compReason);
   const tintLimit = tintLimitOf(settings);
   const services = serviceRows.map((l) => {
     const d = docLine(l);

@@ -1,9 +1,10 @@
+import { customerCompWord } from "../complimentary";
 import "server-only";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { amountInWords } from "@/lib/money";
 import type { QuoteBundle } from "@/lib/quote-data";
-import { complimentaryWord, discountLabelOf, blockOf, isComplimentary, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, round2, hasPackageLine } from "@/lib/quotes";
+import { discountLabelOf, blockOf, isComplimentary, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, lineUnitPrice, partAvailabilityText, partTypeText, quoteTotals, round2, hasPackageLine } from "@/lib/quotes";
 import { positionsWords } from "@/lib/parts-list";
 import type { Settings } from "@/lib/settings";
 import { dubaiDate } from "@/lib/jobs";
@@ -59,7 +60,8 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
       rate: unit,
       amount,
       complimentary: isComplimentary(l) || amount === 0,
-      compWord: isComplimentary(l) ? complimentaryWord(l) : undefined,
+      // Section 5.6: goodwill "COMPLIMENTARY (value AED 350.00)", our mistake or warranty "NO CHARGE". Never our cost.
+      compWord: isComplimentary(l) ? customerCompWord(l, q.comp_reason) : undefined,
       discountPercent: (l.discount_percent ?? 0) > 0 ? l.discount_percent : undefined,
       discountAmount: (l.discount_percent ?? 0) > 0 ? lineDiscountAmount(l) : undefined,
       tag: l.urgency === "urgent" && !isEstimate ? "Urgent" : null,

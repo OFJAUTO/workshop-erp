@@ -5,7 +5,8 @@ import { roundHalfUp } from "./bank-fees";
 import { customerAvailabilityWords, daysFromDate } from "./parts-rows";
 import { unpricedEstimateParts, waitingWords } from "./estimate-parts";
 import { positionsQtyMismatch, positionsWords } from "./parts-list";
-import { packageItemLabels, packageLineCost, type PackageCosting } from "./package-cost";
+import { packageItemLabels, packageLineCost, plainPpfFilm, type PackageCosting } from "./package-cost";
+import { lineIsPpf } from "./ppf-cut";
 
 export const LINE_TYPES = [
   { value: "labour", label: "Labour" },
@@ -140,6 +141,18 @@ export type QuoteRow = {
   kind: QuoteKind;
   number: string;
   version: number;
+  /** Section 5 (30 October 2026): why the complimentary part is free and the owner's decision (read once the migration is in). */
+  comp_reason?: string | null;
+  comp_original_job_id?: string | null;
+  comp_original_job_number?: string | null;
+  comp_note?: string | null;
+  comp_status?: string | null;
+  comp_decided_by?: string | null;
+  comp_decided_at?: string | null;
+  comp_decision_note?: string | null;
+  comp_normal_aed?: number | null;
+  comp_cost_aed?: number | null;
+  comp_cost_detail?: string | null;
   parent_id: string | null;
   job_id: string | null;
   customer_id: string;
@@ -718,7 +731,10 @@ export function quoteTotals(
   // hours - the same everywhere a profit is shown. Without them a package costs only what its line carries.
   const pkgCosts = opts.packageCosting ? labour.filter((l) => !!l.package_key).map((l) => packageLineCost({ title: l.title, itemLabels: packageItemLabels(l.package_items), installerHours: l.installer_hours ?? null }, opts.packageCosting!)) : [];
   const sumOf = (k: "film" | "filmRolls" | "tint" | "ceramic" | "consumables" | "hours") => round2(pkgCosts.reduce((a, c) => a + c[k], 0));
-  const packageMaterials = { film: sumOf("film"), filmRolls: sumOf("filmRolls"), tint: sumOf("tint"), ceramic: sumOf("ceramic"), consumables: sumOf("consumables"), total: round2(sumOf("film") + sumOf("tint") + sumOf("ceramic") + sumOf("consumables")) };
+  // Section 5.3 (30 October 2026): PPF on a line that is not a package (a mirror housing, a bumper) uses film too - its
+  // share of a whole car's film by its hours - unless the line carries its own typed cost. Never materials of 0.
+  const plainFilm = opts.packageCosting ? round2(labour.filter((l) => !l.package_key && !isOutsideWork(l) && !(lineCost(l) > 0) && lineIsPpf(l)).reduce((a, l) => a + plainPpfFilm(l, opts.packageCosting!), 0)) : 0;
+  const packageMaterials = { film: round2(sumOf("film") + plainFilm), filmRolls: sumOf("filmRolls"), tint: sumOf("tint"), ceramic: sumOf("ceramic"), consumables: sumOf("consumables"), total: round2(sumOf("film") + plainFilm + sumOf("tint") + sumOf("ceramic") + sumOf("consumables")) };
   const installerHours = round2(labour.filter((l) => l.line_type === "package" && !(opts.packageCosting && l.package_key)).reduce((a, l) => a + (Number(l.installer_hours) || 0), 0) + sumOf("hours"));
   const bodyshopLabourCost = round2(installerHours * Math.max(0, opts.bodyshopRate ?? opts.packageCosting?.ratePerHour ?? 0));
   const packageSell = round2(labour.filter((l) => !!l.package_key).reduce((a, l) => a + lineTotal(l), 0));
@@ -776,7 +792,7 @@ export function profitLines(t: QuoteTotals, rates: { technician: number; bodysho
     t.installerHours > 0 ? `${h(t.installerHours)} × AED ${rates.bodyshop}` : null,
   ].filter(Boolean).join(" + ");
   const materialsDetail = [
-    pm.film ? `PPF film ${pm.filmRolls} roll${pm.filmRolls === 1 ? "" : "s"} ${a(pm.film)}` : null,
+    pm.film ? (pm.filmRolls ? `PPF film ${pm.filmRolls} roll${pm.filmRolls === 1 ? "" : "s"} ${a(pm.film)}` : `PPF film ${a(pm.film)}`) : null,
     pm.tint ? `tint ${a(pm.tint)}` : null,
     pm.ceramic ? `ceramic ${a(pm.ceramic)}` : null,
     pm.consumables ? `consumables ${a(pm.consumables)}` : null,

@@ -4,7 +4,8 @@ import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
 import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
-import type { Settings } from "./settings";
+import { getSettings, type Settings } from "./settings";
+import { noChargeJob } from "./comp-data";
 import { createAdminClient } from "./supabase/admin";
 import { loadVisitMileage } from "./visit-mileage";
 import { gateOutMileageReady } from "./schema-ready";
@@ -358,7 +359,8 @@ export async function jobBalance(jobId: string) {
     approvedQuotations(jobId),
     admin.from("jobs").select("inspection_fee_due").eq("id", jobId).maybeSingle(),
   ]);
-  const needsInvoice = (quotes ?? []).length > 0 || !!job?.inspection_fee_due;
+  // A wholly complimentary job (section 5.7) needs no invoice: nothing to collect, the gate-out is not held.
+  const needsInvoice = ((quotes ?? []).length > 0 || !!job?.inspection_fee_due) && !(await noChargeJob(jobId, await getSettings()));
   const rows = ((inv ?? []) as Record<string, unknown>[]).map(toInvoice);
   const picked = rows.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id) ?? rows.find((i) => i.kind === "proforma" && !i.deposit_for_quotation_id) ?? rows.find((i) => i.kind === "proforma") ?? null;
   if (!picked) return { invoice: null, balance: 0, needsInvoice, state: needsInvoice ? ("no_invoice" as const) : ("nothing" as const), paid: 0, pending: 0 };

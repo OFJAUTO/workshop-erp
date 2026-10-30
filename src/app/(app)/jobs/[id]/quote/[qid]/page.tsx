@@ -1,3 +1,4 @@
+import { compJobChoices } from "@/lib/quote-data";
 import { invoicesForLock } from "@/lib/quote-lock-server";
 import { DeclinedAllButton } from "@/components/DeclinedAllButton";
 import { anyApproved } from "@/lib/quote-history";
@@ -263,6 +264,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       ) : null}
 
       <QuoteEditor
+        comp={await compJobChoices(q, bundle.job as { comeback_free?: boolean } | null)}
         quotation={q}
         lines={bundle.lines}
         parts={bundle.parts}

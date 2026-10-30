@@ -30,6 +30,8 @@ import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-f
 import { chargeTotalsByJob } from "@/lib/supplier-charges";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { loadJobQuotes } from "@/lib/quote-history-data";
+import { compCostWords, compLinesOf, compProblem } from "@/lib/complimentary";
+import { compCostForBundle } from "@/lib/quote-data";
 
 function refresh(jobId: string | null, quotationId?: string) {
   if (jobId) {
@@ -505,7 +507,9 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
     if (q.status !== "pending_owner") {
       await admin.from("quotations").update({ status: "pending_owner", owner_approval_reason: reasons.join("; "), owner_approved_by: null, owner_approved_at: null, updated_by: staff.id }).eq("id", q.id);
       await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_approval", `${q.number} sent to the owner for approval: ${reasons.join("; ")}`);
-      await notifyRoles(["owner"], { type: "quote_owner_approval", title: `Quotation needs your approval · ${q.number}`, body: reasons.join("; "), jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+      const comp = await compCostForBundle(bundle, settings);
+      const car = [bundle.vehicle?.make?.name, bundle.vehicle?.model?.name].filter(Boolean).join(" ");
+      await notifyRoles(["owner"], { type: "quote_owner_approval", title: comp ? `Complimentary needs your approval · ${car} · ${q.number}` : `Quotation needs your approval · ${q.number}`, body: [reasons.join("; "), comp ? compCostWords(comp.cost) : null].filter(Boolean).join(" · "), jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
       refresh(q.job_id, q.id);
     } else if ((q.owner_approval_reason ?? "") !== reasons.join("; ")) {
       // Still waiting, but the figures moved: the owner's box shows what would go out now.
@@ -521,6 +525,10 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   if (reasons.length && staff.role_id === "owner") Object.assign(patch, { owner_approved_by: staff.id, owner_approved_at: new Date().toISOString(), owner_approval_reason: reasons.join("; ") });
   const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
   if (error) return { error: error.message };
+  if (staff.role_id === "owner" && q.comp_status !== "approved") {
+    const c = await stampComp(bundle, settings, staff.id, "approved", "Owner's own choice");
+    if (c) await logQuoteEvent(q.id, q.job_id, staff.id, "comp_auto_approved", `Complimentary on ${q.number} approved by itself: the owner sent it (${compCostWords(c.cost)})`);
+  }
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_link_created", `${q.number} v${q.version} link created by ${staff.display_name}`);
   // A free comeback (warranty repair): the owner has decided; the quotation is approved on sending, nothing goes to the customer.
   if (q.job_id && bundle.job && (bundle.job as { comeback_free?: boolean }).comeback_free) {
@@ -572,12 +580,17 @@ export async function decideQuoteApproval(quotationId: string, formData: FormDat
   if (q.status !== "pending_owner") redirect(`${back}?error=${encodeURIComponent("This quotation is no longer waiting for your approval: it was changed or already decided. Check it again.")}`);
   const seen = formData.get("seen");
   if (decision === "approve" && seen !== null && String(seen) !== (q.owner_approval_reason ?? "")) redirect(`${back}?error=${encodeURIComponent("The figures changed since you opened it. Check the new reason and approve again.")}`);
+  const settingsNow = await getSettings();
   if (decision === "approve") {
     await admin.from("quotations").update({ status: "draft", owner_approved_by: staff.id, owner_approved_at: new Date().toISOString(), updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_approved", `Owner approved ${q.number}${note ? `: ${note}` : ""}`);
+    const c = await stampComp(bundle, settingsNow, staff.id, "approved", note);
+    if (c) await logQuoteEvent(q.id, q.job_id, staff.id, "comp_approved", `Complimentary on ${q.number} approved by the owner: ${compCostWords(c.cost)}`);
   } else {
     await admin.from("quotations").update({ status: "draft", owner_approval_reason: null, updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_refused", `Owner asked for changes on ${q.number}${note ? `: ${note}` : ""}`);
+    const c = await stampComp(bundle, settingsNow, staff.id, "rejected", note);
+    if (c) await logQuoteEvent(q.id, q.job_id, staff.id, "comp_rejected", `Complimentary on ${q.number} rejected by the owner${note ? `: ${note}` : ""}`);
   }
   if (q.created_by) await notifyStaff([q.created_by], { type: "quote_owner_approval", title: decision === "approve" ? `Owner approved ${q.number}: send it` : `Owner asked for changes on ${q.number}`, body: note ?? "", jobId: q.job_id, href: back });
   refresh(q.job_id, q.id);
@@ -626,7 +639,23 @@ export async function resendQuotation(quotationId: string): Promise<SendQuoteSta
 async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQuotation>>>, settings: Awaited<ReturnType<typeof getSettings>>, checks: { openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }) {
   const q = bundle.quotation;
   // Findings not quoted never block: the advisor sees them as a reference list and decides.
-  return sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, confirmPercent: Number(settings.markup_confirm_percent) || 100 });
+  const out = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, confirmPercent: Number(settings.markup_confirm_percent) || 100 });
+  // Section 5 (30 October 2026): anything free needs its reason (and the original job, or the note) before it can go out.
+  const decidedComeback = !!(bundle.job as { comeback_free?: boolean } | null)?.comeback_free;
+  if (q.comp_reason !== undefined && !decidedComeback && compLinesOf(bundle.lines, q).length) {
+    const p = compProblem(q);
+    if (p) out.push({ key: "comp", label: p });
+  }
+  return out;
+}
+
+/** The owner's decision on the free part, with what it cost us at that moment ("Approved at AED 229 → actual AED 260" later). */
+async function stampComp(bundle: NonNullable<Awaited<ReturnType<typeof loadQuotation>>>, settings: Awaited<ReturnType<typeof getSettings>>, by: string, status: "approved" | "rejected", note: string | null) {
+  if (bundle.quotation.comp_reason === undefined) return null;
+  const c = await compCostForBundle(bundle, settings);
+  if (!c) return null;
+  await createAdminClient().from("quotations").update({ comp_status: status, comp_decided_by: by, comp_decided_at: new Date().toISOString(), comp_decision_note: note, comp_normal_aed: c.cost.normal, comp_cost_aed: c.cost.cost, comp_cost_detail: c.cost.detail || null, updated_by: by }).eq("id", bundle.quotation.id);
+  return c;
 }
 
 /**

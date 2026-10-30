@@ -1,3 +1,4 @@
+import { compJobChoices } from "@/lib/quote-data";
 import Link from "next/link";
 import { installerHistoryFor } from "@/lib/bodyshop";
 import { packagesOf } from "@/lib/packages";
@@ -115,6 +116,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         </Card>
       ) : null}
       <QuoteEditor
+        comp={await compJobChoices(q, null)}
         ownerBox={<OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} />}
         discountBy={discountBy}
         viewerName={staff.display_name}

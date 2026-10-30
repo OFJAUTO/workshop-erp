@@ -337,6 +337,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
   updates.push({ key: "deposit_document", value: formData.get("deposit_document") === "tax_invoice" ? "tax_invoice" : "receipt" });
   updates.push({ key: "prescan_gate_enabled", value: formData.get("prescan_gate_enabled") === "on" });
   updates.push({ key: "advisor_labour_discount", value: formData.get("advisor_labour_discount") === "on" });
+  updates.push({ key: "comp_tax_invoice", value: formData.get("comp_tax_invoice") === "on" });
   updates.push({ key: "wash_board_show_times", value: formData.get("wash_board_show_times") === "on" });
   updates.push({ key: "wash_board_done_button", value: formData.get("wash_board_done_button") === "on" });
   updates.push({ key: "test_mode_enabled", value: formData.get("test_mode_enabled") === "on" });
