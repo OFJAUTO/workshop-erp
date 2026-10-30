@@ -4,6 +4,7 @@ import { formatDateTime } from "@/lib/format";
 import { refusalWords } from "@/lib/refusal-words";
 import { ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { schemaReady } from "@/lib/schema-ready";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,9 @@ export const dynamic = "force-dynamic";
  */
 export default async function RefusalsPage() {
   await requirePermission("manageSettings");
-  const { data: rows } = await createAdminClient()
+  // The list starts once its database table is in (migration 20261201110000); until then it says so.
+  const ready = await schemaReady("access_refusals", "id");
+  const { data: rows } = !ready ? { data: null } : await createAdminClient()
     .from("access_refusals")
     .select("id, created_at, role_id, code, path, record_kind, record_id, detail, staff:staff(display_name)")
     .order("created_at", { ascending: false })
@@ -25,7 +28,7 @@ export default async function RefusalsPage() {
       <PageHeader title="Refusals" subtitle="Pages that refused someone, with the reason they saw. Newest first." actions={<LinkButton href="/settings" tone="secondary" size="lg">Settings</LinkButton>} />
       <Card className="flex flex-col gap-3">
         <SectionLabel right={`${list.length}`}>Last 200</SectionLabel>
-        {list.length === 0 ? <p className="text-sm text-muted">No refusals recorded.</p> : (
+        {!ready ? <p className="text-sm text-muted" data-refusals-waiting>Recording starts after the next database update.</p> : list.length === 0 ? <p className="text-sm text-muted">No refusals recorded.</p> : (
           <div className="flex flex-col divide-y divide-line">
             {list.map((r) => (
               <div key={r.id} className="grid grid-cols-1 gap-1 py-2 text-sm md:grid-cols-[11rem_minmax(0,1fr)]" data-refusal-row={r.code}>

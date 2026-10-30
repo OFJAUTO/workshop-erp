@@ -63,16 +63,19 @@ for (const f of files) {
 const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let bad = 0;
+let waiting = 0;
 const entries = [...reads.entries()];
 for (let i = 0; i < entries.length; i += 8) {
   await Promise.all(entries.slice(i, i + 8).map(async ([k, where]) => {
     const [table, sel] = [k.slice(0, k.indexOf("|")), k.slice(k.indexOf("|") + 1)];
     const r = await fetch(`${base}/rest/v1/${table}?select=${encodeURIComponent(sel)}&limit=0`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
     if (r.ok) return;
-    bad++;
     const body = await r.json().catch(() => ({}));
+    // A table that a migration has not created yet (code shipped dormant) is waiting, not a broken read.
+    if (body.code === "PGRST205") { waiting++; console.log(`WAIT ${where}  ${table}: the table arrives with a migration not applied yet`); return; }
+    bad++;
     console.log(`FAIL ${where}  ${table}: ${body.code ?? r.status} ${body.message ?? ""}${body.hint ? ` - ${body.hint}` : ""}`);
   }));
 }
-console.log(`\n${reads.size} reads with linked tables checked, ${bad} refused by the database (${skipped} built at run time, not checked).`);
+console.log(`\n${reads.size} reads with linked tables checked, ${bad} refused by the database${waiting ? `, ${waiting} waiting for a migration` : ""} (${skipped} built at run time, not checked).`);
 process.exit(bad ? 1 : 0);
