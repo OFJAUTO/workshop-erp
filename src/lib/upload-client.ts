@@ -36,7 +36,10 @@ export async function prepareUpload(jobId: string, kind: UploadKind, contentType
  * dropped signal costs one piece, never the whole file. ONE door for every upload screen.
  */
 export function putWithProgress(url: string, file: Blob, contentType: string, onProgress: (p: number) => void): Promise<void> {
-  return file.size > TUS_CHUNK && signedParts(url) && tusEndpoint() ? resumableUpload(url, file, contentType, onProgress) : putSingle(url, file, contentType, onProgress);
+  // Resumable sends are switched on by NEXT_PUBLIC_RESUMABLE_UPLOADS=1 once proven on the test database (30 October 2026);
+  // until then every file goes in one PUT, as before.
+  const resumable = process.env.NEXT_PUBLIC_RESUMABLE_UPLOADS === "1";
+  return resumable && file.size > TUS_CHUNK && signedParts(url) && tusEndpoint() ? resumableUpload(url, file, contentType, onProgress) : putSingle(url, file, contentType, onProgress);
 }
 
 /* ------------------------------------------------------------------------------------------------------------ */
