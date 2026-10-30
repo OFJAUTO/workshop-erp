@@ -3,7 +3,7 @@
 // cron), the sections in order with empty ones hidden, deliveries grouped per supplier with overdue
 // in red, grouped lines that expand, no grey explanation sentences (tooltips instead), All cars
 // folded at the bottom, and the owner's Parts speed report.
-//   node --env-file=.env.local tests/browser/test-partsdesk.mjs
+//   node --env-file=.env.test.local tests/browser/test-partsdesk.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

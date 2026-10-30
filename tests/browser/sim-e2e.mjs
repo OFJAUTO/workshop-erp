@@ -1,7 +1,7 @@
 // 2.6 (21 October 2026): the end-to-end simulation. Eight real paths driven through the screens as every
 // role, checking the hand-off rules R1 to R9 (docs/workflow-map.md) at every step, with a screenshot of
 // the actor's confirmation AND of the next person's screen at each hand-over. Technicians run at 800px.
-//   PATHS=a,b node --env-file=.env.local tests/browser/sim-e2e.mjs   (default: all eight)
+//   PATHS=a,b node --env-file=.env.test.local tests/browser/sim-e2e.mjs   (default: all eight)
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
 // g recovery delivery · h commission approve → pay.

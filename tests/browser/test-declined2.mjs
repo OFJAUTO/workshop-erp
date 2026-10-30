@@ -7,7 +7,7 @@
 //     the quotation is declined with every line kept; the findings are saved as DECLINED WORK with their status; the
 //     car is Ready to collect; the Declined cars report books the clocked time as the cost.
 //  C  the advisor's follow-up on Waiting on you ("Call … about the declined work on …"), and "Called ✓" closes it.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-declined2.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-declined2.mjs
 import path from "node:path";
 import fs from "node:fs";
 import * as mupdf from "mupdf";

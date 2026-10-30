@@ -3,7 +3,7 @@
 // ("2.2", "0.5", ".5", "10.25", "2,5") and saves the right figure; one definition of a part's state feeds the counter,
 // the "Show only unpriced" filter, the bottom bar, the advisor's notification and the quotation, and "Pricing done"
 // goes straight through when every part is priced or marked not available. Run against `npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-d.mjs
+//   node --env-file=.env.test.local tests/browser/test-d.mjs
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

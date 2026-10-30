@@ -3,7 +3,7 @@
 // refuses the whole read (PGRST201), supabase-js returns no data and the page says "Not here" - the calendar booking
 // page broke that way when jobs.final_check_appointment_id joined appointments.job_id. Read-only: limit=0, nothing is
 // written, so it may run against the live database as well as the test database.
-//   node --env-file=.env.local tests/embed-check.mjs          (npm run test:embeds)
+//   node --env-file=.env.test.local tests/embed-check.mjs          (npm run test:embeds)
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

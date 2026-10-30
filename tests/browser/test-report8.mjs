@@ -9,7 +9,7 @@
 //     screen, zoomed, swiped; a video playing in the viewer; the PDF.
 //  C  the oldest real report (J-00016) renders cleanly in the new layout, on a phone and as a PDF.
 //  D  the staff preview on the inspection page draws the same report.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-report8.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-report8.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { randomBytes } from "node:crypto";

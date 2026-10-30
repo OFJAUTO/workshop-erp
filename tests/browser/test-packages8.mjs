@@ -2,7 +2,7 @@
 // with its condition inside the row · ×); "Estimated completion" replaces "Time in workshop" everywhere
 // and closes the included list; an unticked "only if" item never reaches a customer document; a package
 // quotation's discount reads "Package discount (10%)" in bold green.
-// Run: node --env-file=.env.local tests/browser/test-packages8.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-packages8.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

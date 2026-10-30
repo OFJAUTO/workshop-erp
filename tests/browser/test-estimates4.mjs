@@ -2,7 +2,7 @@
 // Cancelled / expired, the customer's link says withdrawn), expire, Re-send / extend with one tap, the duplicate
 // question when starting a second estimate for the same car, Copy estimate without the commission, and an accepted
 // estimate offers Copy only.
-// Run: node --env-file=.env.local tests/browser/test-estimates4.mjs   (dev server; E2E_BASE for another port)
+// Run: node --env-file=.env.test.local tests/browser/test-estimates4.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

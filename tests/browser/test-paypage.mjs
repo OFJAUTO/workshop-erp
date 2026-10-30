@@ -3,7 +3,7 @@
 // large, Pay now (the pasted link), bank transfer with copy, pay at the workshop; a pasted link is
 // validated against the allowed pay-page domains; replacing it keeps the same /p/ link; once recorded
 // the page says Paid with the receipt.
-//   node --env-file=.env.local tests/browser/test-paypage.mjs
+//   node --env-file=.env.test.local tests/browser/test-paypage.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

@@ -2,7 +2,7 @@
 // bold green under the line and in the totals ("Labour and services (before discount)" → green
 // "Discount −AED X"), on the quotation PDF AND the proforma; trailing dashes leave the names; the
 // Complimentary word follows onto the invoice. One shared template renders them all.
-//   node --env-file=.env.local tests/browser/test-docdiscount.mjs
+//   node --env-file=.env.test.local tests/browser/test-docdiscount.mjs
 import { writeFileSync } from "node:fs";
 import { api, base, browserFor, cleanupDb, cookieHeader, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

@@ -4,7 +4,7 @@
 // the empty Part number box; and every part carries TWO names - the supplier's (LPO, parts desk,
 // stickers) and the customer's (quote, proforma, invoice), renamed with the pencil in the editor and
 // locked after the customer approves.
-//   node --env-file=.env.local tests/browser/test-partnames.mjs
+//   node --env-file=.env.test.local tests/browser/test-partnames.mjs
 import { execFileSync } from "node:child_process";
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
@@ -69,7 +69,7 @@ check("B: an approved quotation now carries the part (the action refuses from he
 
 /* ---- C. The clean-up script rescues a number off a dirty name ---- */
 await sql("insert into public.part_items (job_id, description, quantity) select id, 'Gasket Kit X912345 654321', 1 from public.jobs where id = $1", [jobId]);
-execFileSync("node", ["--env-file=.env.local", "scripts/fix-part-names-21-oct.mjs", "--apply"], { cwd: "C:/Users/user/Desktop/workshop ERP", stdio: "pipe" });
+execFileSync("node", ["--env-file=.env.test.local", "scripts/fix-part-names-21-oct.mjs", "--apply"], { cwd: "C:/Users/user/Desktop/workshop ERP", stdio: "pipe" });
 const fixed = (await sql("select description, part_number from public.part_items where job_id = $1 and description ilike 'Gasket%'", [jobId]))[0];
 check("C: the script cleans the name and rescues the number", /^gasket kit$/i.test(fixed?.description ?? "") && pi.compactPartNumber(fixed?.part_number) === "X912345654321", JSON.stringify(fixed));
 

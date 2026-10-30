@@ -5,7 +5,7 @@
 // hand" on a red row, the reconciliation and monthly-close pages, the REAL write guard — and the go-live SWITCH
 // itself, simulated inside a database transaction that is rolled back (OFJ TEST -> a fake organization -> OFJ TEST;
 // never REAL, nothing kept).
-//   node --env-file=.env.local tests/browser/test-zoho3.mjs   (dev server, no ZOHO_* values)
+//   node --env-file=.env.test.local tests/browser/test-zoho3.mjs   (dev server, no ZOHO_* values)
 import pg from "pg";
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

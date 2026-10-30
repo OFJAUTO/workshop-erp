@@ -187,6 +187,8 @@ export type ZohoUpload = { field: string; filename: string; contentType: string;
 export async function zohoFetch<T = Record<string, unknown>>(path: string, opts: { org?: string | null; method?: "GET" | "POST" | "PUT" | "DELETE"; body?: Record<string, unknown>; upload?: ZohoUpload; write?: boolean } = {}): Promise<T> {
   const method = opts.method ?? "GET";
   const write = opts.write ?? method !== "GET";
+  // 30 October 2026: the TEST server (ERP_ENV=test) never touches the REAL organization at all, read or write.
+  if (process.env.ERP_ENV === "test" && opts.org === ZOHO_REAL_ORG_ID) throw new ZohoError("Refused: the test server never touches the REAL Zoho organization, only OFJ TEST.");
   if (write) {
     // THE guard: nothing writes to the real book while the go-live switch is off — and once it is ON, the test
     // organization is closed to writes too (the books live in ONE place at a time). The rule lives here, not in

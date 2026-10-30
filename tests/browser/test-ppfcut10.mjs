@@ -3,7 +3,7 @@
 // ⓘ sentence on the PDF and the link, locked once approved, the big badge on the job card / bodyshop
 // page / PPF tablet, "OFJ Bespoke PPF – Gloss · Hand-cut · Full body" on the warranty card, and the month's
 // hand-cut against pre-cut table.
-// Run: node --env-file=.env.local tests/browser/test-ppfcut10.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-ppfcut10.mjs   (dev server on :3100)
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

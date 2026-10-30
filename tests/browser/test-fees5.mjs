@@ -5,7 +5,7 @@
 //  C. test copies (auth codes of their own, test payments on a test car) recorded: each payment gets its EXACT
 //     MSF, fee and VAT, the settlement its net, the report remembers its settlement;
 //  D. a report with an adjustment and a refund: red, and Record waits for "checked with the bank".
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-fees5.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees5.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

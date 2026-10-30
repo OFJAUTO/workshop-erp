@@ -1,6 +1,6 @@
 // Screens update by themselves (19 October 2026, section 10): change a job in one place and the open
 // dashboard shows it within seconds - no reload, no scroll jump, nothing typed is lost.
-//   node --env-file=.env.local tests/browser/test-live.mjs
+//   node --env-file=.env.test.local tests/browser/test-live.mjs
 import { api, browserFor, base, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

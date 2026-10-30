@@ -2,7 +2,7 @@
 // pays several ready commissions of one person; cash prints a numbered voucher (signature lines,
 // amount in words); a transfer wants its reference; without the uploaded proof the payment reads
 // "Paid - proof missing" (amber) and sits on accounts' Waiting on you; the export carries the columns.
-// Run: node --env-file=.env.local tests/browser/test-commission2.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-commission2.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

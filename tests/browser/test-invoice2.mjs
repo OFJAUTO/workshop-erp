@@ -1,7 +1,7 @@
 // Supplier invoice rules (20 October 2026, part 2 section 2): number AND date compulsory, "Invoice
 // to follow" shows the amber Invoice missing badge and reminds Parts daily, the LPO cannot be marked
 // paid without number + date + file, and the invoice takes several files with thumbnails and an X.
-//   node --env-file=.env.local tests/browser/test-invoice2.mjs
+//   node --env-file=.env.test.local tests/browser/test-invoice2.mjs
 import { Buffer } from "node:buffer";
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 

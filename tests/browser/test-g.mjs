@@ -3,8 +3,8 @@
 // last import), bulk delete on the Parts table (tick boxes, Delete all, one question, ordered parts kept, Undo for a
 // minute), and the clear of the test data (the two dummy cars with photos, the counts, the empty job board).
 // Run against `npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-g.mjs            (imports and bulk delete)
-//   node --env-file=.env.local tests/browser/test-g.mjs --clear    (also presses Clear test data at the end: everything goes)
+//   node --env-file=.env.test.local tests/browser/test-g.mjs            (imports and bulk delete)
+//   node --env-file=.env.test.local tests/browser/test-g.mjs --clear    (also presses Clear test data at the end: everything goes)
 import fs from "node:fs";
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";

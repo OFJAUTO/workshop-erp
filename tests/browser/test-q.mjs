@@ -2,7 +2,7 @@
 // list changes, the approval box forgets its refusal); the document PDFs open for the owner, advisors, workshop
 // managers and accounts (LPOs for Parts too), refuse other roles and strangers in plain words, and a made-up id is
 // refused. Also B1: the gate-in page opens at the top with nothing focused and no red messages.
-//   node --env-file=.env.local tests/browser/test-q.mjs
+//   node --env-file=.env.test.local tests/browser/test-q.mjs
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, MANAGER_MECH } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

@@ -3,7 +3,7 @@
 // refused attempt is written in the quotation's history; the page shows the lines as plain text with the banner and
 // "Ask owner to revise"; the owner's Revise makes version 2 as a draft and is logged while version 1 stays locked;
 // with a proforma out only the owner may revise; with a tax invoice out nobody may.
-//   node --env-file=.env.local tests/browser/test-x.mjs
+//   node --env-file=.env.test.local tests/browser/test-x.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

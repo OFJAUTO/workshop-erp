@@ -2,7 +2,7 @@
 // deposit, the reference box becomes "Auth code" (6 letters or digits, from the card slip or the payment
 // confirmation), required; the same code on another live receipt is refused; it shows on the money page and the
 // receipt. As Mathew (accounts), from Waiting on you and the job's money page.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-fees3.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees3.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";

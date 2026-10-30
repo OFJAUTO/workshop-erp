@@ -3,7 +3,7 @@
 //     when anything is urgent; a tap anywhere on the bar opens the list (urgent first), "Hide list ▴" closes it.
 //  B  the counts update live while it is closed (a new car waiting appears in the count without a reload).
 //  C  the same bar for an advisor (800x1280) and a technician's My jobs.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-waiting3.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-waiting3.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, go, here, makeChecks, sql } from "./pw-lib.mjs";

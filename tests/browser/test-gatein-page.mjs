@@ -1,7 +1,7 @@
 // Section 9 proof: the gate-in details page. One staff page with everything from the gate-in, reached
 // from the Job card approval box at every stage; "View as customer" shows the exact approval link without
 // marking it opened; "Download PDF" is the internal record; the three fold-outs left the job card.
-// Run: node --env-file=.env.local tests/browser/test-gatein-page.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-gatein-page.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

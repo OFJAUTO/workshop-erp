@@ -2,7 +2,7 @@
 // himself with no "Only the owner" banner; a green status reads "AED 500 = 5.6% of labour · within
 // your limit (10%)"; above the limit it turns amber and (after sending) says Waiting for owner
 // approval. The server-side send gate is test:discount's job and stays green.
-//   node --env-file=.env.local tests/browser/test-discount2.mjs
+//   node --env-file=.env.test.local tests/browser/test-discount2.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

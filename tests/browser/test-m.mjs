@@ -3,7 +3,7 @@
 // paid"; the final confirmation that creates the tax invoice; the owner-only early issue; Pay now through the
 // pretend Network International gateway (the dev server must run with NGENIUS_ENV=mock NGENIUS_WEBHOOK_SECRET=e2e-hook);
 // the accounts screens. Run against `NGENIUS_ENV=mock NGENIUS_WEBHOOK_SECRET=e2e-hook npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-m.mjs
+//   node --env-file=.env.test.local tests/browser/test-m.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

@@ -2,7 +2,7 @@
 // Approved-to-pay → Paid; the owner approves, rejects or edits; accounts mark Paid ONLY once the
 // customer's tax invoice is settled (otherwise the exact reason shows); payable ones sit amber on
 // Mathew's Waiting on you; the month exports as .xlsx.
-//   node --env-file=.env.local tests/browser/test-commissions-page.mjs
+//   node --env-file=.env.test.local tests/browser/test-commissions-page.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

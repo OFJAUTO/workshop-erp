@@ -1,7 +1,7 @@
 // Commission rules (20 October 2026, part 2 section 4): a pending commission counts as a cost the
 // moment it is set, labelled "pending owner approval"; only the owner's decline removes it; and the
 // internal box (profit, margin, total cost) moves INSTANTLY on add, approve and decline - no refresh.
-//   node --env-file=.env.local tests/browser/test-commission.mjs
+//   node --env-file=.env.test.local tests/browser/test-commission.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

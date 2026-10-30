@@ -3,7 +3,7 @@
 // link made; the customer's link shows both videos under their items ("<item> – Bad") and plays both inside the page,
 // muted; the PDF shows both pictures with a play sign and "Watch video" links to those videos on the customer page;
 // a video without a picture (an older one) still gets its dark card and link; fresh addresses come from the token.
-//   node --env-file=.env.local tests/browser/test-videos2.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-videos2.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";

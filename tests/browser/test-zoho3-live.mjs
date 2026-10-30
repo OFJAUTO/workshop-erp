@@ -2,7 +2,7 @@
 // bill, a customer refund on a credit note, and the daily reconciliation catching a deliberately broken day and
 // going green again once it is fixed. Same shape as the earlier live suites: seed through the local dev server,
 // drive the LIVE cron with CRON_SECRET, assert from the stored results. The go-live flip itself is NEVER run.
-//   node --env-file=.env.local tests/browser/test-zoho3-live.mjs   (local dev server, no ZOHO_* values)
+//   node --env-file=.env.test.local tests/browser/test-zoho3-live.mjs   (local dev server, no ZOHO_* values)
 import { api, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

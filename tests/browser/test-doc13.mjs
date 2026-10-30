@@ -3,7 +3,7 @@
 //    the text positions), discounts bold green. 2. A line named just "PART" (or blank) is flagged in Before sending
 //    and refused on completion. 3. "Internal cost only – hide from customer" on any line: counts in the cost, never on
 //    a customer document.
-// Run: node --env-file=.env.local tests/browser/test-doc13.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-doc13.mjs   (dev server on :3100)
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

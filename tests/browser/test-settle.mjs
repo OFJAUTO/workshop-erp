@@ -4,7 +4,7 @@
 // accounts' Waiting on you, and the monthly close carries the clearing line. Real payments are never touched:
 // every row that is not this test's own is unticked before saving. No Zoho call is made (the queued settlement
 // row is removed at once).
-//   node --env-file=.env.local tests/browser/test-settle.mjs   (dev server)
+//   node --env-file=.env.test.local tests/browser/test-settle.mjs   (dev server)
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";

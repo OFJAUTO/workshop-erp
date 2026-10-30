@@ -2,7 +2,7 @@
 //   S1: the technician receives parts on his own tablet (tick, Select all, his PIN, light green lines),
 //       Parts only mark "Ready for handover" (instant notification, 2-hour reminder), nothing blocks
 //       starting work, receiving is required before "Job finished".
-//   node --env-file=.env.local tests/browser/test-z.mjs
+//   node --env-file=.env.test.local tests/browser/test-z.mjs
 import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

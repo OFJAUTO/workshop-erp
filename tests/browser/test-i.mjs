@@ -3,7 +3,7 @@
 // the shared section tablet with PIN clocking, the release sign-off and Not ready, the Going out strip, the handover page,
 // the warranty certificate, the customer updates, and the electrical task on the mechanical side. Screenshots for the
 // owner land in tests/browser/shots/.
-// Run against `npx next dev -p 3100`:  node --env-file=.env.local tests/browser/test-i.mjs
+// Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-i.mjs
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";

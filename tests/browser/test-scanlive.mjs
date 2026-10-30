@@ -1,7 +1,7 @@
 // Section 10 proof: a scan report appears on the screens by itself. The technician's Step 1 card, the
 // job card line and the scans page all hear a new inbound_scans row live (with a quiet 20 s net), show
 // "Scan report received HH:MM ✓", and the read button lights up - with no reload, no scroll jump.
-// Run: node --env-file=.env.local tests/browser/test-scanlive.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-scanlive.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

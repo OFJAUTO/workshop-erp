@@ -9,7 +9,7 @@
 //  D  the trip finished: the page shows nothing about the customer.
 //  E  the failure is in the owner's upload log with its reason.
 //  F  the office's backup: Car loaded and Delivered to OFJ with a photo, from the Recovery page.
-//   E2E_BASE=http://localhost:3104 node --env-file=.env.local tests/browser/test-driveupload.mjs
+//   E2E_BASE=http://localhost:3104 node --env-file=.env.test.local tests/browser/test-driveupload.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { chromium } from "playwright-core";

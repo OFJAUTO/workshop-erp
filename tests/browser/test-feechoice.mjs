@@ -6,7 +6,7 @@
 //     approved it goes straight to the quotation (no Inspection stage).
 //  E  locked after the customer's approval: the advisor cannot change it; the owner can, with a reason.
 //  F  the owner's report "Inspection fees" for the month, per advisor.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-feechoice.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-feechoice.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

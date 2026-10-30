@@ -3,7 +3,7 @@
 // part; the three-dot menus float on top and open upwards near the bottom; the tyre details window (brand, model,
 // size, year, marks) builds the name "PIRELLI P ZERO 275/45 R20 N0 (2026)", a tyre cannot be priced without brand
 // and size, a generic tyre with details in the part number box is told so; the VIN with Copy in every car header.
-//   node --env-file=.env.local tests/browser/test-u.mjs
+//   node --env-file=.env.test.local tests/browser/test-u.mjs
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

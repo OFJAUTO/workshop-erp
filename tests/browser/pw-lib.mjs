@@ -1,19 +1,29 @@
-// Shared helpers for the browser tests. They drive the installed Microsoft Edge (headless) against a local
-// server started with `npx next dev -p 3100`, log people in through the test-only /api/e2e routes (refused in
-// production), run SQL through /api/e2e/sql, and clean every test row up with tests/e2e-cleanup.sql.
+// Shared helpers for the browser tests. They drive the installed Microsoft Edge (headless) against the local TEST
+// server (npm run test:server, port 3102, or npm run dev:test on 3101), log people in through the test-only /api/e2e
+// routes (refused in production and on any server connected to the live database), run SQL through /api/e2e/sql, and
+// clean every test row up with tests/e2e-cleanup.sql. 30 October 2026: tests run ONLY against the TEST database
+// (`node --env-file=.env.test.local tests/browser/<test>.mjs`); they refuse to start with the live settings.
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
-export const base = process.env.E2E_BASE ?? "http://localhost:3100";
+export const base = process.env.E2E_BASE ?? "http://localhost:3102";
+/** The live project (public reference). Tests never run against it. */
+export const LIVE_PROJECT_REF = "uhqcmqudszguqosnjadx";
+/** The settings file of the TEST database: every script a test starts loads this one, never .env.local. */
+export const TEST_ENV_FILE = ".env.test.local";
+if (process.env.ERP_ENV !== "test" || (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").includes(LIVE_PROJECT_REF)) {
+  console.error("Refused: tests run only against the TEST database. Run with: node --env-file=.env.test.local tests/browser/<test>.mjs");
+  process.exit(2);
+}
 export const secret = process.env.E2E_SECRET;
 export const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
 const EDGE = process.env.E2E_BROWSER ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 
 if (!secret) {
-  console.error("E2E_SECRET is missing. Run with: node --env-file=.env.local tests/browser/<test>.mjs");
+  console.error("E2E_SECRET is missing. Run with: node --env-file=.env.test.local tests/browser/<test>.mjs");
   process.exit(2);
 }
 
@@ -62,7 +72,7 @@ export const sql = async (q, params = []) => (await api("/api/e2e/sql", { sql: q
 /** Removes every test row (fixed ids, test customers, test services and emails). Safe to run at any time. */
 export function cleanupDb() {
   try {
-    const out = execSync(`node --env-file=.env.local scripts/db-sql.mjs "${path.join(projectRoot, "tests", "e2e-cleanup.sql")}"`, { cwd: projectRoot, encoding: "utf8" });
+    const out = execSync(`node --env-file=${TEST_ENV_FILE} scripts/db-sql.mjs "${path.join(projectRoot, "tests", "e2e-cleanup.sql")}"`, { cwd: projectRoot, encoding: "utf8" });
     console.log("cleanup:", out.trim().split("\n").slice(-2).join(" | "));
   } catch (e) {
     console.log("cleanup failed:", String(e.message).slice(0, 200));

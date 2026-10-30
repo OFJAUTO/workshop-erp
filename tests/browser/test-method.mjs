@@ -2,7 +2,7 @@
 // says "Cash · deposit · by <who>", never a provider's name; an online payment says "paid online (Pay now)";
 // the receipt PDF names the method only; and no payment in the whole book carries a bank charge that
 // disagrees with its actual method (cash and transfer 0, card and link at the Settings rates).
-// Run: node --env-file=.env.local tests/browser/test-method.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-method.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

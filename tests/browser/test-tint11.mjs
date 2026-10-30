@@ -4,7 +4,7 @@
 // changes after approval logged old → new with the prepared WhatsApp, locked once the tint stage starts (owner
 // excepted), the job card / bodyshop page / PPF tablet (with the photo after fitting), the proforma, the
 // package cost (double layer = double film + hours), Settings (legal limit) and "Same as last time".
-// Run: node --env-file=.env.local tests/browser/test-tint11.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-tint11.mjs   (dev server on :3100)
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";

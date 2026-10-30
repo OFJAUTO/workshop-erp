@@ -6,7 +6,7 @@
 // done on <date> ✓" after the 10-day check (with its photos), never a check not done (30 October 2026: that is for the
 // staff, "Final check not done" on the job card), the owner's manual activation;
 // reminders day 8 / 12 / 20; the warranty card WhatsApp after gate-out; Settings > Warranty terms; the warranty list.
-// Run: node --env-file=.env.local tests/browser/test-warranty12.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-warranty12.mjs   (dev server on :3100)
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, projectRoot, sleep, sql, submitted } from "./pw-lib.mjs";

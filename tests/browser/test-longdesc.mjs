@@ -2,7 +2,7 @@
 // whole, shows whole in the editor with a live counter, prints whole on the quotation PDF and the invoice PDF; above
 // the 3,000 limit the editor saves NOTHING (no half text) and the server refuses; a complimentary labour line with
 // no hours prints nothing in the quantity column (never "0.0 h").
-//   node --env-file=.env.local tests/browser/test-longdesc.mjs   (dev server)
+//   node --env-file=.env.test.local tests/browser/test-longdesc.mjs   (dev server)
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

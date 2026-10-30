@@ -2,7 +2,7 @@
 // tapped (editable, cursor in it) while the save runs behind; typing is never lost; a refused save
 // shows "Not saved - Retry" on that line and the retry lands the same row (same id, no duplicate);
 // removing a line is instant too.
-//   node --env-file=.env.local tests/browser/test-instant.mjs
+//   node --env-file=.env.test.local tests/browser/test-instant.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

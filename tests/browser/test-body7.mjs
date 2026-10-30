@@ -4,7 +4,7 @@
 // and after that the technician cannot change it; the customer's report gets a Body section with the outline; the
 // quotation gets a BODYSHOP line and the job becomes Both; the same outline marks gate-in damage and the PPF
 // pre-work check.
-// Run: node --env-file=.env.local tests/browser/test-body7.mjs   (dev server; E2E_BASE for another port)
+// Run: node --env-file=.env.test.local tests/browser/test-body7.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

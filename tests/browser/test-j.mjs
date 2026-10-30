@@ -1,7 +1,7 @@
 // Proof for the labour estimate fix of 15 October 2026 (the "1400 h" bug): every hour-based labour line shows three
 // labelled boxes (Hours, Est. h, AED/h), labour at cost is the Est. h boxes × the cost rate, the footer and the internal
 // box agree, a rate typed into Est. h turns amber and the quoted hours stand in, and the customer PDF never changes.
-// Run against `npx next dev -p 3100`:  node --env-file=.env.local tests/browser/test-j.mjs
+// Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-j.mjs
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
 

@@ -2,7 +2,7 @@
 // pick-up saved message, Send to driver / Copy message / Copy link / Tell the customer, the SHORT
 // driver link, and the driver's TWO-step pick-up page (Car loaded + photo, then Delivered to OFJ +
 // photo + price). Advisors see the actions and never a price.
-//   node --env-file=.env.local tests/browser/test-trips.mjs
+//   node --env-file=.env.test.local tests/browser/test-trips.mjs
 import { writeFileSync } from "node:fs";
 import { api, base, browserFor, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

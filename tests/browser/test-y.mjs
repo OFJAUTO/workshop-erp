@@ -1,7 +1,7 @@
 // Proof for the 17 October batch, run section by section with ONLY=... (e.g. ONLY=B npm run test:y).
 // B1: breaks per weekday and department (the Settings grid, the saved setting, Friday's longer break in the maths).
 // B3: no staff names or WhatsApp on customer pages; the only contact is "Call OFJ" with the company phone.
-//   node --env-file=.env.local tests/browser/test-y.mjs
+//   node --env-file=.env.test.local tests/browser/test-y.mjs
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

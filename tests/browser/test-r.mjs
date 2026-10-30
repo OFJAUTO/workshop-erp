@@ -4,7 +4,7 @@
 // collecting person from the customer, offers saved drivers (a new one is saved), picks the recovery company from
 // the list with the driver's name, and asks an amber "Gate-in recorded 1 key. Confirm 2?" when the keys differ.
 // Also B1: the inspection, quotation, parts and gate-out pages open at the top with no red messages.
-//   node --env-file=.env.local tests/browser/test-r.mjs
+//   node --env-file=.env.test.local tests/browser/test-r.mjs
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

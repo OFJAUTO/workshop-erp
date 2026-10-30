@@ -3,7 +3,7 @@
 // to AED 90 with a reason, the original stays crossed out, the WhatsApp to the driver is prepared, his page shows the
 // change, Approve at the new price, the month and the Excel use the final price; accounts may change a price too;
 // the rates are set in Settings.
-// Run: node --env-file=.env.local tests/browser/test-recovery3.mjs   (dev server; E2E_BASE for another port)
+// Run: node --env-file=.env.test.local tests/browser/test-recovery3.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

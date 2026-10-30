@@ -4,7 +4,7 @@
 // browser, or a cancel on Zoho's page, stores nothing; the settings page carries the picker and the mirror; the
 // REAL organization (942979945) is named read-only. Run with test values for ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET
 // on the dev server; while a real connection exists, the steps that would disturb it are skipped.
-//   node --env-file=.env.local tests/browser/test-zoho0.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-zoho0.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { base, browserFor, cookieHeader, go, here, makeChecks, sql } from "./pw-lib.mjs";
 

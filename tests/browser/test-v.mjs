@@ -4,7 +4,7 @@
 // black strip) printed the moment a part is ticked received, a staff scan landing on the parts trail, a customer scan
 // seeing "OFJ Automotive: genuine part"; the oil service and battery stickers in portrait with the WhatsApp booking
 // QR and the warranty months chosen on the battery line; Settings > Stickers with sizes and printers.
-//   node --env-file=.env.local tests/browser/test-v.mjs
+//   node --env-file=.env.test.local tests/browser/test-v.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

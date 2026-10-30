@@ -1,6 +1,6 @@
 // 22 October 2026 proof: a part's markup as % or AED, a typed selling price, "Apply to all" in both modes, no upper
 // limit, the 5% minimum (owner excepted), and the profit figures moving with it.
-// Run: node --env-file=.env.local tests/browser/test-markup.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-markup.mjs   (dev server on :3100)
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

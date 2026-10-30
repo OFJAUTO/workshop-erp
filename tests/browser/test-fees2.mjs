@@ -3,7 +3,7 @@
 // fee line. A test car with a tax invoice of AED 3,500 and no payment yet, its quotation approved with the old-style
 // fee line of 79.10 (2.26%): expected card machine → 2.15% = 75.25; payment link → 1.75% + AED 1.00 = 62.25; cash → 0.
 // The real RCT-00036 carries its recalculated figures (read only).
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-fees2.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees2.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, go, here, makeChecks, sql } from "./pw-lib.mjs";

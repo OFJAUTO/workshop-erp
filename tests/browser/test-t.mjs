@@ -6,7 +6,7 @@
 // themselves, the owner allows one or declines); the owner's approval box under "Before sending" with "Approved by
 // Omar, 11:45"; the services list (wheels as services, Outside work with "our cost"); Required jobs on the report
 // become service lines; a typed job saved to the list with one tap; long part names wrap in the Parts table.
-//   node --env-file=.env.local tests/browser/test-t.mjs
+//   node --env-file=.env.test.local tests/browser/test-t.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

@@ -3,7 +3,7 @@
 // customer, the send window lists suspicious words (misspellings with suggestions, keyboard mash such as "afqghjk")
 // with one-tap fix / Keep as is - never a block; the workshop dictionary (built in + Settings + makes and models)
 // is never flagged; the owner adds words.
-// Run: node --env-file=.env.local tests/browser/test-spell5.mjs   (dev server; E2E_BASE for another port)
+// Run: node --env-file=.env.test.local tests/browser/test-spell5.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

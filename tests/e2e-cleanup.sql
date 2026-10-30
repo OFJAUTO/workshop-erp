@@ -1,4 +1,11 @@
 -- Removes every test row made by the e2e routes (fixed ids 22222222-0000-4000-8000-00000000e2xx and e3xx). Bypasses the no-delete triggers.
+-- 30 October 2026: only ever on the TEST database (settings.database_role = 'test'); the live database says 'live'.
+do $$
+begin
+  if coalesce((select value #>> '{}' from public.settings where key = 'database_role'), 'live') <> 'test' then
+    raise exception 'Refused: this is not the TEST database (settings.database_role). Tests never touch the live database.';
+  end if;
+end $$;
 set session_replication_role = replica;
 do $$
 declare

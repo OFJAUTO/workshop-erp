@@ -1,6 +1,6 @@
 // WhatsApp link previews (19 October 2026, section 2): every short link type answers HTTP 200 with the
 // og tags and the square logo; a map pin stays a plain redirect; the image is public and under 100 KB.
-//   node --env-file=.env.local tests/browser/test-preview.mjs
+//   node --env-file=.env.test.local tests/browser/test-preview.mjs
 import { base, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

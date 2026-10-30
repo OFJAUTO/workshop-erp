@@ -3,7 +3,7 @@
 // workshop manager hear "Scan report received for <plate>"; a report for an unknown car waits in Unmatched scans
 // where the car is picked; the same Gmail message is never filed twice; the page shows the mailbox state and offers
 // "Check the mailbox now"; the old Postmark route is gone.
-//   node --env-file=.env.local tests/browser/test-w.mjs
+//   node --env-file=.env.test.local tests/browser/test-w.mjs
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, MANAGER_MECH } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

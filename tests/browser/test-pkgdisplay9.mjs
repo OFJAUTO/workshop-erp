@@ -2,7 +2,7 @@
 // document - the estimate/quotation PDF and link, the proforma and the tax invoice (PDF and link) -
 // from ONE model: name large, "finish · car", package price, what's included with ticks and the
 // warranty column, complimentary badges (never twice), estimated completion, package subtotal.
-// Run: node --env-file=.env.local tests/browser/test-pkgdisplay9.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-pkgdisplay9.mjs   (dev server on :3100)
 import fs from "node:fs";
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

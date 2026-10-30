@@ -1,7 +1,7 @@
 // Section 3 proof (23 October 2026, afternoon): the inspection report (customer link and PDF) no longer carries the
 // line "If no work is approved after the inspection, an inspection fee of AED … will apply."; it stays on the gate-in
 // approval page only (test-fee checks that page still shows it with the car's own amount).
-//   node --env-file=.env.local tests/browser/test-nofee3.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-nofee3.mjs   (dev server; E2E_BASE for another port)
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";

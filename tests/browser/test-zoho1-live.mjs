@@ -8,7 +8,7 @@
 //   (d) two payments, card and transfer: bank charges 2.26% / 0, both applied
 //   (e) forced failure ("Mapping missing") then Retry; and the adopt pass (cleared id -> same Zoho invoice)
 // Needs: the dev server (no ZOHO_* values), CRON_SECRET in .env.local, and the live site deployed with phase 1.
-//   node --env-file=.env.local tests/browser/test-zoho1-live.mjs
+//   node --env-file=.env.test.local tests/browser/test-zoho1-live.mjs
 import { api, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

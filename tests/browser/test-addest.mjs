@@ -10,7 +10,7 @@
 //     the additional one read "ADDITIONAL ESTIMATE – in addition to E-…"            (needs the 30 Oct migration)
 //  E  a gate-in carries BOTH open estimates over: Start quotation makes two quotations on the job, ORIGINAL and
 //     ADDITIONAL, each with its estimate's lines; the money line counts every approved one (needs the migration)
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-addest.mjs   (ONLY=A,B,… for some)
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-addest.mjs   (ONLY=A,B,… for some)
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -39,7 +39,7 @@ async function finish() {
     const file = path.join(os.tmpdir(), `addest-real-${process.pid}.sql`);
     const ids = realMade.map((id) => `'${id}'`).join(", ");
     fs.writeFileSync(file, `begin;\nset local session_replication_role = replica;\ndelete from public.quotation_lines where quotation_id in (${ids});\ndelete from public.quotation_events where quotation_id in (${ids});\ndelete from public.short_links where url like '%/quote/%' and url in (select 'https://erp.ofjauto.com/quote/' || token from public.quotations where id in (${ids}) and token is not null);\ndelete from public.quotations where id in (${ids});\ncommit;\n`);
-    try { console.log("real rows removed:", execSync(`node --env-file=.env.local scripts/db-sql.mjs "${file}"`, { cwd: projectRoot, encoding: "utf8" }).trim().split("\n").join(" | ")); } catch (e) { console.log("REAL ROWS NOT REMOVED", realMade, String(e.message).slice(0, 200)); }
+    try { console.log("real rows removed:", execSync(`node --env-file=.env.test.local scripts/db-sql.mjs "${file}"`, { cwd: projectRoot, encoding: "utf8" }).trim().split("\n").join(" | ")); } catch (e) { console.log("REAL ROWS NOT REMOVED", realMade, String(e.message).slice(0, 200)); }
     fs.rmSync(file, { force: true });
   }
   cleanupDb();

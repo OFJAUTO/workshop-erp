@@ -2,7 +2,7 @@
 // commission (the three copies are logged tombstones) and removed the test names; a revision CARRIES
 // the commission to the new version; an estimate's commission moves onto the job's quotation when the
 // estimate becomes it; the commissions page shows one row per job, with who added it.
-// Run: node --env-file=.env.local tests/browser/test-commission1.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-commission1.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

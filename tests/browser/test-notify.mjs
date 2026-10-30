@@ -2,7 +2,7 @@
 // job card approved → assign → road test → inspection submitted → report approved → parts priced →
 // quotation sent and approved → planning → parts handover → work finished → work confirmed → QC →
 // wash → proforma → payment and tax invoice → gate-out. Run against `npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-notify.mjs
+//   node --env-file=.env.test.local tests/browser/test-notify.mjs
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 /** Ticks a technician; one already on a car asks "Assign anyway?" first (depends on the live workshop). */

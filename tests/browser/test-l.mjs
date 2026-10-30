@@ -3,7 +3,7 @@
 // All cars and search; Parts adding or deleting parts at any time (an ordered part gets Return or Keep in stock);
 // Revise quotation in the bottom bar and the header; Mark as declined as a small link; the declined job's two choices
 // with an optional charge invoiced before gate-out, or a free gate-out.
-// Run against `npx next dev -p 3100`:  node --env-file=.env.local tests/browser/test-l.mjs
+// Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-l.mjs
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
 

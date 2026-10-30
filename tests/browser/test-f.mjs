@@ -3,7 +3,7 @@
 // Parts table widths at 1366 and 1920, the categorised picker on the Parts desk, the price import (file, paste, totals,
 // mapping, apply), part numbers kept off customer PDFs, and the Failed uploads page.
 // Run against `npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-f.mjs
+//   node --env-file=.env.test.local tests/browser/test-f.mjs
 import fs from "node:fs";
 import path from "node:path";
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";

@@ -1,7 +1,7 @@
 // Section 1 of 27 October (afternoon): tyre / part positions. The name keeps its width (no letter-per-line squash),
 // positions sit on their own small line in THE short form, the quote PDF prints the short form under the name, and
 // positions that disagree with the quantity stop "Quotation complete" (the owner may override).
-//   node --env-file=.env.local tests/browser/test-positions.mjs   (dev server)
+//   node --env-file=.env.test.local tests/browser/test-positions.mjs   (dev server)
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

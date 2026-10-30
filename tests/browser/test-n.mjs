@@ -1,7 +1,7 @@
 // Proof for PART D of the night batch: the three-choice customer and car chooser on New estimate (existing customer
 // and car, existing customer with a new car, new customer and car) with the duplicate checks, and the car photo
 // thumbnail in the page headers.
-//   node --env-file=.env.local tests/browser/test-n.mjs
+//   node --env-file=.env.test.local tests/browser/test-n.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

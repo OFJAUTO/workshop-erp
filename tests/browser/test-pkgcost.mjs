@@ -2,7 +2,7 @@
 // gloss, big cars 1.5), tint and ceramic per car, the month's consumables share, installer labour at the
 // bodyshop rate, recovery - and says the estimated profit. The advisor types only the package price (no
 // our-cost box on package lines); the owner can set the rolls for one job.
-// Run: node --env-file=.env.local tests/browser/test-pkgcost.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-pkgcost.mjs   (dev server on :3100)
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { api, base, browserFor, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

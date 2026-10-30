@@ -1,7 +1,7 @@
 // Section 4 of 27 October (afternoon): a new version tells the user, no dead clicks, nothing typed is lost.
 // Needs the dev server started as version "e2e-v1":  APP_VERSION_OVERRIDE=e2e-v1 npx next dev -p 3101
 // The test writes public/version.json as "e2e-v2" (the "newer deploy") and removes it at the end.
-//   node --env-file=.env.local tests/browser/test-version.mjs
+//   node --env-file=.env.test.local tests/browser/test-version.mjs
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

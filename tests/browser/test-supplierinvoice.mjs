@@ -4,7 +4,7 @@
 // needs the "amount is right" tick (AED 500,000 on a 14,782 order), "Invoice to follow" marks the LPO
 // amber + accounts list + daily Parts reminder (once), files upload with an X, and the same box saves
 // the invoice later from the LPO page.
-//   node --env-file=.env.local tests/browser/test-supplierinvoice.mjs
+//   node --env-file=.env.test.local tests/browser/test-supplierinvoice.mjs
 import { writeFileSync } from "node:fs";
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 

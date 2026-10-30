@@ -3,7 +3,7 @@
 // purchase totals (C4), the supplier invoice asked for at receipt with the > AED 1 mismatch and Accept new price (C5),
 // the price memory (C6), and real stock: a stock order through approval, ordered and received onto the shelf with the
 // averaged cost, the low-stock reminder from the hourly job, the monthly count (C7).
-//   node --env-file=.env.local tests/browser/test-p.mjs
+//   node --env-file=.env.test.local tests/browser/test-p.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

@@ -1,6 +1,6 @@
 // Money permissions (19 October 2026, section 1 + 9): advisors never record payments and never see
 // recovery money; the server blocks them even when the button is bypassed. Run with the dev server up:
-//   node --env-file=.env.local tests/browser/test-perms.mjs
+//   node --env-file=.env.test.local tests/browser/test-perms.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, loginCookies, makeChecks, projectRoot, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

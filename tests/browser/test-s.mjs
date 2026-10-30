@@ -1,7 +1,7 @@
 // Proof for C1 of the 16 October batch: the road test results sit at the top right under "The customer says" on the
 // finished report, in the advisor's quotation strip and on the customer's report link and PDF; Bad and Average come
 // first, Good is one line; "+ Add job" on a flagged road test item adds a quotation line that then shows as quoted.
-//   node --env-file=.env.local tests/browser/test-s.mjs
+//   node --env-file=.env.test.local tests/browser/test-s.mjs
 import { api, base, browserFor, browserForId, cleanupDb, go, makeChecks, sleep, sql, MANAGER_MECH } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

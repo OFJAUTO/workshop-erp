@@ -1,5 +1,5 @@
 // A full-page screenshot of one page as one role, into tests/browser/shots/<name>.png.
-//   node --env-file=.env.local tests/browser/shot-page.mjs <role> <path> <name> [width] [height]
+//   node --env-file=.env.test.local tests/browser/shot-page.mjs <role> <path> <name> [width] [height]
 import path from "node:path";
 import { base, browserFor, projectRoot } from "./pw-lib.mjs";
 

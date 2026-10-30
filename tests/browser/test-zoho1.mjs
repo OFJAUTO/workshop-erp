@@ -2,7 +2,7 @@
 // the enqueue hooks on the real money flow (payment, tax invoice, cheque on clearance), the sync page, the account
 // mapping screen and the accounts' Waiting on you. Everything here runs WITHOUT Zoho: the dev machine has no Zoho
 // secret, so the worker is exercised live (test-zoho1-live.mjs) and this file proves the local half.
-//   node --env-file=.env.local tests/browser/test-zoho1.mjs   (dev server on 3100/3101 WITHOUT ZOHO_* env values)
+//   node --env-file=.env.test.local tests/browser/test-zoho1.mjs   (dev server on 3100/3101 WITHOUT ZOHO_* env values)
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

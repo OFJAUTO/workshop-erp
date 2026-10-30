@@ -3,7 +3,7 @@
 // figure carried across; a fixed line shows no hours boxes and counts nothing in labour hours; a
 // service set as fixed in Settings lands fixed even when the price is typed each time; and the
 // customer's PDF shows a fixed line with no "x.x h" anywhere.
-//   node --env-file=.env.local tests/browser/test-fixed.mjs
+//   node --env-file=.env.test.local tests/browser/test-fixed.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

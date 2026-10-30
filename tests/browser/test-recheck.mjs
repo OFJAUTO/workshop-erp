@@ -5,7 +5,7 @@
 //  D  the PPF team's checklist on the tablet: OK / Needs fixing (+ note, Fixed) / Not on this car, then the hand-over.
 //  E  the original job shows the recheck as cost ("Recheck: X h · AED Y") and "Final check done" for the staff.
 //  F  the customer's warranty page shows "Final check done on <date> ✓"; a redo shows on Comebacks.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-recheck.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-recheck.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { base, browserFor, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

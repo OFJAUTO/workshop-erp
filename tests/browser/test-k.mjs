@@ -3,7 +3,7 @@
 // leave out breaks and after-hours (B7), Minor and Major service as services (B8), capitals (B9), Labour charges (B10),
 // the discount scope (B11), sticker sizes (B12), the markup reminder (B13), removing a job with its parts (B14) and the
 // parts step bar (B15).
-// Run against `npx next dev -p 3100`:  node --env-file=.env.local tests/browser/test-k.mjs
+// Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-k.mjs
 import fs from "node:fs";
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";

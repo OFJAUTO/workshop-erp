@@ -1,7 +1,7 @@
 // Evening section 3 proof: the OWNER never asks himself. A locked, approved inspection report gives him
 // a direct Edit (no change request, no one-hour window); his edits save and land quietly on the job's
 // history; an advisor still gets the ask-the-owner path; the job card says when a sent report changed.
-// Run: node --env-file=.env.local tests/browser/test-owner3.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-owner3.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

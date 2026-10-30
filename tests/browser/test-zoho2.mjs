@@ -2,7 +2,7 @@
 // invoice, mark supplier paid, pay commissions, mark recovery month paid), the new mapping groups, the sync page
 // with the new document kinds and the accounts' Waiting wording. The worker itself is proven live
 // (test-zoho2-live.mjs); the REAL-org guard stays covered here too.
-//   node --env-file=.env.local tests/browser/test-zoho2.mjs   (dev server, no ZOHO_* values)
+//   node --env-file=.env.test.local tests/browser/test-zoho2.mjs   (dev server, no ZOHO_* values)
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

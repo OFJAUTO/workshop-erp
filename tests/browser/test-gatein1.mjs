@@ -3,7 +3,7 @@
 // customer fixed, the gate-in goes through to the photos step; a new customer with a mobile already on record is asked
 // "This number belongs to … – add the car to … instead?" (on the form and again on the server); the gate-in role sees no
 // customer page, no history and no money.
-//   node --env-file=.env.local tests/browser/test-gatein1.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-gatein1.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { base, browserFor, cleanupDb, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

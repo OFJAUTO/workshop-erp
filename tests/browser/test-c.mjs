@@ -3,7 +3,7 @@
 // split), customer links opening the PDF, advisors on each other's quotations with the editing lock, the expected
 // payment method, shorter messages with the proforma address, bars beside the menu with Sign out under the name,
 // and the PDF page layout. Run against `npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-c.mjs
+//   node --env-file=.env.test.local tests/browser/test-c.mjs
 import { createRequire } from "node:module";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

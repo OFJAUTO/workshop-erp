@@ -4,7 +4,7 @@
 // MSF (175.00) on bank charges and the transaction fee (1.00) on the transaction fee account, each with the 5% tax,
 // so the VAT (8.80) is INPUT VAT - totals to the fils, all carrying the settlement number and statement reference. Run it only
 // when OFJ TEST's daily call allowance has room (with test:zoho3live). Seeds locally, drives the LIVE cron.
-//   node --env-file=.env.local tests/browser/test-settle-live.mjs   (local dev server)
+//   node --env-file=.env.test.local tests/browser/test-settle-live.mjs   (local dev server)
 import { api, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

@@ -1,6 +1,6 @@
 // Accounts' WAITING ON YOU shows everything (20 October 2026, part 2 section 1): cash to confirm and
 // bank, deposits requested, proformas awaiting payment, LPOs to approve, supplier invoices to follow.
-//   node --env-file=.env.local tests/browser/test-waiting.mjs
+//   node --env-file=.env.test.local tests/browser/test-waiting.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

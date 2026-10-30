@@ -5,7 +5,7 @@
 //  B  1280x800 (the tablet sideways) and 1440x900 (a computer): the sidebar as before, no top bar.
 //  C  the car card: the plate always on one line, the stage bar with its labels, the "2 quotations" picker on a car
 //     with two quotations; Jobs and Bodyshop at 800x1280.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-tablet2.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-tablet2.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { base, browserFor, browserForId, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

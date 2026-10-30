@@ -4,7 +4,7 @@
 // internal on it, the LPO flow (Send LPO for approval, one approval, supplier LPOs with Copy / PDF / Ordered,
 // arrival dates, one date changed with a tap, "All parts here by"), commissions on the monthly report with Mark
 // paid, the inspection photo icons, the viewer and the X, the Saved tick, and the sidebar logo.
-// Run against `npx next dev -p 3100`:  node --env-file=.env.local tests/browser/test-h.mjs
+// Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-h.mjs
 import fs from "node:fs";
 import path from "node:path";
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";

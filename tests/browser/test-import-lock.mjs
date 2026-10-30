@@ -1,6 +1,6 @@
 // 22 October 2026 proof: the Autovivo PDF (Part No. column empty) imported through the real screens, the courier as
 // a supplier charge on the LPO, the totals check ✓, and the safety lock blocking the old broken reading.
-// Run: node --env-file=.env.local tests/browser/test-import-lock.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-import-lock.mjs   (dev server on :3100)
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

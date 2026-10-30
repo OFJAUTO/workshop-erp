@@ -2,7 +2,7 @@
 // AED 1,000 (MSF 21.50, VAT 1.08); the statement shows net 970.00, so AED 7.42 is unexplained: blocked, then saved
 // with the reason in the note by accounts - the difference and the reason are kept on the settlement, written in the
 // change log, shown in red in the history, and the job's profit switches to the actual MSF.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-fees4.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees4.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

@@ -7,7 +7,7 @@
 //     link and PDF are titled ADDITIONAL QUOTATION with "In addition to quotation Q-… (approved …)".
 //  C  J-00017 (real, read only): Q-00002 (approved) and Q-00033 (additional) on the job card, Q-00002 read-only, the
 //     money page's invoice preview a copy of Q-00002 only (Q-00033 counts once approved).
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-quotehist1.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-quotehist1.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { randomBytes } from "node:crypto";

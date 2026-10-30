@@ -2,7 +2,7 @@
 // the whole action in place (no page change), amount pre-filled, five methods, proof required for
 // card/transfer, one confirmation, receipt + Send receipt right there, overpay kept as an advance,
 // the line leaves the list, Parts and the advisor are told; cash to bank confirms inline with one tap.
-//   node --env-file=.env.local tests/browser/test-deposit-panel.mjs
+//   node --env-file=.env.test.local tests/browser/test-deposit-panel.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

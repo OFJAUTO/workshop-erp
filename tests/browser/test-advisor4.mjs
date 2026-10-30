@@ -2,7 +2,7 @@
 // (logged, the new person told); notifications go to the in-charge advisor only - a Follow brings them
 // to a second advisor by choice; the advisor dashboard splits My cars / Other cars with a Mine-All
 // switch; the owner's bell skips informational types.
-// Run: node --env-file=.env.local tests/browser/test-advisor4.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-advisor4.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

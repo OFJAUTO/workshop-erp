@@ -2,7 +2,7 @@
 // VEHICLE / PAID BY; one FOR line; ONE framed Amount received box (the amount large + in words); the three-part
 // summary (total · paid to date · balance remaining, or Paid in full with the green check); the qty/rate/VAT table
 // and every repeated total gone; the footer note from Settings; the same template for deposits and payments.
-//   node --env-file=.env.local tests/browser/test-receipt.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-receipt.mjs   (dev server; E2E_BASE for another port)
 import fs from "node:fs";
 import path from "node:path";
 import { api, base, cleanupDb, cookieHeader, here, makeChecks, sql } from "./pw-lib.mjs";

@@ -2,7 +2,7 @@
 // NOTHING while the live connection is up (no 30-second re-render, no 30-second bell call); a change arrives within
 // seconds through Realtime; a new notification rings the bell without a server call; with the live connection
 // down, the screen falls back to one check a minute.
-//   node --env-file=.env.local tests/browser/test-realtime.mjs   (dev server)
+//   node --env-file=.env.test.local tests/browser/test-realtime.mjs   (dev server)
 import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

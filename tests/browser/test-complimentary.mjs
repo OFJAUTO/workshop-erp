@@ -1,7 +1,7 @@
 // Complimentary / Included lines (21 October 2026, section 1): a price of 0 asks "Mark as Complimentary?",
 // the line turns valid (no red, no "enter the price" blocker), the word prints on the PDF instead of a
 // price, the internal cost still counts, and a free recovery reads "Complimentary pick-up & drop-off".
-//   node --env-file=.env.local tests/browser/test-complimentary.mjs
+//   node --env-file=.env.test.local tests/browser/test-complimentary.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

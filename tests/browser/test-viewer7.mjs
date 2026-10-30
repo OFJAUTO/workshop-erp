@@ -5,7 +5,7 @@
 //  - swiping moves to the next photo (and on from one item to the next); swipe down and the phone's back button close;
 //  - the video opens in the same viewer and plays, muted;
 //  - the page shows small pictures (resized by Supabase), the viewer the sharp one; arrows/Escape on a computer.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-viewer7.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-viewer7.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

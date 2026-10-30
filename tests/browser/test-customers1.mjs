@@ -6,7 +6,7 @@
 //  B  every workshop role (workshop manager, the technician on the car, Parts, QC, team leader): the pages they can
 //     open, their search and the panel's data route never carry the customer's name, phone, the approver or the
 //     driver; the technician's search for the J-00655 customer's name finds nothing; his own card shows no customer.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-customers1.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-customers1.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, here, makeChecks, sql } from "./pw-lib.mjs";

@@ -1,5 +1,5 @@
 // Screenshots of the invoice page (and the job card tile) for a job, as several roles.
-//   node --env-file=.env.local tests/browser/shot-invoice.mjs <jobId> [roles]
+//   node --env-file=.env.test.local tests/browser/shot-invoice.mjs <jobId> [roles]
 import path from "node:path";
 import { base, browserFor, projectRoot } from "./pw-lib.mjs";
 

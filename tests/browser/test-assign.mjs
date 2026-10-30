@@ -1,7 +1,7 @@
 // The To-assign rebuild (21 October 2026, section 6): cars on the LEFT, ONE team-grouped assign panel
 // on the RIGHT (never repeated per car), server-enforced sides, bodyshop cars with no road test and no
 // mechanical inspection, a clear confirmation and the car leaving the list.
-//   node --env-file=.env.local tests/browser/test-assign.mjs
+//   node --env-file=.env.test.local tests/browser/test-assign.mjs
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, freeTech, makeChecks, sleep, sql, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

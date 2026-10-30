@@ -3,7 +3,7 @@
 // to a phase 1 invoice, commission and recovery-month expenses with their proofs, forced failure + Retry, and the
 // never-twice adopt pass. Same shape as test-zoho1-live: seed in the shared DB through the local dev server, drive
 // the LIVE five-minute cron with CRON_SECRET, assert from zoho_outbox.zoho_result.
-//   node --env-file=.env.local tests/browser/test-zoho2-live.mjs   (local dev server, no ZOHO_* values)
+//   node --env-file=.env.test.local tests/browser/test-zoho2-live.mjs   (local dev server, no ZOHO_* values)
 import { api, cleanupDb, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

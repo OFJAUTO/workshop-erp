@@ -2,7 +2,7 @@
 // with the A/C repairs, ticks the recharge by itself, R134a / R1234yf and grams; no litres, no approval spec) and the
 // duplicate "... service due" items folded into their fluid items as a "Service due?" switch. Old reports keep their
 // answers on the merged item; the report, its PDF and the quotation's reference read the merged item.
-// Run: node --env-file=.env.local tests/browser/test-inspection6.mjs   (dev server; E2E_BASE for another port)
+// Run: node --env-file=.env.test.local tests/browser/test-inspection6.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

@@ -3,7 +3,7 @@
 // Each must save, make a receipt (RCT-nnnnn) and clear its task; card and transfer carry their proof (required), the
 // payment link one too (optional, Mathew's case); a cheque turns the task into "Cheque … to clear" with Cleared on the
 // row, and clearing it ends the task. A bad file reference gets a plain sentence and lands in app_errors.
-//   node --env-file=.env.local tests/browser/test-paymethods.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-paymethods.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
 

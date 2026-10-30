@@ -11,7 +11,7 @@
 //  F  a test gate-in: the priced parts carry over to the job's quotation with their cost, supplier and markup (real
 //     priced parts on the job, no re-pricing).
 //  G  the job quotation's "+ Add a part" still names a part and sends it to the Parts desk.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-estparts.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-estparts.mjs
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -38,7 +38,7 @@ async function finish() {
     const file = path.join(os.tmpdir(), `estparts-${process.pid}.sql`);
     const ors = made.estimates.map((id) => `href like '%${id}%'`).join(" or ");
     fs.writeFileSync(file, `delete from public.notifications where ${ors};\n`);
-    try { execSync(`node --env-file=.env.local scripts/db-sql.mjs "${file}"`, { cwd: projectRoot, encoding: "utf8" }); } catch (e) { console.log("notifications not removed:", String(e.message).slice(0, 160)); }
+    try { execSync(`node --env-file=.env.test.local scripts/db-sql.mjs "${file}"`, { cwd: projectRoot, encoding: "utf8" }); } catch (e) { console.log("notifications not removed:", String(e.message).slice(0, 160)); }
     fs.rmSync(file, { force: true });
   }
   cleanupDb();

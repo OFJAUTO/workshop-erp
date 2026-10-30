@@ -2,7 +2,7 @@
 // shows each job with "Last ran: 13:05 ✓" and its result; a job that has not run on time turns red and the owner gets
 // ONE bell ("Mailbox check hasn't run since 12:30"), checked from the notification poll every screen makes.
 // The job rows are shared with the live site: the test only sets times, then puts them back as they were.
-//   node --env-file=.env.local tests/browser/test-jobs4.mjs   (dev server; E2E_BASE for another port)
+//   node --env-file=.env.test.local tests/browser/test-jobs4.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
 import { base, browserFor, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

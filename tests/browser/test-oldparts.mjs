@@ -1,7 +1,7 @@
 // Old parts photo at gate-out (20 October 2026, part 2 section 8): ticking "Old parts handed over"
 // opens Photo / Gallery buttons (optional); the photo is kept with the time and who took it, and the
 // job card history shows it under the gate-out record.
-//   node --env-file=.env.local tests/browser/test-oldparts.mjs
+//   node --env-file=.env.test.local tests/browser/test-oldparts.mjs
 import { Buffer } from "node:buffer";
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 

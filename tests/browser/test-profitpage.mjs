@@ -1,7 +1,7 @@
 // Profit per invoice, the mock-up layout (21 October 2026, part 1 section 1.8): owner only (server
 // enforced), the four figures, the where-the-money-went bar, the table with provisional dots and
 // margin pills, sort and filters, row breakdown, total row, Excel export.
-//   node --env-file=.env.local tests/browser/test-profitpage.mjs
+//   node --env-file=.env.test.local tests/browser/test-profitpage.mjs
 import { browserFor, base, cleanupDb, cookieHeader, makeChecks } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

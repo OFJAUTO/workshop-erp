@@ -2,7 +2,7 @@
 // coloured bars and labels, one line per job per task, ages on each line, short texts with the long
 // sentence in the tooltip, open by default with the urgent count, and one bell for a red task older
 // than 30 minutes (never twice).
-//   node --env-file=.env.local tests/browser/test-urgency.mjs
+//   node --env-file=.env.test.local tests/browser/test-urgency.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

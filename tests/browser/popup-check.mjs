@@ -6,7 +6,7 @@
 //   - nothing inside is cut off by a container that hides its overflow (the discount window's "AE" fault),
 //   - no button or label has text wider than itself,
 //   - no two controls sit on top of each other.
-// Run alone: ROLE=popups node --env-file=.env.local tests/browser/layout-check.mjs   (part of npm run test:layout).
+// Run alone: ROLE=popups node --env-file=.env.test.local tests/browser/layout-check.mjs   (part of npm run test:layout).
 // Not opened on purpose: Settings > Zoho Books (the mirror, the go-live switch): a dev machine must never load that
 // page while the real Zoho connection is live (it refreshes the live token); those controls are plain forms, not pop-ups.
 import { pathToFileURL } from "node:url";

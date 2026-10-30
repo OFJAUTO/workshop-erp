@@ -3,7 +3,7 @@
 // transaction, VAT on the fees and the terminal IDs; its worked examples match the two real transactions to the fils;
 // a deposit by payment link (AED 10,000) and by card machine (AED 1,470) store MSF, fee and VAT apart, the job's
 // cost being MSF + fee. Real settings are snapshotted and put back exactly.
-//   E2E_BASE=http://localhost:3101 node --env-file=.env.local tests/browser/test-fees1.mjs
+//   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees1.mjs
 import path from "node:path";
 import fs from "node:fs";
 import { api, base, browserFor, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";

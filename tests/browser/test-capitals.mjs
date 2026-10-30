@@ -1,7 +1,7 @@
 // Evening section 5 proof: NOTHING changes typed capitals any more. The SQL tidy helpers and the client
 // textCase boxes keep "OFJ" as OFJ (whitespace tidy only, codes still go UPPER); the converted names were
 // put back (OFJ Platinum); screens still DISPLAY names in capitals by CSS.
-// Run: node --env-file=.env.local tests/browser/test-capitals.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-capitals.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

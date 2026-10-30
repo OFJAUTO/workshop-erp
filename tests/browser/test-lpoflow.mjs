@@ -4,7 +4,7 @@
 // ORDER NOW task with the button to the exact LPO; Mark ordered moves it to Deliveries expected and
 // the advisor's job card reads "Parts ordered from <supplier> – arriving <date>"; a refusal tells the
 // desk with the reason and the parts return to To order.
-//   node --env-file=.env.local tests/browser/test-lpoflow.mjs
+//   node --env-file=.env.test.local tests/browser/test-lpoflow.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

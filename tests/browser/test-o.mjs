@@ -1,7 +1,7 @@
 // Proof for PART B of the night batch: Share PDF in the send windows (B1), the PDF viewed inside the customer link
 // with Back and Download (B2), and the supplier LPO's Share PDF and Email to supplier with its "not set up yet" and
 // "no email on the supplier" notes (B3).
-//   node --env-file=.env.local tests/browser/test-o.mjs
+//   node --env-file=.env.test.local tests/browser/test-o.mjs
 import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

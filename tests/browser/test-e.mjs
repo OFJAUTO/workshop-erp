@@ -2,7 +2,7 @@
 // paired parts and "goes with" offers, structured remarks, one-tap reasons, the browser bubble replaced, recovery "Who
 // pays?", documents not sent, "Remove: not needed", supplier discounts needing approval, and the Settings pages.
 // Run against `npx next dev -p 3100`:
-//   node --env-file=.env.local tests/browser/test-e.mjs
+//   node --env-file=.env.test.local tests/browser/test-e.mjs
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

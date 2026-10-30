@@ -2,7 +2,7 @@
 // ADVANCE PAYMENT between Approval and Parts, the advisor sends the request on WhatsApp with the
 // amount, accounts see "Record the deposit", Parts see "Waiting for the deposit", and the editor
 // asks "Did you mean to ask for a deposit?" when the note mentions an advance with none set.
-//   node --env-file=.env.local tests/browser/test-advance.mjs
+//   node --env-file=.env.test.local tests/browser/test-advance.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, tries = 40, ms = 500, okay = (v) => !!v) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (okay(v)) return v; await sleep(ms); } return null; };

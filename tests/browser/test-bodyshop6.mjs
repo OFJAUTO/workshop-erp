@@ -1,7 +1,7 @@
 // Evening section 6 proof: ONE way to quote (the old "New bodyshop quotation" is the estimate path with
 // the package picker opening by itself) and the bodyshop board shows the REAL cars - mixed jobs and cars
 // still in inspection or quoting included, each in its section or the "before the bodyshop work" strip.
-// Run: node --env-file=.env.local tests/browser/test-bodyshop6.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-bodyshop6.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 

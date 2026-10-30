@@ -2,7 +2,7 @@
 // (default 10), the round-off counted toward it; within it the advisor sends himself, above it the
 // quotation waits as "Waiting for the owner: discount X% of labour (limit 10%)" with the owner's
 // bell, and cannot go out until he approves. The owner is never limited.
-//   node --env-file=.env.local tests/browser/test-discount.mjs
+//   node --env-file=.env.test.local tests/browser/test-discount.mjs
 import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();

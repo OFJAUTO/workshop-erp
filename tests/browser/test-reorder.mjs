@@ -1,7 +1,7 @@
 // Section 11 proof: quotation lines reorder by the ↑↓, the menu (Move up / down / to top) and the ⋮⋮
 // drag handle; the numbering and every customer document follow the same order; an approved quotation
 // refuses a reorder; the typed name boxes and the customer-note box carry the browser's spell check.
-// Run: node --env-file=.env.local tests/browser/test-reorder.mjs   (dev server on :3100)
+// Run: node --env-file=.env.test.local tests/browser/test-reorder.mjs   (dev server on :3100)
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
