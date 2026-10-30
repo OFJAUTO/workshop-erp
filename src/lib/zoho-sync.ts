@@ -561,7 +561,25 @@ function incomeKeyOf(line: InvoiceLineRow, q: QLineLite | undefined, jobDept: st
   return "other";
 }
 
-type ZohoInvoice = { invoice_id: string; invoice_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; reference_number?: string; customer_id?: string };
+type ZohoInvoice = { invoice_id: string; invoice_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; reference_number?: string; customer_id?: string; customer_name?: string };
+
+/** Our own test customers in the TEST book (the stage seeds and the e2e runs). */
+const TEST_CUSTOMER_NAME = /\b(e2e|test customer)\b/i;
+
+/**
+ * OFJ TEST only (30 October 2026): our own test runs left invoices in the TEST book (INV-00001 and INV-00002 on "Stage Test
+ * Customer", 26 October) whose numbers the first real invoices now use, so the real ones failed ("already exists on a
+ * different customer"). A clash with such a TEST document is cleared by renaming the old one (INV-00002 →
+ * INV-00002-OLDTEST); nothing is deleted. Never in the REAL book, never after go-live, never on a real customer.
+ */
+async function moveOldTestInvoice(org: string, found: ZohoInvoice, number: string): Promise<string | null> {
+  if (org === ZOHO_REAL_ORG_ID || org !== (await zohoTestOrgId())) return null;
+  if ((await zohoBooksNow()).wentLive) return null;
+  if (!TEST_CUSTOMER_NAME.test(found.customer_name ?? "")) return null;
+  const renamed = `${number}-OLDTEST`;
+  await zohoFetch(`/invoices/${found.invoice_id}?ignore_auto_number_generation=true`, { org, method: "PUT", body: { customer_id: found.customer_id, invoice_number: renamed } });
+  return renamed;
+}
 
 async function zohoInvoiceById(org: string, id: string): Promise<ZohoInvoice | null> {
   try {
@@ -731,13 +749,22 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
 
   const contactId = await ensureContact(org, inv.customer_id);
   const matches = (z: ZohoInvoice) => near(z.total, inv.total_aed) && near(z.tax_total, inv.vat_aed);
+  let oldTestRenamed: { from: string; to: string; customer: string } | null = null;
 
   // Never twice: stored id, else the same number already in Zoho (adopted only when it is OURS), else create.
   let z: ZohoInvoice | null = inv.zoho_invoice_id ? await zohoInvoiceById(org, inv.zoho_invoice_id) : null;
   if (!z) {
     const byNumber = await zohoInvoiceByNumber(org, inv.number);
     // The list row misses tax_total, so the found invoice is read in full before any judgement on its figures.
-    const full = byNumber ? await zohoInvoiceById(org, byNumber.invoice_id) : null;
+    let full = byNumber ? await zohoInvoiceById(org, byNumber.invoice_id) : null;
+    // A leftover from our own test runs holding the number (OFJ TEST only): renamed out of the way, then ours is created.
+    if (full && String(full.customer_id ?? "") !== contactId) {
+      const moved = await moveOldTestInvoice(org, full, inv.number);
+      if (moved) {
+        oldTestRenamed = { from: inv.number, to: moved, customer: full.customer_name ?? "" };
+        full = null;
+      }
+    }
     // Only OUR OWN earlier post is adopted: it must sit on the same customer, and either the figures match or it
     // is a half-finished run on the same job (corrected below). Anything else holding our number — another
     // customer's document, or a leftover with different figures — is NEVER overwritten: FAILED in plain words.
@@ -807,6 +834,8 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     erp: { total: inv.total_aed, vat: inv.vat_aed, taxable: inv.taxable_aed },
     applied_payments: appliedNow,
     line_accounts: incomeCounts,
+    // OFJ TEST: an old test invoice that held this number, renamed out of the way (30 October 2026).
+    ...(oldTestRenamed ? { old_test_renamed: oldTestRenamed } : {}),
   };
   if (opening.length) {
     const list = opening.map((p) => `${p.number} (AED ${p.amount_aed.toFixed(2)}, ${dubaiDate(p.received_at)})`).join(", ");
