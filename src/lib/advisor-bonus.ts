@@ -91,7 +91,9 @@ export async function bonusRowsOf(settings: Settings, periodKey?: string): Promi
   const rows: BonusRow[] = [];
   for (const p of fullyPaid) {
     const jobId = p.invoice.job_id;
-    const bonusProfit = round2(p.profit - (jobId ? (bsRevenue.get(jobId) ?? 0) : 0) + (jobId ? bsLabour.get(jobId) ?? 0 : 0) + p.materialsCost);
+    // Bodyshop work never counts toward the bonus: its revenue out, its costs back in (clocked labour, materials and,
+    // since 30 October 2026, a package's installer hours when nobody clocked).
+    const bonusProfit = round2(p.profit - (jobId ? (bsRevenue.get(jobId) ?? 0) : 0) + (jobId ? bsLabour.get(jobId) ?? 0 : 0) + p.materialsCost + p.packageLabour);
     if (bonusProfit < ADVISOR_BONUS_MIN_PROFIT) continue;
     const advisorId = jobId ? (advisorOf.get(jobId) ?? null) : null;
     const o = overrideOf.get(p.invoice.id);

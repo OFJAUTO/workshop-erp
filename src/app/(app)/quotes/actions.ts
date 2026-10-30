@@ -17,9 +17,9 @@ import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
-import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, packageCostingForQuote, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, approvalCovers, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -660,7 +660,7 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
   // so answering the markup or deposit question afterwards never tells the owner twice.
   let lowProfit: { marginPct: number; profit: number; net: number } | null = null;
   if (q.kind === "quotation") {
-    const t = quoteTotals(bundle.lines, q, { technicianCostRate: Number((settings.technician_cost_rate_by_department as Record<string, number> | null)?.[bundle.job?.department ?? "mechanical"]) || Number(settings.technician_cost_rate_aed) || 0, supplierCharges: q.job_id && (await loadJobQuotes(q.job_id))[0]?.number === q.number ? (await chargeTotalsByJob([q.job_id])).get(q.job_id) ?? 0 : 0 });
+    const t = quoteTotals(bundle.lines, q, { technicianCostRate: Number((settings.technician_cost_rate_by_department as Record<string, number> | null)?.[bundle.job?.department ?? "mechanical"]) || Number(settings.technician_cost_rate_aed) || 0, supplierCharges: q.job_id && (await loadJobQuotes(q.job_id))[0]?.number === q.number ? (await chargeTotalsByJob([q.job_id])).get(q.job_id) ?? 0 : 0, packageCosting: await packageCostingForQuote(settings, q, hasPackageLine(bundle.lines)), bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50 });
     const limits = { yellow: Number(settings.quote_margin_yellow_percent) || 30, red: Number(settings.quote_margin_red_percent) || 20 };
     const marginPct = t.net > 0 ? (t.profit / t.net) * 100 : 0;
     if (marginToneOf(t.profit, t.net, limits) === "red") {

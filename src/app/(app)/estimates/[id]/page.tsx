@@ -24,6 +24,7 @@ import { EstimateMenu } from "../EstimateMenu";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
 import { refuseRecord } from "@/lib/refusal";
+import { recoveryProviderList } from "@/lib/recovery-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -139,7 +140,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
     handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
-    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec),
+    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec, q.vehicle_id),
           installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
           goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),
@@ -165,7 +166,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
         fromEstimate={false}
         completedAt={q.completed_at}
-        recoveryProviders={(settings.recovery_providers ?? []) as string[]}
+        recoveryProviders={await recoveryProviderList(settings)}
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
       />
       {mayManage && ["sent", "opened", "expired", "declined"].includes(q.status) ? (

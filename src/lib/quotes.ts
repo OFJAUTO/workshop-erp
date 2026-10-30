@@ -5,6 +5,7 @@ import { roundHalfUp } from "./bank-fees";
 import { customerAvailabilityWords, daysFromDate } from "./parts-rows";
 import { unpricedEstimateParts, waitingWords } from "./estimate-parts";
 import { positionsQtyMismatch, positionsWords } from "./parts-list";
+import { packageItemLabels, packageLineCost, type PackageCosting } from "./package-cost";
 
 export const LINE_TYPES = [
   { value: "labour", label: "Labour" },
@@ -598,6 +599,10 @@ export type QuoteTotals = {
   bankCharge: number;
   /** Commission we pay someone: internal only, counted once the owner approved it. */
   commission: number;
+  /** 30 October 2026: the packages' materials (film, tint, ceramic, consumables) - zero without the costing figures. */
+  packageMaterials: { film: number; filmRolls: number; tint: number; ceramic: number; consumables: number; total: number };
+  /** The packages' selling price (before the discount). */
+  packageSell: number;
   /** A commission waits for the owner: not counted yet, profit shows "(commission pending)". */
   commissionPending: boolean;
   totalCost: number;
@@ -667,7 +672,7 @@ export function labourDiscountOf(counted: QuoteLine[], q: QuoteHeaderForTotals):
 export function quoteTotals(
   lines: QuoteLine[],
   q: QuoteHeaderForTotals,
-  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The bank's fixed fee per transaction (AED, before VAT) on top of the percentage. */ bankChargeFixed?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null; /** The bodyshop labour rate (AED/h): installer-hour estimates cost this. Leave unset where real clockings are counted instead (profit.ts). */ bodyshopRate?: number | null; /** The job's supplier charges (courier, freight) from the Parts page: an internal cost. */ supplierCharges?: number } = {},
+  opts: { onlyApproved?: boolean; technicianCostRate?: number; depositThreshold?: number; depositPercent?: number; bankChargePercent?: number; /** The bank's fixed fee per transaction (AED, before VAT) on top of the percentage. */ bankChargeFixed?: number; /** The hours the technicians clocked on the job, once the work is done: labour at cost switches to them. */ clockedHours?: number | null; /** The bodyshop labour rate (AED/h): installer-hour estimates cost this. Leave unset where real clockings are counted instead (profit.ts). */ bodyshopRate?: number | null; /** The job's supplier charges (courier, freight) from the Parts page: an internal cost. */ supplierCharges?: number; /** 30 October 2026: the figures every package line is costed with (film, tint, ceramic, consumables, installer hours) - ONE profit calculation. */ packageCosting?: PackageCosting | null } = {},
 ): QuoteTotals {
   const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off && (!opts.onlyApproved || l.customer_approved === true));
   const subtotal = round2(counted.reduce((a, l) => a + lineTotal(l), 0));
@@ -708,8 +713,15 @@ export function quoteTotals(
   // Our own fixed-price services (film, tint, ceramic...): their typed cost is OUR materials cost,
   // and their estimated installer hours cost bodyshop labour - complimentary lines included.
   const ownServiceCost = round2(labour.filter((l) => l.line_type === "package" && !isOutsideWork(l)).reduce((a, l) => a + lineCost(l), 0));
-  const installerHours = round2(labour.filter((l) => l.line_type === "package").reduce((a, l) => a + (Number(l.installer_hours) || 0), 0));
-  const bodyshopLabourCost = round2(installerHours * Math.max(0, opts.bodyshopRate ?? 0));
+  // 30 October 2026: ONE profit calculation. With the costing figures, every package line is costed - film (rolls x
+  // the finish's roll price), tint (the windows included), ceramic (what is included), consumables and its installer
+  // hours - the same everywhere a profit is shown. Without them a package costs only what its line carries.
+  const pkgCosts = opts.packageCosting ? labour.filter((l) => !!l.package_key).map((l) => packageLineCost({ title: l.title, itemLabels: packageItemLabels(l.package_items), installerHours: l.installer_hours ?? null }, opts.packageCosting!)) : [];
+  const sumOf = (k: "film" | "filmRolls" | "tint" | "ceramic" | "consumables" | "hours") => round2(pkgCosts.reduce((a, c) => a + c[k], 0));
+  const packageMaterials = { film: sumOf("film"), filmRolls: sumOf("filmRolls"), tint: sumOf("tint"), ceramic: sumOf("ceramic"), consumables: sumOf("consumables"), total: round2(sumOf("film") + sumOf("tint") + sumOf("ceramic") + sumOf("consumables")) };
+  const installerHours = round2(labour.filter((l) => l.line_type === "package" && !(opts.packageCosting && l.package_key)).reduce((a, l) => a + (Number(l.installer_hours) || 0), 0) + sumOf("hours"));
+  const bodyshopLabourCost = round2(installerHours * Math.max(0, opts.bodyshopRate ?? opts.packageCosting?.ratePerHour ?? 0));
+  const packageSell = round2(labour.filter((l) => !!l.package_key).reduce((a, l) => a + lineTotal(l), 0));
   const other = counted.filter((l) => blockOf(l) === "other" && !l.fee_kind);
   const otherSell = round2(other.filter((l) => !isHidden(l)).reduce((a, l) => a + lineTotal(l), 0));
   const otherCost = round2(other.reduce((a, l) => a + lineCost(l), 0));
@@ -729,7 +741,7 @@ export function quoteTotals(
   const commission = q.commission_status === "declined" ? 0 : commissionAsked;
   const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
   const supplierCharges = round2(Math.max(0, Number(opts.supplierCharges) || 0));
-  const totalCost = round2(partsCost + labourCost + outsideCost + ownServiceCost + bodyshopLabourCost + otherCost + bankCharge + commission + materialsCost + supplierCharges);
+  const totalCost = round2(partsCost + labourCost + outsideCost + ownServiceCost + bodyshopLabourCost + otherCost + bankCharge + commission + materialsCost + supplierCharges + packageMaterials.total);
   const profit = round2(net - totalCost);
   // The deposit is the advisor's choice on the quotation; the old rule (a share of the parts above a threshold) only suggests.
   const threshold = opts.depositThreshold ?? 0;
@@ -742,10 +754,46 @@ export function quoteTotals(
     partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
     otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, supplierCharges, ownServiceCost, installerHours, bodyshopLabourCost, totalCost, profit,
-    labourMargin: round2(labourSell - discount - labourCost - outsideCost - ownServiceCost - bodyshopLabourCost),
+    packageMaterials, packageSell,
+    labourMargin: round2(labourSell - discount - labourCost - outsideCost - ownServiceCost - bodyshopLabourCost - packageMaterials.total),
     deposit,
     depositSuggested,
   };
+}
+
+/**
+ * THE profit list (30 October 2026, night batch section 3): the same lines on the quotation and estimate, the locked
+ * quotation, the job card and everywhere a profit is broken down. The lines always add up to totals.totalCost.
+ */
+export type ProfitLine = { key: "parts" | "labour" | "materials" | "outside" | "recovery" | "commission" | "bank" | "other"; label: string; detail: string | null; amount: number };
+
+export function profitLines(t: QuoteTotals, rates: { technician: number; bodyshop: number }): ProfitLine[] {
+  const h = (n: number) => `${Math.round(n * 10) / 10} h`;
+  const a = (n: number) => `AED ${n.toLocaleString("en-GB", { maximumFractionDigits: 2 })}`;
+  const pm = t.packageMaterials;
+  const labourDetail = [
+    t.labourCostHours > 0 || t.labourCost > 0 ? `${h(t.labourCostHours)} ${t.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED ${rates.technician}` : null,
+    t.installerHours > 0 ? `${h(t.installerHours)} × AED ${rates.bodyshop}` : null,
+  ].filter(Boolean).join(" + ");
+  const materialsDetail = [
+    pm.film ? `PPF film ${pm.filmRolls} roll${pm.filmRolls === 1 ? "" : "s"} ${a(pm.film)}` : null,
+    pm.tint ? `tint ${a(pm.tint)}` : null,
+    pm.ceramic ? `ceramic ${a(pm.ceramic)}` : null,
+    pm.consumables ? `consumables ${a(pm.consumables)}` : null,
+    t.ownServiceCost ? `our services' cost ${a(t.ownServiceCost)}` : null,
+    t.materialsCost ? `typed materials ${a(t.materialsCost)}` : null,
+  ].filter(Boolean).join(" · ");
+  const lines: ProfitLine[] = [
+    { key: "parts", label: "Parts at cost", detail: null, amount: t.partsCost },
+    { key: "labour", label: "Labour at cost", detail: labourDetail || null, amount: round2(t.labourCost + t.bodyshopLabourCost) },
+    { key: "materials", label: "Materials", detail: materialsDetail || null, amount: round2(pm.total + t.ownServiceCost + t.materialsCost) },
+    { key: "outside", label: "Outside work (another company)", detail: null, amount: t.outsideCost },
+    { key: "recovery", label: "Recovery", detail: null, amount: t.recoveryCost },
+    { key: "commission", label: "Commission", detail: t.commissionPending ? "pending owner approval" : null, amount: t.commission },
+    { key: "bank", label: "Bank fee (excl. VAT)", detail: null, amount: t.bankCharge },
+    { key: "other", label: "Other internal costs", detail: t.supplierCharges ? "incl. supplier charges" : null, amount: round2(t.otherCost - t.recoveryCost + t.supplierCharges) },
+  ];
+  return lines;
 }
 
 export type SendBlocker = { key: string; label: string };

@@ -18,6 +18,8 @@ import { TripActions } from "@/components/TripActions";
 import { changeTripPrice, createPickupTrip, decideTrip, markMonthPaid, markTripSentById, recalcDistance, setTripKm, setTripPrice } from "@/app/(app)/jobs/delivery-actions";
 import { NewTripForm } from "./NewTripForm";
 import { ReasonChips } from "@/components/ReasonChips";
+import { RecoveryProvidersCard } from "@/components/RecoveryProvidersCard";
+import { recoveryProviderList } from "@/lib/recovery-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +97,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
       <LiveRefresh tables={["recovery_trips"]} alwaysPollMs={role === "owner" || role === "accounts" ? undefined : 120000} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {role === "owner" && !staff.viewingAs ? <RecoveryProvidersCard providers={await recoveryProviderList(settings)} /> : null}
       {!home ? <p className="text-xs text-muted">Distances show once the workshop&apos;s own pin is in Settings (&quot;Workshop location pin&quot;).</p> : null}
 
       {seesMoney ? (

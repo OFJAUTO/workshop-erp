@@ -80,7 +80,7 @@ type Body = {
   /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
   removeLine?: { id: string; keepParts?: boolean; withParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null; /** Section 7: the owner's per-job film rolls for the package cost estimate. */ film_rolls_est?: number | string | null };
+  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null; /** Section 7: the per-job film rolls for the package cost estimate. */ film_rolls_est?: number | string | null; /** 30 October 2026: why the rolls go below the default (required then, logged). */ film_rolls_note?: string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -617,9 +617,19 @@ export async function POST(request: NextRequest) {
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;
     if (h.film_rolls_est !== undefined) {
-      // Section 7: the film rolls for THIS job's package estimate - the owner's call.
-      if (!isOwner) return NextResponse.json({ error: "Only the owner changes the film rolls for a job." }, { status: 403 });
+      // The film rolls for THIS job's package costing (30 October 2026, section 3.3): anyone may raise them; going below
+      // the default (the most used on this model before, else the car's size) needs a note, written down.
       const rolls = h.film_rolls_est === null || h.film_rolls_est === "" ? null : Math.min(9, Math.max(0.5, Number(h.film_rolls_est) || 0));
+      if (rolls !== null) {
+        const { packageCostingOf } = await import("@/lib/quote-data");
+        const { data: qv } = await admin.from("quotations").select("tint_spec").eq("id", q.id).maybeSingle();
+        const base = await packageCostingOf(settings, null, null, qv?.tint_spec, q.vehicle_id ?? null);
+        if (rolls < base.defaultRolls) {
+          const note = String(h.film_rolls_note ?? "").trim();
+          if (note.length < 5) return NextResponse.json({ error: `Lower than the usual ${base.defaultRolls} roll${base.defaultRolls === 1 ? "" : "s"} (${base.rollsWhy}): write why.` }, { status: 400 });
+          await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "film_rolls_lowered", note: `${staff.display_name} set the film rolls to ${rolls}, below the usual ${base.defaultRolls} (${base.rollsWhy}): ${note}`, created_by: staff.id });
+        }
+      }
       patch.film_rolls_est = rolls;
     }
     if (h.expected_payment_method !== undefined) {

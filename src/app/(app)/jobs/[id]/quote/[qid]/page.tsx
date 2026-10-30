@@ -39,6 +39,7 @@ import { loadJobQuotes, staffNames } from "@/lib/quote-history-data";
 import { approvedFeeOf } from "@/lib/inspection-fee-server";
 import { inclusiveSplit } from "@/lib/inspection-fee";
 import { refuseRecord } from "@/lib/refusal";
+import { recoveryProviderList } from "@/lib/recovery-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -162,7 +163,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     supplierCharges: q.job_id && isOriginalQuote ? await (async () => { const cs = await jobCharges(q.job_id!); return { total: cs.reduce((a, c) => a + c.amount_aed, 0), words: cs.map((c) => `${c.description.toLowerCase()} · ${c.supplier_name}`).join(", ") }; })() : undefined,
     handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
-    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec),
+    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec, q.vehicle_id),
     installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
     goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
     // The estimate uses the higher of the two bank charge rates; the real charge is taken at payment.
@@ -289,7 +290,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         reference={reference}
         catalogue={catalogue}
         canEditList={can(role, "manageServices")}
-        recoveryProviders={(settings.recovery_providers ?? []) as string[]}
+        recoveryProviders={await recoveryProviderList(settings)}
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}

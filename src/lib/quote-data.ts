@@ -9,6 +9,7 @@ import { newToken } from "./media";
 import { dubaiDate } from "./jobs";
 import { loadPricingRows, valuesOfPart, PRICING_PART_SELECT, type PricingPart } from "./parts-pricing";
 import { rowState } from "./parts-rows";
+import { costingWithRolls, type PackageCostingBase } from "./package-cost";
 
 export const PARTS_BUCKET = "parts-diagrams";
 
@@ -466,47 +467,88 @@ export async function parentLineFor(quotationId: string, request: { source_type:
  * itself - film roll prices (gloss and matte), tint and ceramic per car, this month's consumables share,
  * the package installer hours, the bodyshop rate, and whether this car counts as big (more film).
  */
-export type PackageCosting = {
-  filmRollPriceGloss: number;
-  filmRollPriceMatte: number;
-  tintPerCar: number;
-  ceramicExteriorPerCar: number;
-  ceramicInteriorPerCar: number;
-  consumablesPerCar: number;
-  packageHours: number;
-  ratePerHour: number;
-  bigCar: boolean;
-  bigRolls: number;
-  /** The owner's per-job figure, when set on the quotation. */
-  rollsEst: number | null;
-  /** Section 11: the tint specification's share of a car and the double-layer hours. */
-  tintFactor: number;
-  tintExtraHours: number;
-};
+export type PackageCosting = PackageCostingBase;
 
-export async function packageCostingOf(settings: Settings, carTitle: string | null, filmRollsEst: number | string | null | undefined, tintSpec?: unknown): Promise<PackageCosting> {
+/** Film rolls used per job on this model before: the most (worst case), from the film recorded on the jobs. */
+async function rollsUsedOnModel(modelId: string, rollLengthM: number): Promise<{ rolls: number; jobNumber: string } | null> {
+  const { data } = await createAdminClient()
+    .from("film_usage")
+    .select("job_id, metres, roll:film_rolls(kind, length_m), job:jobs!inner(job_number, vehicle:vehicles!inner(model_id))")
+    .eq("is_active", true)
+    .eq("job.vehicle.model_id", modelId);
+  const perJob = new Map<string, { metres: number; length: number; number: string }>();
+  for (const r of (data ?? []) as unknown as { job_id: string; metres: number | string; roll: { kind: string; length_m: number | string | null } | null; job: { job_number: string } }[]) {
+    if (r.roll?.kind === "tint") continue;
+    const cur = perJob.get(r.job_id) ?? { metres: 0, length: Number(r.roll?.length_m) || rollLengthM, number: r.job.job_number };
+    cur.metres += Number(r.metres) || 0;
+    perJob.set(r.job_id, cur);
+  }
+  let best: { rolls: number; jobNumber: string } | null = null;
+  for (const v of perJob.values()) {
+    const rolls = Math.ceil((v.metres / Math.max(1, v.length)) * 10) / 10;
+    if (rolls > 0 && (!best || rolls > best.rolls)) best = { rolls, jobNumber: v.number };
+  }
+  return best;
+}
+
+/**
+ * The figures a package is costed with (Settings, the car, the quotation's film rolls and tint specification): ONE
+ * source for the editor's profit list, the completion check, the profit page and the daily target (30 October 2026).
+ * Film rolls by default (section 3.3): the most used on the same model before (worst case), else the car's size (a big
+ * car, e.g. a G63, 1.5 rolls by Settings), else 1. The advisor may raise it; lowering it below the default needs a note.
+ */
+export async function packageCostingOf(settings: Settings, carTitle: string | null, filmRollsEst: number | string | null | undefined, tintSpec?: unknown, vehicleId?: string | null): Promise<PackageCosting> {
   const { isBigCar } = await import("./package-cost");
   const { cleanTintSpec, tintCostFactor } = await import("./tint");
   const tint = tintCostFactor(cleanTintSpec(tintSpec), Number(settings.tint_double_layer_hours) >= 0 ? Number(settings.tint_double_layer_hours) || 0 : 1);
   const films = ((settings.film_types ?? []) as { name: string; roll_price: number; roll_m: number }[]).filter((f) => f?.name);
-  const gloss = films.find((f) => /gloss/i.test(f.name)) ?? films[0] ?? { roll_price: 1429 };
+  const gloss = films.find((f) => /gloss/i.test(f.name)) ?? films[0] ?? { roll_price: 1429, roll_m: 15 };
   const matte = films.find((f) => /matt/i.test(f.name)) ?? gloss;
-  const monthStart = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 7) + "-01";
-  const { count } = await createAdminClient().from("jobs").select("id", { count: "exact", head: true }).in("department", ["bodyshop", "both"]).gte("gated_in_at", monthStart);
-  const monthly = Number(settings.bodyshop_consumables_monthly_aed) || 1500;
+  const consumablesPerCar = await consumablesPerCarThisMonth(settings);
+  const bigCar = isBigCar(carTitle, ((settings.big_car_models ?? []) as string[]).map(String));
+  const bigRolls = Number(settings.big_car_film_rolls) || 1.5;
+  const { data: car } = vehicleId ? await createAdminClient().from("vehicles").select("model_id, model:vehicle_models(name)").eq("id", vehicleId).maybeSingle() : { data: null };
+  const past = car?.model_id ? await rollsUsedOnModel(car.model_id as string, Number((gloss as { roll_m?: number }).roll_m) || 15) : null;
+  const modelName = (car?.model as unknown as { name: string } | null)?.name ?? "this model";
+  const defaultRolls = past ? past.rolls : bigCar ? bigRolls : 1;
+  const rollsWhy = past ? `the most used on a ${modelName} before: ${past.rolls} roll${past.rolls === 1 ? "" : "s"} (${past.jobNumber})` : bigCar ? `a big car: ${bigRolls} rolls (Settings)` : "standard: 1 roll";
   return {
     filmRollPriceGloss: Number(gloss.roll_price) || 1429,
     filmRollPriceMatte: Number(matte.roll_price) || 1524,
     tintPerCar: Math.round(((Number(settings.tint_roll_price_aed) || 1200) / (Number(settings.tint_cars_per_roll) || 10)) * 100) / 100,
     ceramicExteriorPerCar: Math.round(((Number(settings.ceramic_bottle_price_aed) || 300) / (Number(settings.ceramic_cars_exterior_per_bottle) || 4)) * 100) / 100,
     ceramicInteriorPerCar: Math.round(((Number(settings.ceramic_bottle_price_aed) || 300) / (Number(settings.ceramic_cars_interior_per_bottle) || 5.5)) * 100) / 100,
-    consumablesPerCar: Math.round((monthly / Math.max(1, count ?? 1)) * 100) / 100,
+    consumablesPerCar,
     packageHours: Number(settings.package_installer_hours) || 80,
     ratePerHour: Number(settings.bodyshop_cost_rate_aed) || 50,
-    bigCar: isBigCar(carTitle, ((settings.big_car_models ?? []) as string[]).map(String)),
-    bigRolls: Number(settings.big_car_film_rolls) || 1.5,
+    bigCar,
+    bigRolls,
     rollsEst: filmRollsEst === null || filmRollsEst === undefined || filmRollsEst === "" ? null : Number(filmRollsEst),
+    defaultRolls,
+    rollsWhy,
     tintFactor: tint.factor,
     tintExtraHours: tint.extraHours,
   };
+}
+
+/** This month's consumables share per bodyshop car (the monthly amount over the bodyshop cars gated in this month), kept for ten minutes. */
+let consumablesMemo: { at: number; value: number; monthly: number } | null = null;
+async function consumablesPerCarThisMonth(settings: Settings): Promise<number> {
+  const monthly = Number(settings.bodyshop_consumables_monthly_aed) || 1500;
+  const now = Date.now();
+  if (consumablesMemo && consumablesMemo.monthly === monthly && now - consumablesMemo.at < 600_000) return consumablesMemo.value;
+  const monthStart = new Date(now + 4 * 3600000).toISOString().slice(0, 7) + "-01";
+  const { count } = await createAdminClient().from("jobs").select("id", { count: "exact", head: true }).in("department", ["bodyshop", "both"]).gte("gated_in_at", monthStart);
+  const value = Math.round((monthly / Math.max(1, count ?? 1)) * 100) / 100;
+  consumablesMemo = { at: now, value, monthly };
+  return value;
+}
+
+/** The costing for one quotation (its car, film rolls and tint), or null when it has no package line. */
+export async function packageCostingForQuote(settings: Settings, q: { vehicle_id?: string | null; film_rolls_est?: number | string | null; tint_spec?: unknown }, hasPackage: boolean): Promise<import("./package-cost").PackageCosting | null> {
+  if (!hasPackage) return null;
+  const { data: v } = q.vehicle_id ? await createAdminClient().from("vehicles").select("variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
+  const car = v as unknown as { variant: string | null; make: { name: string } | null; model: { name: string } | null } | null;
+  const base = await packageCostingOf(settings, [car?.make?.name, car?.model?.name, car?.variant].filter(Boolean).join(" "), q.film_rolls_est ?? null, q.tint_spec, q.vehicle_id ?? null);
+  return costingWithRolls(base);
 }

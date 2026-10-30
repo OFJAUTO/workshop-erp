@@ -14,9 +14,11 @@ import { goesWithOffers, positionsWords, type CatalogueRow, type PartsListEntry 
 import { PositionsLine } from "@/components/PositionsLine";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
-import { packageCostEstimate } from "@/lib/package-cost";
+import { costingWithRolls } from "@/lib/package-cost";
+import { RecoveryProviderPicker } from "@/components/RecoveryProviderPicker";
+import type { RecoveryProvider } from "@/lib/recovery-providers";
 import { CUT_METHODS, ppfInstallLine } from "@/lib/ppf-cut";
-import { ESTIMATED_COMPLETION, packageDetailsText, packageSnapshot, toSnapshot, type BodyshopPackage } from "@/lib/packages";
+import { ESTIMATED_COMPLETION, packageDetailsText, packageSnapshot, type BodyshopPackage } from "@/lib/packages";
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
@@ -25,7 +27,7 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimateParts, waitingWords } from "@/lib/estimate-parts";
 import { parseNumber } from "@/lib/price-import";
-import { INTERNAL_ONLY_LABEL, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
@@ -344,7 +346,8 @@ export function QuoteEditor({
   catalogue?: CatalogueRow[];
   canEditList?: boolean;
   hoursMemory?: Record<string, number>;
-  recoveryProviders?: string[];
+  /** THE saved outside recovery companies (30 October 2026, section 3.5). */
+  recoveryProviders?: RecoveryProvider[];
   recoveryTypes?: RecoveryType[];
   wait?: PartsWait | null;
   workshopEstimate?: { hours: number | null; managerHours: number | null; agreed: boolean } | null;
@@ -706,7 +709,22 @@ export function QuoteEditor({
   const expectedMethod = header.expected_payment_method;
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
   const liveFixed = expectedMethod === "link" ? (settings.bankFixedLink ?? 0) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankFixedCard ?? 0);
-  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0 });
+  const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: settings.costing ? costingWithRolls(settings.costing, header.film_rolls_est === null || header.film_rolls_est === undefined ? null : Number(header.film_rolls_est)) : null });
+  // THE profit list (section 3): the same lines everywhere; they add up to the total cost.
+  const profitList = profitLines(totals, { technician: settings.technicianCostRate ?? 0, bodyshop: settings.bodyshopRate ?? settings.costing?.ratePerHour ?? 0 });
+  // Film rolls (section 3.3): raised freely; below the usual figure a note is required (the server checks too).
+  const savedRolls = header.film_rolls_est === null || header.film_rolls_est === undefined ? "" : String(header.film_rolls_est);
+  const [rollsText, setRollsText] = useState(savedRolls);
+  const [rollsNote, setRollsNote] = useState("");
+  const typedRolls = Number(rollsText.replace(",", "."));
+  const rollsChanged = rollsText.trim() !== savedRolls;
+  const rollsLower = rollsChanged && rollsText.trim() !== "" && Number.isFinite(typedRolls) && !!settings.costing && typedRolls < settings.costing.defaultRolls;
+  const saveRolls = () => {
+    const v = rollsText.trim() === "" ? null : typedRolls;
+    setHeader((h) => ({ ...h, film_rolls_est: v }));
+    save({ header: { film_rolls_est: v, film_rolls_note: rollsNote.trim() || null } as Partial<typeof header> });
+    setRollsNote("");
+  };
   const countedForDiscount = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off);
   const discountBases = {
     labour: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour" }).base,
@@ -1183,7 +1201,7 @@ export function QuoteEditor({
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <span className={boxLabel}>Provider<span className="flex flex-wrap items-center gap-1">
             {([["ours", "Our recovery"], ["external", "External"]] as const).map(([k, label]) => <button key={k} type="button" disabled={disabled} onClick={() => patch(l.id, { recovery_provider_kind: k }, true)} className={chip(kind === k)}>{label}</button>)}
-            {kind === "external" ? <Input value={l.recovery_provider ?? ""} onChange={(e) => patch(l.id, { recovery_provider: e.target.value })} list="erp-recovery-providers" disabled={disabled} placeholder="Company or person" aria-label="Recovery company" className="w-44 min-h-9" /> : null}
+            {kind === "external" ? <RecoveryProviderPicker value={l.recovery_provider ?? null} providers={recoveryProviders} disabled={disabled} onPick={(name) => patch(l.id, { recovery_provider: name || null }, true)} /> : null}
           </span></span>
           {paidBy === "us" ? (
             <label className="flex items-center gap-2 self-center text-xs font-semibold cursor-pointer">
@@ -1700,7 +1718,6 @@ export function QuoteEditor({
               {settings.inspectionFee > 0 && !otherLines.some((l) => /inspection fee/i.test(l.title)) ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "Inspection fee", unit_price: settings.inspectionFee, quantity: 1, visible_to_customer: true })}>+ Inspection fee ({aed(settings.inspectionFee)})</Button> : null}
             </div>
           ) : null}
-          <datalist id="erp-recovery-providers">{recoveryProviders.map((p) => <option key={p} value={p} />)}</datalist>
         </Card>
       </div>
 
@@ -1762,62 +1779,40 @@ export function QuoteEditor({
                 <span className="text-[11px] text-muted">Sets the estimated bank charge only. The customer may still pay any way; the real charge replaces it at payment.</span>
               </div>
               <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs" data-internal-box>
-                <dt className="text-muted">Parts cost</dt><dd className="text-right">{aed(totals.partsCost)}</dd>
-                <dt className="text-muted" data-labour-cost-label>
-                  Labour at cost ({hoursText(totals.labourCostHours)} {totals.labourCostBasis === "clocked" ? "clocked" : "estimate"} × AED {settings.technicianCostRate ?? 0})
-                  {totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="ml-1 font-semibold text-amber" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>· Est. h flagged, quoted hours used</span> : null}
-                </dt><dd className="text-right" data-labour-cost>{aed(totals.labourCost)}</dd>
-                {totals.outsideCost ? <><dt className="text-muted">Outside work (another company)</dt><dd className="text-right">{aed(totals.outsideCost)}</dd></> : null}
-                {totals.ownServiceCost ? <><dt className="text-muted">Our services&apos; cost (film, materials)</dt><dd className="text-right" data-own-service-cost>{aed(totals.ownServiceCost)}</dd></> : null}
-                {totals.installerHours > 0 ? <><dt className="text-muted" data-installer-row>Estimated installer hours: {hoursText(totals.installerHours)} × AED {settings.bodyshopRate ?? 0}{settings.installerHistory ? <span className="block text-[11px]" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}</dt><dd className="text-right">{aed(totals.bodyshopLabourCost)}</dd></> : null}
-                <dt className="text-muted">Recovery cost</dt><dd className="text-right">{aed(totals.recoveryCost)}</dd>
-                {totals.supplierCharges ? <><dt className="text-muted" data-supplier-charges-label>Supplier charges ({settings.supplierCharges?.words || "courier, freight"})</dt><dd className="text-right" data-supplier-charges-cost>{aed(totals.supplierCharges)}</dd></> : null}
-                {commissionLine}
-                {department === "bodyshop" || Number(header.materials_cost_aed) > 0 ? <><dt className="text-muted">Materials (film, paint, consumables)</dt><dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd></> : null}
-                {(() => {
-                  // Section 7: a package line fills its own internal cost estimate from Settings.
-                  const pkg = lines.find((l) => l.is_active && l.package_key && !isUnchosen(l));
-                  const c = settings.costing;
-                  if (!pkg || !c) return null;
-                  const rolls = header.film_rolls_est !== null && header.film_rolls_est !== undefined ? Number(header.film_rolls_est) : (c.rollsEst ?? (c.bigCar ? c.bigRolls : 1));
-                  const est = packageCostEstimate({
-                    packagePrice: (pkg.unit_price ?? 0) * (pkg.quantity || 1),
-                    title: pkg.title,
-                    // The snapshot is an OBJECT ({ key, name, items: [...] }), read through the one parser.
-                    itemLabels: (toSnapshot(pkg.package_items)?.items ?? []).map((x) => x.label),
-                    rolls,
-                    filmRollPriceGloss: c.filmRollPriceGloss,
-                    filmRollPriceMatte: c.filmRollPriceMatte,
-                    tintPerCar: c.tintPerCar,
-                    tintFactor: c.tintFactor,
-                    tintExtraHours: c.tintExtraHours,
-                    ceramicExteriorPerCar: c.ceramicExteriorPerCar,
-                    ceramicInteriorPerCar: c.ceramicInteriorPerCar,
-                    consumablesPerCar: c.consumablesPerCar,
-                    hours: pkg.installer_hours ?? c.packageHours,
-                    ratePerHour: c.ratePerHour,
-                    recoveryCost: totals.recoveryCost ?? 0,
-                  });
-                  return (
-                    <>
-                      <dt className="col-span-2 pt-1 text-[11px] leading-relaxed" data-package-cost>
-                        {est.words}
-                        {c.bigCar && header.film_rolls_est === null ? <span className="text-muted"> · big car: {c.bigRolls} rolls by Settings</span> : null}
+                {/* THE profit list (30 October 2026, section 3): one calculation, every cost once; the lines add up to the total cost. */}
+                <dt className="text-muted">Price before VAT</dt><dd className="text-right" data-profit-price>{aed(totals.net)}</dd>
+                {profitList.map((p) =>
+                  p.key === "commission" ? (
+                    <Fragment key="commission">{commissionLine}</Fragment>
+                  ) : (p.key === "outside" || p.key === "other") && !p.amount ? null : (
+                    <Fragment key={p.key}>
+                      <dt className="text-muted" data-profit-line={p.key}>
+                        − {p.key === "bank" ? "Bank fee (excl. VAT)" : p.label}
+                        {p.key === "bank" ? <span className="block text-[11px]" data-bank-fee-label>{liveRate}%{liveFixed > 0 ? " + AED " + liveFixed.toFixed(2) : ""} of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""}</span> : p.detail ? <span className="block text-[11px]" data-profit-detail={p.key}>{p.detail}</span> : null}
+                        {p.key === "labour" && totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="block font-semibold text-amber" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>Est. h flagged, quoted hours used</span> : null}
+                        {p.key === "labour" && settings.installerHistory && totals.installerHours > 0 ? <span className="block text-[11px]" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}
                       </dt>
-                      {isOwner ? (
-                        <dd className="col-span-2 flex items-center justify-end gap-1 text-[11px]" data-film-rolls-box>
-                          <span className="text-muted">Film rolls this job</span>
-                          <Input value={header.film_rolls_est === null || header.film_rolls_est === undefined ? "" : String(header.film_rolls_est)} onChange={(e) => { const v = e.target.value.replace(",", "."); setHeaderField({ film_rolls_est: v === "" ? null : Number(v) }, true); }} inputMode="decimal" placeholder={String(c.bigCar ? c.bigRolls : 1)} disabled={disabled} aria-label="Film rolls for this job" className="w-16 text-right min-h-8 text-xs" data-film-rolls />
+                      <dd className="text-right" data-profit-amount={p.key}>{aed(p.amount)}</dd>
+                      {p.key === "materials" && (department === "bodyshop" || Number(header.materials_cost_aed) > 0) ? (
+                        <>
+                          <dt className="pl-3 text-[11px] text-muted">Typed materials (paint, extra film)</dt>
+                          <dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd>
+                        </>
+                      ) : null}
+                      {p.key === "materials" && settings.costing && hasPackageLine(lines) ? (
+                        <dd className="col-span-2 flex flex-wrap items-center justify-end gap-1 text-[11px]" data-film-rolls-box>
+                          <span className="text-muted" data-film-rolls-why>Film rolls (usual {settings.costing.defaultRolls}: {settings.costing.rollsWhy})</span>
+                          <Input value={rollsText} onChange={(e) => setRollsText(e.target.value)} inputMode="decimal" placeholder={String(settings.costing.defaultRolls)} disabled={disabled} aria-label="Film rolls for this job" className="w-16 text-right min-h-8 text-xs" style={{ width: "4rem" }} data-film-rolls />
+                          {rollsLower ? <Input value={rollsNote} onChange={(e) => setRollsNote(e.target.value)} placeholder="Why fewer rolls? (required)" disabled={disabled} aria-label="Why fewer film rolls" className="min-h-8 text-xs" style={{ width: "14rem" }} data-film-rolls-note /> : null}
+                          {rollsChanged ? <Button type="button" size="md" disabled={disabled || (rollsLower && rollsNote.trim().length < 5)} onClick={saveRolls} data-film-rolls-save>Save rolls</Button> : null}
                         </dd>
                       ) : null}
-                    </>
-                  );
-                })()}
-                <dt className="text-muted">Other internal costs</dt><dd className="text-right">{aed(totals.otherCost - totals.recoveryCost)}</dd>
-                <dt className="text-muted" data-bank-fee-label>Bank fee ({liveRate}%{liveFixed > 0 ? ` + AED ${liveFixed.toFixed(2)}` : ""} of the total with VAT, before VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""})</dt><dd className="text-right">{aed(totals.bankCharge)}</dd>
-                <dt className="font-semibold border-t border-line pt-1">Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1">{aed(totals.totalCost)}</dd>
-                <dt className="font-bold">Profit before VAT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={`text-right font-bold ${marginTone}`}>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
-                <dt className="text-muted">Labour margin</dt><dd className="text-right">{aed(totals.labourMargin)}</dd>
+                    </Fragment>
+                  ),
+                )}
+                <dt className="font-semibold border-t border-line pt-1">= Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1" data-profit-total-cost>{aed(totals.totalCost)}</dd>
+                <dt className="font-bold">PROFIT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={"text-right font-bold " + marginTone} data-profit-total>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
+                <dt className="text-muted">{hasPackageLine(lines) ? "Package margin" : "Labour margin"}</dt><dd className="text-right" data-labour-margin>{aed(totals.labourMargin)}</dd>
                 <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-[11px] font-semibold text-amber" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
               </dl>
             </div>

@@ -136,7 +136,8 @@
     "test:db:create": "node --env-file=.env.local scripts/test-db/create-test-project.mjs",
     "test:db:migrate": "node --env-file=.env.test.local scripts/test-db/migrate-test.mjs",
     "test:mileage": "node --env-file=.env.test.local tests/browser/test-mileage.mjs",
-    "test:roles": "node --env-file=.env.test.local tests/browser/test-roles.mjs"
+    "test:roles": "node --env-file=.env.test.local tests/browser/test-roles.mjs",
+    "test:unit": "node tests/unit/run-all.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

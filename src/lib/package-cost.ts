@@ -82,3 +82,78 @@ export function isBigCar(carTitle: string | null | undefined, bigModels: string[
   if (!t) return false;
   return bigModels.some((m) => m && t.includes(m.toLowerCase()));
 }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   ONE profit calculation (30 October 2026, night batch section 3): the quotation's totals (quoteTotals) cost every
+   package line with these figures, so the internal box, the bottom bar, the job card, the profit page, the daily
+   target and the reports all read the same film, tint, ceramic, consumables and installer hours. Pure.
+   --------------------------------------------------------------------------------------------------------------- */
+
+/** The figures a package is costed with (Settings, the car, the quotation's film rolls and tint specification). */
+export type PackageCosting = {
+  filmRollPriceGloss: number;
+  filmRollPriceMatte: number;
+  tintPerCar: number;
+  /** The tint specification's share of a car (the windows included; 1 = sides & rear). */
+  tintFactor: number;
+  /** Extra installer hours for double-layer windows. */
+  tintExtraHours: number;
+  ceramicExteriorPerCar: number;
+  ceramicInteriorPerCar: number;
+  consumablesPerCar: number;
+  /** Installer hours of a package when its line carries none (Settings, default 80). */
+  packageHours: number;
+  /** Bodyshop labour cost per hour (Settings, default 50). */
+  ratePerHour: number;
+  /** Film rolls for this car (section 3.3: past jobs on the model, else the car size; the advisor may raise it). */
+  rolls: number;
+};
+
+export type PackageLineCost = { film: number; filmRolls: number; matte: boolean; tint: number; ceramic: number; consumables: number; hours: number; labour: number; total: number };
+
+/** The package's included items still switched on (section 6.5: an item marked "Not needed" is costed at nothing). */
+export function packageItemLabels(snapshot: unknown): string[] {
+  const items = Array.isArray(snapshot) ? snapshot : snapshot && typeof snapshot === "object" && Array.isArray((snapshot as { items?: unknown }).items) ? (snapshot as { items: unknown[] }).items : [];
+  return (items as { label?: unknown; off?: unknown }[]).filter((i) => i && !i.off).map((i) => String(i.label ?? "")).filter(Boolean);
+}
+
+/** One package line's internal costs: film (rolls × the finish's roll price), tint, ceramic, consumables and labour. */
+export function packageLineCost(p: { title: string; itemLabels: string[]; installerHours: number | null }, c: PackageCosting): PackageLineCost {
+  // The title names the package; what is in it decides the costs once the items are listed. Item by item: a tint item
+  // ("ceramic heat rejection film" is window tint), a PPF item, and ceramic COATING split into exterior and interior.
+  const labels = (p.itemLabels.length ? p.itemLabels : [p.title]).map((l) => l.toLowerCase());
+  const isTint = (l: string) => /\btint\b|heat rejection|window film/.test(l);
+  const isFilm = (l: string) => /\bppf\b|paint protection/.test(l) && !/remov/.test(l) && !isTint(l);
+  const isCeramic = (l: string) => /ceramic/.test(l) && !isTint(l);
+  const wantsFilm = labels.some(isFilm);
+  const matte = [p.title, ...p.itemLabels].some((l) => /\bmatte?\b|\bstealth\b/i.test(l));
+  const wantsTint = labels.some(isTint);
+  const ceramicInt = labels.some((l) => isCeramic(l) && /(interior|leather|fabric|upholstery)/.test(l));
+  const ceramicExt = labels.some((l) => isCeramic(l) && !/(interior|leather|fabric|upholstery)/.test(l));
+  const filmRolls = wantsFilm ? Math.max(0, c.rolls) : 0;
+  const film = wantsFilm ? r2(filmRolls * (matte ? c.filmRollPriceMatte : c.filmRollPriceGloss)) : 0;
+  const tint = wantsTint ? r2(c.tintPerCar * (c.tintFactor > 0 ? c.tintFactor : 0)) : 0;
+  const ceramic = r2((ceramicExt ? c.ceramicExteriorPerCar : 0) + (ceramicInt ? c.ceramicInteriorPerCar : 0));
+  const consumables = r2(c.consumablesPerCar);
+  const hours = r2((p.installerHours ?? c.packageHours) + (wantsTint ? c.tintExtraHours : 0));
+  const labour = r2(hours * c.ratePerHour);
+  return { film, filmRolls, matte, tint, ceramic, consumables, hours, labour, total: r2(film + tint + ceramic + consumables + labour) };
+}
+
+/** The costing as the server builds it (Settings and the car), before the film rolls are chosen. */
+export type PackageCostingBase = Omit<PackageCosting, "rolls"> & {
+  bigCar: boolean;
+  bigRolls: number;
+  /** The rolls typed on the quotation, when any. */
+  rollsEst: number | null;
+  /** Section 3.3: the default - the most used on the same model before, else the car's size, else 1. */
+  defaultRolls: number;
+  /** Why that default ("the most used on a G 63 before: 1.6 rolls (J-00412)"). */
+  rollsWhy: string;
+};
+
+/** The costing with its film rolls: the quotation's own figure, else the default. */
+export function costingWithRolls(c: PackageCostingBase, rollsEst?: number | null): PackageCosting {
+  const typed = rollsEst ?? c.rollsEst;
+  return { ...c, rolls: typed !== null && typed !== undefined && Number.isFinite(typed) && typed > 0 ? typed : c.defaultRolls };
+}
