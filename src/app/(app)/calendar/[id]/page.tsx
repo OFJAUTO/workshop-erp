@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { CopyText } from "@/components/CopyText";
 import { greetingNameOf } from "@/lib/messages";
-import { notFound } from "next/navigation";
 import { BookingIcon } from "@/components/BookingIcons";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -13,6 +12,7 @@ import { getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { markReminderSent, setAppointmentStatus } from "../actions";
 import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, canEditAppointment, fillCustomerNames, reminderTemplateFor, type AppointmentFull } from "../form-data";
+import { refuseRecord } from "@/lib/refusal";
 
 export default async function AppointmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requirePermission("viewCalendar");
@@ -21,7 +21,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
   const { message, error } = await searchParams;
   const supabase = await createClient();
   const [{ data }, settings] = await Promise.all([supabase.from("appointments").select(APPOINTMENT_SELECT).eq("id", id).maybeSingle(), getSettings()]);
-  if (!data) notFound();
+  if (!data) return refuseRecord("booking", id);
   const a = data as unknown as AppointmentFull;
   await fillCustomerNames(supabase, [a]);
   const canEdit = can(role, "bookAppointments") && canEditAppointment(staff, a);

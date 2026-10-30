@@ -101,14 +101,14 @@ export function ContactButtons({ phone, label = null }: { phone: string | null; 
 }
 
 /** The customer and vehicle boxes every customer link shows, the VIN once. */
-export function customerBoxes(customer: { full_name?: string | null; company_name?: string | null; phone?: string | null } | null, vehicle: { kind?: string | null; variant?: string | null; vin?: string | null; plate?: string | null; title: string } | null): FrontBox[] {
+export function customerBoxes(customer: { full_name?: string | null; company_name?: string | null; phone?: string | null } | null, vehicle: { kind?: string | null; variant?: string | null; vin?: string | null; plate?: string | null; title: string; mileageIn?: string | null; mileageOut?: string | null } | null): FrontBox[] {
   const out: FrontBox[] = [];
   if (customer) out.push({ title: "Customer", strong: customer.company_name ?? customer.full_name ?? "Customer", rows: [["", customer.company_name ? customer.full_name : null], ["", customer.phone ?? null]] });
   if (vehicle) {
     out.push(
       vehicle.kind === "loose"
         ? { title: "Items", strong: vehicle.variant ?? "Loose items", rows: [] }
-        : { title: "Vehicle", strong: vehicle.title, rows: [["", vehicle.variant ?? null], ["Plate", vehicle.plate ?? null], ["VIN", vehicle.vin ?? null]] },
+        : { title: "Vehicle", strong: vehicle.title, rows: [["", vehicle.variant ?? null], ["Plate", vehicle.plate ?? null], ["VIN", vehicle.vin ?? null], ["Mileage in", vehicle.mileageIn ?? null], ["Mileage out", vehicle.mileageOut ?? null]] },
     );
   }
   return out;

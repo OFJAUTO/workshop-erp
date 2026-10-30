@@ -41,6 +41,8 @@ export async function proxy(request: NextRequest) {
   // October 2026 every scheduled run got the 308 below). Each cron route checks CRON_SECRET itself.
   if (request.nextUrl.pathname.startsWith("/api/cron/")) return NextResponse.next();
 
+  // The page address for the server (a refusal writes down which page refused someone: src/lib/refusal.ts).
+  request.headers.set("x-erp-path", request.nextUrl.pathname + request.nextUrl.search);
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

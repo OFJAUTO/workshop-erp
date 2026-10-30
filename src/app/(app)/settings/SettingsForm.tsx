@@ -176,6 +176,9 @@ export function SettingsForm({
               <Field label="Inspection fee: highest an advisor can set (AED)" hint="Before VAT. Only the owner can go above it.">
                 <Input name="inspection_fee_max_aed" defaultValue={v.inspection_fee_max_aed ?? "2500"} inputMode="numeric" required data-fee-max />
               </Field>
+              <Field label="Driven while with us: tell the owner above (km)" hint="At gate-out the final km is compared with gate-in; above this the owner gets a notification with both dashboard photos.">
+                <Input name="mileage_alert_km" defaultValue={v.mileage_alert_km ?? "30"} inputMode="numeric" required data-mileage-alert-km />
+              </Field>
               <Field label="Premium brands" hint="One per line. For cars of these makes the premium amount below is pre-filled as the suggestion (the advisor can change it per car).">
                 <Textarea name="premium_brands" defaultValue={v.premium_brands ?? listTexts.premium_brands} rows={4} data-premium-brands />
               </Field>

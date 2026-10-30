@@ -54,13 +54,14 @@ function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice">) {
   return { title: "Billed to", strong: name, lines: [person, [snap.phone ?? b.customer?.phone, snap.email ?? b.customer?.email].filter(Boolean).join(" · ") || null], muted: [trn ? `TRN ${trn}` : null] };
 }
 
-function vehicleBox(b: Pick<InvoiceBundle, "vehicle" | "invoice">) {
+function vehicleBox(b: Pick<InvoiceBundle, "vehicle" | "invoice" | "mileage">) {
   const v = b.vehicle;
   const snap = b.invoice.vehicle_snapshot ?? {};
   const title = snap.title ?? [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   const plate = snap.plate ?? (v ? formatPlate(v) : null);
   const vin = snap.vin ?? v?.vin ?? null;
-  return { title: "Vehicle", strong: [title || "Vehicle", plate].filter(Boolean).join(" · "), lines: [snap.variant ?? v?.variant ?? null, vin ? `VIN ${vin}` : null] };
+  const km = b.mileage?.in ? [`Mileage in ${b.mileage.in}`, b.mileage.out ? `out ${b.mileage.out}` : null].filter(Boolean).join(" · ") : null;
+  return { title: "Vehicle", strong: [title || "Vehicle", plate].filter(Boolean).join(" · "), lines: [snap.variant ?? v?.variant ?? null, vin ? `VIN ${vin}` : null, km] };
 }
 
 /** What the status box says at this moment, from the payments: amount due, balance due, paid in full, or cheque pending. */

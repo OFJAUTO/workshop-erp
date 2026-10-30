@@ -10,6 +10,8 @@ import { ROAD_TEST_SELECT } from "./road-test";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { approvedFeeOf, FEE_VAT_PERCENT } from "./inspection-fee-server";
+import { inclusiveSplit } from "./inspection-fee";
 
 /**
  * "Customer declined all work" (29 October 2026, batch 2 section 2): the ONE place that closes a car the customer
@@ -94,7 +96,14 @@ export async function declineAllWork(jobId: string, actor: Actor, settings: Sett
   if ((approved ?? []).length) return { error: `${approved![0].number} is approved: part of the work goes ahead, so this is not a full decline. Change the quotation instead.` };
   const fee = Number(job.inspection_fee_aed) || 0;
   const amount = Math.round(Math.max(0, opts.amount) * 100) / 100;
-  if (amount !== fee && !opts.isOwner && (opts.reason ?? "").trim().length < 5) return { error: `The fee agreed at gate-in is AED ${fee.toLocaleString("en-GB")}. To charge a different amount, give the reason (the owner may change it without one).` };
+  // 30 October 2026: approved with the OLD wording (no VAT on the approval page) = the amount the customer read, VAT
+  // included (750.00 = 714.29 + VAT 35.71). Only the owner may charge it as 750 + VAT.
+  const approvedFee = fee > 0 ? await approvedFeeOf(jobId) : null;
+  const old = !!approvedFee?.oldWording;
+  const split = old ? inclusiveSplit(fee, FEE_VAT_PERCENT) : null;
+  if (split && amount > split.net && !opts.isOwner) return { error: `Approved with the old wording: AED ${fee.toLocaleString("en-GB", { minimumFractionDigits: 2 })} total, VAT included (${split.net.toFixed(2)} + VAT ${split.vat.toFixed(2)}). Only the owner can charge ${fee.toLocaleString("en-GB")} + VAT.` };
+  const agreedFee = split ? split.net : fee;
+  if (amount !== agreedFee && amount !== fee && !opts.isOwner && (opts.reason ?? "").trim().length < 5) return { error: `The fee agreed at gate-in is AED ${fee.toLocaleString("en-GB")}. To charge a different amount, give the reason (the owner may change it without one).` };
   const now = new Date().toISOString();
   const plate = job.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : job.job_number;
 

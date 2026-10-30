@@ -64,9 +64,15 @@ export async function requireStaff(): Promise<CurrentStaff> {
   return staff;
 }
 
-/** Like requireStaff, but also requires a permission. Others are sent home. */
+/**
+ * Like requireStaff, but also requires a permission. Others see why (30 October 2026: "You don't have access to this
+ * page", written down for the owner at Settings > Refusals) instead of a silent trip to the start page.
+ */
 export async function requirePermission(permission: Permission): Promise<CurrentStaff> {
   const staff = await requireStaff();
-  if (!can(staff.role_id as RoleId, permission)) redirect("/home");
+  if (!can(staff.role_id as RoleId, permission)) {
+    const { refuse } = await import("./refusal");
+    await refuse("no_permission", { detail: `needs "${permission}"` });
+  }
   return staff;
 }

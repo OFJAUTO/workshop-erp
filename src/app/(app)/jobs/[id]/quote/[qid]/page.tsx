@@ -6,7 +6,7 @@ import { quoteLockOf } from "@/lib/quote-lock";
 import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -36,6 +36,9 @@ import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApproval
 import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
 import { oldVersionBanner } from "@/lib/quote-history";
 import { loadJobQuotes, staffNames } from "@/lib/quote-history-data";
+import { approvedFeeOf } from "@/lib/inspection-fee-server";
+import { inclusiveSplit } from "@/lib/inspection-fee";
+import { refuseRecord } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +52,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
   const [bundle, settings, site] = await Promise.all([loadQuotation(qid), getSettings(), getSiteUrl()]);
-  if (!bundle || bundle.quotation.job_id !== id) notFound();
+  if (!bundle || bundle.quotation.job_id !== id) return refuseRecord("quotation", qid);
   const { quotation: q, job, vehicle, customer } = bundle;
 
   // Any advisor can open, edit and send any quotation; the car keeps its own advisor.
@@ -312,7 +315,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               </form>
             </Card>
           ) : null}
-          {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(declinedRow?.inspection_fee_aed) || 0} isOwner={isOwner} /></div> : null}
+          {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(declinedRow?.inspection_fee_aed) || 0} isOwner={isOwner} oldWording={(await approvedFeeOf(id))?.oldWording && Number(declinedRow?.inspection_fee_aed) > 0 ? inclusiveSplit(Number(declinedRow?.inspection_fee_aed), 5) : null} /></div> : null}
           {canSend && ["sent", "opened", "expired"].includes(q.status) ? (
             <details className="text-sm" data-mark-declined>
               <summary className="cursor-pointer font-semibold underline underline-offset-4 min-h-11 flex items-center">Mark as declined</summary>

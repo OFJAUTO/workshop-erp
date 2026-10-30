@@ -259,6 +259,8 @@ const DEFAULTS = {
   /** 30 October 2026: the advisor sets each car's fee between these (before VAT); only the owner goes outside. */
   inspection_fee_min_aed: 500,
   inspection_fee_max_aed: 2500,
+  /** 30 October 2026: a car driven more than this (km) between gate-in and gate-out is reported to the owner. */
+  mileage_alert_km: 30,
   /** Section 8: brands whose inspection fee defaults higher, and that default. */
   premium_brands: [] as string[],
   premium_brand_fee_aed: 1500,

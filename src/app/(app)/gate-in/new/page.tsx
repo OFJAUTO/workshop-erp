@@ -50,7 +50,9 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   type Hist = { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean; gate_in: { customer_requests: string; mileage: number; mileage_unit: "km" | "mi" } | null };
   const visits = (history ?? []) as unknown as Hist[];
   const openVisit = visits.find((h) => h.is_open);
-  if (openVisit) redirect(`/jobs/${openVisit.id}`);
+  // A car already in the workshop: its job card, or for the gate-in person (who cannot open job cards, 30 October 2026)
+  // its photos and video page, as the gate-in search does.
+  if (openVisit) redirect(gateInOnly ? `/jobs/${openVisit.id}/media` : `/jobs/${openVisit.id}`);
 
   const settings = await getSettings();
   const admin = createAdminClient();

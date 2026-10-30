@@ -76,7 +76,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   const snapshot = invoice.customer_snapshot;
   const boxes = customerBoxes(
     { full_name: snapshot?.full_name ?? customer?.full_name ?? null, company_name: snapshot?.company_name ?? customer?.company_name ?? null, phone: snapshot?.phone ?? customer?.phone ?? null },
-    vehicle || invoice.vehicle_snapshot ? { kind: vehicle?.kind ?? null, variant: vehicle?.variant ?? invoice.vehicle_snapshot?.variant ?? null, vin: invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null, plate: invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null), title: invoice.vehicle_snapshot?.title ?? car ?? "Vehicle" } : null,
+    vehicle || invoice.vehicle_snapshot ? { kind: vehicle?.kind ?? null, variant: vehicle?.variant ?? invoice.vehicle_snapshot?.variant ?? null, vin: invoice.vehicle_snapshot?.vin ?? vehicle?.vin ?? null, plate: invoice.vehicle_snapshot?.plate ?? (vehicle ? formatPlate(vehicle) : null), title: invoice.vehicle_snapshot?.title ?? car ?? "Vehicle", mileageIn: bundle.mileage?.in ?? null, mileageOut: bundle.mileage?.out ?? null } : null,
   );
 
   {

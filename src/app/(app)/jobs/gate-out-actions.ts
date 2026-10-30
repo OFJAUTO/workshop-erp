@@ -17,6 +17,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { closeJob } from "@/lib/close-job";
 import { createTrip, rememberDriver } from "@/lib/delivery";
 import { isMapLink } from "@/lib/recovery";
+import { checkFinalReading, formatThousands, mileageInOut, parseMileage, readingOf, toKm, unreadableLabel, UNREADABLE_REASONS, type MileageUnit } from "@/lib/mileage";
+import { formatPlate } from "@/lib/types";
+import { gateOutMileageReady } from "@/lib/schema-ready";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -41,7 +44,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   const role = staff.role_id as RoleId;
   const values = formValues(formData);
   const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, status, is_open, job_number, gated_in_by, customer_id, declined_out_at").eq("id", jobId).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("id, status, is_open, job_number, gated_in_by, customer_id, vehicle_id, declined_out_at").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) return { error: "This job is already closed.", values };
   if (job.status === "in_delivery") return { error: "The car has left for delivery. Mark it delivered instead.", values };
   // Gate-out comes after QC, the wash and the invoice. Only the owner may go through earlier, and it is written down.
@@ -58,7 +61,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     const st = await signoffState(jobId);
     if (st.hasStages && !st.complete) return { error: `Release sign-off missing: waiting on ${st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. Sign it on the bodyshop page.`, values };
   }
-  const { data: gi } = await admin.from("gate_ins").select("keys_count, keys_keychain, dash_cam, old_parts_return").eq("job_id", jobId).maybeSingle();
+  const { data: gi } = await admin.from("gate_ins").select("keys_count, keys_keychain, dash_cam, old_parts_return, mileage, mileage_unit, mileage_miles").eq("job_id", jobId).maybeSingle();
   if (!gi) return { error: "No gate-in record found.", values };
   const method = String(formData.get("leave_method") ?? "");
   if (!["customer", "customer_driver", "recovery"].includes(method)) return { error: "Choose how the car leaves.", values };
@@ -114,6 +117,28 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   if (gi.dash_cam && !dashCam) return { error: "Tick that the dash cam has been reconnected.", values };
   const oldParts = gi.old_parts_return ? formData.get("old_parts_handed") === "on" : null;
   if (gi.old_parts_return && !oldParts) return { error: "Tick that the old parts were handed over; the customer asked for them.", values };
+  // 30 October 2026: the final reading (never lower than at gate-in) and the photo of the whole instrument cluster are
+  // required before the car leaves; when the reading cannot be taken the reason is given and the photo still taken.
+  // Dormant until its database change is applied (gateOutMileageReady): gate-out then works as before.
+  const mileageOn = await gateOutMileageReady();
+  const unit: MileageUnit = gi.mileage_unit === "mi" ? "mi" : "km";
+  const inReading = readingOf(gi.mileage, gi.mileage_miles, unit);
+  const unreadableReason = blankToNull(formData.get("mileage_unreadable_reason"));
+  const unreadableNote = blankToNull(formData.get("mileage_unreadable_note"));
+  const finalReading = unreadableReason ? null : parseMileage(String(formData.get("mileage_out") ?? ""));
+  if (!mileageOn) {
+    // Nothing to check yet.
+  } else if (unreadableReason) {
+    if (!UNREADABLE_REASONS.some((r) => r.key === unreadableReason)) return { error: "Pick why the km can't be read.", values };
+    if (unreadableReason === "other" && (unreadableNote ?? "").length < 3) return { error: "Write why the km can't be read.", values };
+  } else {
+    const fc = checkFinalReading(finalReading, inReading, unit);
+    if ("error" in fc) return { error: fc.error, values };
+  }
+  const { data: odo } = mileageOn ? await admin.from("job_files").select("id").eq("job_id", jobId).eq("kind", "odometer_out").is("removed_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
+  if (mileageOn && !odo) return { error: "Take the photo of the whole instrument cluster (km, fuel, warning lights) before the car leaves.", values };
+  const outKm = finalReading === null ? null : toKm(finalReading, unit);
+  const io = mileageInOut({ inKm: gi.mileage, inMiles: gi.mileage_miles, outKm, outMiles: unit === "mi" ? finalReading : null, unit, unreadable: unreadableReason });
 
   // Balance. Credit terms (B2B, set by the owner on the customer): the balance is due within the agreed days instead.
   const bal = await jobBalance(jobId);
@@ -199,6 +224,16 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
       keys_override_reason: overrideBy ? overrideReason : null,
       dash_cam_reconnected: dashCam,
       old_parts_handed: oldParts,
+      ...(mileageOn
+        ? {
+            mileage_out: outKm,
+            mileage_out_unit: unit,
+            mileage_out_miles: unit === "mi" ? finalReading : null,
+            mileage_unreadable_reason: unreadableReason,
+            mileage_unreadable_note: unreadableReason ? unreadableNote : null,
+            odometer_file_id: odo?.id ?? null,
+          }
+        : {}),
       balance_due_aed: bal.balance,
       release_approved_by: releaseBy,
       release_reason: releaseBy ? releaseReason : null,
@@ -210,6 +245,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     { onConflict: "job_id" },
   );
   if (error) return { error: error.message, values };
+  if (mileageOn) await mileageAfterGateOut(jobId, job.job_number, job.vehicle_id, io, unreadableNote, staff.id);
   if (savedDriver) await admin.from("job_events").insert({ job_id: jobId, event_type: "note", note: `Driver saved on the customer: ${collector}, ${collectorPhone}`, created_by: staff.id });
   if (method === "recovery" && companyChoice === "other" && company) {
     // A new recovery company is remembered for next time (Settings > Recovery companies).
@@ -301,4 +337,40 @@ export async function collectItems(jobId: string, _state: FormState, formData: F
   await admin.from("job_events").insert({ job_id: jobId, event_type: "gate_out", note: `Collected by ${collector}: ${names}. ${left} item${left === 1 ? "" : "s"} still with us.`, created_by: staff.id });
   refresh(jobId);
   redirect(`/jobs/${jobId}/gate-out?message=${encodeURIComponent(`${leaving.length} item${leaving.length === 1 ? "" : "s"} collected. ${left} still with us.`)}`);
+}
+
+/**
+ * After the gate-out is saved (30 October 2026): the car's mileage on record moves on, and the owner hears about a car
+ * driven more than the set km while with us ("DUBAI EE 72836 driven 145 km while with us (gate-in 48,210 → gate-out
+ * 48,355)"), or a final km that could not be read. Both dashboard photos are on the job card (#mileage).
+ */
+async function mileageAfterGateOut(jobId: string, jobNumber: string, vehicleId: string | null, io: ReturnType<typeof mileageInOut>, note: string | null, by: string) {
+  const admin = createAdminClient();
+  const { data: v } = vehicleId ? await admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, last_mileage").eq("id", vehicleId).maybeSingle() : { data: null };
+  if (vehicleId && io.out !== null) {
+    const outKm = io.unit === "mi" ? toKm(io.out, "mi") : io.out;
+    if (v?.last_mileage === null || v?.last_mileage === undefined || Number(v.last_mileage) < outKm) await admin.from("vehicles").update({ last_mileage: outKm, updated_by: by }).eq("id", vehicleId);
+  }
+  const plate = (v ? formatPlate(v) : jobNumber).toUpperCase();
+  const alertKm = Number((await getSettings()).mileage_alert_km) || 30;
+  const u = io.unit;
+  if (io.drivenKm !== null && io.drivenKm > alertKm) {
+    await notifyRoles(["owner"], {
+      type: "mileage_alert",
+      title: `${plate} driven ${formatThousands(io.driven)} ${u}${u === "mi" ? ` (${formatThousands(io.drivenKm)} km)` : ""} while with us (gate-in ${formatThousands(io.in)} → gate-out ${formatThousands(io.out)})`,
+      body: `${jobNumber}: both dashboard photos are on the job card.`,
+      jobId,
+      href: `/jobs/${jobId}#mileage`,
+    });
+    await admin.from("gate_outs").update({ mileage_alert_at: new Date().toISOString() }).eq("job_id", jobId);
+  }
+  if (io.unreadable) {
+    await notifyRoles(["owner"], {
+      type: "mileage_alert",
+      title: `Final km not read · ${plate}`,
+      body: `${jobNumber}: ${unreadableLabel(io.unreadable)}${note ? ` - ${note}` : ""}. The dashboard photo is on the job card.`,
+      jobId,
+      href: `/jobs/${jobId}#mileage`,
+    });
+  }
 }

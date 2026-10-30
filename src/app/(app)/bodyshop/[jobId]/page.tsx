@@ -2,7 +2,6 @@ import { VinCopy } from "@/components/VinCopy";
 import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
-import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Avatar, Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -52,6 +51,7 @@ import { signOffAftercare } from "@/app/(app)/jobs/aftercare-actions";
 import { AFTERCARE_POINTS } from "@/lib/aftercare";
 import { answerProblemAction, handOverStageAction, raiseProblemAction } from "../actions";
 import { FALLBACK_POLL_MS } from "@/lib/live-connection";
+import { refuseRecord, refuse } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -66,11 +66,11 @@ const hm = (m: number) => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, 
 export default async function BodyshopJobPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!can(role, "viewBodyshop")) notFound();
   const { jobId } = await params;
+  if (!can(role, "viewBodyshop")) return refuse("no_permission", { recordKind: "job", recordId: jobId, detail: "The bodyshop pages are for the bodyshop team and its managers." });
   const { message, error } = await searchParams;
   const [data, settings, site] = await Promise.all([loadBodyshopJob(jobId), getSettings(), getSiteUrl()]);
-  if (!data) notFound();
+  if (!data) return refuseRecord("job", jobId);
   const { job, stages, assignments, clockings, signoffs, removedItems, updates, kinds, film, tintPercent } = data;
   const v = job.vehicle;
   const admin = createAdminClient();

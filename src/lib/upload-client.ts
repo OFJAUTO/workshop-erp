@@ -31,10 +31,132 @@ export async function prepareUpload(jobId: string, kind: UploadKind, contentType
 }
 
 /**
- * Sends the file and reports progress from 0 to 1. An upload that makes no progress for a minute and a half
- * (phone asleep, signal gone) is given up with a clear error instead of hanging for ever.
+ * Sends the file straight to storage and reports progress from 0 to 1 (30 October 2026, batch 2 section 5.2): a file
+ * of one 6 MB piece or less goes in one PUT; anything bigger - every video - goes in resumable 6 MB pieces, so a
+ * dropped signal costs one piece, never the whole file. ONE door for every upload screen.
  */
-export function putWithProgress(url: string, file: Blob, contentType: string, onProgress: (p: number) => void) {
+export function putWithProgress(url: string, file: Blob, contentType: string, onProgress: (p: number) => void): Promise<void> {
+  return file.size > TUS_CHUNK && signedParts(url) && tusEndpoint() ? resumableUpload(url, file, contentType, onProgress) : putSingle(url, file, contentType, onProgress);
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* Resumable sends: Supabase's resumable endpoint (TUS) with the same one-time upload address - its token goes in */
+/* the x-signature header. A piece that fails is sent again from where storage says it stopped (HEAD), and the     */
+/* place reached is remembered in the browser, so a later try of the same address carries on from there.         */
+/* ------------------------------------------------------------------------------------------------------------ */
+export const TUS_CHUNK = 6 * 1024 * 1024;
+
+/** The bucket, the object and the token of a one-time upload address (createSignedUploadUrl). */
+export function signedParts(url: string): { bucket: string; object: string; token: string } | null {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/storage\/v1\/object\/upload\/sign\/([^/]+)\/(.+)$/);
+    const token = u.searchParams.get("token");
+    return m && token ? { bucket: decodeURIComponent(m[1]), object: decodeURIComponent(m[2]), token } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The project's direct storage address for resumable sends (recommended by Supabase for large files). */
+function tusEndpoint(): string | null {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) return null;
+  return `https://${new URL(base).hostname.split(".")[0]}.storage.supabase.co/storage/v1/upload/resumable`;
+}
+
+const b64 = (v: string) => btoa(unescape(encodeURIComponent(v)));
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** One request with the stall detector; progress of the body as 0..1. */
+function xhrRequest(method: string, url: string, headers: Record<string, string>, body: Blob | null, onProgress?: (p: number) => void): Promise<{ status: number; header: (name: string) => string | null }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let stall: ReturnType<typeof setTimeout> | null = null;
+    const armStall = () => {
+      if (stall) clearTimeout(stall);
+      stall = setTimeout(() => {
+        xhr.abort();
+        reject(new Error("The upload stopped (no connection, or the phone went to sleep). Tap Retry."));
+      }, STALL_SECONDS * 1000);
+    };
+    xhr.open(method, url, true);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = (e) => {
+      armStall();
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (stall) clearTimeout(stall);
+      resolve({ status: xhr.status, header: (n) => xhr.getResponseHeader(n) });
+    };
+    xhr.onerror = () => {
+      if (stall) clearTimeout(stall);
+      reject(new Error("Upload failed. Check the connection."));
+    };
+    xhr.onabort = () => { if (stall) clearTimeout(stall); };
+    armStall();
+    xhr.send(body);
+  });
+}
+
+export async function resumableUpload(url: string, file: Blob, contentType: string, onProgress: (p: number) => void): Promise<void> {
+  const parts = signedParts(url);
+  const endpoint = tusEndpoint();
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  if (!parts || !endpoint) return putSingle(url, file, contentType, onProgress);
+  const auth = { authorization: `Bearer ${anon}`, apikey: anon, "x-signature": parts.token, "Tus-Resumable": "1.0.0" };
+  const key = `erp-tus:${parts.bucket}/${parts.object}:${file.size}`;
+  const remembered = (() => { try { return localStorage.getItem(key); } catch { return null; } })();
+  const where = async (loc: string) => {
+    const r = await xhrRequest("HEAD", loc, auth, null);
+    if (r.status === 404 || r.status === 410) return null;
+    return Number(r.header("Upload-Offset") ?? 0);
+  };
+  let location = remembered;
+  const resumedAt = location ? await where(location).catch(() => null) : null;
+  let offset: number = resumedAt ?? 0;
+  if (resumedAt === null) {
+    const created = await xhrRequest("POST", endpoint, { ...auth, "Upload-Length": String(file.size), "Upload-Metadata": `bucketName ${b64(parts.bucket)},objectName ${b64(parts.object)},contentType ${b64(contentType)},cacheControl ${b64("3600")}`, "x-upsert": "false" }, null);
+    const loc = created.header("Location");
+    if (created.status !== 201 || !loc) throw Object.assign(new Error(`Upload failed (${created.status}).`), { status: created.status });
+    location = new URL(loc, endpoint).toString();
+    offset = 0;
+    try { localStorage.setItem(key, location); } catch { /* the browser may refuse: the send still works */ }
+  }
+  let failures = 0;
+  while (offset < file.size) {
+    const piece = file.slice(offset, offset + TUS_CHUNK);
+    const from: number = offset;
+    try {
+      const r = await xhrRequest("PATCH", location!, { ...auth, "Upload-Offset": String(from), "Content-Type": "application/offset+octet-stream" }, piece, (p) => onProgress((from + p * piece.size) / file.size));
+      if (r.status === 204 || r.status === 200) {
+        offset = Number(r.header("Upload-Offset") ?? from + piece.size);
+        failures = 0;
+        continue;
+      }
+      if (r.status === 409) {
+        offset = (await where(location!)) ?? from;
+        continue;
+      }
+      if (r.status === 404 || r.status === 410) {
+        try { localStorage.removeItem(key); } catch { /* nothing */ }
+      }
+      throw Object.assign(new Error(`Upload failed (${r.status}).`), { status: r.status });
+    } catch (err) {
+      failures++;
+      // Offline, or tried enough: the caller decides (Retry, or the queue that sends when the signal is back).
+      if (failures > 5 || (typeof navigator !== "undefined" && navigator.onLine === false) || (err as { status?: number }).status === 404 || (err as { status?: number }).status === 410) throw err;
+      await wait(Math.min(30_000, 2000 * failures));
+      offset = (await where(location!).catch(() => null)) ?? from;
+    }
+  }
+  try { localStorage.removeItem(key); } catch { /* nothing */ }
+  onProgress(1);
+}
+
+/** One PUT of the whole file (photos and other small files). */
+function putSingle(url: string, file: Blob, contentType: string, onProgress: (p: number) => void) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let stall: ReturnType<typeof setTimeout> | null = null;

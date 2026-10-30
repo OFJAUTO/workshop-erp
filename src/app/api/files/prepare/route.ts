@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
 
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "video/webm": "webm", "video/mp4": "mp4", "video/quicktime": "mov", "application/pdf": "pdf" };
-export const FILE_KINDS = ["work_photo", "additional_work", "wash_photo", "gate_out_photo", "delivery_photo", "handover_photo", "supplier_invoice", "qc_postscan", "return_photo", "bodyshop_photo", "bodyshop_removed", "payment_proof"];
+export const FILE_KINDS = ["work_photo", "additional_work", "wash_photo", "gate_out_photo", "delivery_photo", "handover_photo", "supplier_invoice", "qc_postscan", "return_photo", "bodyshop_photo", "bodyshop_removed", "payment_proof", "odometer_out"];
 
 /** Any signed-in member of staff may add a file to an open job (photos of work, a wash, a delivery, a supplier invoice). */
 export async function authoriseJobUpload(jobId: string) {

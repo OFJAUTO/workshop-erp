@@ -4,6 +4,8 @@ import { useState } from "react";
 import { ReasonChips } from "@/components/ReasonChips";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
+import { FinalMileage } from "@/components/FinalMileage";
+import type { MileageUnit } from "@/lib/mileage";
 import { Button, ChoiceButtons, Field, Input, Notice } from "@/components/ui";
 
 export type BalanceInfo = { state: "paid" | "part_paid" | "unpaid" | "cheque_pending" | "no_invoice" | "nothing"; balance: number; invoiceNumber: string | null };
@@ -40,6 +42,7 @@ export function GateOutForm({
   recoveryCompanies = [],
   drivers = [],
   lastPin = null,
+  mileage = null,
 }: {
   jobId: string;
   action: FormAction;
@@ -68,6 +71,8 @@ export function GateOutForm({
   drivers?: SavedDriver[];
   /** A returning customer's last delivery pin, prefilled (editable). */
   lastPin?: { url: string; details: string | null } | null;
+  /** 30 October 2026: the final reading and the cluster photo (null for loose items: no car). */
+  mileage?: { unit: MileageUnit; inReading: number | null; alertKm: number; photo: JobFile | null } | null;
 }) {
   const [method, setMethod] = useState<string>("customer");
   const [oldPartsTicked, setOldPartsTicked] = useState(false);
@@ -99,6 +104,7 @@ export function GateOutForm({
     <ActionForm action={action}>
       {(v) => (
         <>
+          {mileage ? <FinalMileage jobId={jobId} unit={mileage.unit} inReading={mileage.inReading} alertKm={mileage.alertKm} initial={{ reading: v.mileage_out, reason: v.mileage_unreadable_reason, note: v.mileage_unreadable_note, photo: mileage.photo }} /> : null}
           <Field label="How does the car leave?">
             <div onChange={(e) => setMethod((e.target as HTMLInputElement).value)}>
               <ChoiceButtons name="leave_method" columns={3} defaultValue={v.leave_method ?? "customer"} options={[{ value: "customer", label: "Customer collects" }, { value: "customer_driver", label: "Customer's driver collects" }, { value: "recovery", label: "Delivery by recovery" }]} />

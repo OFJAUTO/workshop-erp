@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ppfJobsOfCar } from "@/lib/recheck";
 import { CarThumb } from "@/components/CarThumb";
-import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -17,6 +16,7 @@ import { QuotePicker } from "@/components/QuotePicker";
 import { loadEstimateHistory, loadQuoteHistory } from "@/lib/quote-history-data";
 import { QuotationList } from "@/components/QuotationList";
 import { pickItems } from "@/lib/quote-history";
+import { refuseRecord } from "@/lib/refusal";
 
 type Row = VehicleRow & {
   make: { name: string } | null;
@@ -53,7 +53,7 @@ export default async function VehiclePage({
       .eq("vehicle_id", id)
       .order("taken_at", { ascending: false }),
   ]);
-  if (!vData) notFound();
+  if (!vData) return refuseRecord("vehicle", id);
   const v = vData as unknown as Row;
   const photos = (photosData ?? []) as VehiclePhotoRow[];
 

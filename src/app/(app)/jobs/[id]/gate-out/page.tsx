@@ -26,6 +26,10 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { loadJobItems } from "@/lib/loose-items";
 import { CollectItemsForm } from "./CollectItemsForm";
 import { GateOutForm } from "./GateOutForm";
+import { readingOf, type MileageUnit } from "@/lib/mileage";
+import { gateOutMileageReady } from "@/lib/schema-ready";
+import { JOB_FILE_SELECT, signJobFiles, type JobFileRow } from "@/lib/work-data";
+import { refuseRecord } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +42,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const { message, error } = await searchParams;
   const supabase = await createClient();
   const [card, bal, settings] = await Promise.all([loadJobCard(supabase, id), jobBalance(id), getSettings()]);
-  if (!card) notFound();
+  if (!card) return refuseRecord("job", id);
   if (!card.job.is_open) redirect(`/jobs/${id}`);
   const loose = card.job.job_kind === "loose";
   if (!loose && !card.gateIn) notFound();
@@ -59,6 +63,12 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const { data: custRow } = job.customer_id ? await createAdminClient().from("customers").select("full_name, company_name, phone").eq("id", job.customer_id).maybeSingle() : { data: null };
   const customerText = trip ? onTheWayMessage(String(settings.whatsapp_on_the_way_template ?? ""), { name: greetingNameOf(custRow), car: vehicleTitle(card.vehicle), truckPlate: trip.truck_plate ?? "", driverName: trip.driver_name ?? "", driverMobile: trip.driver_phone ?? "" }) : "";
   const declinedOut = !!declinedRow?.declined_out_at;
+  // 30 October 2026: the final reading against the gate-in one, in the car's own unit, and the cluster photo already taken.
+  const mileageUnit: MileageUnit = g?.mileage_unit === "mi" ? "mi" : "km";
+  const { data: odoRows } = loose ? { data: [] } : await createAdminClient().from("job_files").select(JOB_FILE_SELECT).eq("job_id", id).eq("kind", "odometer_out").is("removed_at", null).order("created_at", { ascending: false }).limit(1);
+  const odo = ((odoRows ?? []) as unknown as JobFileRow[])[0] ?? null;
+  const odoUrl = odo ? (await signJobFiles([odo.storage_path]))[odo.storage_path] ?? null : null;
+  const mileage = loose || !g || !(await gateOutMileageReady()) ? null : { unit: mileageUnit, inReading: readingOf(g.mileage, g.mileage_miles, mileageUnit), alertKm: Number(settings.mileage_alert_km) || 30, photo: odo ? { id: odo.id, path: odo.storage_path, url: odoUrl, caption: odo.caption, contentType: odo.content_type } : null };
   const blocked = ((bal.state === "no_invoice" && !declinedOut) || bal.balance > 0) && !(bal.state !== "no_invoice" && bal.balance > 0 && creditDays > 0);
   // Bodyshop: the sign-off state, and the final check visit for a PPF car (7 to 14 days, the Settings default).
   const bodyshop = job.department === "bodyshop";
@@ -95,6 +105,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
           ) : (
             <Card>
               <GateOutForm
+            mileage={mileage}
             drivers={drivers}
             lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>

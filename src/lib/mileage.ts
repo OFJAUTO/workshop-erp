@@ -60,3 +60,57 @@ export function mileageChecks(km: number, ctx: { modelYear: number | null; lastK
   }
   return out;
 }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   In and out (30 October 2026, batch 2 section 2): the gate-in reading against the final reading at gate-out, both
+   in the car's own unit (the unit its dashboard shows, chosen at gate-in). ONE set of rules for the gate-out form,
+   the gate-out action, the job card and the customer's invoice.
+   --------------------------------------------------------------------------------------------------------------- */
+
+/** Why the final reading could not be taken; the photo of the cluster is still required and the owner is told. */
+export const UNREADABLE_REASONS: { key: string; label: string }[] = [
+  { key: "battery", label: "Battery dead" },
+  { key: "cluster", label: "Instrument cluster not working" },
+  { key: "recovery", label: "Leaves on a recovery truck" },
+  { key: "other", label: "Other" },
+];
+export const unreadableLabel = (key: string | null | undefined) => UNREADABLE_REASONS.find((r) => r.key === key)?.label ?? (key || "Not read");
+
+/** A reading in the car's own unit: the miles as read for a car showing miles, else the km. */
+export function readingOf(km: number | null | undefined, miles: number | null | undefined, unit: MileageUnit): number | null {
+  if (km === null || km === undefined) return null;
+  return unit === "mi" ? (miles ?? toMiles(km)) : km;
+}
+
+export type MileageInOut = { unit: MileageUnit; in: number | null; out: number | null; driven: number | null; drivenKm: number | null; unreadable: string | null };
+
+/** The visit's readings and what was driven (null when a reading is missing). */
+export function mileageInOut(i: { inKm: number | null; inMiles?: number | null; outKm: number | null; outMiles?: number | null; unit: MileageUnit; unreadable?: string | null }): MileageInOut {
+  const inR = readingOf(i.inKm, i.inMiles, i.unit);
+  const outR = readingOf(i.outKm, i.outMiles, i.unit);
+  const driven = inR !== null && outR !== null ? outR - inR : null;
+  return { unit: i.unit, in: inR, out: outR, driven, drivenKm: driven === null ? null : i.unit === "mi" ? Math.round(driven * KM_PER_MILE) : driven, unreadable: i.unreadable ?? null };
+}
+
+/** Checks the final reading typed at gate-out against the gate-in reading (both in the car's own unit). */
+export function checkFinalReading(typed: number | null, inReading: number | null, unit: MileageUnit): { error: string } | { ok: true } {
+  if (typed === null) return { error: `Enter the final ${unit} shown on the dashboard, or tick "Can't read it".` };
+  if (inReading !== null && typed < inReading) return { error: `Final ${unit} (${formatThousands(typed)}) is lower than at gate-in (${formatThousands(inReading)}). Check the reading.` };
+  return { ok: true };
+}
+
+/** "Mileage in 48,210 km · out 48,226 km · driven 16 km" (or "· out not read (Battery dead)"). */
+export function mileageLine(m: MileageInOut): string {
+  const u = m.unit;
+  const parts = [m.in !== null ? `Mileage in ${formatThousands(m.in)} ${u}` : "Mileage in not recorded"];
+  if (m.out !== null) parts.push(`out ${formatThousands(m.out)} ${u}`);
+  else if (m.unreadable) parts.push(`out not read (${unreadableLabel(m.unreadable)})`);
+  if (m.driven !== null) parts.push(`driven ${formatThousands(m.driven)} ${u}${u === "mi" ? ` (${formatThousands(m.drivenKm)} km)` : ""}`);
+  return parts.join(" · ");
+}
+
+/** The customer's words (the invoice): "48,210 km" in and out - no distance driven, no internal reasons, never photos. */
+export function customerMileage(m: MileageInOut): { in: string | null; out: string | null } {
+  const show = (v: number | null) => (v === null ? null : `${formatThousands(v)} ${m.unit}`);
+  return { in: show(m.in), out: show(m.out) };
+}

@@ -82,3 +82,16 @@ export function feeWords(job: { inspection_fee_choice?: string | null; inspectio
 
 /** A quick job (no fee, no full inspection) skips the Inspection stage and goes straight to the quotation. */
 export const isQuickJob = (job: { inspection_fee_choice?: string | null; inspection_type?: string | null }) => job.inspection_fee_choice === "none" && job.inspection_type === "quick";
+
+/**
+ * A fee the customer approved with the OLD wording ("an inspection fee of AED 750 will apply", VAT not mentioned) is
+ * charged as that amount INCLUDING VAT (30 October 2026): 750.00 = 714.29 + VAT 35.71. The VAT takes the rounding, so
+ * the two always add up to the amount the customer read.
+ */
+export function inclusiveSplit(total: number, vatPercent: number): { net: number; vat: number; total: number } {
+  const net = Math.round((total / (1 + vatPercent / 100)) * 100) / 100;
+  return { net, vat: Math.round((total - net) * 100) / 100, total };
+}
+
+/** The approved wording mentions no VAT: the old wording of before 30 October 2026. */
+export const isOldFeeWording = (text: string | null | undefined) => !!text && !/\bVAT\b|ضريبة/i.test(text);

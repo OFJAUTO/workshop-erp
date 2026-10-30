@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { dubaiDateOf, dubaiTimeOf } from "@/lib/calendar";
@@ -6,13 +6,14 @@ import { createClient } from "@/lib/supabase/server";
 import { updateAppointment } from "../../actions";
 import { AppointmentForm } from "../../AppointmentForm";
 import { APPOINTMENT_SELECT, appointmentCustomerName, canEditAppointment, fillCustomerNames, loadAppointmentFormData, type AppointmentFull } from "../../form-data";
+import { refuseRecord } from "@/lib/refusal";
 
 export default async function EditAppointmentPage({ params }: { params: Promise<{ id: string }> }) {
   const staff = await requirePermission("bookAppointments");
   const { id } = await params;
   const supabase = await createClient();
   const [{ data }, formData] = await Promise.all([supabase.from("appointments").select(APPOINTMENT_SELECT).eq("id", id).maybeSingle(), loadAppointmentFormData(supabase)]);
-  if (!data) notFound();
+  if (!data) return refuseRecord("booking", id);
   const a = data as unknown as AppointmentFull;
   if (!canEditAppointment(staff, a)) redirect(`/calendar/${id}?error=${encodeURIComponent("Only the person this booking belongs to, or the owner, can change it.")}`);
   await fillCustomerNames(supabase, [a]);

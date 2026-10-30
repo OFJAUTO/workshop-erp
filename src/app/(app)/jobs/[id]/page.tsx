@@ -8,6 +8,12 @@ import Link from "next/link";
 import { recheckProgress } from "@/lib/recheck-points";
 import { DeclinedAllButton } from "@/components/DeclinedAllButton";
 import { TimeSpentPanel } from "@/components/TimeSpentPanel";
+import { MileagePanel } from "@/components/MileagePanel";
+import { ApprovedFeeWording } from "@/components/ApprovedFeeWording";
+import { approvedFeeOf } from "@/lib/inspection-fee-server";
+import { inclusiveSplit } from "@/lib/inspection-fee";
+import { loadVisitMileage } from "@/lib/visit-mileage";
+import { gateOutMileageReady } from "@/lib/schema-ready";
 import { timeSpentOf } from "@/lib/time-spent";
 import { CustomerName } from "@/components/CustomerPanel";
 import { AFTERCARE_POINTS, aftercareOf } from "@/lib/aftercare";
@@ -22,7 +28,7 @@ import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { partsSteps, stepPartOf, noPartsNeeded } from "@/lib/parts-steps";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -92,6 +98,7 @@ import { bodyshopScopeOf, maySignAftercare } from "@/lib/team-scope";
 import { QuotationList } from "@/components/QuotationList";
 import { loadJobQuotes } from "@/lib/quote-history-data";
 import { anyApproved } from "@/lib/quote-history";
+import { refuseRecord } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +117,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const admin = createAdminClient();
 
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
-  if (!card) notFound();
+  if (!card) return refuseRecord("job", id);
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
   if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
@@ -220,6 +227,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const techniciansCanChange = canAssign && !staff.viewingAs && !["pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
 
   const latestApproval = approvals[0] ?? null;
+  // 30 October 2026: the fee wording the customer approved (customer roles only), and the old wording's VAT-inclusive charge.
+  const approvedFee = seesCustomerDetails ? await approvedFeeOf(id) : null;
+  const oldWording = approvedFee?.oldWording && (Number(job.inspection_fee_aed) || 0) > 0 ? inclusiveSplit(Number(job.inspection_fee_aed), 5) : null;
   void link;
   void req;
   // The WhatsApp messages: car details filled here; the recipient's name and the link are filled in the centre window.
@@ -334,6 +344,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // the owner, advisors and accounts see the time spent on the car.
   const mayDeclineAll = (role === "owner" || role === "service_advisor") && !staff.viewingAs && job.is_open && !job.declined_out_at && !quoteApproved && !loose && (!!inspection || quoteFamilies.length > 0);
   const timeSpent = role === "owner" || role === "service_advisor" || role === "accounts" ? await timeSpentOf(id, settings) : null;
+  // 30 October 2026: the mileage in and out with both dashboard photos (a car only; loose items have no gate-in reading).
+  const visitMileage = job.job_kind === "loose" || !(await gateOutMileageReady()) ? null : await loadVisitMileage(id);
   const trackWithAdvance = hasDeposit ? trackStages.flatMap((st) => (st === "approval" ? [st, "advance" as const] : [st])) : trackStages;
   const stageDone = (s: string, i: number): boolean => {
     if (!job.is_open) return true;
@@ -636,6 +648,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className={boxTitle(approvalBox)}>{tick(approvalBox)}Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
           {seesCustomerDetails ? <ApprovalSendControl fee={!job.first_approval_at && !staff.viewingAs ? { initial: feeInputOf(job), bounds: feeBoundsFor(settings, vehicle?.make?.name), isOwner: role === "owner" } : null} jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} /> : job.first_approval_at ? <span className="text-sm font-semibold" data-approval-plain>Approved {formatDayTime(job.first_approval_at)}</span> : latestApproval ? <span className="text-sm font-semibold" data-approval-plain>{approvalState.text}</span> : null}
+          {approvedFee ? <ApprovedFeeWording f={approvedFee} /> : null}
           {job.first_approval_at && role === "owner" && !staff.viewingAs && job.is_open ? <OwnerFeeChange action={ownerChangeInspectionFee.bind(null, id)} initial={feeInputOf(job)} bounds={feeBoundsFor(settings, vehicle?.make?.name)} /> : null}
           <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" size="md" className="mt-auto" data-gate-in-details>
             Gate-in details
@@ -672,7 +685,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <span className={boxTitle(quoteBox)}>{tick(quoteBox)}{quoteFamilies.length > 1 ? `Quotations · ${quoteFamilies.length}` : "Quotation"}</span>
           <span className="text-sm font-semibold">{qState.text}</span>
           <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} />
-          {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(job.inspection_fee_aed) || 0} isOwner={role === "owner"} /></div> : null}
+          {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(job.inspection_fee_aed) || 0} isOwner={role === "owner"} oldWording={oldWording} /></div> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (loose || isQuickJob(job) || inspection?.inspection.status === "approved" || role === "owner") ? (
               <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
@@ -798,6 +811,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
       </div>
+      {visitMileage ? <MileagePanel m={visitMileage} /> : null}
       {timeSpent ? <TimeSpentPanel t={timeSpent} /> : null}
       {!job.is_open && job.followup_due_at && !job.followup_done_at && can(role, "sendApproval") ? (
         <Card className="flex flex-wrap items-center gap-3 border-ink">

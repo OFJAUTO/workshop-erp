@@ -95,6 +95,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "commission_approval", label: "A commission needs the owner's approval", locked: true },
   { type: "low_profit", label: "A low-profit quotation was sent anyway (owner)", locked: true },
   { type: "release_approval", label: "A car with a balance due needs release approval", locked: true },
+  { type: "mileage_alert", label: "At gate-out: a car driven more than the set km while with us, or a final km that could not be read (owner)", locked: true },
   { type: "delivery", label: "A delivery was booked, left or delivered", locked: true },
   { type: "gate_out_followup", label: "Follow-up call due after gate-out", locked: true },
   { type: "parts_question", label: "Parts asked the workshop manager about a part", locked: true },

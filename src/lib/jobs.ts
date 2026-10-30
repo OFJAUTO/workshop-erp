@@ -2,6 +2,7 @@
 
 import { breakForDay, dubaiDayId, workingHoursBetween, type WorkingTime } from "./working-time";
 import { departmentBreakSchedule } from "./breaks";
+import { feeNoticeTexts } from "./inspection-fee";
 
 export const STAGES = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"] as const;
 export type Stage = (typeof STAGES)[number];
@@ -202,10 +203,10 @@ export function hoursInStage(clock: StageClock, now = new Date()) {
   return Math.max(0, (now.getTime() - Date.parse(clock.enteredAt)) / 3600000);
 }
 
-/** The inspection fee notice with the amount filled in. */
+/** The inspection fee notice with the amount filled in: [total] with VAT, [amount] before VAT (THE fee rule, feeNoticeTexts). */
 export function feeNotice(template: string | null | undefined, amount: number | string) {
   const n = Number(amount);
-  return String(template ?? "").replaceAll("[amount]", Number.isFinite(n) ? n.toLocaleString("en-GB") : String(amount));
+  return feeNoticeTexts({ en: template, ar: null }, Number.isFinite(n) ? n : 0, 5).en;
 }
 
 /**

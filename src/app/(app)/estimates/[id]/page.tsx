@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { installerHistoryFor } from "@/lib/bodyshop";
 import { packagesOf } from "@/lib/packages";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -23,6 +23,7 @@ import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { EstimateMenu } from "../EstimateMenu";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
+import { refuseRecord } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const { id } = await params;
   const { message, error, packages: openPackages } = await searchParams;
   const [bundle, settings, site] = await Promise.all([loadQuotation(id), getSettings(), getSiteUrl()]);
-  if (!bundle || bundle.quotation.kind !== "estimate") notFound();
+  if (!bundle || bundle.quotation.kind !== "estimate") return refuseRecord("estimate", id);
   const { quotation: q, vehicle, customer } = bundle;
   const mine = q.created_by === staff.id;
   const isOwner = role === "owner";

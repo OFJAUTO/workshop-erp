@@ -3,6 +3,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, feeNotice, labelOf } from "@/lib/jobs";
+import { feeWords } from "@/lib/inspection-fee";
 import { JOB_DEPARTMENTS } from "@/lib/inspection";
 import { can, type RoleId } from "@/lib/roles";
 import { describeMileage } from "@/lib/mileage";
@@ -50,7 +51,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     : latest
       ? `Link created ${formatDateTime(latest.created_at)}${latest.sent_at ? `, sent ${formatDateTime(latest.sent_at)}` : ", not sent yet"}. Not approved yet.`
       : "No approval link yet.";
-  const feeLine = ["team_leader", "technician", "qc_inspector"].includes(String(staff?.role_id)) ? "" : feeNotice(settings.inspection_fee_notice, job.inspection_fee_aed ?? settings.inspection_fee_aed);
+  const feeLine = ["team_leader", "technician", "qc_inspector"].includes(String(staff?.role_id)) ? "" : job.inspection_fee_choice === "none" ? feeWords(job) : feeNotice(settings.inspection_fee_notice, job.inspection_fee_aed ?? settings.inspection_fee_aed);
 
   const isVideo = (k: string) => k === "video" || k === "video_exterior" || k === "video_interior";
   const wanted = media

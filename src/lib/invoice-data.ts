@@ -6,6 +6,9 @@ import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./
 import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { loadVisitMileage } from "./visit-mileage";
+import { gateOutMileageReady } from "./schema-ready";
+import { customerMileage } from "./mileage";
 
 export type InvoiceKind = "tax_invoice" | "proforma" | "credit_note";
 export type LabourMode = "itemised" | "combined";
@@ -172,6 +175,8 @@ export type InvoiceBundle = {
   creditNotes: InvoiceRow[];
   preparedByName: string | null;
   issuedByName: string | null;
+  /** 30 October 2026: "48,210 km" at gate-in and at gate-out, for the customer (words only). */
+  mileage: { in: string | null; out: string | null } | null;
 };
 
 export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
@@ -199,7 +204,14 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
     creditNotes: ((credits ?? []) as Record<string, unknown>[]).map(toInvoice),
     preparedByName: invoice.prepared_by ? (nameOf.get(invoice.prepared_by) ?? null) : null,
     issuedByName: invoice.issued_by ? (nameOf.get(invoice.issued_by) ?? null) : null,
+    mileage: invoice.job_id && (await gateOutMileageReady()) ? await invoiceMileage(invoice.job_id) : null,
   };
+}
+
+/** The visit's mileage in and out, as the customer reads it on the invoice (30 October 2026). */
+async function invoiceMileage(jobId: string): Promise<{ in: string | null; out: string | null } | null> {
+  const m = await loadVisitMileage(jobId, { withPhotos: false });
+  return m ? customerMileage(m.io) : null;
 }
 
 export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; positions?: string[] | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number; /** Section 9: the package snapshot, so the invoice shows the PROTECTION PACKAGE section too. */ package_items?: unknown; /** Section 10: the PPF cutting method. */ cut_method?: string | null; cut_note?: string | null };

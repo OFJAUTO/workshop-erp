@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -11,6 +10,7 @@ import { ContactForm } from "./ContactForm";
 import { QuotationList } from "@/components/QuotationList";
 import { loadEstimateHistory } from "@/lib/quote-history-data";
 import type { QuoteFamily } from "@/lib/quote-history";
+import { refuseRecord } from "@/lib/refusal";
 
 export default async function CustomerPage({
   params,
@@ -44,7 +44,7 @@ export default async function CustomerPage({
       .order("is_active", { ascending: false })
       .order("created_at", { ascending: false }),
   ]);
-  if (!cData) notFound();
+  if (!cData) return refuseRecord("customer", id);
   const c = cData as CustomerRow;
   const contacts = (contactsData ?? []) as CustomerContactRow[];
   const cars = (carsData ?? []) as unknown as (VehicleRow & { make: { name: string } | null; model: { name: string } | null })[];

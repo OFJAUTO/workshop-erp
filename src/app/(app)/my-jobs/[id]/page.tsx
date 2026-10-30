@@ -1,6 +1,6 @@
 import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -37,6 +37,7 @@ import { reasonsFor } from "@/lib/reasons";
 import { InspectionForm, type Suggestions } from "./InspectionForm";
 import { canEditBody, isBodyshopStaff, loadBodyState } from "@/lib/bodyshop-findings";
 import { WorkClock, WorkJobs, type PanelLine, type PanelPart, type RunningSession } from "./WorkPanel";
+import { refuseRecord } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const [card, bundle, settings, { data: rt }] = await Promise.all([loadJobCard(supabase, id), loadInspection(id), getSettings(), supabase.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle()]);
   if (!card) {
     const { data: other } = await createAdminClient().from("jobs").select("job_number, assigned_to, assignee:staff!jobs_assigned_to_fkey(display_name)").eq("id", id).maybeSingle();
-    if (!other) notFound();
+    if (!other) return refuseRecord("job", id);
     const who = (other as unknown as { assignee: { display_name: string } | null }).assignee?.display_name ?? null;
     return (
       <>

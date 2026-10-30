@@ -115,6 +115,9 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/uploads" tone="secondary">
               Failed uploads
             </LinkButton>
+            <LinkButton href="/settings/refusals" tone="secondary" data-refusals-link>
+              Refusals
+            </LinkButton>
             <LinkButton href="/settings/zoho" tone="secondary" data-zoho-link>
               Zoho Books
             </LinkButton>

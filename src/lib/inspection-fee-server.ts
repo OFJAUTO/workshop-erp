@@ -1,5 +1,5 @@
 import "server-only";
-import { checkFee, feeWords, type FeeBounds, type FeeInput } from "./inspection-fee";
+import { checkFee, feeWords, isOldFeeWording, type FeeBounds, type FeeInput } from "./inspection-fee";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 
@@ -66,4 +66,28 @@ export async function saveFeeChoice(jobId: string, input: FeeInput, actor: { id:
   const why = job.first_approval_at ? ` after the customer's approval. Reason: ${String(opts.ownerReason).trim()}` : "";
   await admin.from("job_events").insert({ job_id: jobId, event_type: "inspection_fee", note: `${actor.display_name}: ${job.inspection_fee_choice ? `${before} → ` : ""}${after}${input.choice === "none" && input.note ? ` (${input.note})` : ""}${outside}${why}`, created_by: actor.id });
   return { ok: true, changed: true };
+}
+
+export type ApprovedFee = { at: string; by: string | null; amount: number; noFee: boolean; text: string | null; textAr: string | null; oldWording: boolean };
+
+/**
+ * What the customer agreed to about the inspection fee (30 October 2026, batch 2 section 4.1): the exact wording on
+ * the approval page they approved, the amount and the date, as stored on the approval link at the moment it was made.
+ * Shown on the job card; the declined-all charge reads it (an old wording without VAT is charged VAT-inclusive). A link
+ * approved before the wording was stored on it (21 October) showed the old Settings wording: it counts as old too.
+ */
+export async function approvedFeeOf(jobId: string): Promise<ApprovedFee | null> {
+  const { data } = await createAdminClient()
+    .from("approval_requests")
+    .select("approved_at, approver_name, inspection_fee_aed, no_fee, inspection_fee_notice, inspection_fee_notice_ar")
+    .eq("job_id", jobId)
+    .not("approved_at", "is", null)
+    .order("approved_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  const amount = Number(data.inspection_fee_aed) || 0;
+  const noFee = !!data.no_fee || amount <= 0;
+  const text = (data.inspection_fee_notice as string | null) ?? null;
+  return { at: data.approved_at as string, by: (data.approver_name as string | null) ?? null, amount, noFee, text: noFee ? null : text, textAr: noFee ? null : ((data.inspection_fee_notice_ar as string | null) ?? null), oldWording: !noFee && (text === null || isOldFeeWording(text)) };
 }

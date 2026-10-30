@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { signJobFiles } from "@/lib/work-data";
 import { PositionsLine } from "@/components/PositionsLine";
-import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { detailsWithoutHours, formatDate, formatDateTime, hoursQty } from "@/lib/format";
@@ -18,6 +17,7 @@ import { formatPlate } from "@/lib/types";
 import { decideOverpaymentAction, issueCreditNote, recordCnRefund, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, verifyPaymentAction, voidPaymentAction } from "../actions";
 import { ChoiceButtons } from "@/components/ui";
 import { PaymentForm } from "./PaymentForm";
+import { refuseRecord } from "@/lib/refusal";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const { id } = await params;
   const { message, error } = await searchParams;
   const [bundle, settings, site] = await Promise.all([loadInvoice(id), getSettings(), getSiteUrl()]);
-  if (!bundle) notFound();
+  if (!bundle) return refuseRecord("invoice", id);
   const { invoice, lines, payments, customer, vehicle, job, creditNotes } = bundle;
   const paymentLinks = invoice.kind === "credit_note" ? [] : await paymentLinksOf(invoice.id);
   const live = payments.filter((p) => p.status === "recorded");
