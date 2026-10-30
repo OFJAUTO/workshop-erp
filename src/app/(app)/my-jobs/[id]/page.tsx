@@ -1,3 +1,6 @@
+import { DamageSection } from "@/components/DamageSection";
+import { DamageFoundAfter } from "@/components/DamageFoundAfter";
+import { damageAfterReady, loadCarDamage } from "@/lib/damage-data";
 import { VinCopy } from "@/components/VinCopy";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -133,6 +136,9 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const managerName = (managers ?? []).map((m) => m.display_name).join(" or ") || "the workshop manager";
   const myTech = techs.find((t) => t.staff_id === staff.id);
   const canWork = mine && (role === "technician" || role === "owner") && !staff.viewingAs;
+  // Section 4 (30 October 2026): the damage the car came in with, and a way to record damage found while working on it.
+  const damage = gateIn ? await loadCarDamage(id, { media, urls: card.mediaUrls }) : null;
+  const damageAfterOn = await damageAfterReady();
 
   const [tyreSizeSuggestion, catalogue] = insp ? await Promise.all([tyreSizeSuggestionFor(vehicle.id), loadCatalogue()]) : [null, []];
   const formProps = insp && bundle
@@ -302,6 +308,12 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
               <ul className="divide-y divide-line text-sm">
                 {inspectionTasks.map((t, i) => <li key={i} className="py-1.5"><span className="font-semibold">{t.label}</span><span className="text-muted"> · {t.status}</span>{t.note ? <span className="text-muted"> · {t.note}</span> : null}</li>)}
               </ul>
+            </Card>
+          ) : null}
+          {damage ? (
+            <Card className="flex flex-col gap-3" data-tech-damage>
+              <DamageSection damage={damage} arabic={false} heading="Damage on the car (check-in and after)" outlineSize={140} />
+              {damageAfterOn ? <DamageFoundAfter jobId={id} entries={[]} canAdd={!staff.viewingAs && !job.gated_out_at} canTell={false} /> : null}
             </Card>
           ) : null}
           {insp ? (

@@ -2,41 +2,59 @@
  * The car outline (top view, front at the top), shared by the inspection's bodyshop findings, the gate-in damage
  * marking and the bodyshop pre-work check - on screen (CarOutline) and in the PDFs (CarOutlinePdf). Pure data:
  * the panels with their shapes in a 240 x 480 box, and the words for the damage chips.
+ * 30 October 2026 (night batch section 4): redrawn to look like a car (a rounded nose, the windscreen, the mirrors, a
+ * bonnet longer than the boot) with FRONT / REAR / LEFT / RIGHT printed around it, and every panel named "Part –
+ * position" ("Headlight – front right"). The keys never changed (saved marks keep their panels).
  */
 
 export type PanelShape = { kind: "rect"; x: number; y: number; w: number; h: number; r?: number } | { kind: "circle"; cx: number; cy: number; r: number } | { kind: "path"; d: string };
-export type Panel = { key: string; label: string; shape: PanelShape | null };
+/** Where a panel sits on the car, for the position check: which end, which side (the car's own). */
+export type PanelPlace = { end?: "front" | "rear"; side?: "left" | "right" };
+export type Panel = { key: string; label: string; shape: PanelShape | null; place?: PanelPlace };
 
-/** Left and right are the car's own left and right (the driver's side seen from the seat). */
+/**
+ * Left and right are the car's own left and right, as if sitting in the driver's seat. With the front at the top of
+ * the picture, the car's RIGHT is on the right of the picture.
+ */
 export const CAR_PANELS: Panel[] = [
-  { key: "front_bumper", label: "Front bumper", shape: { kind: "rect", x: 52, y: 8, w: 136, h: 30, r: 14 } },
-  { key: "grille", label: "Grille", shape: { kind: "rect", x: 94, y: 40, w: 52, h: 14, r: 4 } },
-  { key: "headlight_l", label: "Headlight left", shape: { kind: "rect", x: 56, y: 40, w: 34, h: 16, r: 6 } },
-  { key: "headlight_r", label: "Headlight right", shape: { kind: "rect", x: 150, y: 40, w: 34, h: 16, r: 6 } },
-  { key: "bonnet", label: "Bonnet", shape: { kind: "path", d: "M66 58 L174 58 L170 138 L70 138 Z" } },
-  { key: "front_fender_l", label: "Front fender left", shape: { kind: "path", d: "M36 54 L62 58 L66 150 L36 150 Q30 100 36 54 Z" } },
-  { key: "front_fender_r", label: "Front fender right", shape: { kind: "path", d: "M204 54 L178 58 L174 150 L204 150 Q210 100 204 54 Z" } },
-  { key: "windshield", label: "Windshield", shape: { kind: "path", d: "M72 142 L168 142 L160 186 L80 186 Z" } },
-  { key: "mirror_l", label: "Mirror left", shape: { kind: "rect", x: 12, y: 158, w: 22, h: 16, r: 5 } },
-  { key: "mirror_r", label: "Mirror right", shape: { kind: "rect", x: 206, y: 158, w: 22, h: 16, r: 5 } },
-  { key: "door_fl", label: "Front door left", shape: { kind: "rect", x: 36, y: 154, w: 30, h: 96, r: 4 } },
-  { key: "door_fr", label: "Front door right", shape: { kind: "rect", x: 174, y: 154, w: 30, h: 96, r: 4 } },
-  { key: "roof", label: "Roof", shape: { kind: "rect", x: 80, y: 190, w: 80, h: 132, r: 8 } },
-  { key: "door_rl", label: "Rear door left", shape: { kind: "rect", x: 36, y: 254, w: 30, h: 86, r: 4 } },
-  { key: "door_rr", label: "Rear door right", shape: { kind: "rect", x: 174, y: 254, w: 30, h: 86, r: 4 } },
-  { key: "quarter_l", label: "Quarter panel left", shape: { kind: "path", d: "M36 344 L66 344 L66 418 L40 418 Q32 380 36 344 Z" } },
-  { key: "quarter_r", label: "Quarter panel right", shape: { kind: "path", d: "M204 344 L174 344 L174 418 L200 418 Q208 380 204 344 Z" } },
-  { key: "boot", label: "Boot", shape: { kind: "path", d: "M76 326 L164 326 L170 418 L70 418 Z" } },
-  { key: "tail_light_l", label: "Tail light left", shape: { kind: "rect", x: 52, y: 420, w: 36, h: 14, r: 5 } },
-  { key: "tail_light_r", label: "Tail light right", shape: { kind: "rect", x: 152, y: 420, w: 36, h: 14, r: 5 } },
-  { key: "rear_bumper", label: "Rear bumper", shape: { kind: "rect", x: 52, y: 436, w: 136, h: 32, r: 14 } },
-  { key: "wheel_fl", label: "Wheel / rim front left", shape: { kind: "rect", x: 14, y: 84, w: 18, h: 50, r: 8 } },
-  { key: "wheel_fr", label: "Wheel / rim front right", shape: { kind: "rect", x: 208, y: 84, w: 18, h: 50, r: 8 } },
-  { key: "wheel_rl", label: "Wheel / rim rear left", shape: { kind: "rect", x: 14, y: 350, w: 18, h: 50, r: 8 } },
-  { key: "wheel_rr", label: "Wheel / rim rear right", shape: { kind: "rect", x: 208, y: 350, w: 18, h: 50, r: 8 } },
+  { key: "front_bumper", label: "Front bumper", place: { end: "front" }, shape: { kind: "path", d: "M60 34 Q60 8 120 6 Q180 8 180 34 L180 40 L60 40 Z" } },
+  { key: "grille", label: "Radiator grille", place: { end: "front" }, shape: { kind: "rect", x: 96, y: 42, w: 48, h: 12, r: 4 } },
+  { key: "headlight_l", label: "Headlight – front left", place: { end: "front", side: "left" }, shape: { kind: "path", d: "M58 42 L92 42 L90 56 L62 56 Q56 50 58 42 Z" } },
+  { key: "headlight_r", label: "Headlight – front right", place: { end: "front", side: "right" }, shape: { kind: "path", d: "M182 42 L148 42 L150 56 L178 56 Q184 50 182 42 Z" } },
+  { key: "bonnet", label: "Bonnet", place: { end: "front" }, shape: { kind: "path", d: "M66 60 L174 60 L168 168 L72 168 Z" } },
+  { key: "front_fender_l", label: "Front wing – left", place: { end: "front", side: "left" }, shape: { kind: "path", d: "M38 50 Q40 44 62 44 L68 170 L38 170 Q32 110 38 50 Z" } },
+  { key: "front_fender_r", label: "Front wing – right", place: { end: "front", side: "right" }, shape: { kind: "path", d: "M202 50 Q200 44 178 44 L172 170 L202 170 Q208 110 202 50 Z" } },
+  { key: "windshield", label: "Windscreen", place: { end: "front" }, shape: { kind: "path", d: "M74 172 L166 172 L156 218 L84 218 Z" } },
+  { key: "mirror_l", label: "Mirror – left", place: { side: "left" }, shape: { kind: "path", d: "M36 186 L14 180 Q8 188 14 196 L36 196 Z" } },
+  { key: "mirror_r", label: "Mirror – right", place: { side: "right" }, shape: { kind: "path", d: "M204 186 L226 180 Q232 188 226 196 L204 196 Z" } },
+  { key: "door_fl", label: "Door – front left", place: { side: "left" }, shape: { kind: "rect", x: 38, y: 174, w: 30, h: 98, r: 4 } },
+  { key: "door_fr", label: "Door – front right", place: { side: "right" }, shape: { kind: "rect", x: 172, y: 174, w: 30, h: 98, r: 4 } },
+  { key: "roof", label: "Roof", shape: { kind: "rect", x: 84, y: 222, w: 72, h: 112, r: 8 } },
+  { key: "door_rl", label: "Door – rear left", place: { side: "left" }, shape: { kind: "rect", x: 38, y: 276, w: 30, h: 88, r: 4 } },
+  { key: "door_rr", label: "Door – rear right", place: { side: "right" }, shape: { kind: "rect", x: 172, y: 276, w: 30, h: 88, r: 4 } },
+  { key: "rear_screen", label: "Rear screen", place: { end: "rear" }, shape: { kind: "path", d: "M84 338 L156 338 L164 366 L76 366 Z" } },
+  { key: "quarter_l", label: "Quarter panel – rear left", place: { end: "rear", side: "left" }, shape: { kind: "path", d: "M38 368 L68 368 L70 430 Q46 432 40 424 Q34 396 38 368 Z" } },
+  { key: "quarter_r", label: "Quarter panel – rear right", place: { end: "rear", side: "right" }, shape: { kind: "path", d: "M202 368 L172 368 L170 430 Q194 432 200 424 Q206 396 202 368 Z" } },
+  { key: "boot", label: "Boot lid / tailgate", place: { end: "rear" }, shape: { kind: "path", d: "M74 370 L166 370 L168 428 L72 428 Z" } },
+  { key: "tail_light_l", label: "Tail light – rear left", place: { end: "rear", side: "left" }, shape: { kind: "path", d: "M60 432 L90 432 L90 444 L64 444 Q58 440 60 432 Z" } },
+  { key: "tail_light_r", label: "Tail light – rear right", place: { end: "rear", side: "right" }, shape: { kind: "path", d: "M180 432 L150 432 L150 444 L176 444 Q182 440 180 432 Z" } },
+  { key: "rear_bumper", label: "Rear bumper", place: { end: "rear" }, shape: { kind: "path", d: "M60 446 L180 446 L180 452 Q180 474 120 476 Q60 474 60 452 Z" } },
+  { key: "wheel_fl", label: "Wheel / rim – front left", place: { end: "front", side: "left" }, shape: { kind: "rect", x: 14, y: 92, w: 20, h: 54, r: 8 } },
+  { key: "wheel_fr", label: "Wheel / rim – front right", place: { end: "front", side: "right" }, shape: { kind: "rect", x: 206, y: 92, w: 20, h: 54, r: 8 } },
+  { key: "wheel_rl", label: "Wheel / rim – rear left", place: { end: "rear", side: "left" }, shape: { kind: "rect", x: 14, y: 372, w: 20, h: 54, r: 8 } },
+  { key: "wheel_rr", label: "Wheel / rim – rear right", place: { end: "rear", side: "right" }, shape: { kind: "rect", x: 206, y: 372, w: 20, h: 54, r: 8 } },
   // Not a shape on the outline: a button of its own under it.
   { key: "chassis", label: "Chassis / structure", shape: null },
 ];
+
+/** The words printed around the outline (bold capitals), placed in its frame (the viewBox below). */
+export const OUTLINE_VIEWBOX = "-34 -26 308 532";
+export const OUTLINE_LABELS = [
+  { text: "FRONT", x: 120, y: -8, rotate: 0 },
+  { text: "REAR", x: 120, y: 498, rotate: 0 },
+  { text: "LEFT", x: -16, y: 240, rotate: -90 },
+  { text: "RIGHT", x: 256, y: 240, rotate: 90 },
+] as const;
 export const PANEL_LABEL: Record<string, string> = Object.fromEntries(CAR_PANELS.map((p) => [p.key, p.label]));
 export const panelLabel = (key: string) => PANEL_LABEL[key] ?? key.replace(/_/g, " ");
 

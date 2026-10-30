@@ -1,3 +1,4 @@
+import { loadCarDamage } from "@/lib/damage-data";
 import { VinCopy } from "@/components/VinCopy";
 import { getSettings } from "@/lib/settings";
 import Link from "next/link";
@@ -33,6 +34,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
   const check = mediaChecklist(card.media, { majorDamage: card.gateIn?.major_damage ?? false, wheelsRequired: card.gateIn?.wheels_required ?? false, damageNote: card.gateIn?.damage_note ?? "", hasCarPicture: !!card.vehicle.photo_path });
   const damageChips = ((await getSettings()).damage_note_chips ?? []) as string[];
   const { data: giPanels } = await createAdminClient().from("gate_ins").select("damage_panels").eq("job_id", id).maybeSingle();
+  const damage = await loadCarDamage(id, { media: card.media, urls: card.mediaUrls });
 
   const token = await createUploadLinkToken(id);
   const site = await getSiteUrl();
@@ -62,7 +64,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
         <div className="xl:col-span-2">
           <MediaChecklist jobId={id} check={check} carPictureUrl={card.vehiclePhotoUrl} damageChips={damageChips} />
           <div className="mt-6">
-            <PanelMarker hook="gate-in" title="Damage on the car at gate-in" hint="Tap each panel that already has damage as the car comes in: scratches, dents, broken parts. It goes with the gate-in record and the photos." initial={cleanPanelMarks(giPanels?.damage_panels)} save={saveGateInDamage.bind(null, id)} canEdit={!staff.viewingAs} />
+            <PanelMarker hook="gate-in" title="Damage on the car at gate-in" hint="Tap each panel that already has damage as the car comes in: scratches, dents, broken parts. It goes with the gate-in record and the photos." initial={cleanPanelMarks(giPanels?.damage_panels)} save={saveGateInDamage.bind(null, id)} canEdit={!staff.viewingAs} photos={{ jobId: id, byPanel: damage.byPanel }} />
           </div>
         </div>
 

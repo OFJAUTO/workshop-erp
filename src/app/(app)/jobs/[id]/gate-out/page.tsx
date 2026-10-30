@@ -1,3 +1,5 @@
+import { DamageSection } from "@/components/DamageSection";
+import { loadCarDamage } from "@/lib/damage-data";
 import { VinCopy } from "@/components/VinCopy";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
@@ -112,6 +114,12 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
           )}
         </div>
         <div className="flex flex-col gap-6">
+          {!loose && g ? (
+            <Card className="flex flex-col gap-2" data-gate-out-damage>
+              {/* Section 4 (30 October 2026): what the car came in with, to check against at handover. */}
+              <DamageSection damage={await loadCarDamage(id, { media: card.media, urls: card.mediaUrls })} arabic={false} heading="Damage at check-in" outlineSize={130} />
+            </Card>
+          ) : null}
           <Card className="flex flex-col gap-2">
             <SectionLabel>Balance</SectionLabel>
             {bal.state === "nothing" ? <p className="text-sm text-muted">Nothing to invoice on this job.</p> : bal.state === "no_invoice" ? <p className="text-sm font-semibold text-red">No invoice issued yet.</p> : (

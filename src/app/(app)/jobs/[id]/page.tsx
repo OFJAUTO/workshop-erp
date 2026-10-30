@@ -1,3 +1,6 @@
+import { DamageSection } from "@/components/DamageSection";
+import { DamageFoundAfter } from "@/components/DamageFoundAfter";
+import { loadCarDamage, damageAfterReady } from "@/lib/damage-data";
 import { VinCopy } from "@/components/VinCopy";
 import { OwnerFeeChange } from "@/components/OwnerFeeChange";
 import { feeWords, isQuickJob } from "@/lib/inspection-fee";
@@ -205,6 +208,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canSendReport = can(role, "sendReport") && job.is_open && inspection?.inspection.status === "approved";
   const canNote = can(role, "noteToManager") && job.is_open;
   const seesCustomerDetails = can(role, "viewCustomers");
+  // Section 4 (30 October 2026): the damage already on the car, and what was found after check-in.
+  const damage = gateIn ? await loadCarDamage(id, { media, urls: mediaUrls }) : null;
+  const damageAfterOn = await damageAfterReady();
 
   // The car's sides (job-sides.ts) and THE people source for every picker on this page.
   const jobSides = await workSidesOf(id, job.department);
@@ -836,6 +842,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
+          {damage ? (
+            <div id="damage" data-job-damage>
+              <Collapsible title="Damage on the car" right={`${damage.items.length ? `${damage.items.length} panel${damage.items.length === 1 ? "" : "s"}` : "None noted"}${damage.after.length ? ` · ${damage.after.length} found after` : ""}`} defaultOpen={damage.after.some((a) => !a.sentAt)}>
+                <div className="flex flex-col gap-4 px-5 pb-5">
+                  <DamageSection damage={damage} arabic={false} heading="At check-in and after" outlineSize={150} />
+                  {damageAfterOn ? <DamageFoundAfter jobId={id} entries={damage.after.map((a) => ({ id: a.id, label: a.label, at: a.at, sentAt: a.sentAt }))} canAdd={!staff.viewingAs && !job.gated_out_at} canTell={seesCustomerDetails && !staff.viewingAs} /> : null}
+                </div>
+              </Collapsible>
+            </div>
+          ) : null}
           <Collapsible title="History" right={`${events.length}`}>
             <ul className="flex flex-col divide-y divide-line">
               {events.filter((e) => can(role, "viewInvoices") || !MONEY_EVENTS.has(e.event_type)).map((e) => (

@@ -6,13 +6,18 @@ import { Card, Input, SectionLabel } from "@/components/ui";
 import { DAMAGE_TYPES, SEVERITIES, damageWords, panelLabel, toneOf, type PanelMarks } from "@/lib/car-outline";
 import { clearPending, readPending, writePending } from "@/lib/pending-draft";
 import { reloadIfStale } from "@/lib/app-version";
+import { MediaCapture } from "@/components/MediaCapture";
+import { ViewerThumb } from "@/components/PhotoViewer";
+import { panelCaption, type DamagePhoto } from "@/lib/damage";
 
 /**
  * Damage marked on the car outline - the same outline as the inspection's bodyshop findings - for the gate-in
  * (what the car came in with) and the bodyshop pre-work check before PPF. Tap a panel, tap what is there, a short
  * note; every tap is saved. Read-only when canEdit is off.
+ * 30 October 2026 (night batch section 4.4): the note is labelled "shown to the customer" (it prints on the customer's
+ * job card), and with `photos` each panel takes its own photos (gate_in_media damage_photo, caption "panel:<key>").
  */
-export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer = null }: { title: string; hint: string; initial: PanelMarks; save: (json: string) => Promise<{ error?: string }>; canEdit: boolean; hook: string; footer?: React.ReactNode }) {
+export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer = null, photos = null, noteForCustomer = true }: { title: string; hint: string; initial: PanelMarks; save: (json: string) => Promise<{ error?: string }>; canEdit: boolean; hook: string; footer?: React.ReactNode; photos?: { jobId: string; token?: string; byPanel: Record<string, DamagePhoto[]> } | null; noteForCustomer?: boolean }) {
   const [marks, setMarks] = useState<PanelMarks>(initial);
   const [selected, setSelected] = useState<string | null>(null);
   const [state, setState] = useState<"saved" | "saving" | "error">("saved");
@@ -75,7 +80,25 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
               <div className="flex flex-wrap gap-1.5">
                 {SEVERITIES.map((d) => <button key={d.value} type="button" disabled={!canEdit} aria-pressed={mark.severity === d.value} onClick={() => setMark(selected, { severity: mark.severity === d.value ? null : d.value })} className={chip(mark.severity === d.value)} data-marker-severity={d.value}>{d.label}</button>)}
               </div>
-              <Input value={mark.note ?? ""} onChange={(e) => setMark(selected, { note: e.target.value }, true)} disabled={!canEdit} placeholder="Short note (optional)" aria-label={`${panelLabel(selected)} note`} textCase="sentence" data-marker-note />
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-bold" data-marker-note-label>{noteForCustomer ? "Note (shown to the customer)" : "Note"}</span>
+                <Input value={mark.note ?? ""} onChange={(e) => setMark(selected, { note: e.target.value }, true)} disabled={!canEdit} placeholder="Optional" aria-label={`${panelLabel(selected)} note`} textCase="sentence" data-marker-note />
+              </label>
+              {photos ? (
+                <div className="flex flex-col gap-2" data-marker-photos={selected}>
+                  {(photos.byPanel[selected] ?? []).length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {(photos.byPanel[selected] ?? []).map((p) => (
+                        <ViewerThumb key={p.id} src={p.url} thumb={p.thumb} label={p.label} viewerKey={p.id} className="block h-16 w-16 overflow-hidden rounded-md bg-chip" data-marker-photo={p.id}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={p.thumb ?? p.url} alt={p.label} className="h-full w-full object-cover" />
+                        </ViewerThumb>
+                      ))}
+                    </div>
+                  ) : null}
+                  {canEdit ? <MediaCapture key={selected} jobId={photos.jobId} token={photos.token} kind="damage_photo" caption={panelCaption(selected)} label={`Photo of the ${panelLabel(selected).toLowerCase()}`} hint="Tap to add a photo of this panel" multiple itemKey={null} /> : null}
+                </div>
+              ) : null}
             </div>
           )}
           {marked.length ? (

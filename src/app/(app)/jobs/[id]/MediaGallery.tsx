@@ -7,6 +7,7 @@ import { ViewerThumb } from "@/components/PhotoViewer";
 import { formatDateTime } from "@/lib/format";
 import { MEDIA_KIND_LABELS, type GateInMediaRow } from "@/lib/types";
 import { WHEEL_KINDS, WHEEL_LABELS, isWheelKind, wheelConditionText } from "@/lib/wheels";
+import { captionWords } from "@/lib/damage";
 
 const KIND_LABEL = MEDIA_KIND_LABELS;
 
@@ -67,7 +68,8 @@ function VideoPreview({ url }: { url: string }) {
 function captionFor(p: GateInMediaRow, compact: boolean) {
   const parts = [KIND_LABEL[p.kind]];
   if (isWheelKind(p.kind) && p.wheel_condition?.length) parts.push(wheelConditionText(p.wheel_condition));
-  if (p.caption) parts.push(p.caption);
+  const words = captionWords(p.caption);
+  if (words) parts.push(words);
   if (!compact) parts.push(formatDateTime(p.taken_at));
   return parts.join(" · ");
 }
@@ -140,6 +142,7 @@ export function MediaGallery({
   stacked = false,
   hideVideos = false,
   canRemove = false,
+  damageElsewhere = false,
 }: {
   media: GateInMediaRow[];
   urls: Record<string, string>;
@@ -154,6 +157,8 @@ export function MediaGallery({
   hideVideos?: boolean;
   /** Anyone doing the gate-in while it is open; only the owner once it is finished. */
   canRemove?: boolean;
+  /** The page shows the damage photos and note in its own "Damage already on the car" section (DamageSection). */
+  damageElsewhere?: boolean;
 }) {
   const router = useRouter();
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -176,7 +181,7 @@ export function MediaGallery({
   const keys = media.filter((m) => m.kind === "keys_photo_front" || m.kind === "keys_photo_back" || m.kind === "keys_photo");
   // Newest photo of each wheel, in the order they were taken.
   const wheels = WHEEL_KINDS.map((kind) => media.filter((m) => m.kind === kind).sort((a, b) => (a.taken_at < b.taken_at ? 1 : -1))[0]).filter((m): m is GateInMediaRow => !!m);
-  const damage = media.filter((m) => m.kind === "damage_photo");
+  const damage = damageElsewhere ? [] : media.filter((m) => m.kind === "damage_photo");
   const other = media.filter((m) => m.kind === "gate_out_photo");
   const cols = compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4";
 
@@ -270,7 +275,7 @@ export function MediaGallery({
         </div>
       ) : null}
 
-      {damage.length || damageNote ? (
+      {damage.length || (damageNote && !damageElsewhere) ? (
         <div className="flex flex-col gap-2">
           <span className="text-xs font-bold uppercase tracking-[0.08em]">Damage photos · {damage.length}</span>
           {damage.length ? (

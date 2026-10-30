@@ -2,6 +2,7 @@ import "server-only";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import { Document, Image, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { loadLogo } from "./images";
+import { DamagePdf, type DamagePdfData } from "./damage-pdf";
 import { GREY, INK, LINE, PALE, px, styles } from "./template";
 
 /**
@@ -31,6 +32,10 @@ export type GateInPdfData = {
   videoCount: number;
   printedBy: string;
   printedAt: string;
+  /** Section 4 (30 October 2026): the damage already on the car, with each panel's photos. */
+  damage?: DamagePdfData | null;
+  /** The customer's copy of the job card (from their link): no staff names, nothing internal. */
+  customer?: boolean;
 };
 
 const row = (label: string, value: string, i: number) => (
@@ -52,17 +57,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export async function renderGateInPdf(d: GateInPdfData): Promise<Buffer> {
   const logo = await loadLogo();
   const doc = (
-    <Document title={`Gate-in record ${d.jobNumber}`}>
+    <Document title={d.customer ? `Job card ${d.jobNumber}` : `Gate-in record ${d.jobNumber}`}>
       <Page size="A4" style={[styles.page, { paddingTop: px(28), paddingBottom: px(56), paddingHorizontal: px(42) }]}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: px(3), borderBottomColor: INK, paddingBottom: px(10), marginBottom: px(14) }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: px(14) }}>
             {logo ? <Image src={logo} style={{ height: px(40), width: px(80), objectFit: "contain", objectPosition: "left" }} /> : null}
-            <Text style={{ fontSize: px(15), fontWeight: 800, letterSpacing: 0.5 }}>GATE-IN RECORD – INTERNAL</Text>
+            <Text style={{ fontSize: px(15), fontWeight: 800, letterSpacing: 0.5 }}>{d.customer ? "JOB CARD" : "GATE-IN RECORD – INTERNAL"}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={{ fontSize: px(12), fontWeight: 800 }}>{d.jobNumber} · {d.plate}</Text>
             <Text style={{ fontSize: px(9.5), color: GREY }}>{d.car}{d.vin ? ` · VIN ${d.vin}` : ""}</Text>
-            <Text style={{ fontSize: px(9.5), color: GREY }}>Printed {d.printedAt} by {d.printedBy}</Text>
+            <Text style={{ fontSize: px(9.5), color: GREY }}>{d.customer ? `Received ${d.gatedIn}` : `Printed ${d.printedAt} by ${d.printedBy}`}</Text>
           </View>
         </View>
 
@@ -74,13 +79,15 @@ export async function renderGateInPdf(d: GateInPdfData): Promise<Buffer> {
           {d.colour ? row("Colour", d.colour, 4) : null}
         </Section>
 
-        <Section title="Gate-in">
-          {row("Gated in", `${d.gatedIn} by ${d.gatedInBy}`, 0)}
+        <Section title={d.customer ? "Check-in" : "Gate-in"}>
+          {row(d.customer ? "Received" : "Gated in", d.customer ? d.gatedIn : `${d.gatedIn} by ${d.gatedInBy}`, 0)}
           {d.details.map(([k, v], i) => row(k, v, i + 1))}
         </Section>
 
+        {d.damage ? <DamagePdf d={d.damage} /> : null}
+
         {d.requests.length ? (
-          <Section title="Customer requests">
+          <Section title={d.customer ? "Your requests" : "Customer requests"}>
             {d.requests.map((r, i) => (
               <Text key={i} style={{ fontSize: px(10.5), paddingVertical: px(2) }}>{i + 1}. {r}</Text>
             ))}
@@ -110,7 +117,7 @@ export async function renderGateInPdf(d: GateInPdfData): Promise<Buffer> {
         <Text
           fixed
           style={{ position: "absolute", bottom: px(24), left: px(42), right: px(42), fontSize: px(9), color: GREY, textAlign: "center" }}
-          render={({ pageNumber, totalPages }) => `INTERNAL – NOT FOR THE CUSTOMER · Page ${pageNumber} of ${totalPages}`}
+          render={({ pageNumber, totalPages }) => (d.customer ? `Page ${pageNumber} of ${totalPages}` : `INTERNAL – NOT FOR THE CUSTOMER · Page ${pageNumber} of ${totalPages}`)}
         />
       </Page>
     </Document>

@@ -15,6 +15,9 @@ import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
 import { CustomerVideos } from "@/components/CustomerVideos";
 import { thumbsFor } from "@/lib/media-urls";
 import { GATE_IN_BUCKET } from "@/lib/media";
+import { DamageSection } from "@/components/DamageSection";
+import { DAMAGE_CONFIRM_EN, DAMAGE_WORDS_AR, damageCountWords } from "@/lib/damage";
+import { loadCarDamage } from "@/lib/damage-data";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +66,9 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   const signedAt = Date.now();
   // Small pictures for the page; the viewer opens the sharp ones (videos keep their own tiles).
   const photoThumbs = await thumbsFor(GATE_IN_BUCKET, media.filter((m) => !String(m.kind).startsWith("video")).map((m) => m.storage_path));
+  // Section 4 (30 October 2026): the damage already on the car, with each panel's photos, above the approval box.
+  const damage = await loadCarDamage(job.id, { media, urls: mediaUrls });
+  const hasDamage = damage.items.length > 0 || damage.loose.length > 0;
   const dirty = gateIn.cleanliness === "dirty" || gateIn.cleanliness === "very_dirty";
   const approved = !!req.approved_at;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
@@ -81,7 +87,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     ["Condition on arrival", labelOf(CONDITIONS, gateIn.condition)],
     [vehicle.fuel_type === "electric" ? "Battery" : "Fuel level", vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : null) : labelOf(FUEL_LEVELS, gateIn.fuel_level)],
     ["Cleanliness", labelOf(CLEANLINESS, gateIn.cleanliness)],
-    ["Major damage noted", gateIn.major_damage ? "Yes, see the damage photos" : "No"],
+    ["Damage noted", damageCountWords(damage)],
     ["Mileage", `${gateIn.mileage.toLocaleString("en-GB")} km`],
     ["Keys received", `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}`],
     ["Old parts returned to you", gateIn.old_parts_return ? "Yes" : "No"],
@@ -94,6 +100,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       header="plain"
       title="Job card"
       meta={[{ label: "Job card", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }]}
+      view={{ href: `/api/pdf/jobcard/${token}`, label: "View job card (PDF)", fileName: `OFJ Job card ${job.job_number}.pdf` }}
       boxes={customerBoxes({ full_name: customerName, company_name: card.customer?.company_name ?? null, phone: card.customer?.phone ?? null }, { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: car || "Vehicle" })}
       action={
         !approved ? (
@@ -111,7 +118,9 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
                 <input type="checkbox" name="agree" required className="mt-1 h-5 w-5 accent-ink shrink-0" />
                 <span className="flex flex-col gap-2">
                   <span className="text-sm font-medium">{declaration}</span>
+                  {hasDamage ? <span className="text-sm font-medium" data-damage-confirm>{DAMAGE_CONFIRM_EN}</span> : null}
                   <span className="text-sm font-medium" dir="rtl" lang="ar">{declarationAr}</span>
+                  {hasDamage ? <span className="text-sm font-medium" dir="rtl" lang="ar">{DAMAGE_WORDS_AR.confirm}</span> : null}
                   <Link href={`/terms?t=${encodeURIComponent(token)}`} className="text-xs font-bold underline underline-offset-4">Read the terms and conditions</Link>
                 </span>
               </label>
@@ -137,11 +146,12 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
         <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
         <div className="py-1 flex flex-col gap-4">
           <CustomerVideos token={token} initial={videoRows} expected={videoRows.some((v) => v.kind === "video") ? ["video"] : ["video_exterior", "video_interior"]} complete={videosComplete} signedAt={signedAt} />
-          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} thumbs={Object.fromEntries(photoThumbs)} damageNote={gateIn.damage_note} stacked hideVideos />
+          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} thumbs={Object.fromEntries(photoThumbs)} stacked hideVideos damageElsewhere />
         </div>
         {dirty ? <p className="text-xs font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
         {gateIn.dash_cam ? <p className="text-xs font-semibold">Dash cam fitted: it will be disconnected as per the terms and conditions.</p> : null}
       </section>
+      <DamageSection damage={damage} />
       <details className="rounded-lg border border-[#D4D4D8]">
         <summary className="cursor-pointer min-h-12 flex items-center px-4 text-sm font-bold">Check-in details</summary>
         <div className="px-4 pb-4 text-sm grid grid-cols-[9rem_1fr] sm:grid-cols-[12rem_1fr] gap-y-1">

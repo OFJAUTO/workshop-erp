@@ -132,6 +132,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "bodyshop_electrical", label: "Bodyshop: an electrical reset for the electricians", locked: true },
   { type: "bodyshop_booked", label: "Bodyshop: a quotation was approved before the car arrived", locked: true },
   { type: "bodyshop_problem", label: "Bodyshop: a team leader raised a problem (bodyshop manager and the advisor)", locked: true },
+  { type: "damage_found_after", label: "Damage found on a car after check-in: tell the customer (the advisor in charge)", locked: true },
   { type: "bodyshop_problem_answered", label: "Bodyshop: the manager answered your problem", locked: true },
   { type: "comeback", label: "A comeback job needs a cause or the owner's decision", locked: true },
   { type: "inspection_fee_request", label: "An inspection fee below AED 750 asked (owner decides)", locked: true },

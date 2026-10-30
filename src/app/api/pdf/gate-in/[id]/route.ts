@@ -8,6 +8,9 @@ import { JOB_DEPARTMENTS } from "@/lib/inspection";
 import { can, type RoleId } from "@/lib/roles";
 import { describeMileage } from "@/lib/mileage";
 import { renderGateInPdf } from "@/lib/pdf/gate-in-pdf";
+import { damagePdfData } from "@/lib/pdf/damage-pdf";
+import { damageCountWords } from "@/lib/damage";
+import { loadCarDamage } from "@/lib/damage-data";
 import { pdfResponse } from "@/lib/pdf/response";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -27,6 +30,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   if (!card || !card.gateIn) return new NextResponse("Not found.", { status: 404 });
   const { job, vehicle, customerPublic, gateIn, requests, media, mediaUrls, approvals, gateOut } = card;
   const settings = await getSettings();
+  const damage = await loadCarDamage(id, { media, urls: mediaUrls });
 
   const details: [string, string][] = [
     ["Department", JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label ?? "Not set"],
@@ -36,8 +40,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     [vehicle.fuel_type === "electric" ? "Battery" : "Fuel level", vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : "") : labelOf(FUEL_LEVELS, gateIn.fuel_level)],
     ["Cleanliness", labelOf(CLEANLINESS, gateIn.cleanliness)],
     ["Dash cam", gateIn.dash_cam ? "Fitted, to be disconnected" : "Not fitted"],
-    ["Major damage", gateIn.major_damage ? "Yes" : "No"],
-    ...(gateIn.damage_note ? ([["Damage note", gateIn.damage_note]] as [string, string][]) : []),
+    ["Damage noted", damageCountWords(damage)],
     ["Mileage", describeMileage(gateIn.mileage, gateIn.mileage_unit ?? "km")],
     ["Keys", `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}`],
     ["Old parts returned to customer", gateIn.old_parts_return ? "Yes" : "No"],
@@ -55,7 +58,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
 
   const isVideo = (k: string) => k === "video" || k === "video_exterior" || k === "video_interior";
   const wanted = media
-    .filter((m) => !isVideo(m.kind))
+    // Damage photos print in the damage block, next to their panel.
+    .filter((m) => !isVideo(m.kind) && m.kind !== "damage_photo")
     .map((m) => ({
       url: mediaUrls.get(m.storage_path) ?? "",
       label: [MEDIA_KIND_LABELS[m.kind], isWheelKind(m.kind) && m.wheel_condition?.length ? wheelConditionText(m.wheel_condition) : null, m.caption].filter(Boolean).join(" · "),
@@ -110,6 +114,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     gateOut: gateOutRows,
     photos,
     videoCount: media.filter((m) => isVideo(m.kind)).length,
+    damage: await damagePdfData(damage),
     printedBy: staff.display_name,
     printedAt: formatDateTime(new Date().toISOString()),
   });

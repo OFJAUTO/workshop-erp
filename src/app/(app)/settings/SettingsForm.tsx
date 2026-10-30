@@ -6,6 +6,7 @@ import { STAGE_LABELS, STAGES } from "@/lib/jobs";
 import { DEFAULT_DOC_LIMITS, DOC_HINTS, DOC_KEYS, DOC_LABELS } from "@/lib/doc-reminder-defs";
 import { DEFAULT_REASONS, REASON_CONTEXTS } from "@/lib/reasons";
 import { TonePicker } from "./TonePicker";
+import { DEFAULT_DAMAGE_FOUND } from "@/lib/damage";
 
 const DAYS: { id: string; label: string }[] = [
   { id: "mon", label: "Mon" },
@@ -210,6 +211,9 @@ export function SettingsForm({
             </Field>
             <Field label="WhatsApp approval message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_approval_template" defaultValue={v.whatsapp_approval_template} rows={4} required />
+            </Field>
+            <Field label="WhatsApp: damage found after check-in" hint="Sent when the team records damage found after the car arrived. Placeholders: [name], [make model], [plate], [damage], [link].">
+              <Textarea name="whatsapp_damage_found_template" defaultValue={v.whatsapp_damage_found_template || DEFAULT_DAMAGE_FOUND} rows={4} data-damage-found-template />
             </Field>
             <Field label="WhatsApp inspection report message" hint="Sent with the customer's link to the approved report. Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_report_template" defaultValue={v.whatsapp_report_template} rows={3} required />

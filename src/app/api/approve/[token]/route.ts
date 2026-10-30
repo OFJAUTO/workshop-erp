@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isQuickJob } from "@/lib/inspection-fee";
 import { jobAdvisorIds, notifyManagers, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { damageSnapshot } from "@/lib/damage";
+import { damageSnapshotReady, loadCarDamage } from "@/lib/damage-data";
 
 /** Records the customer's approval: name, time, and the exact terms shown. Then tells the advisor and the workshop manager. */
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
@@ -26,9 +28,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   if (req.approved_at) return back();
 
   const now = new Date().toISOString();
+  // Section 4.5 (30 October 2026): what the customer confirmed - the damage marked at check-in and its photos - is kept
+  // with the approval, so a later change to the gate-in never changes what was agreed.
+  const snapshot = (await damageSnapshotReady()) ? await loadCarDamage(req.job_id).then((d) => ({ damage_snapshot: damageSnapshot(d, now, d.marks) })).catch(() => ({})) : {};
   const { error } = await admin
     .from("approval_requests")
-    .update({ approved_at: now, approver_name: name, status: "approved", opened_at: now })
+    .update({ approved_at: now, approver_name: name, status: "approved", opened_at: now, ...snapshot })
     .eq("id", req.id);
   if (error) return back("Something went wrong. Please try again.");
 
