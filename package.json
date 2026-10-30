@@ -53,6 +53,7 @@
     "test:supinv": "node --env-file=.env.local tests/browser/test-supplierinvoice.mjs",
     "test:sim": "node --env-file=.env.local tests/browser/sim-e2e.mjs",
     "test:security": "node --env-file=.env.local tests/security-check.mjs",
+    "test:embeds": "node --env-file=.env.local tests/embed-check.mjs",
     "test:comp": "node --env-file=.env.local tests/browser/test-complimentary.mjs",
     "test:docdiscount": "node --env-file=.env.local tests/browser/test-docdiscount.mjs",
     "test:assign": "node --env-file=.env.local tests/browser/test-assign.mjs",

@@ -37,7 +37,7 @@ export async function loadHandover(token: string, settings: Settings): Promise<H
     approvedKinds(job.id),
     job.bodyshop_after_photo_id ? admin.from("job_files").select("storage_path").eq("id", job.bodyshop_after_photo_id).maybeSingle() : Promise.resolve({ data: null }),
     job.final_check_appointment_id ? admin.from("appointments").select("starts_at, status").eq("id", job.final_check_appointment_id).maybeSingle() : Promise.resolve({ data: null }),
-    job.gated_in_by ? admin.from("staff").select("display_name, staff_private(phone)").eq("id", job.gated_in_by).maybeSingle() : Promise.resolve({ data: null }),
+    job.gated_in_by ? admin.from("staff").select("display_name, staff_private!staff_private_staff_id_fkey(phone)").eq("id", job.gated_in_by).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const pictures = await signCarPictures([job.vehicle?.photo_path]);
   const beforeUrl = job.vehicle?.photo_path ? (pictures.get(job.vehicle.photo_path) ?? null) : null;

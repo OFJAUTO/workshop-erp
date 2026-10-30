@@ -47,7 +47,7 @@ export async function loadPartsSpeed(): Promise<PartsSpeed> {
     admin.from("purchase_orders").select("created_at, created_by, job_id, number").eq("kind", "main").gte("created_at", from).limit(500),
     admin.from("purchase_orders").select("id, number, supplier_name, approved_at, ordered_at, ordered_by, job_id").in("kind", ["supplier", "stock"]).not("ordered_at", "is", null).not("approved_at", "is", null).gte("ordered_at", from).limit(800),
     admin.from("purchase_order_lines").select("expected_date, received_at, po:purchase_orders!inner(supplier_name)").not("received_at", "is", null).not("expected_date", "is", null).gte("received_at", from).limit(2000),
-    admin.from("part_items").select("issue_confirmed_at, issue_confirmed_by, received_qty, updated_at, po_line_id, line:purchase_order_lines(received_at)").not("issue_confirmed_at", "is", null).gte("issue_confirmed_at", from).eq("is_active", true).limit(2000),
+    admin.from("part_items").select("issue_confirmed_at, issue_confirmed_by, received_qty, updated_at, po_line_id, line:purchase_order_lines!part_items_po_line_id_fkey(received_at)").not("issue_confirmed_at", "is", null).gte("issue_confirmed_at", from).eq("is_active", true).limit(2000),
     admin.from("staff").select("id, display_name"),
   ]);
   const names = new Map(((staff ?? []) as { id: string; display_name: string }[]).map((s) => [s.id, s.display_name]));
