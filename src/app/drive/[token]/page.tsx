@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { tripByToken, tripCar } from "@/lib/delivery";
+import { tripByToken, tripCar, tripContact } from "@/lib/delivery";
+import { companyFromSettings } from "@/lib/company";
+import { formatPhone } from "@/lib/messages";
+import { getSettings } from "@/lib/settings";
 import { priceHistoryOf, scheduleWords } from "@/lib/recovery";
 import { DriveClient } from "./DriveClient";
 
@@ -31,15 +34,36 @@ export default async function DrivePage({ params }: { params: Promise<{ token: s
       </main>
     );
   }
-  const car = await tripCar(trip);
+  const [car, contact, settings] = await Promise.all([tripCar(trip), tripContact(trip), getSettings()]);
+  const officePhone = companyFromSettings(settings).phone || null;
+  const digits = (p: string) => p.replace(/[^\d]/g, "");
   return (
     <main className="min-h-screen bg-white text-[#111113]">
-      <div className="mx-auto w-full max-w-md px-5 pt-6">
-        <p className="text-2xl font-extrabold">{car.plate || "OFJ Automotive"}</p>
-        {car.car ? <p className="text-lg font-bold">{car.car}</p> : null}
-        <p className="text-base font-semibold text-[#5F6368]">{scheduleWords(trip.scheduled_date, trip.scheduled_slot)}{trip.location_details ? ` · ${trip.location_details}` : ""}</p>
+      <div className="mx-auto flex w-full max-w-md flex-col gap-3 px-5 pt-6">
+        <div>
+          <p className="text-2xl font-extrabold">{car.plate || "OFJ Automotive"}</p>
+          {car.car ? <p className="text-lg font-bold">{car.car}</p> : null}
+          <p className="text-base font-semibold text-[#5F6368]">{scheduleWords(trip.scheduled_date, trip.scheduled_slot)}</p>
+        </div>
+        {/* 30 October 2026: the driver calls the customer - for HIS OWN open trip only, never after it is done. */}
+        {contact && (contact.name || contact.phone || contact.address || contact.mapUrl) ? (
+          <div className="flex flex-col gap-2 rounded-2xl border-2 border-[#111113] p-4" data-drive-contact>
+            {contact.name ? <p className="text-xl font-extrabold uppercase" data-drive-customer>{contact.name}</p> : null}
+            {contact.phone ? (
+              <>
+                <p className="text-base font-semibold text-[#5F6368]">{formatPhone(contact.phone)}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <a href={`tel:${contact.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-3 text-lg font-extrabold text-white" data-drive-call>Call</a>
+                  <a href={`https://wa.me/${digits(contact.phone)}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-xl bg-[#1b6b2f] px-3 text-lg font-extrabold text-white" data-drive-whatsapp>WhatsApp</a>
+                </div>
+              </>
+            ) : null}
+            {contact.address ? <p className="text-base font-bold" data-drive-address>{contact.address}</p> : null}
+            {contact.mapUrl ? <a href={contact.mapUrl} target="_blank" rel="noreferrer" className="flex min-h-12 items-center justify-center rounded-xl border-2 border-[#111113] px-3 text-base font-extrabold" data-drive-map>Open the map</a> : null}
+          </div>
+        ) : null}
       </div>
-      <DriveClient token={token} kind={trip.kind} loadedAt={trip.loaded_at ?? null} />
+      <DriveClient token={token} kind={trip.kind} loadedAt={trip.loaded_at ?? null} officePhone={officePhone ? formatPhone(officePhone) : null} />
     </main>
   );
 }

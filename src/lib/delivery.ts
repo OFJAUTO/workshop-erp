@@ -151,17 +151,15 @@ export async function driverMessageFor(trip: TripRow): Promise<string> {
  * The driver pressed his one button: the photo and his price land on the trip, the trip is claimed, and a delivery
  * closes the job ("Delivered hh:mm"). The link is dead afterwards.
  */
-export async function completeTripByDriver(token: string, input: { bytes: Buffer; contentType: string; price: number }): Promise<{ ok: true; kind: "delivery" | "pickup" } | { error: string }> {
+export async function completeTripByDriver(token: string, input: TripPhotoInput & { price: number }): Promise<{ ok: true; kind: "delivery" | "pickup" } | { error: string; code?: TripErrorCode }> {
   const admin = createAdminClient();
   const trip = await tripByToken(token);
-  if (!trip) return { error: "This link is no longer valid." };
-  if (trip.delivered_at) return { error: "Already done, thank you." };
-  if (!(input.price > 0) || input.price > 100000) return { error: "Enter the price in AED." };
-  if (!input.bytes.length || input.bytes.length > 25 * 1024 * 1024) return { error: "The photo did not come through. Try again." };
-  const ext = input.contentType.includes("png") ? "png" : input.contentType.includes("webp") ? "webp" : "jpg";
-  const path = `recovery/${trip.id}-${Date.now()}.${ext}`;
-  const { error: upErr } = await admin.storage.from("job-files").upload(path, input.bytes, { contentType: input.contentType || "image/jpeg", upsert: false });
-  if (upErr) return { error: "The photo could not be saved. Try again." };
+  if (!trip) return { error: "This link is no longer valid.", code: "link" };
+  if (trip.delivered_at) return { error: "Already done, thank you.", code: "done" };
+  if (!(input.price > 0) || input.price > 100000) return { error: "Enter the price in AED.", code: "price" };
+  const stored = await tripPhoto(trip, "final", input);
+  if ("error" in stored) return stored;
+  const path = stored.path;
   const now = new Date().toISOString();
   await admin.from("recovery_trips").update({ delivered_at: now, photo_path: path, price_aed: Math.round(input.price * 100) / 100, price_at: now, status: "claimed", updated_by: trip.created_by }).eq("id", trip.id);
   const car = await tripCar(trip);
@@ -181,17 +179,15 @@ export async function completeTripByDriver(token: string, input: { bytes: Buffer
 
 /** Section 7 (21 October 2026): the pick-up's FIRST step - the driver pressed "Car loaded" with the photo.
  *  The trip stamps loaded_at, the advisor is told, and the page moves to "Delivered to OFJ". Idempotent. */
-export async function markTripLoadedByDriver(token: string, input: { bytes: Buffer; contentType: string }): Promise<{ ok: true } | { error: string }> {
+export async function markTripLoadedByDriver(token: string, input: TripPhotoInput): Promise<{ ok: true } | { error: string; code?: TripErrorCode }> {
   const admin = createAdminClient();
   const trip = await tripByToken(token);
-  if (!trip) return { error: "This link is no longer valid." };
-  if (trip.delivered_at) return { error: "Already done, thank you." };
+  if (!trip) return { error: "This link is no longer valid.", code: "link" };
+  if (trip.delivered_at) return { error: "Already done, thank you.", code: "done" };
   if (trip.loaded_at) return { ok: true };
-  if (!input.bytes.length || input.bytes.length > 25 * 1024 * 1024) return { error: "The photo did not come through. Try again." };
-  const ext = input.contentType.includes("png") ? "png" : input.contentType.includes("webp") ? "webp" : "jpg";
-  const path = `recovery/${trip.id}-loaded-${Date.now()}.${ext}`;
-  const { error: upErr } = await admin.storage.from("job-files").upload(path, input.bytes, { contentType: input.contentType || "image/jpeg", upsert: false });
-  if (upErr) return { error: "The photo could not be saved. Try again." };
+  const stored = await tripPhoto(trip, "loaded", input);
+  if ("error" in stored) return stored;
+  const path = stored.path;
   const now = new Date().toISOString();
   await admin.from("recovery_trips").update({ loaded_at: now, loaded_photo_path: path, updated_by: trip.created_by }).eq("id", trip.id);
   const car = await tripCar(trip);
@@ -200,6 +196,92 @@ export async function markTripLoadedByDriver(token: string, input: { bytes: Buff
     await notifyStaff(car.advisorIds, { type: "delivery", title: `Car loaded · ${car.jobNumber ?? ""}`, body: `${car.plate}: ${trip.driver_name ?? "the driver"} pressed Car loaded with the photo; on the way to OFJ.`, jobId: trip.job_id, href: `/jobs/${trip.job_id}` });
   } else {
     await notifyRoles(["owner"], { type: "delivery", title: `Car loaded: ${car.plate || trip.location_details || "pick-up"}`, body: `${trip.driver_name ?? "The driver"} pressed Car loaded; on the way to OFJ.`, jobId: null, href: "/recovery" });
+  }
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* The driver's photo, sent straight to storage (30 October 2026)                                                 */
+/* ------------------------------------------------------------------------------------------------------------ */
+
+/** Why a driver's step was refused: the link is dead (call OFJ), already done (fine), the price, or the photo is not there yet (send it again). */
+export type TripErrorCode = "link" | "done" | "price" | "photo";
+/** The photo of a step: already in storage under the trip's own name (the shared uploader), or in the request (an old page). */
+export type TripPhotoInput = { path: string; contentType: string } | { bytes: Buffer; contentType: string };
+
+/** The storage name a step's photo must carry: recovery/<trip>-<step>-<id>.jpg. */
+export function tripPhotoPrefix(tripId: string, step: "loaded" | "final" | "office"): string {
+  return `recovery/${tripId}-${step}-`;
+}
+
+/** A signed address to send a step's photo straight to storage (never through a server function). */
+export async function prepareTripPhoto(tripId: string, step: "loaded" | "final" | "office", contentType: string): Promise<{ path: string; url: string } | { error: string }> {
+  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : contentType.includes("heic") ? "heic" : "jpg";
+  const path = `${tripPhotoPrefix(tripId, step)}${crypto.randomUUID()}.${ext}`;
+  const { data, error } = await createAdminClient().storage.from("job-files").createSignedUploadUrl(path);
+  if (error || !data) return { error: "Could not prepare the upload." };
+  return { path: data.path, url: data.signedUrl };
+}
+
+async function tripPhoto(trip: TripRow, step: "loaded" | "final", input: TripPhotoInput): Promise<{ path: string } | { error: string; code: TripErrorCode }> {
+  const admin = createAdminClient();
+  if ("path" in input) {
+    // Only this trip's own photo, and only one that really arrived.
+    if (!input.path.startsWith(tripPhotoPrefix(trip.id, step)) || input.path.includes("..")) return { error: "The photo did not arrive. It is sent again.", code: "photo" };
+    const name = input.path.slice("recovery/".length);
+    const { data } = await admin.storage.from("job-files").list("recovery", { search: name, limit: 5 });
+    if (!(data ?? []).some((o) => o.name === name)) return { error: "The photo did not arrive. It is sent again.", code: "photo" };
+    return { path: input.path };
+  }
+  if (!input.bytes.length || input.bytes.length > 25 * 1024 * 1024) return { error: "The photo did not come through. Try again.", code: "photo" };
+  const ext = input.contentType.includes("png") ? "png" : input.contentType.includes("webp") ? "webp" : "jpg";
+  const path = `${tripPhotoPrefix(trip.id, step)}${Date.now()}.${ext}`;
+  const { error: upErr } = await admin.storage.from("job-files").upload(path, input.bytes, { contentType: input.contentType || "image/jpeg", upsert: false });
+  if (upErr) return { error: "The photo could not be saved. Try again.", code: "photo" };
+  return { path };
+}
+
+/**
+ * The driver needs to call the customer (30 October 2026, an exception to the customer-privacy rule): for HIS OWN open
+ * trip only - the customer's name and phone, the pickup address and pin, the car. Nothing once the trip is done, and
+ * nothing else about the customer (no history, invoices or other cars).
+ */
+export async function tripContact(trip: TripRow): Promise<{ name: string | null; phone: string | null; address: string | null; mapUrl: string | null } | null> {
+  if (trip.delivered_at) return null;
+  const car = await tripCar(trip);
+  return { name: car.customerName, phone: car.customerPhone, address: trip.location_details, mapUrl: trip.location_url };
+}
+
+/**
+ * The office's backup when the driver could not press his button (30 October 2026): the advisor or the owner marks
+ * "Car loaded" or "Delivered to OFJ" (a delivery: delivered to the customer), with the photo if he has one. Logged as
+ * marked by the office; the driver's price, if any, follows on the Recovery page.
+ */
+export async function officeTripStep(tripId: string, step: "loaded" | "delivered", photoPath: string | null, actor: { id: string; display_name: string }): Promise<{ ok: true } | { error: string }> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("recovery_trips").select(TRIP_SELECT).eq("id", tripId).eq("is_active", true).maybeSingle();
+  const trip = (data as TripRow | null) ?? null;
+  if (!trip) return { error: "Trip not found." };
+  if (trip.delivered_at) return { error: "This trip is already done." };
+  if (photoPath) {
+    if (!photoPath.startsWith(tripPhotoPrefix(trip.id, "office")) || photoPath.includes("..")) return { error: "That photo does not belong to this trip." };
+    const name = photoPath.slice("recovery/".length);
+    const { data: objs } = await admin.storage.from("job-files").list("recovery", { search: name, limit: 5 });
+    if (!(objs ?? []).some((o) => o.name === name)) return { error: "The photo did not arrive. Add it again." };
+  }
+  const now = new Date().toISOString();
+  const car = await tripCar(trip);
+  if (step === "loaded") {
+    if (trip.kind !== "pickup") return { error: "Only a pick-up has a Car loaded step." };
+    await admin.from("recovery_trips").update({ loaded_at: trip.loaded_at ?? now, ...(photoPath ? { loaded_photo_path: photoPath } : {}), updated_by: actor.id }).eq("id", trip.id);
+  } else {
+    if (trip.kind === "delivery" && trip.job_id) return { error: "A delivery to the customer is marked on the car's gate-out page (it closes the job)." };
+    await admin.from("recovery_trips").update({ delivered_at: now, marked_by: actor.id, ...(photoPath ? { photo_path: photoPath } : {}), updated_by: actor.id }).eq("id", trip.id);
+  }
+  if (trip.job_id) {
+    if (photoPath) await admin.from("job_files").insert({ job_id: trip.job_id, kind: "delivery_photo", storage_path: photoPath, content_type: "image/jpeg", caption: step === "loaded" ? "Car loaded (added by the office)" : "Delivered to OFJ (added by the office)", uploaded_by: actor.id }).then(() => null, () => null);
+    await admin.from("job_events").insert({ job_id: trip.job_id, event_type: "delivery", note: `${step === "loaded" ? "Car loaded" : "Delivered to OFJ"} marked by ${actor.display_name} for the driver${photoPath ? ", with the photo" : ""}`, created_by: actor.id });
+    await notifyStaff(car.advisorIds.filter((x) => x !== actor.id), { type: "delivery", title: `${step === "loaded" ? "Car loaded" : "Delivered to OFJ"} (marked by ${actor.display_name}) · ${car.jobNumber ?? ""}`, body: `${car.plate}: marked from the office; the driver's price follows on the Recovery page.`, jobId: trip.job_id, href: "/recovery" });
   }
   return { ok: true };
 }

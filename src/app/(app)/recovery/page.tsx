@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { can } from "@/lib/roles";
+import { TripOfficeBackup } from "@/components/TripOfficeBackup";
+import { officeTripStepAction } from "@/app/(app)/jobs/delivery-actions";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -36,6 +39,8 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
   const canDecide = (role === "owner" || role === "accounts") && !staff.viewingAs;
   // Advisors see the trips list only: date, kind, car, who, the pin and the photo. Never a price, a km cost or a total.
   const seesMoney = role === "owner" || role === "accounts";
+  // 30 October 2026: the office marks a step for a driver who could not press his button.
+  const canMark = can(role, "gateOut") && !staff.viewingAs;
   const { message, error, month: monthParam, who: whoParam } = await searchParams;
   const month = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7);
   const admin = createAdminClient();
@@ -172,6 +177,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                       onMarkSent={markTripSentById.bind(null, t.id)}
                     />
                   ) : null}
+                  {!t.delivered_at && canMark ? <TripOfficeBackup tripId={t.id} kind={t.kind} loadedAt={t.loaded_at} action={officeTripStepAction.bind(null, t.id)} /> : null}
                   {t.marked_by && price === null && canDecide ? (
                     <form action={setTripPrice.bind(null, t.id)} className="flex flex-wrap items-center gap-2">
                       <Input name="price" inputMode="decimal" placeholder="Driver's price (AED)" className="w-40 min-h-9" data-trip-price-box />

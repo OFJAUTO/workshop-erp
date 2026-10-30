@@ -3,14 +3,18 @@
 import { useRef, useState } from "react";
 import { Lightbox } from "./Lightbox";
 import { PhotoButton } from "./PhotoButton";
-import { putWithProgress, reportUploadFailure, type UploadStep } from "@/lib/upload-client";
+import { putWithProgress, reportUploadFailure, shrinkPhoto, type UploadStep } from "@/lib/upload-client";
 
 export type JobFile = { id: string; path: string; url: string | null; caption?: string | null; contentType?: string | null };
 
 const STEP_TIMEOUT_MS = 60_000;
 
-async function uploadOne(jobId: string, kind: string, refId: string | null, file: File, onProgress: (p: number) => void, caption?: string): Promise<JobFile> {
-  const type = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+async function uploadOne(jobId: string, kind: string, refId: string | null, original: File, onProgress: (p: number) => void, caption?: string): Promise<JobFile> {
+  const originalType = original.type || (original.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+  // 30 October 2026: a photo is shrunk on the phone first (the shared rule: 2000 px, JPEG 80%, about 0.5 MB).
+  const small = originalType.startsWith("image/") ? await shrinkPhoto(original) : { blob: original as Blob, type: originalType, shrunk: false };
+  const file = small.blob;
+  const type = small.type;
   let step: UploadStep = "prepare";
   try {
     const prep = await fetch("/api/files/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, contentType: type }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
@@ -19,10 +23,10 @@ async function uploadOne(jobId: string, kind: string, refId: string | null, file
     step = "upload";
     await putWithProgress(p.url, file, type, onProgress);
     step = "register";
-    const reg = await fetch("/api/files/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind, refId, path: p.path, contentType: type, caption: caption ?? (type === "application/pdf" ? file.name.slice(0, 120) : undefined) }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+    const reg = await fetch("/api/files/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind, refId, path: p.path, contentType: type, caption: caption ?? (type === "application/pdf" ? original.name.slice(0, 120) : undefined) }), signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
     const r = (await reg.json()) as { ok?: boolean; id?: string; url?: string | null; error?: string };
     if (!reg.ok || !r.ok || !r.id) throw new Error(r.error ?? "Could not record the file.");
-    return { id: r.id, path: p.path, url: r.url ?? null, caption: caption ?? (type === "application/pdf" ? file.name : null), contentType: type };
+    return { id: r.id, path: p.path, url: r.url ?? null, caption: caption ?? (type === "application/pdf" ? original.name : null), contentType: type };
   } catch (err) {
     reportUploadFailure({ jobId, kind: `job_${kind}`, step, error: err, sizeBytes: file.size, contentType: type, extra: { refId } });
     throw err;

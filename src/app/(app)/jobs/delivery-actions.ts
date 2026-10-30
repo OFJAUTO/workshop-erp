@@ -305,3 +305,13 @@ export async function markTripSentById(tripId: string) {
   if (!t.sent_at) await admin.from("recovery_trips").update({ sent_at: new Date().toISOString(), updated_by: staff.id }).eq("id", tripId);
   revalidatePath("/recovery");
 }
+
+/** 30 October 2026: the office marks a trip's step for the driver (Car loaded / Delivered to OFJ), with the photo if there is one. */
+export async function officeTripStepAction(tripId: string, step: "loaded" | "delivered", photoPath: string | null): Promise<{ error?: string; ok?: boolean }> {
+  const staff = await requirePermission("gateOut");
+  if (staff.viewingAs) return { error: "View only." };
+  const { officeTripStep } = await import("@/lib/delivery");
+  const r = await officeTripStep(tripId, step === "loaded" ? "loaded" : "delivered", photoPath, staff);
+  revalidatePath("/recovery");
+  return "error" in r ? { error: r.error } : { ok: true };
+}
