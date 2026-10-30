@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { damagedPanelsOf } from "@/lib/damage-data";
 import { invoicesForLock } from "@/lib/quote-lock-server";
 import { DeclinedAllButton } from "@/components/DeclinedAllButton";
 import { anyApproved } from "@/lib/quote-history";
@@ -265,6 +266,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
 
       <QuoteEditor
         comp={await compJobChoices(q, bundle.job as { comeback_free?: boolean } | null)}
+        damagePanels={await damagedPanelsOf(q.job_id)}
         quotation={q}
         lines={bundle.lines}
         parts={bundle.parts}

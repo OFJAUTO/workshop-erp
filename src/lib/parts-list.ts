@@ -37,7 +37,7 @@ export type CatalogueRow = {
 };
 
 /** The owner's order of the pool's categories in every picker; a category not listed goes at the end, alphabetically. */
-export const CATEGORY_ORDER = ["Servicing", "Brakes", "Wheels and tyres", "Suspension and steering", "Engine", "Fuel and exhaust", "Cooling", "Air conditioning", "Transmission and driveline", "Electrical", "Other"] as const;
+export const CATEGORY_ORDER = ["Servicing", "Brakes", "Wheels and tyres", "Suspension and steering", "Engine", "Fuel and exhaust", "Cooling", "Air conditioning", "Transmission and driveline", "Electrical", "Body", "Glass", "Interior", "Other"] as const;
 
 export function sortCategories(categories: string[]): string[] {
   const rank = (c: string) => {

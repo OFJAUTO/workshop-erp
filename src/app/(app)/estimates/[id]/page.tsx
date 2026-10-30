@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { damagedPanelsOf } from "@/lib/damage-data";
 import Link from "next/link";
 import { installerHistoryFor } from "@/lib/bodyshop";
 import { packagesOf } from "@/lib/packages";
@@ -117,6 +118,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
       ) : null}
       <QuoteEditor
         comp={await compJobChoices(q, null)}
+        damagePanels={await damagedPanelsOf(q.job_id)}
         ownerBox={<OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} />}
         discountBy={discountBy}
         viewerName={staff.display_name}

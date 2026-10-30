@@ -407,6 +407,10 @@ export async function POST(request: NextRequest) {
     }
     const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, positions: reqPositions, catalogue_id: reqCatalogue, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp });
     if (error) return NextResponse.json({ ok: !!/client_key/.test(error.message), error: /client_key/.test(error.message) ? undefined : error.message }, { status: /client_key/.test(error.message) ? 200 : 500 });
+    if (reqCatalogue) {
+      const { data: row } = await admin.from("part_catalogue").select("usage_count").eq("id", reqCatalogue).maybeSingle();
+      if (row) await admin.from("part_catalogue").update({ usage_count: (Number(row.usage_count) || 0) + 1 }).eq("id", reqCatalogue);
+    }
     await notifyRoles(["parts"], { type: "parts_request", title: `Part to price · ${job?.job_number ?? ""}`, body: `${description} × ${qty}, asked by ${staff.display_name} on ${q.number}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     await refreshed();
     return NextResponse.json({ ok: true });

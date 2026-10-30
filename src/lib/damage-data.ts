@@ -1,5 +1,6 @@
 import "server-only";
-import { buildCarDamage, type CarDamage } from "./damage";
+import { buildCarDamage, cleanDamageAfter, type CarDamage } from "./damage";
+import { CAR_PANELS, cleanPanelMarks } from "./car-outline";
 import { GATE_IN_BUCKET } from "./media";
 import { thumbsFor } from "./media-urls";
 import { schemaReady } from "./schema-ready";
@@ -33,4 +34,22 @@ export async function loadCarDamage(jobId: string, have?: { media?: MediaRow[]; 
   }
   const thumbs = await thumbsFor(GATE_IN_BUCKET, paths);
   return { ...buildCarDamage({ marks: row.damage_panels, after: row.damage_after, note: row.damage_note ?? null, media, urls, thumbs }), marks: row.damage_panels ?? {} };
+}
+
+/** The panels marked damaged on a job, in outline order: the gate-in marks, what was found after, and the bodyshop findings (section 7.4). */
+export async function damagedPanelsOf(jobId: string | null | undefined): Promise<string[]> {
+  if (!jobId) return [];
+  const admin = createAdminClient();
+  const after = await damageAfterReady();
+  const [{ data: gi }, { data: findings }] = await Promise.all([
+    admin.from("gate_ins").select(after ? "damage_panels, damage_after" : "damage_panels").eq("job_id", jobId).maybeSingle(),
+    admin.from("bodyshop_findings").select("panel").eq("job_id", jobId).eq("is_active", true),
+  ]);
+  const row = (gi ?? {}) as { damage_panels?: unknown; damage_after?: unknown };
+  const keys = new Set<string>([
+    ...Object.keys(cleanPanelMarks(row.damage_panels)),
+    ...cleanDamageAfter(row.damage_after).map((a) => a.panel),
+    ...((findings ?? []) as { panel: string }[]).map((f) => f.panel),
+  ]);
+  return CAR_PANELS.map((p) => p.key).filter((k) => keys.has(k));
 }

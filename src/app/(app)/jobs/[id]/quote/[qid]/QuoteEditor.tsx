@@ -29,6 +29,7 @@ import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimat
 import { parseNumber } from "@/lib/price-import";
 import { CompBox } from "@/app/(app)/quotes/CompBox";
 import { PackageItemsToggle } from "@/components/PackageItemsToggle";
+import { damagePartSuggestions } from "@/lib/body-parts";
 import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/complimentary";
 import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
@@ -319,6 +320,7 @@ export function QuoteEditor({
   viewerName = null,
   lock = null,
   comp = null,
+  damagePanels = [],
 }: {
   quotation: QuoteRow;
   lines: QuoteLine[];
@@ -367,6 +369,8 @@ export function QuoteEditor({
   ownerBox?: ReactNode;
   /** Section 5 (30 October 2026): the complimentary box - the earlier jobs to pick from, and whether the owner already decided (a free comeback). Null until the database has it. */
   comp?: { jobs: { id: string; label: string }[]; decidedComeback: boolean } | null;
+  /** Section 7.4: the panels marked damaged on this car, offered first in "+ Add a part" with their side. */
+  damagePanels?: string[];
   /** Who gave the labour discount (B3): the words on the line follow them, not the person looking. */
   discountBy?: { name: string; owner: boolean } | null;
   /** The person on screen: a discount changed here and not yet reloaded is theirs. */
@@ -1918,6 +1922,8 @@ export function QuoteEditor({
         <PartPicker
           title="Add a part"
           catalogue={catalogue}
+          suggested={damagePartSuggestions(damagePanels)}
+          suggestedLabel="From the damage list"
           selected={[]}
           itemKey={null}
           source="custom"
