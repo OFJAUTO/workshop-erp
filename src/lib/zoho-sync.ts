@@ -577,7 +577,7 @@ async function moveOldTestInvoice(org: string, found: ZohoInvoice, number: strin
   if ((await zohoBooksNow()).wentLive) return null;
   if (!TEST_CUSTOMER_NAME.test(found.customer_name ?? "")) return null;
   const renamed = `${number}-OLDTEST`;
-  await zohoFetch(`/invoices/${found.invoice_id}?ignore_auto_number_generation=true`, { org, method: "PUT", body: { customer_id: found.customer_id, invoice_number: renamed } });
+  await zohoFetch(`/invoices/${found.invoice_id}?ignore_auto_number_generation=true`, { org, method: "PUT", body: { customer_id: found.customer_id, invoice_number: renamed, reason: "OFJ ERP test invoice renamed to free its number for a real invoice (OFJ TEST only)" } });
   return renamed;
 }
 
