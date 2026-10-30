@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { customerWarrantyStatus, customerWarrantyTitle } from "@/lib/warranty";
 import { CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { PackageCard } from "@/components/PackageCard";
 import { packageDocOf } from "@/lib/packages";
@@ -146,7 +147,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
         {invoice.notes ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{invoice.notes}</p> : null}
         {workmanship ? <p className="rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-workmanship><span className="font-bold">Workmanship warranty: {workmanship.period}, valid until {formatDate(workmanship.until)}</span></p> : null}
-        {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={wCard.status} /> : null}
+        {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={{ kind: customerWarrantyStatus(wCard.status).kind, title: customerWarrantyTitle(wCard.status) }} /> : null}
         {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}
         {bundle.lines.filter((l) => l.section === "services" && !!l.package_items).map((l) => {
           const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null), decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });

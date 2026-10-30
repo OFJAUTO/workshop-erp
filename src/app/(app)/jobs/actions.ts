@@ -1,6 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { feeInputFrom, feeNoticeTexts } from "@/lib/inspection-fee";
+import { FEE_VAT_PERCENT, saveFeeChoice } from "@/lib/inspection-fee-server";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { revalidatePath } from "next/cache";
@@ -8,7 +10,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
-import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, labelOf, type JobStatus, feeNotice } from "@/lib/jobs";
+import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, labelOf, type JobStatus } from "@/lib/jobs";
 import { addTechnician, applyStageSideEffects } from "@/lib/work-flow";
 import { ensureInspection } from "@/lib/inspection-data";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
@@ -316,20 +318,11 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
   if (error) return { error: error.message, values };
   const dept = String(formData.get("department") ?? "");
   if (["mechanical", "bodyshop", "both"].includes(dept)) await supabase.from("jobs").update({ department: dept }).eq("id", jobId);
-  // Section 8: the inspection fee can change until the customer approves the job card, then it is locked.
-  const feeRaw = String(formData.get("inspection_fee") ?? "").replace(/[^\d.]/g, "");
-  if (feeRaw !== "") {
-    const asked = Math.max(0, Math.round(Number(feeRaw)));
-    const current = Number(job.inspection_fee_aed) || 0;
-    if (asked !== current) {
-      if (job.first_approval_at) return { error: "The inspection fee is locked: the customer already approved the job card with it.", values };
-      if (asked < 750 && staff.role_id !== "owner") {
-        await createAdminClient().from("jobs").update({ inspection_fee_request_aed: asked, inspection_fee_request_by: staff.id, updated_by: staff.id }).eq("id", jobId);
-        await notifyRoles(["owner"], { type: "inspection_fee_request", title: `Inspection fee below 750 asked · ${job.job_number}`, body: `${staff.display_name} asked for AED ${asked.toLocaleString("en-GB")}${asked === 0 ? " (waived)" : ""}. Approve or keep the current fee on the job card.`, jobId, href: `/jobs/${jobId}` });
-      } else {
-        await createAdminClient().from("jobs").update({ inspection_fee_aed: asked, inspection_fee_request_aed: null, inspection_fee_request_by: null, updated_by: staff.id }).eq("id", jobId);
-      }
-    }
+  // 30 October 2026: the fee choice changes until the customer approves the job card (THE rule: saveFeeChoice); then it
+  // is locked and only the owner changes it on the job card, with a reason.
+  if (String(formData.get("fee_choice") ?? "") && !job.first_approval_at) {
+    const saved = await saveFeeChoice(jobId, feeInputFrom((k) => String(formData.get(k) ?? "")), staff, await getSettings());
+    if ("error" in saved) return { error: saved.error, values };
   }
   await supabase.from("vehicles").update({ mileage_unit: d.mileage_unit }).eq("id", (await supabase.from("jobs").select("vehicle_id").eq("id", jobId).maybeSingle()).data?.vehicle_id ?? "");
 
@@ -398,12 +391,24 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   if (phone.length < 7) return { error: "Choose or enter the phone number to send to.", values };
 
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, status, is_open, job_number, inspection_fee_aed").eq("id", jobId).maybeSingle();
-  if (!job || !job.is_open) return { error: "This job is closed.", values };
+  const { data: job0 } = await supabase.from("jobs").select("id, status, is_open, job_number, first_approval_at").eq("id", jobId).maybeSingle();
+  if (!job0 || !job0.is_open) return { error: "This job is closed.", values };
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
   if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos must be uploaded before the approval link can be created.", values };
 
   const settings = await getSettings();
+  // 30 October 2026: the fee choice is required on the link (Inspection fee with its amount, or No inspection fee with
+  // the reason); it is saved on the job and copied onto the link exactly as the customer will see it.
+  if (!job0.first_approval_at) {
+    const fee = feeInputFrom((k) => String(formData.get(k) ?? ""));
+    const saved = await saveFeeChoice(jobId, fee, staff, settings);
+    if ("error" in saved) return { error: saved.error, values };
+  }
+  const { data: job } = await createAdminClient().from("jobs").select("id, job_number, inspection_fee_aed, inspection_fee_choice").eq("id", jobId).maybeSingle();
+  if (!job) return { error: "This job is closed.", values };
+  const noFee = job.inspection_fee_choice === "none";
+  const feeAmount = noFee ? 0 : Number(job.inspection_fee_aed ?? settings.inspection_fee_aed) || 0;
+  const notices = noFee ? null : feeNoticeTexts({ en: settings.inspection_fee_notice, ar: settings.inspection_fee_notice_ar }, feeAmount, FEE_VAT_PERCENT);
   const terms = String(settings.terms_and_conditions ?? "").trim();
   if (!terms) return { error: "Add the terms and conditions text in Settings first.", values };
 
@@ -423,10 +428,11 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
       terms_text_ar: blankToNull(settings.terms_and_conditions_ar),
       declaration_text: settings.declaration_text,
       declaration_text_ar: settings.declaration_text_ar,
-      // Section 8: the fee chosen for THIS car at gate-in (falls back to the Settings default).
-      inspection_fee_aed: Number(job.inspection_fee_aed ?? settings.inspection_fee_aed) || 0,
-      inspection_fee_notice: feeNotice(settings.inspection_fee_notice, job.inspection_fee_aed ?? settings.inspection_fee_aed),
-      inspection_fee_notice_ar: feeNotice(settings.inspection_fee_notice_ar, job.inspection_fee_aed ?? settings.inspection_fee_aed),
+      // The fee chosen for THIS car, with VAT as the customer sees it; no fee = no notice at all.
+      inspection_fee_aed: feeAmount,
+      inspection_fee_notice: notices?.en ?? null,
+      inspection_fee_notice_ar: notices?.ar ?? null,
+      no_fee: noFee,
     })
     .select("id")
     .single();
@@ -566,4 +572,15 @@ export async function decideInspectionFee(jobId: string, formData: FormData) {
   if (job.inspection_fee_request_by) await notifyStaff([job.inspection_fee_request_by], { type: "inspection_fee_request", title: `Inspection fee · ${job.job_number}`, body: approve ? `The owner approved AED ${asked.toLocaleString("en-GB")}.` : `The owner kept AED ${Number(job.inspection_fee_aed).toLocaleString("en-GB")}.`, jobId, href: `/jobs/${jobId}` });
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=` + encodeURIComponent(approve ? `Inspection fee set to AED ${asked.toLocaleString("en-GB")}.` : "Lower fee refused: the current fee stands."));
+}
+
+/** 30 October 2026: the owner changes the inspection fee after the customer approved the job card, with a reason (logged). */
+export async function ownerChangeInspectionFee(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePermission("sendApproval");
+  const values = formValues(formData);
+  if (staff.role_id !== "owner" || staff.viewingAs) return { error: "Only the owner changes the fee after the customer's approval.", values };
+  const saved = await saveFeeChoice(jobId, feeInputFrom((k) => String(formData.get(k) ?? "")), staff, await getSettings(), { ownerReason: String(formData.get("owner_reason") ?? "") });
+  if ("error" in saved) return { error: saved.error, values };
+  refresh(jobId);
+  return { success: saved.changed ? "Inspection fee changed (logged)." : "Nothing changed.", values: {} };
 }

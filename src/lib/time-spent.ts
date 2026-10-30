@@ -21,6 +21,8 @@ export type TimeSpent = {
   sellRate: number;
   worth: number;
   inWorkshop: { from: string | null; to: string | null; minutes: number };
+  /** 30 October 2026: the free PPF recheck visits of this job, a cost of THIS job ("Recheck: 1.2 h · AED 60.00"). */
+  recheck?: { minutes: number; cost: number; film: number; words: string; visits: { id: string; number: string }[] } | null;
 };
 
 const mins = (a: string | null | undefined, b: string | null | undefined) => (a && b ? Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 60000)) : null);
@@ -106,5 +108,9 @@ export async function timeSpentFor(jobIds: string[], settings: Settings, now = D
 }
 
 export async function timeSpentOf(jobId: string, settings: Settings): Promise<TimeSpent | null> {
-  return (await timeSpentFor([jobId], settings)).get(jobId) ?? null;
+  const t = (await timeSpentFor([jobId], settings)).get(jobId) ?? null;
+  if (!t) return null;
+  const { recheckCostsFor, recheckCostWords } = await import("./recheck");
+  const r = (await recheckCostsFor([jobId], settings)).get(jobId);
+  return r ? { ...t, recheck: { minutes: r.minutes, cost: r.cost, film: r.film, words: recheckCostWords(r), visits: r.visits } } : t;
 }

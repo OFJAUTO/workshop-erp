@@ -55,6 +55,7 @@ begin
   delete from public.commission_payments where recipient ilike 'e2e %';
   delete from public.notifications where job_id = any(job_ids);
   delete from public.audit_log where (new_data->>'job_id') = any(job_ids::text[]) or (old_data->>'job_id') = any(job_ids::text[]) or (new_data->>'id') = any(job_ids::text[]) or (old_data->>'id') = any(job_ids::text[]) or record_id = any(job_ids::text[]);
+  delete from public.aftercare_checks where job_id = any(job_ids);
   delete from public.jobs where id = any(job_ids);
   delete from public.declined_work where vehicle_id = any(veh_ids);
   delete from public.vehicles where id = any(veh_ids);
@@ -109,6 +110,7 @@ begin
   end loop;
   delete from public.notifications where job_id = any(job_ids);
   delete from public.audit_log where (new_data->>'job_id') = any(job_ids::text[]) or (old_data->>'job_id') = any(job_ids::text[]) or (new_data->>'id') = any(job_ids::text[]) or (old_data->>'id') = any(job_ids::text[]) or record_id = any(job_ids::text[]);
+  delete from public.aftercare_checks where job_id = any(job_ids);
   delete from public.jobs where id = any(job_ids);
   delete from public.declined_work where vehicle_id = any(veh_ids);
   delete from public.qr_links where vehicle_id = any(veh_ids);

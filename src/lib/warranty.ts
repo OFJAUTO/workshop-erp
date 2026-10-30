@@ -136,3 +136,33 @@ export function warrantyStatusOf(i: { handoverDay: string | null; check: Afterca
   if (daysBetween(i.handoverDay, i.today) >= NOT_ACTIVATED_AFTER_DAYS) return { kind: "not_activated", title: "Not activated – 10-day after-care check not completed", detail: null, checkDate: null, manual: null, reminders, due: null };
   return { kind: "pending", title: "Pending activation – complete your 10-day check", detail: null, checkDate: null, manual: null, reminders, due: c.due_date };
 }
+
+const longDay = (iso: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Dubai" }).format(new Date(iso));
+
+/** "Final check done on 30 Oct 2026 ✓" once the PPF final check is done, else null. */
+export function finalCheckDoneWords(s: Pick<WarrantyStatus, "checkDate">): string | null {
+  return s.checkDate ? `Final check done on ${longDay(s.checkDate)} ✓` : null;
+}
+
+/**
+ * What the CUSTOMER sees (30 October 2026): the warranty is Active from the handover, with "Final check done on <date> ✓"
+ * once the free final check is done. A check not done (or never done) shows them nothing - no "pending", no
+ * "not activated"; the staff see "Final check not done" (staffFinalCheckWords).
+ */
+export function customerWarrantyStatus(s: WarrantyStatus): { kind: WarrantyStatusKind; title: string; finalCheck: string | null } {
+  if (s.kind === "before_handover") return { kind: s.kind, title: s.title, finalCheck: null };
+  return { kind: "active", title: "Active ✓", finalCheck: finalCheckDoneWords(s) };
+}
+
+/** What the staff see about the final check: done with its date, or "Final check not done" while one is owed. */
+export function staffFinalCheckWords(s: WarrantyStatus): string | null {
+  const done = finalCheckDoneWords(s);
+  if (done) return done;
+  return s.kind === "pending" || s.kind === "not_activated" ? "Final check not done" : null;
+}
+
+/** One line for a panel or a PDF: "Active ✓ · Final check done on 30 Oct 2026 ✓" (or just "Active ✓"). */
+export function customerWarrantyTitle(s: WarrantyStatus): string {
+  const c = customerWarrantyStatus(s);
+  return c.finalCheck ? `${c.title} · ${c.finalCheck}` : c.title;
+}

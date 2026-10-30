@@ -1,4 +1,5 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { finalChecksToBook } from "@/lib/recheck";
 import { jobCustomersFor, jobPeopleFor } from "@/lib/customer-data";
 import {Card, SectionLabel} from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -173,6 +174,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   });
 
   // "Proformas to send" and "Awaiting payment" fold into the one WAITING ON YOU box.
+  // 30 October 2026: a PPF job delivered the set days ago (Settings, default 10) whose free final check is not booked yet.
+  const finalChecks: ExtraWaiting[] = role === "service_advisor" || role === "owner" ? (await finalChecksToBook(settings, role === "owner" ? null : staff.id)).map((c) => ({ jobId: c.jobId, plate: c.plate, car: c.car || null, what: `Book the PPF final check · ${c.number}, delivered ${c.deliveredOn}`, amount: null, actionLabel: "Message the customer", href: `/jobs/${c.jobId}#warranty-card`, always: true, urgency: "amber" as const, hint: "The free 10-day final check after the PPF job: send the message (ready on the job card) and book the visit. It leaves this list when the car is gated in for its PPF RECHECK." })) : [];
   const moneyWaiting: ExtraWaiting[] = [
     ...toSend.map((j) => {
       const r = rows.find((x) => x.id === j.id)!;
@@ -191,7 +194,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <LiveRefresh tables={["jobs", "gate_ins", "invoices"]} showUpdated />
       <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
-      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? moneyWaiting : []} />
+      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks] : []} />
 
       {role === "owner" && profit ? (
         <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />

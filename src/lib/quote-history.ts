@@ -31,16 +31,25 @@ export type QuoteVersionRow = {
   created_at: string;
   created_by: string | null;
   token: string | null;
+  /** Estimates (30 October 2026): the car, the estimate it adds to, the job it was carried over to, why it was cancelled. */
+  vehicle_id?: string | null;
+  additional_to_id?: string | null;
+  carried_job_id?: string | null;
+  cancel_reason?: string | null;
 };
 
 export type QuoteFamily = {
   number: string;
-  role: "original" | "additional";
+  /** A job: the first number is the ORIGINAL, later ones ADDITIONAL. Estimates: ADDITIONAL when made as one, ORIGINAL when one adds to it, else single (no chip). */
+  role: "original" | "additional" | "single";
   /** Versions oldest first; `current` is the newest. */
   versions: QuoteVersionRow[];
   current: QuoteVersionRow;
   /** The amount shown on the row: the approved total once approved, else the rounded (or plain) total. */
   amount: number;
+  /** Estimates: the number this one adds to, and the job it was carried over to at gate-in. */
+  addsTo?: string | null;
+  carriedTo?: { id: string; number: string } | null;
 };
 
 /** What a version is worth on a row. */
@@ -68,6 +77,13 @@ export function quoteFamilies(rows: QuoteVersionRow[]): QuoteFamily[] {
 }
 
 const WAITING = ["pending_owner", "sent", "opened", "urgent_requested"];
+
+/**
+ * An estimate still waiting for its car (30 October 2026): accepted by the customer, or still being prepared or with
+ * the customer, and not carried to a job. The ONE list for the "already has an open estimate" question and the gate-in
+ * carry-over.
+ */
+export const OPEN_ESTIMATE_STATUSES = ["approved", "draft", "pending_owner", "sent", "opened", "urgent_requested"];
 
 /** "Approved so far AED X · Waiting for approval AED Y · Declined AED Z". */
 export function quoteMoney(families: QuoteFamily[]): { approved: number; waiting: number; declined: number } {
@@ -108,6 +124,8 @@ export function statusWords(v: QuoteVersionRow): string {
       return "Waiting for the owner's approval";
     case "superseded":
       return "Replaced by a newer version";
+    case "cancelled":
+      return `Cancelled${v.cancel_reason ? `: ${v.cancel_reason}` : ""}`;
     case "draft":
       return v.token ? "Link made, not sent yet" : "Being prepared";
     default:
@@ -169,10 +187,50 @@ export function anyApproved(families: QuoteFamily[]): boolean {
 }
 
 /** One row of the "2 quotations" picker on a car card or a visit row. */
-export type QuotePickItem = { number: string; role: "original" | "additional"; words: string; amount: string; href: string; versions: number };
+export type QuotePickItem = { number: string; role: QuoteFamily["role"]; words: string; amount: string; href: string; versions: number };
 
 /** The picker rows of a job: each quotation number opening its newest version. */
 export function pickItems(jobId: string, families: QuoteFamily[]): QuotePickItem[] {
   const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return families.map((f) => ({ number: f.number, role: f.role, words: statusWords(f.current), amount: money(f.amount), href: `/jobs/${jobId}/quote/${f.current.id}`, versions: f.versions.length }));
 }
+
+/**
+ * The estimates of one car (30 October 2026), oldest first, every number with its versions, the way a job's
+ * quotations are listed. An estimate made with "Make an additional estimate" is ADDITIONAL (it names the one it adds
+ * to); the estimate it adds to is the ORIGINAL; a lone estimate has no chip. Nothing is left out but deleted drafts.
+ */
+export function estimateFamilies(rows: QuoteVersionRow[], jobNumbers: Map<string, string>): QuoteFamily[] {
+  const byNumber = new Map<string, QuoteVersionRow[]>();
+  for (const r of rows) {
+    if (r.kind !== "estimate") continue;
+    const list = byNumber.get(r.number) ?? [];
+    list.push(r);
+    byNumber.set(r.number, list);
+  }
+  const numberOfId = new Map(rows.map((r) => [r.id, r.number]));
+  const addsToOf = (list: QuoteVersionRow[]) => {
+    const id = list.find((v) => v.additional_to_id)?.additional_to_id ?? null;
+    return id ? (numberOfId.get(id) ?? null) : null;
+  };
+  const targets = new Set(Array.from(byNumber.values()).map(addsToOf).filter((n): n is string => !!n));
+  const families = Array.from(byNumber.entries()).map(([number, list]) => {
+    const versions = [...list].sort((a, b) => a.version - b.version);
+    const current = versions[versions.length - 1];
+    const addsTo = addsToOf(versions);
+    const carriedId = versions.map((v) => v.carried_job_id).find((x) => !!x) ?? null;
+    const role: QuoteFamily["role"] = addsTo ? "additional" : targets.has(number) ? "original" : "single";
+    return { number, role, versions, current, amount: amountOf(current), addsTo, carriedTo: carriedId ? { id: carriedId, number: jobNumbers.get(carriedId) ?? "the job" } : null, first: versions[0].created_at };
+  });
+  families.sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : a.number.localeCompare(b.number)));
+  return families.map((f) => ({ number: f.number, role: f.role, versions: f.versions, current: f.current, amount: f.amount, addsTo: f.addsTo, carriedTo: f.carriedTo }));
+}
+
+/** The customer's copy of an additional estimate: "In addition to estimate E-00035" ("(accepted 30 Oct)" once accepted). */
+export function additionalEstimateLine(base: { number: string; acceptedOn: string | null } | null): string | null {
+  if (!base) return null;
+  return `In addition to estimate ${base.number}${base.acceptedOn ? ` (accepted ${base.acceptedOn})` : ""}`;
+}
+
+/** "30 Oct" in Dubai. */
+export const dubaiDay = day;

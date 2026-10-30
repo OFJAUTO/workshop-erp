@@ -1,4 +1,5 @@
 import "server-only";
+import { estimateTaskWords, loadEstimatesToPrice } from "./estimate-parts-data";
 import type { ExtraWaiting } from "@/components/WaitingPanel";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
@@ -13,6 +14,24 @@ const aed = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
  * approval, with the button opening that LPO's card (Copy, PDF, Email, Mark ordered).
  */
 export async function partsWaitingExtra(): Promise<ExtraWaiting[]> {
+  // 30 October 2026: estimates to price (the car not here yet) and advisors' prices to check come first.
+  const estimates: ExtraWaiting[] = (await loadEstimatesToPrice()).map((e) => ({
+    jobId: `est:${e.id}`,
+    plate: e.plate,
+    car: e.car || null,
+    what: `ESTIMATE ${e.number} – car not here yet: ${estimateTaskWords(e)}`,
+    amount: null,
+    actionLabel: e.toPrice ? "Price the parts" : "Check the price",
+    href: `/parts/estimate/${e.id}`,
+    always: true,
+    urgency: e.toPrice ? "amber" : "grey",
+    since: e.since,
+    hint: "The advisor's estimate before the car arrives: price each part he named, or check the price he typed.",
+  }));
+  return [...estimates, ...(await orderNowItems())];
+}
+
+async function orderNowItems(): Promise<ExtraWaiting[]> {
   const admin = createAdminClient();
   const { data: pos } = await admin
     .from("purchase_orders")

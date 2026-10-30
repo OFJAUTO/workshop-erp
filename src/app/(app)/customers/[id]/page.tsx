@@ -8,6 +8,9 @@ import { createClient } from "@/lib/supabase/server";
 import { formatPlate, type CustomerContactRow, type CustomerRow, type VehicleRow } from "@/lib/types";
 import { addContact, setContactActive, setContactApproval, setCustomerActive } from "../actions";
 import { ContactForm } from "./ContactForm";
+import { QuotationList } from "@/components/QuotationList";
+import { loadEstimateHistory } from "@/lib/quote-history-data";
+import type { QuoteFamily } from "@/lib/quote-history";
 
 export default async function CustomerPage({
   params,
@@ -45,6 +48,9 @@ export default async function CustomerPage({
   const c = cData as CustomerRow;
   const contacts = (contactsData ?? []) as CustomerContactRow[];
   const cars = (carsData ?? []) as unknown as (VehicleRow & { make: { name: string } | null; model: { name: string } | null })[];
+  // 30 October 2026: every estimate of the customer, per car, with its versions (the same list as a job's quotations).
+  const estimatesByCar = can(staff.role_id as RoleId, "viewEstimates") ? await loadEstimateHistory({ customerId: id }) : new Map<string, QuoteFamily[]>();
+  const estimateCount = Array.from(estimatesByCar.values()).reduce((n, list) => n + list.length, 0);
 
   return (
     <>
@@ -122,6 +128,25 @@ export default async function CustomerPage({
               </div>
             )}
           </section>
+
+          {can(staff.role_id as RoleId, "viewEstimates") ? (
+            <section className="flex flex-col gap-3" data-customer-estimates={estimateCount}>
+              <SectionLabel right={`${estimateCount}`}>Estimates</SectionLabel>
+              {estimateCount === 0 ? (
+                <p className="text-sm text-muted">No estimates yet.</p>
+              ) : (
+                Array.from(estimatesByCar.entries()).map(([vehicleId, families]) => {
+                  const car = cars.find((v) => v.id === vehicleId);
+                  return (
+                    <Card key={vehicleId || "none"} className="flex flex-col gap-2" data-customer-estimates-car={vehicleId}>
+                      <span className="text-sm font-bold">{car ? <Link href={`/vehicles/${car.id}`} className="hover:underline underline-offset-4">{formatPlate(car)} · {[car.make?.name, car.model?.name].filter(Boolean).join(" ")}</Link> : "No car"}</span>
+                      <QuotationList kind="estimate" families={families} canQuote={false} jobOpen={false} />
+                    </Card>
+                  );
+                })
+              )}
+            </section>
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-6">

@@ -15,7 +15,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { execSync } from "node:child_process";
-import { base, browserFor, cleanupDb, go, here, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
+import { base, browserFor, chooseInspectionFee, cleanupDb, go, here, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "addest");
@@ -45,6 +45,9 @@ async function finish() {
   cleanupDb();
   await sql("select setval('public.estimate_number_seq', greatest(1, coalesce((select max(substring(number from 3)::int) from public.quotations where number ~ '^E-[0-9]+$'), 1)))");
   await sql("select setval('public.quotation_number_seq', greatest(1, coalesce((select max(substring(number from 3)::int) from public.quotations where number ~ '^Q-[0-9]+$'), 1)))");
+  // The test customers and the test gate-in used real customer and job numbers: given back too.
+  await sql("select setval('public.customer_number_seq', greatest(1, coalesce((select max(substring(customer_number from 3)::int) from public.customers where customer_number ~ '^C-[0-9]+$'), 1)))");
+  await sql("select setval('public.job_number_seq', greatest(1, coalesce((select max(substring(job_number from 3)::int) from public.jobs where job_number ~ '^J-[0-9]+$'), 1)))");
   console.log(`numbering back: E max ${maxE}, Q max ${maxQ} before the run`);
 }
 
@@ -150,6 +153,127 @@ try {
       const made = newId ? (await sql("select number, customer_id, vehicle_id from public.quotations where id = $1", [newId]))[0] : null;
       check(`C [Make an additional estimate] made one for the same customer and car (removed again at the end)`, !!made && made.customer_id === real.customer_id && made.vehicle_id === real.vehicle_id, made?.number ?? "nothing");
       await page.screenshot({ path: path.join(SHOTS, `C-real-additional-made-1440x900.png`) });
+      await browser.close();
+    }
+  }
+
+  /* ---------------- D and E: one customer, one car, an accepted estimate (two versions) and an additional one ---------------- */
+  if (want("D") || want("E")) {
+    const t = await testCustomer("E2e Carry Customer", "+971500000085", ["85001"]);
+    const car = t.cars[0];
+    // E1: version 1 replaced by version 2, accepted by the customer. E2: made as an additional estimate to E1, opened by the customer, not accepted yet.
+    const e1v1 = await openEstimate(t.cust, car, "sent", 700);
+    await sql("update public.quotations set status = 'superseded' where id = $1", [e1v1.id]);
+    const e1 = (await sql("insert into public.quotations (kind, number, version, parent_id, customer_id, vehicle_id, status, token, validity_days, sent_at, valid_until, responded_at, approver_name, total_aed, approved_total_aed, created_by, updated_by) values ('estimate', $1, 2, $2, $3, $4, 'sent', 'e2eaddest' || floor(random()*1e9)::text, 7, now(), now() + interval '6 days', now(), 'E2e Carry Customer', 735, 735, $5, $5) returning id, number, token", [e1v1.number, e1v1.id, t.cust, car, advisor]))[0];
+    await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, hours, labour_rate, line_total, created_by, updated_by) values ($1, 1, 'labour', 'E2e brake service', 'manual', 1, 2, 350, 700, $2, $2)", [e1.id, advisor]);
+    // Approved only after its line is in: the approved-quotation lock refuses lines on an approved quotation.
+    await sql("update public.quotations set status = 'approved' where id = $1", [e1.id]);
+    const e2 = (await sql("insert into public.quotations (kind, customer_id, vehicle_id, status, token, validity_days, sent_at, opened_at, valid_until, total_aed, additional_to_id, created_by, updated_by) values ('estimate', $1, $2, 'opened', 'e2eaddest' || floor(random()*1e9)::text, 7, now(), now(), now() + interval '6 days', 1575, $3, $4, $4) returning id, number, token", [t.cust, car, e1v1.id, advisor]))[0];
+    await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, hours, labour_rate, line_total, created_by, updated_by) values ($1, 1, 'labour', 'E2e PPF bonnet', 'manual', 1, 3, 500, 1500, $2, $2)", [e2.id, advisor]);
+
+    if (want("D")) {
+      for (const [w, h] of [[1440, 900], [800, 1280]]) {
+        const { browser, page } = await browserFor("service_advisor", { viewport: { width: w, height: h }, touch: w < 1100 });
+        await go(page, `${base}/vehicles/${car}`);
+        const list = page.locator("[data-car-estimates]");
+        const rows = list.locator("[data-quote-row]");
+        const r1 = list.locator(`[data-quote-row="${e1.number}"]`);
+        const r2 = list.locator(`[data-quote-row="${e2.number}"]`);
+        check(`D ${w}x${h}: the car page lists BOTH estimates, ${e1.number} ORIGINAL (accepted, v2 of 2) and ${e2.number} ADDITIONAL "in addition to ${e1.number}"`, (await rows.count()) === 2 && (await r1.getAttribute("data-quote-role")) === "original" && (await r2.getAttribute("data-quote-role")) === "additional" && /Accepted/.test(await text(r1)) && /v2 of 2/.test(await text(r1)) && (await r2.locator(`[data-quote-adds-to="${e1.number}"]`).count()) === 1, `${await rows.count()} rows · ${await text(r1)} | ${await text(r2)}`);
+        check(`D ${w}x${h}: ${e1.number}'s versions are one pick away (v1 and v2)`, (await r1.locator('[data-quote-versions="2"]').count()) === 1);
+        await list.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: path.join(SHOTS, `D-car-page-estimates-${w}x${h}.png`), fullPage: true });
+        await go(page, `${base}/customers/${t.cust}`);
+        const cl = page.locator("[data-customer-estimates]");
+        check(`D ${w}x${h}: the customer page lists the same two estimates under the car`, (await cl.getAttribute("data-customer-estimates")) === "2" && (await cl.locator(`[data-quote-row="${e1.number}"]`).count()) === 1 && (await cl.locator(`[data-quote-row="${e2.number}"]`).count()) === 1);
+        await cl.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: path.join(SHOTS, `D-customer-page-estimates-${w}x${h}.png`), fullPage: true });
+        await browser.close();
+      }
+      // The customer's copy: the page and the PDF are titled Additional estimate, in addition to E1 (accepted).
+      const { browser: cb, page: cp } = await browserFor("owner", { viewport: { width: 420, height: 900 }, touch: true });
+      await cp.context().clearCookies();
+      await go(cp, `${base}/quote/${e2.token}`);
+      const body = ((await cp.textContent("body")) ?? "").replace(/\s+/g, " ");
+      check(`D the customer's link: "ADDITIONAL ESTIMATE" with "In addition to estimate ${e1.number} (accepted …)"`, /Additional estimate/i.test(body) && body.includes(`In addition to estimate ${e1.number} (accepted `), body.slice(0, 200));
+      await cp.screenshot({ path: path.join(SHOTS, "D-customer-link-additional-420.png"), fullPage: true });
+      await cb.close();
+      const pdf = Buffer.from(await (await fetch(`${base}/api/pdf/quote/${e2.token}`)).arrayBuffer());
+      const mupdf = await import("mupdf");
+      const doc = mupdf.Document.openDocument(pdf, "application/pdf");
+      let pdfText = "";
+      for (let i = 0; i < doc.countPages(); i++) pdfText += doc.loadPage(i).toStructuredText().asText() + "\n";
+      check(`D the PDF: "ADDITIONAL ESTIMATE" and "In addition to estimate ${e1.number}"`, /ADDITIONAL ESTIMATE/i.test(pdfText) && pdfText.includes(`In addition to estimate ${e1.number}`), pdfText.replace(/\s+/g, " ").slice(0, 160));
+      fs.writeFileSync(path.join(SHOTS, "D-additional-estimate.pdf"), pdf);
+    }
+
+    if (want("E")) {
+      // The gate-in, filled the way a person does it: both estimates are listed and ticked.
+      const pick = (page, name, value) => page.locator(`input[name="${name}"][value="${value}"]`).first().evaluate((el) => el.click());
+      const { browser, page } = await browserFor("owner", { viewport: { width: 1280, height: 900 } });
+      await go(page, `${base}/gate-in/new?vehicle=${car}`);
+      const carry = page.locator("[data-carry-estimates]");
+      const ticked = await page.locator('input[name="carry_estimate"]:checked').count();
+      check(`E gate-in lists BOTH open estimates of the car, ticked to carry over (${e1.number} accepted, ${e2.number} additional, not accepted yet)`, (await carry.getAttribute("data-carry-estimates")) === "2" && ticked === 2 && /additional to/.test(await text(carry)), await text(carry));
+      await carry.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(SHOTS, "E-gate-in-both-estimates-1280.png") });
+      await pick(page, "arrived_by", "customer_drove");
+      await pick(page, "condition", "runs_drives");
+      await pick(page, "fuel_level", "half");
+      await pick(page, "cleanliness", "clean");
+      await pick(page, "dash_cam", "no");
+      await pick(page, "major_damage", "no");
+      await pick(page, "keys_count", "1");
+      await pick(page, "keys_keychain", "no");
+      await pick(page, "old_parts_return", "no");
+      await pick(page, "department", "mechanical");
+      const addr = page.locator('textarea[name="location_address"]');
+      if (await addr.count()) await addr.fill("E2e test address");
+      await page.locator('input[name="mileage_display"]').pressSequentially("9500");
+      await page.keyboard.press("Tab");
+      await page.locator('input[name="requests"]:visible').first().pressSequentially("Brakes and PPF as estimated");
+      await chooseInspectionFee(page, 1000);
+      await sleep(400);
+      await page.getByText("Save and continue to photos and video").click();
+      await page.waitForURL((u) => /\/media/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+      const job = (await sql("select id, job_number, estimate_id from public.jobs where vehicle_id = $1 and is_open", [car]))[0];
+      const carried = job ? await sql("select number, version from public.quotations where carried_job_id = $1 order by created_at", [job.id]) : [];
+      check(`E the gate-in carried BOTH estimates over to the job (${e1.number} the original)`, !!job && carried.length >= 2 && job.estimate_id === e1.id, `${job?.job_number} · ${carried.map((c) => c.number).join(", ")} · job points at ${job?.estimate_id === e1.id ? "v2 (accepted)" : job?.estimate_id === e1v1.id ? "v1 (replaced)" : job?.estimate_id}`);
+      // The owner starts the quotation (before the inspection is approved, written down): each estimate becomes its own quotation.
+      await go(page, `${base}/jobs/${job.id}`);
+      await page.getByRole("button", { name: "Start quotation" }).first().click();
+      await page.waitForURL((u) => /\/quote\//.test(u.toString()), { timeout: 30000 }).catch(() => null);
+      const qs = await sql("select q.number, q.status, q.estimate_id, e.number as est, (select string_agg(title, ', ') from public.quotation_lines where quotation_id = q.id and is_active) as titles from public.quotations q join public.quotations e on e.id = q.estimate_id where q.job_id = $1 and q.kind = 'quotation' order by q.created_at", [job.id]);
+      check(`E Start quotation made TWO quotations: ${qs[0]?.number} from ${e1.number} (brakes) and ${qs[1]?.number} from ${e2.number} (PPF)`, qs.length === 2 && qs[0].est === e1.number && /E2e brake service/.test(qs[0].titles ?? "") && qs[1].est === e2.number && /E2e PPF bonnet/.test(qs[1].titles ?? ""), JSON.stringify(qs));
+      await go(page, `${base}/jobs/${job.id}`);
+      const ql = page.locator('[data-quotation-list][data-list-kind="quotation"]');
+      check("E the job card lists them as ORIGINAL and ADDITIONAL", (await ql.locator('[data-quote-role="original"]').count()) === 1 && (await ql.locator('[data-quote-role="additional"]').count()) === 1);
+      await ql.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(SHOTS, "E-job-card-two-quotations-1280.png") });
+      // The original came from an ACCEPTED estimate: "Confirm: nothing changed" approves it. The customer approves the additional one (as on its link).
+      await go(page, `${base}/jobs/${job.id}/quote/${(await sql("select id from public.quotations where job_id = $1 and estimate_id = $2", [job.id, job.estimate_id]))[0].id}`);
+      const confirmBtn = page.getByRole("button", { name: /Confirm: nothing changed/ });
+      if (await confirmBtn.count()) {
+        await confirmBtn.first().click();
+        await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+      }
+      const q1 = (await sql("select id, number, status, total_aed from public.quotations where job_id = $1 and estimate_id = $2", [job.id, job.estimate_id]))[0];
+      const q2 = (await sql("select id, number, status, total_aed from public.quotations where job_id = $1 and estimate_id = $2", [job.id, e2.id]))[0];
+      await sql("update public.quotations set status = 'approved', token = coalesce(token, 'e2eaddq' || floor(random()*1e9)::text), sent_at = now(), responded_at = now(), approver_name = 'E2e Carry Customer', approved_total_aed = total_aed where id = $1", [q2.id]);
+      check(`E the original ${q1.number} is approved from the accepted estimate`, q1.status === "approved", q1.status);
+      await go(page, `${base}/jobs/${job.id}`);
+      const money = await text(page.locator("[data-quote-money]"));
+      const both = Math.round((Number(q1.total_aed) + Number(q2.total_aed)) * 100) / 100;
+      check(`E the money counts EVERY approved quotation: "Approved so far AED ${both.toLocaleString("en-GB", { minimumFractionDigits: 2 })}"`, money.includes(`Approved so far AED ${both.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`), money);
+      await page.locator("[data-quote-money]").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(SHOTS, "E-job-card-both-approved-1280.png") });
+      await go(page, `${base}/jobs/${job.id}/invoice`);
+      const inv = ((await page.textContent("main")) ?? "").replace(/\s+/g, " ");
+      check("E the invoice draft takes the lines of BOTH approved quotations", /E2e brake service/i.test(inv) && /E2e PPF bonnet/i.test(inv), inv.slice(0, 160));
+      await page.screenshot({ path: path.join(SHOTS, "E-invoice-both-1280.png"), fullPage: true });
+      // Both estimates now say where they went, and no gate-in offers them again.
+      await go(page, `${base}/vehicles/${car}`);
+      check(`E the car page: both estimates "carried over to ${job.job_number}"`, (await page.locator(`[data-car-estimates] [data-quote-carried="${job.job_number}"]`).count()) === 2);
       await browser.close();
     }
   }

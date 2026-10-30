@@ -24,7 +24,7 @@ import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { JOB_FILE_SELECT, signJobFiles } from "@/lib/work-data";
-import { addStageAction, afterPhotoAction, assignAction, bookArrivalAction, clockAction, moveStageAction, notReadyAction, refitTickAction, removeStageAction, removedItemAction, reopenStageAction, requestDepositAction, setStageDueAction, signOffAction, stageDoneAction, startWorkAction, updatePhotoAction, updateSentAction } from "../actions";
+import { addStageAction, afterPhotoAction, assignAction, bookArrivalAction, clockAction, moveStageAction, notReadyAction, refitTickAction, removeStageAction, removedItemAction, reopenStageAction, requestDepositAction, setStageDueAction, signOffAction, stageDoneAction, startWorkAction, updatePhotoAction, updateSentAction, saveRecheckPointAction } from "../actions";
 import { consumablesShare, jobFilmCost, rollsWithUse } from "@/lib/film";
 import { bodyshopLabourBySection } from "@/lib/bodyshop";
 import { ceramicUsageAction, filmUsageAction, tintUsageAction } from "../rolls/actions";
@@ -44,6 +44,8 @@ import { TEAM_LABELS, TEAM_OF_SECTION, teamOf } from "@/lib/teams";
 import { StageHandover } from "@/components/StageHandover";
 import { ProblemButton } from "@/components/ProblemButton";
 import { bodyshopScopeOf, isBodyshopManagerScope, mayActOnSection, mayEnterProduct, maySignAftercare } from "@/lib/team-scope";
+import { RecheckChecklist } from "@/components/RecheckChecklist";
+import { recheckStateOf } from "@/lib/recheck";
 import { jobCeramicUsage } from "@/lib/film";
 import { AftercareSignoff } from "@/app/(app)/jobs/[id]/AftercareCard";
 import { signOffAftercare } from "@/app/(app)/jobs/aftercare-actions";
@@ -78,6 +80,9 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const canManage = !staff.viewingAs && (isOwner || isBodyshopManager);
   const canLead = !staff.viewingAs && (isOwner || isBodyshopManager || role === "team_leader");
   const scope = bodyshopScopeOf(staff);
+  // 30 October 2026: a PPF RECHECK (FREE) visit carries the final-check checklist of its original PPF job.
+  const recheck = job.job_kind === "recheck" ? await recheckStateOf(jobId) : null;
+  const recheckStage = recheck ? (stages.find((st) => st.key === "recheck") ?? null) : null;
   const managerScope = isBodyshopManagerScope(scope);
   const ownSection = (section: string) => mayActOnSection(scope, section);
   // THE shared picker's people: a team leader picks from their own team only (the leader first), managers from every bodyshop team.
@@ -221,8 +226,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
       {!booked && !job.bodyshop_started_at && job.is_open ? (
         <Card className="flex flex-col gap-2 border-ink">
           <SectionLabel>Not started yet</SectionLabel>
-          <p className="text-sm">{kinds.length ? "The stages are built from the approved packages when the gate-in photos are complete." : "No approved bodyshop packages yet: the quotation has to be approved first."}</p>
-          {canManage && kinds.length && !["approved", "waiting_parts"].includes(job.status) ? <form action={startWorkAction.bind(null, jobId)}><Button type="submit" size="md" data-start-work>Start the work now</Button></form> : null}
+          <p className="text-sm">{job.job_kind === "recheck" ? "PPF RECHECK (FREE): the PPF team's final check starts when the gate-in photos are complete." : kinds.length ? "The stages are built from the approved packages when the gate-in photos are complete." : "No approved bodyshop packages yet: the quotation has to be approved first."}</p>
+          {canManage && (kinds.length || job.job_kind === "recheck") && !["approved", "waiting_parts"].includes(job.status) ? <form action={startWorkAction.bind(null, jobId)}><Button type="submit" size="md" data-start-work>Start the work now</Button></form> : null}
           {["approved", "waiting_parts"].includes(job.status) ? <p className="text-sm"><Link href={`/jobs/${jobId}#planning`} className="font-semibold underline underline-offset-4">Release it to the bodyshop on the Planning card</Link> (start day and team).</p> : null}
         </Card>
       ) : null}
@@ -237,8 +242,20 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         </Card>
       ) : null}
 
+      {recheck ? (
+        <RecheckChecklist
+          jobId={jobId}
+          stageId={recheckStage?.id ?? null}
+          originalNumber={recheck.originalNumber}
+          points={recheck.points}
+          files={recheckStage ? photosOfStage(recheckStage.id) : []}
+          canEdit={!staff.viewingAs && mayActOnSection(scope, "ppf") && job.is_open}
+          done={recheck.doneAt}
+          save={saveRecheckPointAction.bind(null, jobId)}
+        />
+      ) : null}
       {/* Section 7 (23 October 2026): the pre-work check before PPF on the same car outline as the inspection. */}
-      <PanelMarker hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />
+      {recheck ? null : <PanelMarker hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />}
 
       {stages.length ? (
         <Card id="stages" className="flex flex-col gap-3" data-stages-card>

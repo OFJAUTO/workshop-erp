@@ -60,6 +60,8 @@ export const STAGE_DEFS: StageDef[] = [
   { key: "electrical", label: "Electrical reset", section: "electrical", hours: 1 },
   { key: "qc", label: "QC", section: "qc", hours: 1 },
   { key: "handover", label: "Handover", section: "handover", hours: 0.5 },
+  // 30 October 2026: the FREE 10-day final check after a PPF job, its own visit (job_kind 'recheck'), the PPF team.
+  { key: "recheck", label: "PPF final check (free)", section: "ppf", hours: 1 },
 ];
 export const stageDef = (key: string) => STAGE_DEFS.find((s) => s.key === key) ?? null;
 
@@ -71,6 +73,8 @@ export const stageDef = (key: string) => STAGE_DEFS.find((s) => s.key === key) ?
  */
 export function stageKeysFor(kinds: string[]): string[] {
   const k = new Set(kinds);
+  // A PPF recheck visit is one stage: the PPF team's final check (no handover sign-off, nothing to charge).
+  if (k.has("recheck")) return ["recheck"];
   const want = new Set<string>();
   const ppf = k.has("ppf") || k.has("coloured_ppf");
   const fullPaint = k.has("peelable_full") || k.has("respray");

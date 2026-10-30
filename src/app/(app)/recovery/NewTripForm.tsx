@@ -79,6 +79,8 @@ export function NewTripForm({ ourDriver, companies, action }: { ourDriver: Drive
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Location details<Input name="location_details" placeholder="Villa 23, gate 2" textCase="sentence" /></label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Date<Input type="date" name="date" defaultValue={today} /></label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Job number (optional)<Input name="job_number" placeholder="J-00123" textCase="upper" /></label>
+        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Person the driver calls<Input name="contact_name" placeholder="Customer, or the pick-up contact" textCase="title" data-trip-contact-name /></label>
+        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Their mobile<Input name="contact_phone" type="tel" inputMode="tel" placeholder="+971 50 123 4567" data-trip-contact-phone /></label>
       </div>
       <div><Button type="submit" size="lg" data-save-trip>{kind === "pickup" ? "Save the pick-up" : "Save the delivery"}</Button></div>
     </form>

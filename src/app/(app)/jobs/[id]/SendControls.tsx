@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
+import { InspectionFeeChoice } from "@/components/InspectionFeeChoice";
+import { checkFee, type FeeBounds, type FeeInput } from "@/lib/inspection-fee";
 import { Button, Field, Input } from "@/components/ui";
 import { formatDayTime } from "@/lib/format";
 import type { ApprovalRequestRow } from "@/lib/types";
@@ -94,7 +96,10 @@ export function ApprovalSendControl({
   customer,
   contacts,
   hidePhone = false,
+  fee = null,
 }: {
+  /** 30 October 2026: the inspection fee choice, required on the link (null once the customer approved). */
+  fee?: { initial: FeeInput; bounds: FeeBounds; isOwner: boolean } | null;
   jobId: string;
   canSend: boolean;
   complete: boolean;
@@ -117,6 +122,7 @@ export function ApprovalSendControl({
   const [name, setName] = useState(latest?.sent_to_name ?? customer?.name ?? "");
   const [created, setCreated] = useState<{ id: string; link: string } | null>(latest && !latest.approved_at ? { id: latest.id, link: latestShort ?? `${siteUrl}/approve/${latest.token}` } : null);
   const [error, setError] = useState<string | null>(null);
+  const [feeValue, setFeeValue] = useState<FeeInput | null>(fee?.initial ?? null);
   const [pending, start] = useTransition();
   const approved = !!(approvedAt || latest?.approved_at);
   const message = created ? messageTemplate.replaceAll("[name]", name || "Customer").replaceAll("[link]", created.link) : null;
@@ -131,6 +137,18 @@ export function ApprovalSendControl({
     const fd = new FormData();
     fd.set("sent_to_phone", phone);
     fd.set("sent_to_name", name);
+    if (feeValue) {
+      const check = fee ? checkFee(feeValue, fee.bounds, fee.isOwner) : null;
+      if (check && "error" in check) {
+        setError(check.error);
+        return;
+      }
+      fd.set("fee_choice", feeValue.choice ?? "");
+      fd.set("inspection_fee", feeValue.choice === "fee" && feeValue.amount !== null ? String(feeValue.amount) : "");
+      fd.set("no_fee_reason", feeValue.reason ?? "");
+      fd.set("no_fee_note", feeValue.note ?? "");
+      fd.set("inspection_type", feeValue.type);
+    }
     start(async () => {
       const res = await sendApproval(jobId, {}, fd);
       if (res.error || !res.values?.link || !res.values?.req) {
@@ -204,6 +222,7 @@ export function ApprovalSendControl({
               <Field label="Name of the person approving" optional>
                 <Input value={name} onChange={(e) => setName(e.target.value)} />
               </Field>
+              {fee ? <InspectionFeeChoice initial={fee.initial} bounds={fee.bounds} isOwner={fee.isOwner} onChange={setFeeValue} /> : null}
               {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
               <Button type="button" size="lg" className="w-full" disabled={pending} onClick={createLink}>
                 {pending ? "Creating the link…" : "Create link"}

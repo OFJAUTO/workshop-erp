@@ -1,4 +1,5 @@
 import "server-only";
+import { customerWarrantyTitle } from "@/lib/warranty";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import type { ReactNode } from "react";
 import { Image, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
@@ -189,7 +190,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
                   startNote={card.handoverDay ? `From the handover on ${formatDate(card.handoverDay)}` : "Starts on the handover day"}
                   rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: r.rollBatch ?? "—", cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
                 />
-                <WarrantyPanel logo={logo} qr={warrantyQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={card.status.title} />
+                <WarrantyPanel logo={logo} qr={warrantyQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={customerWarrantyTitle(card.status)} />
               </>
             ) : null}
           </>

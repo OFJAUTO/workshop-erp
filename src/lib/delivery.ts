@@ -11,9 +11,12 @@ import { notifyRoles, notifyStaff } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 
-export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by, road_km, km_source, km_error, recovery_kind, paid_month, original_price_aed, price_history";
+export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by, road_km, km_source, km_error, recovery_kind, paid_month, original_price_aed, price_history, contact_name, contact_phone";
 
 export type TripRow = {
+  /** The person the driver calls when the trip has no job, or a pick-up contact who is not the customer (30 October 2026). */
+  contact_name?: string | null;
+  contact_phone?: string | null;
   id: string; job_id: string | null; kind: "delivery" | "pickup"; company: string | null; driver_id: string | null;
   driver_name: string | null; driver_phone: string | null; truck_plate: string | null;
   location_url: string | null; location_details: string | null; lat: number | null; lng: number | null;
@@ -141,7 +144,9 @@ export async function tripCar(trip: TripRow): Promise<{ plate: string; car: stri
 
 /** The driver's WhatsApp text: the customer's pin and his one-button page as short links. */
 export async function driverMessageFor(trip: TripRow): Promise<string> {
-  const car = await tripCar(trip);
+  const job = await tripCar(trip);
+  // A trip without a job (a pick-up before gate-in) names the person on the trip itself (30 October 2026).
+  const car = { ...job, customerName: job.customerName ?? trip.contact_name ?? null, customerPhone: job.customerPhone ?? trip.contact_phone ?? null };
   const drive = await shortFor(`${PRODUCTION_SITE_URL}/drive/${trip.token}`, "drive");
   // The map pin stays a plain Google Maps link: the driver's app shows the map preview that way.
   return driverMessage({ plate: car.plate, car: car.car, kind: trip.kind, date: trip.scheduled_date, slot: trip.scheduled_slot, customerName: car.customerName, customerPhone: car.customerPhone, locationUrl: trip.location_url, locationDetails: trip.location_details }, { drive, map: trip.location_url });
@@ -246,10 +251,17 @@ async function tripPhoto(trip: TripRow, step: "loaded" | "final", input: TripPho
  * trip only - the customer's name and phone, the pickup address and pin, the car. Nothing once the trip is done, and
  * nothing else about the customer (no history, invoices or other cars).
  */
-export async function tripContact(trip: TripRow): Promise<{ name: string | null; phone: string | null; address: string | null; mapUrl: string | null } | null> {
+export async function tripContact(trip: TripRow): Promise<{ name: string | null; phone: string | null; other: { name: string | null; phone: string | null } | null; address: string | null; mapUrl: string | null } | null> {
   if (trip.delivered_at) return null;
   const car = await tripCar(trip);
-  return { name: car.customerName, phone: car.customerPhone, address: trip.location_details, mapUrl: trip.location_url };
+  const tripName = trip.contact_name ?? null;
+  const tripPhone = trip.contact_phone ?? null;
+  const name = car.customerName ?? tripName;
+  const phone = car.customerPhone ?? tripPhone;
+  // The pick-up contact, when it is someone else than the customer (another name or another number).
+  const digits = (p: string | null) => (p ?? "").replace(/\D/g, "").slice(-9);
+  const other = car.customerName && (tripName || tripPhone) && (digits(tripPhone) !== digits(car.customerPhone) || (tripName && tripName.toLowerCase() !== car.customerName.toLowerCase())) ? { name: tripName, phone: tripPhone } : null;
+  return { name, phone, other, address: trip.location_details, mapUrl: trip.location_url };
 }
 
 /**

@@ -8,6 +8,7 @@ import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { bodyshopPeople } from "./bodyshop";
 import { approvedQuotations } from "./quote-data";
+import { ppfInstallLine } from "./ppf-cut";
 
 /**
  * The complimentary 10-day after-care check on package jobs (20 October 2026). Booked by itself the
@@ -25,11 +26,17 @@ export async function ensureAftercare(jobId: string, by: string | null): Promise
   const admin = createAdminClient();
   const { data: existing } = await admin.from("aftercare_checks").select("id").eq("job_id", jobId).limit(1);
   if (existing?.length) return;
-  // A package with the after-care check on ANY approved quotation of the job (original or additional).
+  // A package with the after-care check, or (30 October 2026) ANY real PPF install - a PPF service from the list or a
+  // package with PPF film - on any approved quotation of the job. A PPF recheck visit never books another one.
+  const { data: kindRow } = await admin.from("jobs").select("job_kind").eq("id", jobId).maybeSingle();
+  if (kindRow?.job_kind === "recheck") return;
   const approved = await approvedQuotations(jobId);
   if (!approved.length) return;
-  const { data: pkgLines } = await admin.from("quotation_lines").select("package_items").in("quotation_id", approved.map((a) => a.id)).eq("is_active", true).not("package_items", "is", null);
-  const wants = (pkgLines ?? []).some((l) => (l.package_items as { aftercare_check?: boolean } | null)?.aftercare_check);
+  const { data: qLines } = await admin.from("quotation_lines").select("package_items, service_id, left_off").in("quotation_id", approved.map((a) => a.id)).eq("is_active", true);
+  const svcIds = Array.from(new Set((qLines ?? []).map((l) => l.service_id as string | null).filter((x): x is string => !!x)));
+  const { data: svcs } = svcIds.length ? await admin.from("services").select("id, bodyshop_kind").in("id", svcIds) : { data: [] };
+  const kindOf = new Map((svcs ?? []).map((s) => [s.id as string, (s.bodyshop_kind as string | null) ?? null]));
+  const wants = (qLines ?? []).some((l) => !l.left_off && ((l.package_items as { aftercare_check?: boolean } | null)?.aftercare_check || ppfInstallLine({ package_items: l.package_items }, kindOf.get((l.service_id as string | null) ?? "") ?? null)));
   if (!wants) return;
   const settings = await getSettings();
   const days = Number(settings.bodyshop_final_check_days) || 10;
@@ -67,6 +74,8 @@ export async function aftercareOf(jobId: string): Promise<{ due_date: string; do
 export async function aftercareHourly(opts: { jobIds?: string[] } = {}): Promise<{ reminded: number; overdue: number }> {
   const admin = createAdminClient();
   const today = dubaiDate();
+  // The first reminder comes two days before the final-check day set in Settings (10 → day 8, 30 October 2026).
+  const firstDay = Math.max(1, (Number((await getSettings()).bodyshop_final_check_days) || 10) - 2);
   let reminded = 0;
   let overdue = 0;
   let query = admin.from("aftercare_checks").select("id, job_id, due_date, reminded_at, reminded_12_at, reminded_20_at, done_at, activated_at, job:jobs(job_number, gated_out_at)").eq("is_active", true).is("done_at", null).is("activated_at", null);
@@ -76,7 +85,7 @@ export async function aftercareHourly(opts: { jobIds?: string[] } = {}): Promise
     const job = r.job as unknown as { job_number: string; gated_out_at: string | null } | null;
     if (!job?.gated_out_at) continue;
     const day = daysBetween(dubaiDay(job.gated_out_at), today);
-    const step = day >= 20 && !r.reminded_20_at ? { col: "reminded_20_at", title: `Third reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder (ready on the job card). After 30 days the warranty shows Not activated." } : day >= 12 && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_12_at", title: `Second reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder with the warranty link (ready on the job card)." } : day >= 8 && !r.reminded_at && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_at", title: `10-day after-care check due ${formatDate(String(r.due_date))} · ${job.job_number}`, body: "Send the customer the message (ready on the job card) and confirm the visit. The check activates the warranty." } : null;
+    const step = day >= 20 && !r.reminded_20_at ? { col: "reminded_20_at", title: `Third reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder (ready on the job card). After 30 days the warranty shows Not activated." } : day >= 12 && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_12_at", title: `Second reminder: 10-day check not done · ${job.job_number}`, body: "Send the reminder with the warranty link (ready on the job card)." } : day >= firstDay && !r.reminded_at && !r.reminded_12_at && !r.reminded_20_at ? { col: "reminded_at", title: `10-day after-care check due ${formatDate(String(r.due_date))} · ${job.job_number}`, body: "Send the customer the message (ready on the job card) and confirm the visit. The check activates the warranty." } : null;
     if (!step) continue;
     await notifyStaff(await jobAdvisorIds(r.job_id as string), { type: "aftercare_due", title: step.title, body: step.body, jobId: r.job_id as string, href: `/jobs/${r.job_id}#warranty-card` });
     // The PPF leader does the check: told on the same days, sent to the bodyshop page where his card is.

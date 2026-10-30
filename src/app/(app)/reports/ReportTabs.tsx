@@ -7,6 +7,7 @@ const TABS = [
   { href: "/reports/cars", label: "Finished cars" },
   { href: "/reports/people", label: "People" },
   { href: "/reports/declined", label: "Declined cars" },
+  { href: "/reports/inspection-fees", label: "Inspection fees" },
 ];
 
 /** The three report pages share one strip: the tabs and the month with its arrows. */

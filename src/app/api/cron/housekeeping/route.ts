@@ -223,7 +223,7 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   {
     const days = Number(settings.estimate_followup_days) || 2;
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-    const { data: quiet } = await admin.from("quotations").select("id, number, created_by, sent_by").eq("kind", "estimate").in("status", ["sent", "opened"]).is("reminded_at", null).lt("sent_at", cutoff).limit(100);
+    const { data: quiet } = await admin.from("quotations").select("id, number, created_by, sent_by").eq("kind", "estimate").in("status", ["sent", "opened"]).is("carried_job_id", null).is("reminded_at", null).lt("sent_at", cutoff).limit(100);
     for (const q of quiet ?? []) {
       await notifyStaff([q.created_by, q.sent_by].filter((x): x is string => !!x), { type: "estimate_followup", title: `Follow up the estimate · ${q.number}`, body: `No reply for ${days} day${days === 1 ? "" : "s"}. Call the customer.`, href: `/estimates/${q.id}` });
       await admin.from("quotations").update({ reminded_at: new Date().toISOString() }).eq("id", q.id);

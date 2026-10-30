@@ -48,7 +48,7 @@ export async function createNextVersion(quotationId: string, by: VersionActor, o
   const carried = com?.commission_to ? { ...com, commission_status: com.commission_status ?? "approved" } : {};
   const { data: created, error } = await admin
     .from("quotations")
-    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", discount_set_by: q.discount_set_by ?? null, discount_set_at: q.discount_set_at ?? null, expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, tint_spec: q.tint_spec ?? null, ...carried, created_by: by.id, updated_by: by.id })
+    .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, additional_to_id: q.additional_to_id ?? null, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", discount_set_by: q.discount_set_by ?? null, discount_set_at: q.discount_set_at ?? null, expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, tint_spec: q.tint_spec ?? null, ...carried, created_by: by.id, updated_by: by.id })
     .select("id")
     .single();
   if (error || !created) return { error: error?.message ?? "Could not revise." };
@@ -93,6 +93,22 @@ export async function quoteTargetFor(jobId: string, by: string | null, change?: 
   const admin = createAdminClient();
   const { data: latest } = await admin.from("quotations").select("id, number, version, status, job_id, created_by, sent_by, revision_allowed_at, revision_requested_at, revision_declined_at").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).neq("status", "cancelled").order("version", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!latest) return null;
+  // Several quotations prepared at once (estimates carried over at gate-in, 30 October 2026): the parts go to the
+  // ORIGINAL first - the oldest number whose newest version is still being prepared.
+  {
+    const { data: rows } = await admin.from("quotations").select("id, number, version, status, created_at").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).neq("status", "cancelled").order("created_at");
+    const firstSeen = new Map<string, string>();
+    const newest = new Map<string, { id: string; version: number; status: string }>();
+    for (const r of rows ?? []) {
+      if (!firstSeen.has(r.number)) firstSeen.set(r.number, r.created_at as string);
+      const cur = newest.get(r.number);
+      if (!cur || Number(r.version) > cur.version) newest.set(r.number, { id: r.id as string, version: Number(r.version), status: r.status as string });
+    }
+    const preparing = Array.from(newest.entries())
+      .filter(([, v]) => v.status === "draft" || v.status === "pending_owner")
+      .sort(([a], [b]) => ((firstSeen.get(a) ?? "") < (firstSeen.get(b) ?? "") ? -1 : 1));
+    if (preparing.length) return { id: preparing[0][1].id, created: false };
+  }
   if (latest.status === "draft" || latest.status === "pending_owner") return { id: latest.id, created: false };
   if (!REVISABLE.includes(latest.status)) return null;
   const { data: who } = by ? await admin.from("staff").select("display_name").eq("id", by).maybeSingle() : { data: null };
@@ -137,9 +153,19 @@ export async function askOwnerForRevision(q: { id: string; number: string; job_i
 /** The priced parts of a job (Our stock included) with no line on the given quotation. */
 export async function missingPricedParts(jobId: string, quotationId: string): Promise<{ id: string; description: string }[]> {
   const admin = createAdminClient();
+  // 30 October 2026: a job can carry several quotations (an additional one, estimates carried over at gate-in). A part
+  // already on the newest version of ANOTHER quotation number of the job has its home: it is not missing from this one.
+  const { data: qs } = await admin.from("quotations").select("id, number, version").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).neq("status", "cancelled");
+  const me = (qs ?? []).find((x) => x.id === quotationId);
+  const newest = new Map<string, { id: string; version: number }>();
+  for (const x of qs ?? []) {
+    const cur = newest.get(x.number as string);
+    if (!cur || Number(x.version) > cur.version) newest.set(x.number as string, { id: x.id as string, version: Number(x.version) });
+  }
+  const others = Array.from(newest.entries()).filter(([n]) => n !== me?.number).map(([, v]) => v.id);
   const [{ data: parts }, { data: lines }] = await Promise.all([
     admin.from("part_items").select("id, description, cost_aed, confirm_status, is_active, removed_at, not_needed_at").eq("job_id", jobId).eq("is_active", true).not("cost_aed", "is", null),
-    admin.from("quotation_lines").select("part_item_id").eq("quotation_id", quotationId).eq("is_active", true).not("part_item_id", "is", null),
+    admin.from("quotation_lines").select("part_item_id").in("quotation_id", [quotationId, ...others]).eq("is_active", true).not("part_item_id", "is", null),
   ]);
   const have = new Set((lines ?? []).map((l) => String(l.part_item_id)));
   return (parts ?? []).filter((p) => p.confirm_status !== "rejected" && !p.removed_at && !p.not_needed_at && !have.has(p.id)).map((p) => ({ id: p.id, description: p.description }));
@@ -173,7 +199,18 @@ export async function syncPartLine(jobId: string, partId: string, by: string | n
     ]);
     if (p0) changeWords = `${who0?.display_name ?? "Parts"} ${(onQuote ?? []).length ? "changed" : "added"} ${String(p0.description).toUpperCase()}${p0.cost_aed !== null && p0.cost_aed !== undefined ? `, AED ${Number(p0.cost_aed).toLocaleString("en-GB")}` : ""}`;
   }
-  const target = quotationId ? { id: quotationId, created: false } : await quoteTargetFor(jobId, by, changeWords);
+  // A part already on a quotation still being prepared (several on one job: estimates carried over at gate-in) stays
+  // on that one; it never jumps to another quotation as a second line.
+  let home: string | null = null;
+  if (!quotationId) {
+    const { data: onLines } = await admin.from("quotation_lines").select("quotation_id").eq("part_item_id", partId).eq("is_active", true);
+    const ids = Array.from(new Set((onLines ?? []).map((x) => x.quotation_id as string)));
+    if (ids.length) {
+      const { data: open } = await admin.from("quotations").select("id").in("id", ids).eq("job_id", jobId).eq("kind", "quotation").in("status", ["draft", "pending_owner"]).limit(1).maybeSingle();
+      home = (open?.id as string | undefined) ?? null;
+    }
+  }
+  const target = quotationId ? { id: quotationId, created: false } : home ? { id: home, created: false } : await quoteTargetFor(jobId, by, changeWords);
   if (!target) return { quotationId: null, created: false, change: null };
   const qid = target.id;
   const [{ data: pRaw }, { data: line }] = await Promise.all([

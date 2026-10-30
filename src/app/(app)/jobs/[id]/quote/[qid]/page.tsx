@@ -74,6 +74,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
   // The same rows and state as the Parts table: "4 of 5 parts priced" means the same thing on both screens.
   const pricing = await loadPricingRows(id);
+  // The estimate this quotation came from (30 October 2026: several can be carried over at gate-in, accepted or not).
+  const { data: fromEst } = q.estimate_id ? await createAdminClient().from("quotations").select("number, status").eq("id", q.estimate_id).maybeSingle() : { data: null };
   const { data: unavailableRows } = await createAdminClient().from("part_requests").select("label, closed_reason").eq("job_id", id).eq("status", "unavailable").eq("is_active", true);
   const wait: PartsWait = {
     unavailable: (unavailableRows ?? []).map((u) => ({ label: u.label as string, note: (u.closed_reason as string | null) ?? null })),
@@ -205,7 +207,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
             <span>· {customerName}</span>
             <VinCopy vin={vehicle?.vin ?? null} />
             <Badge tone={tone}>{QUOTE_STATUS_LABELS[q.status]}</Badge>
-            {q.estimate_id ? <Badge tone="neutral">From an estimate</Badge> : null}
+            {q.estimate_id ? <Badge tone="neutral">From estimate {fromEst?.number ?? ""}</Badge> : null}
           </span>
         }
         actions={
@@ -301,9 +303,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
-          {q.estimate_id && q.status === "draft" && canSend ? (
+          {q.estimate_id && fromEst?.status === "approved" && q.status === "draft" && canSend ? (
             <Card className="flex flex-col gap-2">
-              <SectionLabel>From the accepted estimate</SectionLabel>
+              <SectionLabel>From the accepted estimate {fromEst.number}</SectionLabel>
               <p className="text-sm text-muted">If nothing changed since the customer accepted the estimate, confirm it here and the earlier acceptance counts as approval. If anything changed, send the revised quotation instead.</p>
               <form action={confirmEstimateUnchanged.bind(null, q.id)}>
                 <Button type="submit" tone="secondary" size="md">Confirm: nothing changed, treat as approved</Button>

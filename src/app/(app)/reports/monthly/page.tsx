@@ -166,7 +166,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
                 {s.commissions.map((c) => (
                   <tr key={c.quotationId} className="border-t border-line" data-commission={c.number}>
                     <td className="py-1.5 pr-3 whitespace-nowrap"><Link href={`/reports/jobs/${c.jobId}`} className="font-bold underline underline-offset-4">{c.jobNumber}</Link>{c.inMonth ? "" : <span className="block text-xs text-muted">earlier month</span>}</td>
-                    <td className="py-1.5 pr-3">{c.plate}<span className="block text-xs text-muted">{c.number}</span></td>
+                    <td className="py-1.5 pr-3">{c.plate}<span className="block whitespace-nowrap text-xs text-muted">{c.number}</span></td>
                     <td className="py-1.5 pr-3">{c.to || "–"}</td>
                     <td className="py-1.5 pr-3 text-right whitespace-nowrap font-semibold">{aedText(c.amount)}</td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">{c.paidAt ? <Badge tone="green">Paid {formatDate(c.paidAt)}</Badge> : <Badge tone="amber">Not paid</Badge>}</td>

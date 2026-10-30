@@ -117,7 +117,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
       case "revenue": return r.revenue;
       case "parts": return r.partsCost;
       case "labour": return r.labourCost;
-      case "other": return r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost;
+      case "other": return r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost + r.recheckCost;
       case "bank": return r.bankCharges;
       case "profit": return r.profit;
       case "margin": return marginOf(r);
@@ -128,7 +128,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
   rows.sort((a, b) => (valueOf(a) < valueOf(b) ? -dir : valueOf(a) > valueOf(b) ? dir : 0));
   const sum = (f: (r: JobProfit) => number) => rows.reduce((a, r) => a + f(r), 0);
   const revenue = sum((r) => r.revenue);
-  const costs = { parts: sum((r) => r.partsCost), commission: sum((r) => r.commission), bank: sum((r) => r.bankCharges), labour: sum((r) => r.labourCost), other: sum((r) => r.otherCost + r.stockCost + r.recoveryCost + r.materialsCost), profit: sum((r) => r.profit) };
+  const costs = { parts: sum((r) => r.partsCost), commission: sum((r) => r.commission), bank: sum((r) => r.bankCharges), labour: sum((r) => r.labourCost), other: sum((r) => r.otherCost + r.stockCost + r.recoveryCost + r.materialsCost + r.recheckCost), profit: sum((r) => r.profit) };
   const jobCosts = revenue - costs.profit;
   const margin = revenue > 0 ? (costs.profit / revenue) * 100 : 0;
   const breakdowns = await loadBreakdowns(Array.from(new Set(rows.map((r) => r.invoice.job_id).filter((x): x is string => !!x))));
@@ -208,17 +208,17 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
           </thead>
           <tbody className="divide-y divide-line">
             {rows.map((r) => {
-              const other = r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost;
+              const other = r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost + r.recheckCost;
               const m = marginOf(r);
               const b = r.invoice.job_id ? breakdowns.get(r.invoice.job_id) : undefined;
               return (
                 <tr key={r.invoice.id} data-profit-row={r.invoice.number}>
-                  <td className="px-3 py-2 pl-5 align-top font-extrabold"><Link href={`/invoices/${r.invoice.id}`} className="underline underline-offset-4">{r.invoice.number}</Link></td>
+                  <td className="px-3 py-2 pl-5 align-top font-extrabold"><Link href={`/invoices/${r.invoice.id}`} className="whitespace-nowrap underline underline-offset-4">{r.invoice.number}</Link></td>
                   <td className="px-3 py-2 align-top text-muted whitespace-nowrap">{formatDate(r.invoice.issued_at)}</td>
                   <td className="px-3 py-2 align-top">
                     <details>
                       <summary className="cursor-pointer list-none font-semibold uppercase">
-                        {r.plate ?? ""} <span className="text-muted normal-case">· {r.jobNumber ?? ""}</span>
+                        {r.plate ?? ""} <span className="whitespace-nowrap text-muted normal-case">· {r.jobNumber ?? ""}</span>
                         {r.provisional ? <span className="ml-1 text-amber-bar" title={`Provisional: ${r.provisionalWhy.join(", ")}`} data-provisional-dot>●</span> : null}
                       </summary>
                       <div className="mt-2 flex flex-col gap-1 rounded-control bg-canvas p-2 text-xs normal-case" data-profit-breakdown>
@@ -248,7 +248,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
               <td className="px-3 py-2.5 text-right">{n0(revenue)}</td>
               <td className="px-3 py-2.5 text-right">{n0(costs.parts)}</td>
               <td className="px-3 py-2.5 text-right">{n0(costs.labour)}</td>
-              <td className="px-3 py-2.5 text-right">{n0(sum((r) => r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost))}</td>
+              <td className="px-3 py-2.5 text-right">{n0(sum((r) => r.otherCost + r.stockCost + r.recoveryCost + r.commission + r.materialsCost + r.recheckCost))}</td>
               <td className="px-3 py-2.5 text-right">{n0(costs.bank)}</td>
               <td className="px-3 py-2.5 text-right">{n0(costs.profit)}</td>
               <td className="px-3 py-2.5 text-right"><span className={`inline-flex min-h-6 items-center rounded-full px-2 text-xs font-bold ${pill(margin)}`}>{margin.toFixed(1)}%</span></td>

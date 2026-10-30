@@ -15,8 +15,12 @@ import { notifyManagers, notifyRoles } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES } from "@/lib/types";
+import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES, formatPlate } from "@/lib/types";
 import { knownWordsUp } from "@/lib/text-case";
+import { linkRecheck, ppfJobsOfCar } from "@/lib/recheck";
+import { checkFee, feeInputFrom } from "@/lib/inspection-fee";
+import { feeBoundsFor } from "@/lib/inspection-fee-server";
+import { OPEN_ESTIMATE_STATUSES } from "@/lib/quote-history";
 
 /* ---------------------------------------------------------------------------
    Car picture upload (shared)
@@ -38,6 +42,9 @@ async function saveCarPicture(vehicleId: string, file: FormDataEntryValue | null
 /* ---------------------------------------------------------------------------
    Gate-in
    --------------------------------------------------------------------------- */
+
+/** Estimates that carry over at gate-in: accepted, or still with the customer (30 October 2026). */
+const CARRY_STATUSES = OPEN_ESTIMATE_STATUSES;
 
 const gateInSchema = z
   .object({
@@ -125,6 +132,17 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
   const d = parsed.data;
   const requests = await requestLines(formData);
+  // 30 October 2026: PPF RECHECK (FREE) - the 10-day final check of an earlier PPF job of this car. No inspection fee,
+  // no estimate, no quotation, no approval, no invoice: the PPF team's checklist, then the car goes back.
+  const recheck = String(formData.get("visit_type") ?? "") === "recheck";
+  let recheckOf: { id: string; number: string } | null = null;
+  if (recheck) {
+    const originalId = String(formData.get("recheck_of") ?? "");
+    const hit = (await ppfJobsOfCar(vehicleId)).find((j) => j.id === originalId);
+    if (!hit) return { error: "Choose the PPF job this recheck is for.", values };
+    recheckOf = { id: hit.id, number: hit.number };
+    if (!requests.length) requests.push(`PPF RECHECK (FREE): 10-day final check of ${hit.number}`);
+  }
   if (requests.length === 0) return { error: "Add at least one customer request.", values };
   const vipOn = formData.get("vip") === "on";
   const vipNote = blankToNull(formData.get("vip_note"));
@@ -144,18 +162,19 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
 
-  // Section 8: the inspection fee if no work is approved, chosen per car. Premium brands default higher;
-  // only the owner may go below AED 750 or waive it - anyone else's lower figure becomes a request to him.
-  const makeName = ((vehicle.make as unknown as { name: string } | null)?.name ?? "").toLowerCase();
-  const premium = ((settings.premium_brands ?? []) as string[]).some((b) => makeName && b.toLowerCase() === makeName);
-  const defaultFee = premium ? Number(settings.premium_brand_fee_aed) || 1500 : Number(settings.inspection_fee_aed) || 750;
-  const feeRaw = String(formData.get("inspection_fee") ?? "").replace(/[^\d.]/g, "");
-  const askedFee = feeRaw === "" ? defaultFee : Math.max(0, Math.round(Number(feeRaw)));
-  let inspectionFee = askedFee;
-  let feeRequest: number | null = null;
-  if (askedFee < 750 && staff.role_id !== "owner") {
-    inspectionFee = 750;
-    feeRequest = askedFee;
+  // 30 October 2026: THE fee choice (Inspection fee with the amount, or No inspection fee with the reason and the
+  // inspection type), required when an advisor or the owner does the gate-in; the gate-in person leaves it to the
+  // advisor, who chooses it on the approval link. A PPF recheck is free (warranty) by itself.
+  const makeName = (vehicle.make as unknown as { name: string } | null)?.name ?? null;
+  const feeNow = new Date().toISOString();
+  let feeFields: Record<string, unknown> = {};
+  if (recheck) {
+    feeFields = { inspection_fee_choice: "none", no_fee_reason: "warranty", inspection_type: "full", inspection_fee_aed: 0, fee_set_by: staff.id, fee_set_at: feeNow };
+  } else if (staff.role_id === "service_advisor" || staff.role_id === "owner") {
+    const fee = feeInputFrom((k) => String(formData.get(k) ?? ""));
+    const feeCheck = checkFee(fee, feeBoundsFor(settings, makeName), staff.role_id === "owner");
+    if ("error" in feeCheck) return { error: feeCheck.error, values };
+    feeFields = { inspection_fee_choice: fee.choice, inspection_fee_aed: fee.choice === "fee" ? fee.amount : 0, no_fee_reason: fee.choice === "none" ? fee.reason : null, no_fee_note: fee.choice === "none" ? fee.note : null, inspection_type: fee.choice === "none" ? fee.type : "full", fee_set_by: staff.id, fee_set_at: feeNow };
   }
 
   // The mileage checks run here too, so a figure that looks wrong is only saved once the advisor confirmed it.
@@ -175,16 +194,28 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     .eq("vehicle_id", vehicleId)
     .eq("is_open", true)
     .maybeSingle();
-  if (openJob) return { error: `This car is already in the workshop on job ${openJob.job_number}.`, values };
+  // 30 October 2026: a warning with a way forward - the job card it is already on, one tap away.
+  if (openJob) return { error: `This car is already in the workshop on job ${openJob.job_number}.`, values: { ...values, open_job_id: openJob.id, open_job_number: openJob.job_number } };
 
   if (hasNewPicture) {
     const picError = await saveCarPicture(vehicleId, picture);
     if (picError) return { error: picError, values };
   }
 
-  // An accepted estimate for this car becomes the quotation once the inspection is approved.
-  const estimateId = blankToNull(formData.get("estimate_id"));
-  const { data: estimate } = estimateId ? await supabase.from("quotations").select("id, number, status, vehicle_id").eq("id", estimateId).eq("kind", "estimate").maybeSingle() : { data: null };
+  // 30 October 2026: EVERY ticked open estimate of the car carries over (accepted or still with the customer). The
+  // first one that is not itself an additional estimate is the original (jobs.estimate_id, as before); each of the
+  // others becomes an additional quotation on the job when the quotation starts. Read with the master key: the
+  // gate-in person cannot read quotations.
+  const carryIds = recheck ? [] : Array.from(new Set([...formData.getAll("carry_estimate").map(String), String(formData.get("estimate_id") ?? "")].filter(Boolean)));
+  const { data: carryRows } = carryIds.length
+    ? await createAdminClient().from("quotations").select("id, number, status, vehicle_id, additional_to_id, carried_job_id, created_at").in("id", carryIds).eq("kind", "estimate").eq("is_active", true).is("deleted_at", null)
+    : { data: [] as { id: string; number: string; status: string; vehicle_id: string | null; additional_to_id: string | null; carried_job_id: string | null; created_at: string }[] };
+  const { data: takenRows } = carryIds.length ? await createAdminClient().from("jobs").select("estimate_id").in("estimate_id", carryIds) : { data: [] as { estimate_id: string }[] };
+  const taken = new Set((takenRows ?? []).map((j) => j.estimate_id));
+  const carried = (carryRows ?? [])
+    .filter((e) => e.vehicle_id === vehicleId && !e.carried_job_id && !taken.has(e.id) && CARRY_STATUSES.includes(e.status))
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+  const estimate = carried.find((e) => !e.additional_to_id) ?? carried[0] ?? null;
   // A comeback: the car is back for a previous job of its own. High priority, linked both ways.
   const comebackId = blankToNull(formData.get("comeback_of"));
   const { data: comebackJob } = comebackId ? await supabase.from("jobs").select("id, job_number, vehicle_id").eq("id", comebackId).eq("vehicle_id", vehicleId).maybeSingle() : { data: null };
@@ -194,15 +225,12 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   // Section 4 (21 October): the gate-in person becomes the car's advisor in charge (advisors and the
   // owner); a booked bodyshop job keeps the estimate's advisor. Changeable any time on the job card.
   const advisorInCharge = ["service_advisor", "owner"].includes(staff.role_id) ? staff.id : null;
-  const jobFields = { vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId ? estimate.id : null, comeback_of: comebackJob?.id ?? null, inspection_fee_aed: inspectionFee, inspection_fee_request_aed: feeRequest, inspection_fee_request_by: feeRequest !== null ? staff.id : null, ...(booked ? {} : { advisor_id: advisorInCharge }) };
+  const jobFields = { ...(recheckOf ? { job_kind: "recheck", recheck_of: recheckOf.id } : {}), vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked || recheckOf ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate?.id ?? null, comeback_of: recheckOf ? null : comebackJob?.id ?? null, ...feeFields, ...(booked ? {} : { advisor_id: advisorInCharge }) };
   const nowIso = new Date().toISOString();
   const { data: job, error: jobError } = booked
     ? await createAdminClient().from("jobs").update({ ...jobFields, status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", booked.id).select("id, job_number").single()
     : await supabase.from("jobs").insert(jobFields).select("id, job_number").single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
-  if (feeRequest !== null) {
-    await notifyRoles(["owner"], { type: "inspection_fee_request", title: `Inspection fee below 750 asked · ${job.job_number}`, body: `${staff.display_name} asked for AED ${feeRequest.toLocaleString("en-GB")}${feeRequest === 0 ? " (waived)" : ""} instead of AED 750. Approve or keep 750 on the job card.`, jobId: job.id, href: `/jobs/${job.id}` });
-  }
 
   const { error: giError } = await supabase.from("gate_ins").insert({
     job_id: job.id,
@@ -252,8 +280,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     }
   }
 
-  if (estimate && estimate.status === "approved" && estimate.vehicle_id === vehicleId) {
-    await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Accepted estimate ${estimate.number} attached at gate-in`, created_by: staff.id });
+  if (recheckOf) await linkRecheck(recheckOf.id, job.id, { id: staff.id, display_name: staff.display_name });
+  if (carried.length) {
+    const { error: carryError } = await createAdminClient().from("quotations").update({ carried_job_id: job.id, updated_by: staff.id }).in("id", carried.map((e) => e.id));
+    const words = carried.map((e) => `${e.number} (${e.id === estimate?.id ? "original" : "additional"}, ${e.status === "approved" ? "accepted" : "not accepted yet"})`).join(", ");
+    await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: carryError ? `Estimates ${words} could not all be marked as carried over: ${carryError.message}` : `Carried over at gate-in: ${words}. Each opens as its own quotation once the inspection is approved.`, created_by: staff.id });
   }
   if (comebackJob) {
     await supabase.from("job_events").insert({ job_id: job.id, event_type: "comeback", note: `Comeback of ${comebackJob.job_number}, marked at gate-in by ${staff.display_name}. High priority.`, created_by: staff.id });
@@ -466,13 +497,24 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     .single();
   if (vError || !vehicle) {
     const msg = vError?.message ?? "";
+    // 30 October 2026: the car already on record is named with one tap to gate it in, never a search to do by hand.
+    const plateTaken = msg.includes("vehicles_active_plate_idx");
+    const vinTaken = msg.includes("vehicles_vin_key");
+    let existing: { id: string; plate: string } | null = null;
+    if (plateTaken || vinTaken) {
+      let q = createAdminClient().from("vehicles").select("id, kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin").limit(1);
+      if (vinTaken) q = q.eq("vin", d.vin);
+      else {
+        q = q.eq("is_active", true).eq("has_plate", true).eq("plate_country", d.plate_country).eq("plate_number", d.plate_number.replace(/\s+/g, ""));
+        q = d.plate_country === "UAE" && d.plate_emirate ? q.eq("plate_emirate", d.plate_emirate) : q;
+        q = blankToNull(d.plate_code) ? q.eq("plate_code", String(d.plate_code).toUpperCase()) : q.is("plate_code", null);
+      }
+      const { data: hit } = await q.maybeSingle();
+      if (hit) existing = { id: hit.id as string, plate: formatPlate(hit) };
+    }
     return {
-      error: msg.includes("vehicles_active_plate_idx")
-        ? "A car with this plate already exists. Search for it instead."
-        : msg.includes("vehicles_vin_key")
-          ? "A car with this VIN already exists. Search for it instead."
-          : msg || "Could not save the car.",
-      values,
+      error: plateTaken ? "A car with this plate is already on record." : vinTaken ? "A car with this VIN is already on record." : msg || "Could not save the car.",
+      values: existing ? { ...values, existing_car_id: existing.id, existing_car_plate: existing.plate } : values,
     };
   }
 

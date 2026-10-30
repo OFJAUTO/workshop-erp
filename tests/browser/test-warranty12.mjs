@@ -2,8 +2,9 @@
 // Team leaders write the warranty details at the end of their stage (PPF roll + areas pre-ticked, tint roll, ceramic
 // product + batch); QC ticks "Warranty details complete" before Ready; the tax invoice carries the WARRANTY table
 // and the framed YOUR OFJ WARRANTY panel with its QR (and the link page the same panel); mechanical invoices say
-// "Workmanship warranty: 6 months, valid until …"; the QR's page shows Pending activation → Active ✓ after the
-// 10-day check (with its photos), Not activated after 30 days with the reminder dates, the owner's manual activation;
+// "Workmanship warranty: 6 months, valid until …"; the QR's page shows Active ✓ from the handover and "Final check
+// done on <date> ✓" after the 10-day check (with its photos), never a check not done (30 October 2026: that is for the
+// staff, "Final check not done" on the job card), the owner's manual activation;
 // reminders day 8 / 12 / 20; the warranty card WhatsApp after gate-out; Settings > Warranty terms; the warranty list.
 // Run: node --env-file=.env.local tests/browser/test-warranty12.mjs   (dev server on :3100)
 import path from "node:path";
@@ -126,7 +127,7 @@ check("4: the panel's QR has the job's own warranty address", !!wToken);
 await sql("update public.jobs set gated_out_at = now() - interval '5 days' where id = $1", [jobId]);
 await sql("insert into public.aftercare_checks (job_id, due_date, created_by, updated_by) values ($1, ((now() at time zone 'Asia/Dubai')::date + 5), $2, $2)", [jobId, owner]);
 const after = await pdfOf(`/api/pdf/invoice/${pf.token}`);
-check("4: after the handover every row runs from the handover day, with its valid-until date", /From the handover on/i.test(after.text) && /10 years/i.test(after.text) && /Pending activation/i.test(after.text), after.text.match(/From the handover on.{0,120}/i)?.[0] ?? "");
+check("4: after the handover every row runs from the handover day, with its valid-until date; Active, nothing about a check not done", /From the handover on/i.test(after.text) && /10 years/i.test(after.text) && /Active/.test(after.text) && !/Pending activation|Not activated|not done/i.test(after.text), after.text.match(/From the handover on.{0,120}/i)?.[0] ?? "");
 for (let i = 0; i < after.doc.countPages(); i++) renderPage(after, i, `warranty12-3-invoice-p${i + 1}.png`);
 
 /* ---------------- 5. The customer's invoice page and the warranty page: Pending → Active ✓ ---------------- */
@@ -138,7 +139,7 @@ await cp.screenshot({ path: shot("warranty12-4-invoice-link.png"), clip: (await 
 await go(cp, `${base}/warranty/${wToken}`);
 const pageText = (await cp.locator("main").textContent()) ?? "";
 check("5: the warranty page: car, VIN, products with coverage, roll/batch and dates - and no prices", /VIN WDC/i.test(pageText) && /E2E-PPF-0042/.test(pageText) && /Full body/.test(pageText) && /sides & rear 50% darkness/.test(pageText) && !/AED|23,100/.test(pageText));
-check("5: status Pending activation with Book your check", (await cp.locator('[data-warranty-status="pending"]').count()) === 1 && (await cp.locator("[data-book-check]").count()) === 1);
+check("5: before the 10-day check the customer sees Active ✓ from the handover, nothing about a check not done", (await cp.locator('[data-warranty-status="active"]').count()) === 1 && !/Pending activation|Not activated|not done/i.test(pageText));
 await cp.screenshot({ path: shot("warranty12-5-page-pending.png"), fullPage: true });
 // The job card after gate-out: the short warranty card WhatsApp.
 await go(op, `${base}/jobs/${jobId}#warranty-card`);
@@ -159,7 +160,7 @@ const photoRow = (await sql("select storage_path from public.job_files where job
 if (photoRow) uploaded.push(photoRow.storage_path);
 check("5: the 10-day check is signed off with its photo", !!(await sql("select done_at from public.aftercare_checks where job_id = $1", [jobId]))[0]?.done_at && !!photoRow);
 await go(cp, `${base}/warranty/${wToken}`);
-check("5: the warranty page now says Active ✓ with the check date and the team leader's photo", (await cp.locator('[data-warranty-status="active"]').count()) === 1 && /10-day after-care check completed on/.test((await cp.locator('[data-warranty-status="active"]').textContent()) ?? "") && (await cp.locator("[data-warranty-check-photos] img").count()) >= 1);
+check("5: the warranty page now says \"Final check done on <date> ✓\" with the team leader's photo", (await cp.locator('[data-warranty-status="active"]').count()) === 1 && /Final check done on \d{1,2} \w{3} \d{4} ✓/.test((await cp.locator("[data-final-check-done]").textContent().catch(() => "")) ?? "") && (await cp.locator("[data-warranty-check-photos] img").count()) >= 1);
 await cp.screenshot({ path: shot("warranty12-7-page-active.png"), fullPage: true });
 
 /* ---------------- 6. Mechanical invoices: workmanship 6 months; Not activated after 30 days; the owner's manual activation ---------------- */
@@ -181,7 +182,10 @@ if (mJob) {
   await sql("update public.jobs set department = 'both', gated_out_at = now() - interval '31 days', warranty_token = 'e2e-w12-not-activated-token' where id = $1", [mJob]);
   await sql("insert into public.aftercare_checks (job_id, due_date, reminded_at, reminded_12_at, reminded_20_at, created_by, updated_by) values ($1, ((now() at time zone 'Asia/Dubai')::date - 21), now() - interval '23 days', now() - interval '19 days', now() - interval '11 days', $2, $2)", [mJob, owner]);
   await go(cp, `${base}/warranty/e2e-w12-not-activated-token`);
-  check("6: 30 days without the check: 'Not activated – 10-day after-care check not completed' with the reminder dates", (await cp.locator('[data-warranty-status="not_activated"]').count()) === 1 && /Not activated – 10-day after-care check not completed/.test((await cp.locator('[data-warranty-status="not_activated"]').textContent()) ?? "") && ((await cp.locator("[data-warranty-reminders]").textContent()) ?? "").split(",").length === 3);
+  const page6 = (await cp.locator("main").textContent()) ?? "";
+  check("6: 30 days without the check: the customer still sees Active ✓, nothing about a check not done", (await cp.locator('[data-warranty-status="active"]').count()) === 1 && !/Pending activation|Not activated|not done/i.test(page6));
+  await go(op, `${base}/jobs/${mJob}#warranty-card`);
+  check("6: the staff see \"Final check not done\" on the job card", /Final check not done/.test((await op.locator("[data-final-check-staff]").first().textContent().catch(() => "")) ?? ""));
   check("6: a job with mechanical work shows the workmanship warranty on the page too", (await cp.locator('[data-warranty-product="mechanical"]').count()) === 1);
   await cp.screenshot({ path: shot("warranty12-8-page-not-activated.png"), fullPage: true });
   await go(op, `${base}/jobs/${mJob}#warranty-card`);

@@ -1,6 +1,9 @@
 "use server";
 
 import { declinedItemsOf, declinedNote, saveDeclinedWork } from "@/lib/declined";
+import { isQuickJob } from "@/lib/inspection-fee";
+import { dateFromDays } from "@/lib/parts-rows";
+import { dubaiDate } from "@/lib/jobs";
 import { invoicesForLock, loadQuoteLock, refuseIfLocked } from "@/lib/quote-lock-server";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { liveInvoicesOf } from "@/lib/quote-lock";
@@ -88,13 +91,14 @@ async function syncPartLines(quotationId: string, jobId: string, by: string, min
 /** "Start quotation": suggested lines from the approved report (or the estimate), one part line per listed part. */
 export async function startQuotation(jobId: string) {
   const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, department, is_open, status, estimate_id, gated_in_by, job_kind").eq("id", jobId).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, department, is_open, status, estimate_id, gated_in_by, job_kind, inspection_fee_choice, inspection_type").eq("id", jobId).maybeSingle();
   const err = (m: string) => redirect(`/jobs/${jobId}?error=${encodeURIComponent(m)}`);
   if (!job || !job.is_open) err("This job is closed.");
   const staff = await mayEdit(jobId, null);
   if (!staff) err("Only the job's advisor or the owner can start the quotation.");
   // Loose items have no inspection report: the quotation is the first step after gate-in.
-  const loose = job!.job_kind === "loose";
+  // Loose items, and a quick job (no fee, no full inspection: 30 October 2026), have no inspection report: the quotation is the first step.
+  const loose = job!.job_kind === "loose" || isQuickJob(job!);
   const bundle = loose ? null : await loadInspection(jobId);
   if (!loose && staff!.role_id !== "owner" && (!bundle || bundle.inspection.status !== "approved")) err("The quotation opens once the workshop manager has approved the inspection report.");
   if (!loose && staff!.role_id === "owner" && (!bundle || bundle.inspection.status !== "approved")) {
@@ -117,26 +121,19 @@ export async function startQuotation(jobId: string) {
 
   let lines: Record<string, unknown>[] = [];
   if (job!.estimate_id) {
-    const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", job!.estimate_id).eq("is_active", true).order("position");
-    lines = ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !l.fee_kind).map((l) => ({ quotation_id: created!.id, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: staff!.id, updated_by: staff!.id }));
-    // ONE commission per job: a commission set on the estimate moves onto the job's quotation whole,
-    // and the estimate keeps a tombstone - it never lists as its own commission again.
-    const { data: estCom } = await admin.from("quotations").select("number, commission_to, commission_kind, commission_value, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note").eq("id", job!.estimate_id).maybeSingle();
-    if (estCom?.commission_to) {
-      const comFields: Record<string, unknown> = { ...estCom, commission_status: estCom.commission_status ?? "approved" };
-      delete comFields.number;
-      await admin.from("quotations").update({ ...comFields, updated_by: staff!.id }).eq("id", created!.id);
-      await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_aed: 0, commission_status: "superseded", commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, updated_by: staff!.id }).eq("id", job!.estimate_id);
-      await logQuoteEvent(created!.id, jobId, staff!.id, "commission_carried", `${created!.number}: the commission for ${estCom.commission_to} moved over from estimate ${estCom.number}`);
-      await logQuoteEvent(job!.estimate_id!, jobId, staff!.id, "commission_carried", `${estCom.number}: the commission for ${estCom.commission_to} moved to ${created!.number} when the estimate became the job's quotation`);
-    }
-    const { data: estTint } = await admin.from("quotations").select("tint_spec").eq("id", job!.estimate_id).maybeSingle();
-    if (estTint?.tint_spec) await admin.from("quotations").update({ tint_spec: estTint.tint_spec, updated_by: staff!.id }).eq("id", created!.id);
+    lines = await estimateLineRows(job!.estimate_id, created!.id, staff!.id, jobId);
+    await carryEstimateHeader(job!.estimate_id, { id: created!.id, number: created!.number }, jobId, staff!.id);
   } else {
     // The labour list is the advisor's own: nothing from the report is pre-filled. The parts list comes from the approved report through the part requests below.
     lines = [];
   }
-  if (lines.length) await admin.from("quotation_lines").insert(lines);
+  if (lines.length) {
+    const { error: lineError } = await admin.from("quotation_lines").insert(lines);
+    if (lineError) {
+      console.error("startQuotation: estimate lines not copied", lineError.message);
+      await logQuoteEvent(created!.id, jobId, staff!.id, "quote_started", `The lines of the estimate could not all be copied: ${lineError.message}`);
+    }
+  }
   // Tyres marked Replace on the report: one row, the count as the quantity, the positions on it. The advisor only checks it.
   if (bundle && !job!.estimate_id) {
     const m = (bundle.inspection.measurements ?? {}) as Record<string, string | number>;
@@ -210,8 +207,113 @@ export async function startQuotation(jobId: string) {
   await syncPartLines(created!.id, jobId, staff!.id, minMarkup);
   await refreshQuoteTotals(created!.id, settings, staff!.id);
   await logQuoteEvent(created!.id, jobId, staff!.id, "quote_started", `Quotation ${created!.number} started by ${staff!.display_name}${job!.estimate_id ? " from the estimate" : ""}`);
+  await quotationsFromCarriedEstimates({ id: jobId, customer_id: job!.customer_id, vehicle_id: job!.vehicle_id, estimate_id: job!.estimate_id }, staff!, settings);
   refresh(jobId, created!.id);
   redirect(`/jobs/${jobId}/quote/${created!.id}`);
+}
+
+/**
+ * An estimate's lines as rows for a job's quotation (the bank-charge fee line left out). 30 October 2026: an estimate
+ * part the parts desk (or the advisor) priced becomes a real part on the job - a part request and a priced part item
+ * with its cost, supplier, part number and availability - and the quotation line keeps its markup (no re-pricing).
+ * A part still without a price becomes an open request for Parts; its line comes back once Parts price it.
+ */
+async function estimateLineRows(estimateId: string, quotationId: string, by: string, jobId: string): Promise<Record<string, unknown>[]> {
+  const admin = createAdminClient();
+  const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", estimateId).eq("is_active", true).order("position");
+  const { data: est } = await admin.from("quotations").select("number").eq("id", estimateId).maybeSingle();
+  const rows: Record<string, unknown>[] = [];
+  const now = new Date().toISOString();
+  for (const l of ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((x) => !x.fee_kind)) {
+    const row: Record<string, unknown> = { quotation_id: quotationId, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: by, updated_by: by };
+    if (l.line_type !== "part" || l.part_item_id || l.left_off) {
+      rows.push(row);
+      continue;
+    }
+    const priced = l.unit_cost !== null && l.unit_cost !== undefined;
+    const qty = Number(l.quantity) || 1;
+    const words = [`From estimate ${est?.number ?? ""}`, l.parts_note ? `note: ${l.parts_note}` : null, l.priced_by_advisor && !l.price_checked_at ? "priced by the advisor, not checked yet" : null].filter(Boolean).join(" · ");
+    const { data: req, error: reqError } = await admin
+      .from("part_requests")
+      .insert({ job_id: jobId, source_type: "manual", source_key: `estimate:${l.id}`, label: l.title, positions: l.positions ?? [], quantity: qty, requested_text: words, status: priced ? "done" : "open", created_by: by, updated_by: by })
+      .select("id")
+      .single();
+    if (reqError || !req) {
+      // Already carried (a second press): the part item made then is the one to link.
+      const { data: again } = await admin.from("part_items").select("id, part_request_id").eq("job_id", jobId).eq("client_key", `estimate:${l.id}`).eq("is_active", true).maybeSingle();
+      if (again) rows.push({ ...row, part_item_id: again.id });
+      continue;
+    }
+    if (!priced) continue;
+    const delivery = l.availability === "to_order" && l.delivery_days !== null && l.delivery_days !== undefined ? dateFromDays(String(l.delivery_days), dubaiDate()) : null;
+    const { data: item, error: itemError } = await admin
+      .from("part_items")
+      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: qty, confirmed_quantity: qty, positions: l.positions ?? [], part_number: l.part_number ?? null, part_type: l.part_type ?? null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: l.availability ?? null, delivery_date: delivery, confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now, added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
+      .select("id")
+      .single();
+    if (itemError || !item) {
+      await admin.from("part_requests").update({ status: "open", updated_by: by }).eq("id", req.id);
+      continue;
+    }
+    rows.push({ ...row, part_item_id: item.id });
+  }
+  return rows;
+}
+
+/**
+ * The estimate's header choices that travel to the job's quotation: the tint spec, and the commission. ONE commission
+ * per job: a commission on the estimate moves onto the quotation whole and the estimate keeps a tombstone; when the
+ * job already carries one (an additional estimate with its own), the estimate keeps it and it is written down.
+ */
+async function carryEstimateHeader(estimateId: string, to: { id: string; number: string }, jobId: string, by: string) {
+  const admin = createAdminClient();
+  const { data: estCom } = await admin.from("quotations").select("number, commission_to, commission_kind, commission_value, commission_aed, commission_status, commission_set_by, commission_set_at, commission_decided_by, commission_decided_at, commission_decision_note").eq("id", estimateId).maybeSingle();
+  if (estCom?.commission_to) {
+    const { data: already } = await admin.from("quotations").select("number").eq("job_id", jobId).eq("kind", "quotation").not("commission_to", "is", null).neq("id", to.id).limit(1).maybeSingle();
+    if (already) {
+      await logQuoteEvent(estimateId, jobId, by, "commission_not_carried", `${estCom.number}: the commission for ${estCom.commission_to} stays on the estimate - the job already has one on ${already.number} (one commission per job)`);
+    } else {
+      const comFields: Record<string, unknown> = { ...estCom, commission_status: estCom.commission_status ?? "approved" };
+      delete comFields.number;
+      await admin.from("quotations").update({ ...comFields, updated_by: by }).eq("id", to.id);
+      await admin.from("quotations").update({ commission_to: null, commission_kind: null, commission_value: null, commission_aed: 0, commission_status: "superseded", commission_decided_by: null, commission_decided_at: null, commission_decision_note: null, updated_by: by }).eq("id", estimateId);
+      await logQuoteEvent(to.id, jobId, by, "commission_carried", `${to.number}: the commission for ${estCom.commission_to} moved over from estimate ${estCom.number}`);
+      await logQuoteEvent(estimateId, jobId, by, "commission_carried", `${estCom.number}: the commission for ${estCom.commission_to} moved to ${to.number} when the estimate became the job's quotation`);
+    }
+  }
+  const { data: estTint } = await admin.from("quotations").select("tint_spec").eq("id", estimateId).maybeSingle();
+  if (estTint?.tint_spec) await admin.from("quotations").update({ tint_spec: estTint.tint_spec, updated_by: by }).eq("id", to.id);
+}
+
+/**
+ * 30 October 2026: every OTHER estimate carried over at gate-in becomes its own quotation on the job, after the
+ * original and oldest first - an ADDITIONAL quotation by the job's rules, with its estimate's lines. Each is made once
+ * (a quotation already made from that estimate is left alone).
+ */
+async function quotationsFromCarriedEstimates(job: { id: string; customer_id: string; vehicle_id: string; estimate_id: string | null }, staff: { id: string; display_name: string }, settings: Awaited<ReturnType<typeof getSettings>>) {
+  const admin = createAdminClient();
+  const { data: ests } = await admin.from("quotations").select("id, number").eq("kind", "estimate").eq("carried_job_id", job.id).eq("is_active", true).order("created_at");
+  for (const e of (ests ?? []).filter((x) => x.id !== job.estimate_id)) {
+    const { data: made } = await admin.from("quotations").select("id").eq("job_id", job.id).eq("kind", "quotation").eq("estimate_id", e.id).limit(1).maybeSingle();
+    if (made) continue;
+    const { data: q, error } = await admin
+      .from("quotations")
+      .insert({ kind: "quotation", job_id: job.id, customer_id: job.customer_id, vehicle_id: job.vehicle_id, estimate_id: e.id, validity_days: Number(settings.quote_validity_days) || 7, vat_percent: 5, created_by: staff.id, updated_by: staff.id })
+      .select("id, number")
+      .single();
+    if (error || !q) {
+      await admin.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Estimate ${e.number} could not become a quotation: ${error?.message ?? "unknown"}. Start it with New quotation.`, created_by: staff.id });
+      continue;
+    }
+    const rows = await estimateLineRows(e.id, q.id, staff.id, job.id);
+    if (rows.length) {
+      const { error: lineError } = await admin.from("quotation_lines").insert(rows);
+      if (lineError) await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `The lines of estimate ${e.number} could not all be copied: ${lineError.message}`);
+    }
+    await carryEstimateHeader(e.id, { id: q.id, number: q.number }, job.id, staff.id);
+    await refreshQuoteTotals(q.id, settings, staff.id);
+    await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `Additional quotation ${q.number} started by ${staff.display_name} from estimate ${e.number}, carried over at gate-in`);
+  }
 }
 
 /** A further quotation on the same job, for extra work found later. */

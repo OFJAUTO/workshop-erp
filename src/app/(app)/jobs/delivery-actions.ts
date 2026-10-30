@@ -134,6 +134,10 @@ export async function createPickupTrip(formData: FormData) {
   });
   if (!trip) redirect(`${back}?error=${encodeURIComponent("The trip could not be saved.")}`);
   if (recoveryKind) await admin.from("recovery_trips").update({ recovery_kind: recoveryKind, updated_by: staff.id }).eq("id", trip.id);
+  // 30 October 2026: the person the driver calls (the customer before the car has a job, or the pick-up contact).
+  const contactName = blankToNull(formData.get("contact_name"));
+  const contactPhone = blankToNull(formData.get("contact_phone"));
+  if (contactName || contactPhone) await admin.from("recovery_trips").update({ contact_name: contactName, contact_phone: contactPhone, updated_by: staff.id }).eq("id", trip.id);
   revalidatePath("/recovery");
   redirect(`${back}?message=${encodeURIComponent(`${kind === "pickup" ? "Pick-up" : "Delivery"} saved ✓ — send it to ${driverName ?? "the driver"} now (the buttons are on its row below).`)}&sent=${trip.id}`);
 }

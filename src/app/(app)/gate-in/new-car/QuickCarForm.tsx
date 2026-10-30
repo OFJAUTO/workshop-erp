@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ModelYearSelect } from "@/components/ModelYearSelect";
 import { SearchSelect } from "@/components/SearchSelect";
-import { Button, Card, ChoiceButtons, Field, Input, SectionLabel, Select } from "@/components/ui";
+import { Button, Card, ChoiceButtons, Field, Input, LinkButton, SectionLabel, Select } from "@/components/ui";
 import { makeFromVin, modelYearFromVin } from "@/lib/vin";
 import { checkCustomerPhone } from "../actions";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES, type VehicleMakeRow, type VehicleModelRow } from "@/lib/types";
@@ -30,7 +30,17 @@ export function QuickCarForm({
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues} className="flex flex-col gap-6">
-      {(v) => <Fields v={v} makes={makes} models={models} variants={variants} fixed={customer} />}
+      {(v) => (
+        <>
+          {v.existing_car_id ? (
+            <div className="rounded-control border-2 border-ink p-4 flex flex-wrap items-center gap-3" data-existing-car={v.existing_car_id}>
+              <span className="font-semibold">{v.existing_car_plate || "This car"} is already on record.</span>
+              <LinkButton href={`/gate-in/new?vehicle=${v.existing_car_id}`} size="lg" data-existing-car-gate-in>Gate in {v.existing_car_plate || "this car"}</LinkButton>
+            </div>
+          ) : null}
+          <Fields v={v} makes={makes} models={models} variants={variants} fixed={customer} />
+        </>
+      )}
     </ActionForm>
   );
 }

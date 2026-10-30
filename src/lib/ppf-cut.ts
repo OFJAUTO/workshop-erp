@@ -44,9 +44,24 @@ export function lineIsPpf(l: { title?: string | null; package_items?: unknown },
   return !l.package_items && isPpfFilmItem(l.title);
 }
 
-/** A package item that IS film being fitted: PPF words, but never a coating, a tint or taking old film off. */
+/** Words that name a visit or a check, never film being fitted: "PPF RECHECK", "PPF inspection", "10-day final check" (30 October 2026). */
+export const NOT_AN_INSTALL = /re-?check|\bcheck\b|inspect|after-?care|warranty|final check/i;
+
+/** A package item that IS film being fitted: PPF words, but never a coating, a tint, taking old film off or a check visit. */
 export function isPpfFilmItem(label: string | null | undefined): boolean {
-  return isPpfText(label) && !/ceramic|coating|remov|tint/i.test(label ?? "");
+  return isPpfText(label) && !/ceramic|coating|remov|tint/i.test(label ?? "") && !NOT_AN_INSTALL.test(label ?? "");
+}
+
+/**
+ * The PPF CUT choice (Hand-cut / Pre-cut / Mixed) belongs to a real PPF INSTALL only (30 October 2026): a service of
+ * the PPF kind from the services list, or a package with PPF film in it. Never because a typed line says "PPF"
+ * ("PPF RECHECK" is the free 10-day check, not a new job).
+ */
+export function ppfInstallLine(l: { package_items?: unknown }, serviceKind?: string | null): boolean {
+  if (serviceKind === "ppf_removal") return false;
+  if (serviceKind === "ppf" || serviceKind === "coloured_ppf") return true;
+  const items = (l.package_items && typeof l.package_items === "object" && Array.isArray((l.package_items as { items?: unknown }).items) ? (l.package_items as { items: { label?: string }[] }).items : []) as { label?: string }[];
+  return items.some((i) => isPpfFilmItem(i.label));
 }
 
 /** The film's finish for the warranty: Matte (matte, stealth, satin) or Gloss (gloss, clear), else the film colour. */

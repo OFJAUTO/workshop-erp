@@ -3,6 +3,7 @@
 import type { WorkingTime } from "./working-time";
 import { roundHalfUp } from "./bank-fees";
 import { customerAvailabilityWords, daysFromDate } from "./parts-rows";
+import { unpricedEstimateParts, waitingWords } from "./estimate-parts";
 import { positionsQtyMismatch, positionsWords } from "./parts-list";
 
 export const LINE_TYPES = [
@@ -107,6 +108,21 @@ export type QuoteLine = {
   /** Section 10: the PPF cutting method (hand / machine / mixed) and the note for Mixed. */
   /** Section 7 (23 October 2026): a bodyshop line on a mixed job (from the inspection's bodyshop findings). */
   side?: "mechanical" | "bodyshop" | null;
+  /** Estimate parts (30 October 2026): the line carries its own price. The note for the parts desk, when it was sent to
+   *  be priced, who priced it (the parts desk, or the advisor with a price he had - checked later by the parts desk), and
+   *  the parts desk's supplier, part number and availability (internal: never on a customer document). */
+  parts_note?: string | null;
+  price_requested_at?: string | null;
+  price_requested_by?: string | null;
+  priced_at?: string | null;
+  priced_by?: string | null;
+  priced_by_advisor?: boolean;
+  price_checked_at?: string | null;
+  price_checked_by?: string | null;
+  supplier_text?: string | null;
+  part_number?: string | null;
+  availability?: "in_stock" | "to_order" | null;
+  delivery_days?: number | null;
   cut_method?: "hand" | "machine" | "mixed" | null;
   cut_note?: string | null;
   film_colour?: string | null;
@@ -128,6 +144,10 @@ export type QuoteRow = {
   customer_id: string;
   vehicle_id: string | null;
   estimate_id: string | null;
+  /** An additional estimate: the open estimate of the same car it adds to (30 October 2026). */
+  additional_to_id?: string | null;
+  /** An estimate carried over to this job at gate-in (30 October 2026). */
+  carried_job_id?: string | null;
   status: QuoteStatus;
   token: string | null;
   discount_percent: number;
@@ -753,7 +773,7 @@ export function sendBlockers(
         if (p.confirm_status === "rejected") out.push({ key: `line-${l.id}`, label: `${short}: rejected, remove the line` });
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
       } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "+ Add a part"` });
-      else if (l.unit_cost === null || l.unit_cost === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
+      // An estimate's unpriced parts are counted once below (30 October 2026).
     }
     const comp = isComplimentary(l);
     if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });
@@ -765,6 +785,13 @@ export function sendBlockers(
     if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && !comp && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price per trip, or hide the line` });
     const floor = floorProblem(l, settings.minMarkup);
     if (floor) out.push({ key: `line-${l.id}`, label: `${short}: ${floor}` });
+  }
+  // An estimate is never sent with a part still unpriced: "2 parts still waiting for the parts desk", the tap goes to
+  // the first of them (send it, price it yourself, or remove the line).
+  if (q.kind === "estimate") {
+    const { notSent, withDesk } = unpricedEstimateParts(active);
+    if (withDesk.length) out.push({ key: `line-${withDesk[0].id}`, label: waitingWords(withDesk.length, true) });
+    if (notSent.length) out.push({ key: `line-${notSent[0].id}`, label: `${waitingWords(notSent.length, false)}: send to the parts desk, type the price you have, or remove the line` });
   }
   return out;
 }

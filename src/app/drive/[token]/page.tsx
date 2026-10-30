@@ -58,6 +58,17 @@ export default async function DrivePage({ params }: { params: Promise<{ token: s
                 </div>
               </>
             ) : null}
+            {contact.other ? (
+              <div className="flex flex-col gap-2 border-t border-[#D4D4D8] pt-2" data-drive-other-contact>
+                <p className="text-base font-extrabold">Pick-up contact{contact.other.name ? `: ${contact.other.name}` : ""}</p>
+                {contact.other.phone ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <a href={`tel:${contact.other.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-3 text-lg font-extrabold text-white">Call</a>
+                    <a href={`https://wa.me/${digits(contact.other.phone)}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-xl bg-[#1b6b2f] px-3 text-lg font-extrabold text-white">WhatsApp</a>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {contact.address ? <p className="text-base font-bold" data-drive-address>{contact.address}</p> : null}
             {contact.mapUrl ? <a href={contact.mapUrl} target="_blank" rel="noreferrer" className="flex min-h-12 items-center justify-center rounded-xl border-2 border-[#111113] px-3 text-base font-extrabold" data-drive-map>Open the map</a> : null}
           </div>

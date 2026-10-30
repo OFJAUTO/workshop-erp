@@ -17,8 +17,8 @@ import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { cleanTintSpec, decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { DocumentTail, GREY, InfoBoxes, PackageSection, PdfDocument, SectionBox, TitleRow, TotalsBox, companyOf, currencyOf, px, qtyText, styles, type SectionLine } from "./template";
-import { additionalToOf } from "@/lib/quote-history-data";
-import { additionalLine } from "@/lib/quote-history";
+import { additionalToOf, estimateAddsTo } from "@/lib/quote-history-data";
+import { additionalEstimateLine, additionalLine } from "@/lib/quote-history";
 
 /**
  * The customer's quotation or estimate on the document template: the header, two grey boxes, three bordered boxes
@@ -77,12 +77,14 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
   const statusLine = q.status === "approved" ? `${isEstimate ? "Accepted" : "Approved"} by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : q.status === "declined" ? `Declined by ${q.approver_name} on ${formatDateTime(q.responded_at)}.` : null;
   const discountLabel = discountLabelOf(q, { hasPackage: hasPackageLine(lines) });
   // An additional quotation (29 October 2026): its own title and the quotation(s) it adds to.
-  const addsToLine = isEstimate ? null : additionalLine(await additionalToOf(q.job_id, q.number));
+  // An additional estimate (30 October 2026) says so like an additional quotation, naming the estimate it adds to.
+  const estBase = isEstimate ? await estimateAddsTo(q) : null;
+  const addsToLine = isEstimate ? additionalEstimateLine(estBase) : additionalLine(await additionalToOf(q.job_id, q.number));
 
   const doc = (
     <PdfDocument title={`${isEstimate ? "Estimate" : "Quotation"} ${q.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} footerLines={[]} scanLabel={`Scan to view\nthis ${isEstimate ? "estimate" : "quotation"} online`}>
       <TitleRow
-        title={isEstimate ? "ESTIMATE" : addsToLine ? "ADDITIONAL QUOTATION" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
+        title={isEstimate ? (estBase ? "ADDITIONAL ESTIMATE" : "ESTIMATE") : addsToLine ? "ADDITIONAL QUOTATION" : q.version > 1 ? "REVISED QUOTATION" : "QUOTATION"}
         meta={[
           { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },
           { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },

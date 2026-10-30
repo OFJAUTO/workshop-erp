@@ -34,8 +34,8 @@ export type Person = { id: string; name: string; section: Section | null; role_i
 export const STAGE_SELECT = "id, job_id, position, key, label, section, est_hours, due_date, status, started_at, done_at, done_by, heads_up_sent_at, late_notified_at";
 const VEHICLE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, colour, model_year, photo_path, make:vehicle_makes(name), model:vehicle_models(name)";
 export type Vehicle = { kind?: "car" | "loose" | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; colour: string | null; model_year: number | null; photo_path: string | null; make: { name: string } | null; model: { name: string } | null };
-export type BodyshopJobRow = { id: string; job_number: string; status: string; stage: string; is_open: boolean; department: string | null; customer_id: string; vehicle_id: string; gated_in_by: string | null; gated_in_at: string; promised_at: string | null; booked_at: string | null; booked_arrival_at: string | null; bodyshop_started_at: string | null; bodyshop_handover_token: string | null; bodyshop_after_photo_id: string | null; final_check_appointment_id: string | null; gated_out_at: string | null; vehicle: Vehicle | null };
-export const JOB_SELECT = `id, job_number, status, stage, is_open, department, customer_id, vehicle_id, gated_in_by, gated_in_at, promised_at, booked_at, booked_arrival_at, bodyshop_started_at, bodyshop_handover_token, bodyshop_after_photo_id, final_check_appointment_id, gated_out_at, vehicle:vehicles(${VEHICLE_SELECT})`;
+export type BodyshopJobRow = { id: string; job_number: string; job_kind?: string | null; recheck_of?: string | null; status: string; stage: string; is_open: boolean; department: string | null; customer_id: string; vehicle_id: string; gated_in_by: string | null; gated_in_at: string; promised_at: string | null; booked_at: string | null; booked_arrival_at: string | null; bodyshop_started_at: string | null; bodyshop_handover_token: string | null; bodyshop_after_photo_id: string | null; final_check_appointment_id: string | null; gated_out_at: string | null; vehicle: Vehicle | null };
+export const JOB_SELECT = `id, job_number, job_kind, recheck_of, status, stage, is_open, department, customer_id, vehicle_id, gated_in_by, gated_in_at, promised_at, booked_at, booked_arrival_at, bodyshop_started_at, bodyshop_handover_token, bodyshop_after_photo_id, final_check_appointment_id, gated_out_at, vehicle:vehicles(${VEHICLE_SELECT})`;
 
 export const carText = (v: Vehicle | null | undefined) => (v ? `${[v.make?.name, v.model?.name].filter(Boolean).join(" ")}${v.has_plate ? ` (${formatPlate(v)})` : ""}` : "the car");
 export const shortCar = (v: Vehicle | null | undefined) => (v ? [v.make?.name, v.model?.name].filter(Boolean).join(" ") || formatPlate(v) : "Car");
@@ -265,7 +265,8 @@ export async function startBodyshopWork(jobId: string, actor: Actor | null, sett
   const job = jobRaw as unknown as BodyshopJobRow | null;
   if (!job || !job.is_open) return { error: "This job is not open." };
   if (job.bodyshop_started_at) return { started: false };
-  const { kinds } = await approvedKinds(jobId);
+  // A PPF recheck (30 October 2026) has no quotation: its one stage is the PPF team's final check.
+  const { kinds } = job.job_kind === "recheck" ? { kinds: ["recheck"] } : await approvedKinds(jobId);
   if (!kinds.length) return { error: "No approved bodyshop packages on this car yet." };
   const keys = stageKeysFor(kinds);
   const defs = keys.map((k) => stageDef(k)!).filter(Boolean);
@@ -341,6 +342,11 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     if ((items ?? []).length) return { error: `${(items ?? []).length} removed item${(items ?? []).length === 1 ? " is" : "s are"} not ticked back on yet: ${(items ?? []).map((i) => i.label).join(", ")}.` };
   }
   // Section 12: the warranty details are written at the end of the stage that fitted them; QC confirms the set.
+  // The PPF recheck is done when every point of the checklist is answered and anything that needed fixing is fixed.
+  if (stage.key === "recheck") {
+    const r = await recheckCompleteOrWhy(job.id);
+    if (r) return { error: r };
+  }
   if (["ppf", "tint", "detail", "clean", "qc"].includes(stage.key)) {
     const card = await warrantyCardOf(job.id, settings);
     if (card?.rows.length) {
@@ -379,6 +385,14 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     await admin.from("job_events").insert({ job_id: job.id, event_type: "bodyshop_stage", note: `Bodyshop side complete (${actor.display_name}); the mechanical side takes the car through QC to Ready`, created_by: actor.id });
     const needed = neededSignoffs(stages.map((s) => s.section));
     await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by, true), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The bodyshop work is complete; the mechanical work carries on. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
+  }
+  // A PPF recheck: the car is Ready to go back (nothing to invoice, no release sign-off) and the ORIGINAL job's 10-day
+  // check is signed off with the checklist.
+  if (!left.length && job.status === "in_work" && job.job_kind === "recheck") {
+    await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, updated_by: actor.id }).eq("id", job.id);
+    await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: "in_work", to_status: "ready", note: `PPF final check done (${actor.display_name}); free, nothing to invoice: ready to hand back`, created_by: actor.id });
+    await finishRecheck(job.id, actor);
+    return { ok: true };
   }
   if (!left.length && job.status === "in_work" && !mixed) {
     await admin.from("jobs").update({ status: "ready", stage: "ready", stage_entered_at: now, updated_by: actor.id }).eq("id", job.id);
@@ -599,8 +613,9 @@ export async function bodyshopLabourCost(jobId: string, settings: Settings): Pro
 /* ------------------------------------------------------------------------------------------------------------ */
 
 export async function signoffState(jobId: string) {
-  const [stages, { data: sig }] = await Promise.all([loadStages(jobId), createAdminClient().from("bodyshop_signoffs").select("role_key").eq("job_id", jobId).eq("is_active", true)]);
-  const needed = neededSignoffs(stages.map((s) => s.section));
+  const [stages, { data: sig }, { data: kindRow }] = await Promise.all([loadStages(jobId), createAdminClient().from("bodyshop_signoffs").select("role_key").eq("job_id", jobId).eq("is_active", true), createAdminClient().from("jobs").select("job_kind").eq("id", jobId).maybeSingle()]);
+  // A PPF recheck is free and fixes only what the original work needs: no release sign-off.
+  const needed = kindRow?.job_kind === "recheck" ? [] : neededSignoffs(stages.map((s) => s.section));
   const signed = new Set((sig ?? []).map((s) => s.role_key as SignoffKey));
   return { needed, signed: Array.from(signed), waitingOn: needed.filter((k) => !signed.has(k)), complete: needed.every((k) => signed.has(k)), hasStages: stages.length > 0 };
 }
@@ -984,4 +999,26 @@ export async function extendBodyshopStages(jobId: string, actor: Actor): Promise
   }
   await admin.from("job_events").insert({ job_id: jobId, event_type: "bodyshop_stage", note: `New bodyshop work approved: ${added.join(", ")} added to the stages`, created_by: actor.id });
   return { added };
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* PPF recheck (30 October 2026)                                                                                   */
+/* ------------------------------------------------------------------------------------------------------------ */
+
+/** Why the recheck cannot be finished yet, or null when every point is answered and every fix is done. */
+export async function recheckCompleteOrWhy(recheckJobId: string): Promise<string | null> {
+  const { recheckStateOf } = await import("./recheck");
+  const st = await recheckStateOf(recheckJobId);
+  if (!st) return "This recheck is not linked to its original PPF job.";
+  const unanswered = st.points.filter((p) => !p.status);
+  if (unanswered.length) return `Answer every point of the checklist first: ${unanswered.map((p) => p.label).join(", ")}.`;
+  const open = st.points.filter((p) => p.status === "fix" && !p.fixedAt);
+  if (open.length) return `Fix and tick: ${open.map((p) => p.label).join(", ")}.`;
+  return null;
+}
+
+/** The recheck is done: the ORIGINAL job's 10-day check is signed off with the checklist; a redo also makes it a comeback. */
+async function finishRecheck(recheckJobId: string, actor: Actor) {
+  const { signOffFromRecheck } = await import("./recheck");
+  await signOffFromRecheck(recheckJobId, actor);
 }

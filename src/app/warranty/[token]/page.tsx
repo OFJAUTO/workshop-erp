@@ -3,6 +3,7 @@ import { Logo } from "@/components/Logo";
 import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate } from "@/lib/format";
+import { customerWarrantyStatus } from "@/lib/warranty";
 import { getSettings } from "@/lib/settings";
 import { TERMS_LABELS, type TermsKey } from "@/lib/warranty";
 import { warrantyCardByToken } from "@/lib/warranty-data";
@@ -31,10 +32,10 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
     </div>
   );
   if (!card) return shell(<div className="rounded-xl bg-white p-6 text-sm">This warranty link is not valid. Please ask OFJ Automotive for a new one.</div>);
-  const phoneDigits = company.phone.replace(/[^\d]/g, "");
-  const bookText = `Hello OFJ, I would like to book the 10-day after-care check for my ${card.car}${card.plate ? ` (${card.plate})` : ""}. Warranty ${card.certificateNo}.`;
   const s = card.status;
-  const statusTone = s.kind === "active" ? "border-green bg-green-soft" : s.kind === "not_activated" ? "border-red-bar bg-red-soft" : s.kind === "pending" ? "border-amber-bar bg-amber-soft" : "border-[#D4D4D8] bg-white";
+  // 30 October 2026: the customer sees "Final check done on <date> ✓" once done, and nothing about a check not done.
+  const cs = customerWarrantyStatus(s);
+  const statusTone = cs.kind === "active" ? "border-green bg-green-soft" : "border-[#D4D4D8] bg-white";
   const termKeys = Array.from(new Set<TermsKey>([...card.rows.map((r) => r.product), ...(card.mechanical ? (["mechanical"] as TermsKey[]) : [])]));
   const today = new Date().toISOString();
   return shell(
@@ -49,18 +50,13 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
         </div>
       </section>
 
-      <section className={`flex flex-col gap-2 rounded-xl border-2 px-5 py-4 ${statusTone}`} data-warranty-status={s.kind}>
+      <section className={`flex flex-col gap-2 rounded-xl border-2 px-5 py-4 ${statusTone}`} data-warranty-status={cs.kind}>
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#5F6368]">Status</span>
-        <span className="text-lg font-extrabold leading-snug">{s.title}</span>
-        {s.kind === "active" && s.checkDate ? <span className="text-sm">10-day after-care check completed on {formatDate(s.checkDate)}.</span> : null}
+        <span className="text-lg font-extrabold leading-snug">{cs.title}</span>
+        {cs.finalCheck ? <span className="text-base font-bold text-green" data-final-check-done>{cs.finalCheck}</span> : null}
         {s.kind === "active" && s.manual ? <span className="text-sm">Activated by OFJ Automotive on {formatDate(s.manual.at)}{s.manual.note ? `: ${s.manual.note}` : "."}</span> : null}
-        {s.kind === "active" && !s.checkDate && !s.manual && card.handoverDay ? <span className="text-sm">From the handover on {formatDate(card.handoverDay)}.</span> : null}
-        {s.kind === "pending" ? <span className="text-sm">The complimentary 10-day after-care check activates your warranty{s.due ? `; it is due around ${formatDate(s.due)}` : ""}.</span> : null}
-        {s.kind === "not_activated" && s.reminders.length ? <span className="text-sm" data-warranty-reminders>Reminders sent on {s.reminders.map((d) => formatDate(d)).join(", ")}.</span> : null}
+        {cs.kind === "active" && !s.checkDate && !s.manual && card.handoverDay ? <span className="text-sm">From the handover on {formatDate(card.handoverDay)}.</span> : null}
         {s.kind === "before_handover" ? <span className="text-sm">{s.detail}</span> : null}
-        {s.kind === "pending" || s.kind === "not_activated" ? (
-          <a href={`https://wa.me/${phoneDigits}?text=${encodeURIComponent(bookText)}`} target="_blank" rel="noreferrer" className="mt-1 flex min-h-12 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white" data-book-check>Book your check</a>
-        ) : null}
         {card.checkPhotos.length ? (
           <div className="mt-1 grid grid-cols-3 gap-2" data-warranty-check-photos>
             {card.checkPhotos.filter((p) => p.url).map((p) => (

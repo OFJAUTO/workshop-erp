@@ -17,7 +17,8 @@ export function DeclinedAllButton({ jobId, fee, isOwner }: { jobId: string; fee:
   const [reason, setReason] = useState("");
   const [answer, setAnswer] = useState<{ error?: string; ok?: string } | null>(null);
   const [pending, start] = useTransition();
-  const feeText = `AED ${fee.toLocaleString("en-GB")}`;
+  // The fee is before VAT; the invoice adds the VAT (30 October 2026: the job's own fee, as the customer approved it).
+  const feeText = `AED ${fee.toLocaleString("en-GB")} + VAT (AED ${(Math.round(fee * 105) / 100).toLocaleString("en-GB", { minimumFractionDigits: 2 })})`;
   const value = Number(amount.replace(/,/g, "")) || 0;
   const send = (charge: number) => {
     const fd = new FormData();
@@ -53,7 +54,7 @@ export function DeclinedAllButton({ jobId, fee, isOwner }: { jobId: string; fee:
                 <p className="text-sm">The quotation stays in the history, marked declined by the customer. The declined work is saved for the next visit and the car goes to Ready to collect.</p>
                 {fee > 0 && !changing ? (
                   <>
-                    <p className="text-base font-bold" data-declined-question>Charge the inspection fee of {feeText} agreed at gate-in?</p>
+                    <p className="text-base font-bold" data-declined-question>Charge the inspection fee of {feeText} the customer agreed to?</p>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" disabled={pending} onClick={() => send(fee)} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-50" data-declined-charge>
                         {pending ? "Recording…" : `Yes, charge ${feeText}`}
@@ -81,7 +82,7 @@ export function DeclinedAllButton({ jobId, fee, isOwner }: { jobId: string; fee:
                   </div>
                 ) : (
                   <>
-                    <p className="text-sm font-semibold" data-declined-no-fee>No inspection fee was agreed at gate-in: no invoice. The time spent and the declined work are saved.</p>
+                    <p className="text-sm font-semibold" data-declined-no-fee>No inspection fee on this car: no invoice. The time spent and the declined work are saved.</p>
                     <button type="button" disabled={pending} onClick={() => send(0)} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-50" data-declined-confirm>
                       {pending ? "Recording…" : "Record the decline"}
                     </button>

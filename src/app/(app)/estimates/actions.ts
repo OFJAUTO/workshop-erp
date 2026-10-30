@@ -16,10 +16,10 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { shortFor } from "@/lib/short-links";
 import { formatPlate } from "@/lib/types";
 import { aed } from "@/lib/quotes";
-import { amountOf, statusWords, type QuoteVersionRow } from "@/lib/quote-history";
+import { amountOf, OPEN_ESTIMATE_STATUSES, statusWords, type QuoteVersionRow } from "@/lib/quote-history";
 
-/** Open estimates (not answered, not cancelled): a second one for the same car is asked about first. */
-const OPEN_ESTIMATE = ["draft", "pending_owner", "sent", "opened", "urgent_requested"];
+/** Open estimates (accepted or not, never carried to a job): a second one for the same car is asked about first. */
+const OPEN_ESTIMATE = OPEN_ESTIMATE_STATUSES;
 
 /**
  * The open estimates of ONE car, oldest first, with the words the question shows: "E-00035 · AED 6,615.00 · sent
@@ -35,6 +35,7 @@ async function openEstimatesOfCar(vehicleId: string): Promise<{ id: string; numb
     .eq("is_active", true)
     .is("deleted_at", null)
     .eq("vehicle_id", vehicleId)
+    .is("carried_job_id", null)
     .in("status", OPEN_ESTIMATE)
     .order("created_at");
   const rows = (data ?? []) as unknown as QuoteVersionRow[];
@@ -86,7 +87,7 @@ export async function createEstimate(_state: FormState, formData: FormData): Pro
   const settings = await getSettings();
   const { data: created, error } = await admin
     .from("quotations")
-    .insert({ kind: "estimate", customer_id: customerId, vehicle_id: vehicleId, validity_days: Number(settings.quote_validity_days) || 7, created_by: staff.id, updated_by: staff.id })
+    .insert({ kind: "estimate", customer_id: customerId, vehicle_id: vehicleId, additional_to_id: addTo?.id ?? null, validity_days: Number(settings.quote_validity_days) || 7, created_by: staff.id, updated_by: staff.id })
     .select("id, number")
     .single();
   if (error || !created) return { error: error?.message ?? "Could not create the estimate.", values };

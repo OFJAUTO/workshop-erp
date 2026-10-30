@@ -6,7 +6,7 @@ import { LINE_TEXT_MAX } from "@/lib/text-limits";
 import { flushTimers, onPageLeave } from "@/lib/app-version";
 import { LockedQuote } from "./LockedQuote";
 import { lineIsTint } from "@/lib/tint";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { PartPicker } from "@/components/PartPicker";
 import { ServicePicker, type PickerKind } from "@/components/ServicePicker";
@@ -15,7 +15,7 @@ import { PositionsLine } from "@/components/PositionsLine";
 import { ReasonChips } from "@/components/ReasonChips";
 import { FloatingMenu } from "@/components/FloatingMenu";
 import { packageCostEstimate } from "@/lib/package-cost";
-import { CUT_METHODS, lineIsPpf } from "@/lib/ppf-cut";
+import { CUT_METHODS, ppfInstallLine } from "@/lib/ppf-cut";
 import { ESTIMATED_COMPLETION, packageDetailsText, packageSnapshot, toSnapshot, type BodyshopPackage } from "@/lib/packages";
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
@@ -23,6 +23,7 @@ import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/co
 import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
+import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimateParts, waitingWords } from "@/lib/estimate-parts";
 import { parseNumber } from "@/lib/price-import";
 import { INTERNAL_ONLY_LABEL, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
@@ -252,6 +253,23 @@ function focusNextAmount(from: HTMLElement) {
  * Include or Leave off, the other charges with recovery as one labelled row, one summary with the
  * internal breakdown, and the decision in a bar fixed to the bottom.
  */
+/** An estimate part's price fields, as the server has them (30 October 2026). */
+const estPriceOf = (l: QuoteLine): Partial<QuoteLine> => ({
+  unit_cost: l.unit_cost,
+  priced_at: l.priced_at,
+  priced_by: l.priced_by,
+  priced_by_advisor: l.priced_by_advisor,
+  price_checked_at: l.price_checked_at,
+  price_checked_by: l.price_checked_by,
+  price_requested_at: l.price_requested_at,
+  price_requested_by: l.price_requested_by,
+  supplier_text: l.supplier_text,
+  part_number: l.part_number,
+  part_type: l.part_type,
+  availability: l.availability,
+  delivery_days: l.delivery_days,
+});
+
 export function QuoteEditor({
   quotation,
   lines: initialLines,
@@ -417,6 +435,8 @@ export function QuoteEditor({
   const [attempted, setAttempted] = useState(false);
   const [picker, setPicker] = useState<null | { kind: PickerKind; replace?: string; sourceType?: "item" | "tyre" | "request" | null; sourceKey?: string | null; label?: string }>(null);
   const [partPicker, setPartPicker] = useState(false);
+  /** Estimate parts (30 October 2026): the "I have a price" box open on a line, with what is typed in it. */
+  const [ownPrice, setOwnPrice] = useState<{ id: string; cost: string; supplier: string } | null>(null);
   const [skippedPositions, setSkippedPositions] = useState<Set<string>>(() => new Set());
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -488,7 +508,9 @@ export function QuoteEditor({
         if (!k || l.fee_kind) return l;
         if (pendingNew.current.has(l.id)) return dirty.has(l.id) ? { ...l, ...k } : l;
         if (dirty.has(l.id)) return { ...l, ...k };
-        return { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, left_off: l.left_off, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title };
+        const merged: QuoteLine = { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, left_off: l.left_off, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title };
+        // An estimate part is priced elsewhere (the parts desk, or this screen's saved "I have a price"): its price fields come from the server.
+        return isEstimatePart(l) ? { ...merged, ...estPriceOf(l) } : merged;
       });
       for (const l of cur) if (!serverIds.has(l.id) && pendingNew.current.has(l.id)) out.push(l);
       for (const id of Array.from(pendingNew.current)) if (serverIds.has(id)) pendingNew.current.delete(id);
@@ -631,6 +653,14 @@ export function QuoteEditor({
     if (key === "hand" && surcharge > 0 && !existing) addLine({ line_type: "package", title: HANDCUT_SURCHARGE_TITLE, unit_price: surcharge, quantity: 1, price_per: "job" } as Partial<QuoteLine>);
     if (key !== "hand" && existing) removeLine(existing.id);
   };
+  /** Estimate parts: sent to the parts desk at once on screen, the save carries the ids. */
+  const sendToDesk = (ids: string[]) => {
+    if (!ids.length) return;
+    const now = new Date().toISOString();
+    setLines((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, price_requested_at: now } : x)));
+    setDirty((d) => { const n = new Set(d); for (const id of ids) n.add(id); return n; });
+    save({ sendToDesk: { ids } });
+  };
   const removeLine = (id: string) => {
     const kids = lines.filter((l) => l.is_active && l.parent_line_id === id && blockOf(l) === "parts" && !l.left_off);
     if (kids.length) { setRemoveAsk({ id, parts: kids.length }); return; }
@@ -684,6 +714,10 @@ export function QuoteEditor({
   };
   const labourLines = lines.filter((l) => l.is_active && blockOf(l) === "labour");
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
+  // An estimate's own parts (30 October 2026): what still has no price, and what can go to the parts desk now.
+  const estParts = isQuotation ? [] : partLines.filter((l) => isEstimatePart(l) && !l.left_off);
+  const estUnpriced = unpricedEstimateParts(estParts);
+  const estToSend = estUnpriced.notSent.filter((l) => l.title.trim());
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
 
   /* ----- Section 11: the jobs can be put in the customer's order - drag the ⋮⋮ handle, the ↑ ↓, or the menu.
@@ -954,7 +988,7 @@ export function QuoteEditor({
             ) : null}
             {l.side === "bodyshop" ? <span className="self-start rounded-full bg-chip px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em]" data-side-badge="bodyshop">Bodyshop · bodyshop rate{l.details ? ` · ${l.details}` : ""}</span> : null}
             {l.package_items ? <span className="whitespace-pre-line px-1 text-[11px] leading-relaxed text-muted" data-package-items>{packageDetailsText(l.package_items)}</span> : null}
-            {lineIsPpf(l, svc?.bodyshop_kind ?? null) ? (
+            {ppfInstallLine(l, svc?.bodyshop_kind ?? null) ? (
               // Section 10: the PPF cutting method, approved with the quotation and printed under the PPF item.
               <span className="flex flex-wrap items-center gap-1.5 px-1 pt-0.5" data-cut-method={l.cut_method ?? "hand"}>
                 <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted">PPF cut</span>
@@ -1370,7 +1404,7 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button type="button" size="md" onClick={() => setDraft("choose")} disabled={draft === "saving"}>+ Add line</Button>
               {(packages?.length ?? 0) > 0 ? <Button type="button" tone="secondary" size="md" onClick={() => setPackageAsk(true)} data-add-package>+ Add a package</Button> : null}
-              {isQuotation ? <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)}>+ Add a part</Button> : null}
+              <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)} data-add-part>+ Add a part</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green" : ""}>
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
               </Button>
@@ -1413,7 +1447,13 @@ export function QuoteEditor({
         {/* Block 2: parts, priced by Parts; the advisor sets the markup and Include or Leave off */}
         {hasTint ? tintBox : null}
         <Card className="flex flex-col gap-3">
-          <SectionLabel right={wait?.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} priced` : undefined}>Parts</SectionLabel>
+          <SectionLabel right={wait?.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} priced` : !isQuotation && estParts.length ? `${estParts.filter((l) => l.unit_cost !== null && l.unit_cost !== undefined).length} of ${estParts.length} priced` : undefined}>Parts</SectionLabel>
+          {!isQuotation && (estUnpriced.withDesk.length || estUnpriced.notSent.length) ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm" data-est-parts-waiting>
+              <span className="font-semibold">{[estUnpriced.withDesk.length ? waitingWords(estUnpriced.withDesk.length, true) : null, estUnpriced.notSent.length ? waitingWords(estUnpriced.notSent.length, false) : null].filter(Boolean).join(" · ")}</span>
+              {!disabled && estToSend.length ? <Button type="button" size="md" onClick={() => sendToDesk(estToSend.map((l) => l.id))} data-est-send-all>Send all to the parts desk ({estToSend.length})</Button> : null}
+            </div>
+          ) : null}
           {partLines.length && !disabled ? (
             <div className="flex flex-wrap items-end gap-2">
               <span className={boxLabel} data-markup-all>
@@ -1459,6 +1499,9 @@ export function QuoteEditor({
                 <tbody className="divide-y divide-line">
                   {partLines.map((l, idx) => {
                     const part = partOf(l);
+                    // An estimate's own part line (30 October 2026): named here, priced by the parts desk or by the advisor.
+                    const est = !isQuotation && isEstimatePart(l);
+                    const estState = est ? estimatePartState(l) : null;
                     const leftOff = !!l.left_off;
                     const optionOff = !!l.option_group && l.chosen === false;
                     const unchosen = leftOff || optionOff;
@@ -1481,7 +1524,8 @@ export function QuoteEditor({
                       patch(l.id, fields, true);
                     };
                     return (
-                      <tr key={l.id} id={`item-line-${l.id}`} className={unchosen ? "opacity-50" : ""} data-part-line>
+                      <Fragment key={l.id}>
+                      <tr id={`item-line-${l.id}`} className={unchosen ? "opacity-50" : ""} data-part-line data-est-part={est ? l.id : undefined}>
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{idx + 1}</td>
                         <td className="py-2 pr-2 align-top min-w-0">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
@@ -1496,7 +1540,12 @@ export function QuoteEditor({
                                 {renameError ? <span className="w-full text-[11px] font-semibold text-red" data-rename-part-error>{renameError}</span> : null}
                               </span>
                             ) : (
-                              <>
+                              est && !disabled ? (
+                                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                                  <Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} placeholder="Name of the part" className="min-h-9 uppercase font-semibold" aria-label="Name of the part" data-est-part-name />
+                                  <Input value={l.parts_note ?? ""} onChange={(e) => patch(l.id, { parts_note: e.target.value })} placeholder="Note for the parts desk (OEM only, front left…)" className="min-h-9 text-xs" aria-label="Note for the parts desk" data-est-part-note />
+                                </span>
+                              ) : <>
                                 <span className="min-w-0 break-words font-semibold uppercase">{l.title}</span>
                                 {!disabled && l.part_item_id ? <button type="button" onClick={() => { setRenameError(null); setRenamePart({ lineId: l.id, partId: l.part_item_id!, value: l.title }); }} aria-label="Rename for the customer" title="Rename for the customer (the supplier name and part number never change)" className="min-h-7 min-w-7 shrink-0 rounded-control border border-line text-xs font-bold text-muted hover:border-ink" data-rename-part={l.id}>✎</button> : null}
                               </>
@@ -1505,6 +1554,13 @@ export function QuoteEditor({
                           <PositionsLine positions={l.positions} />
                           {partTypeText(l) ? <div><Badge tone="outline">{partTypeText(l)}</Badge></div> : null}
                           {positionsWarningOf(l) ? <div className="text-[11px] font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
+                          {est ? (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted" data-est-part-state={estState}>
+                              <Badge tone={estState === "draft" ? "outline" : estState === "with_desk" || estState === "advisor" ? "amber" : "green"}>{ESTIMATE_PART_WORDS[estState!]}</Badge>
+                              {l.supplier_text ? <span data-est-part-supplier>{l.supplier_text}{l.part_number ? ` · ${l.part_number}` : ""} (internal)</span> : null}
+                              {disabled && l.parts_note ? <span>Note: {l.parts_note}</span> : null}
+                            </div>
+                          ) : null}
                           <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-[11px] text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
@@ -1525,8 +1581,8 @@ export function QuoteEditor({
                             ) : null}
                           </div>
                         </td>
-                        <td className="py-2 pr-2 align-top text-xs text-muted whitespace-nowrap">{customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? ""}</td>
-                        <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
+                        <td className="py-2 pr-2 align-top text-xs text-muted whitespace-nowrap">{est ? (customerAvailabilityWords(l.availability, l.delivery_days) ?? "") : (customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? "")}</td>
+                        <td className="py-2 pr-2 align-top text-right">{est && !disabled ? <Input value={num(l.quantity)} onChange={(e) => { const v = Number(e.target.value.replace(",", ".")); if (e.target.value !== "" && Number.isFinite(v) && v > 0) patch(l.id, { quantity: v }); }} inputMode="decimal" className="min-h-9 text-right" style={{ width: "4.5rem" }} aria-label="Quantity" data-est-part-qty /> : l.quantity}</td>
                         <td className="py-2 pr-2 align-top text-right">{l.unit_cost === null ? "" : aed(l.unit_cost)}</td>
                         <td className="py-2 pr-2 align-top" data-markup-cell>
                           <div className="flex items-center justify-end gap-1.5">
@@ -1563,7 +1619,14 @@ export function QuoteEditor({
                           <span className={`block text-[11px] font-bold text-red ${belowFloor ? "" : "invisible"}`}>Below the minimum</span>
                         </td>
                         <td className="py-2 align-top text-right">
-                          {!disabled && isQuotation ? (
+                          {est && !disabled ? (
+                            <div className="mb-1 flex flex-col items-end gap-1" data-est-part-actions>
+                              {estState === "draft" ? <button type="button" disabled={!l.title.trim()} onClick={() => sendToDesk([l.id])} title={l.title.trim() ? undefined : "Type the name first"} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap disabled:opacity-40" data-est-send={l.id}>Send to parts desk to price</button> : null}
+                              {estState === "draft" || estState === "with_desk" ? <button type="button" onClick={() => setOwnPrice(ownPrice?.id === l.id ? null : { id: l.id, cost: "", supplier: "" })} className="min-h-9 rounded-control border border-line-strong px-2.5 text-xs font-semibold whitespace-nowrap" data-est-own-price={l.id}>I have a price</button> : null}
+                              <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-red whitespace-nowrap" data-est-remove={l.id}>Remove</button>
+                            </div>
+                          ) : null}
+                          {!disabled ? (
                             leftOff ? (
                               <button type="button" onClick={() => patch(l.id, { left_off: false }, true)} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap">Put back</button>
                             ) : (
@@ -1573,6 +1636,21 @@ export function QuoteEditor({
                           {!disabled && !leftOff ? <button type="button" onClick={() => patch(l.id, { visible_to_customer: l.visible_to_customer === false }, true)} title={INTERNAL_ONLY_LABEL} className="mt-1 block min-h-9 w-full text-right text-[11px] font-semibold text-muted underline underline-offset-4 whitespace-nowrap" data-internal-toggle={l.id}>{l.visible_to_customer === false ? "Show to customer" : "Internal only"}</button> : null}
                         </td>
                       </tr>
+                      {est && ownPrice?.id === l.id ? (
+                        <tr data-est-own-price-box={l.id}>
+                          <td />
+                          <td colSpan={8} className="pb-3">
+                            <div className="flex flex-wrap items-end gap-2 rounded-control border border-line-strong bg-chip p-3">
+                              <span className="w-full text-xs text-muted">A price you already have (a dealer on the phone). It shows as &quot;Priced by advisor&quot; inside the workshop only, and the parts desk checks it.</span>
+                              <label className="flex flex-col gap-1 text-xs font-semibold">Cost each, before VAT (AED)<Input value={ownPrice.cost} onChange={(e) => setOwnPrice({ ...ownPrice, cost: e.target.value })} inputMode="decimal" className="min-h-9" style={{ width: "8rem" }} data-est-own-cost /></label>
+                              <label className="flex flex-col gap-1 text-xs font-semibold">Supplier<Input value={ownPrice.supplier} onChange={(e) => setOwnPrice({ ...ownPrice, supplier: e.target.value })} className="min-h-9" style={{ width: "12rem" }} textCase="title" data-est-own-supplier /></label>
+                              <Button type="button" size="md" disabled={!(Number(ownPrice.cost.replace(/,/g, "")) > 0) || !ownPrice.supplier.trim()} onClick={() => { const cost = Number(ownPrice.cost.replace(/,/g, "")); setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: cost, supplier_text: ownPrice.supplier.trim(), priced_by_advisor: true, price_checked_at: null } : x))); setDirty((d) => new Set(d).add(l.id)); save({ advisorPrice: { id: l.id, cost, supplier: ownPrice.supplier.trim() } }); setOwnPrice(null); }} data-est-own-save>Use this price</Button>
+                              <Button type="button" tone="ghost" size="md" onClick={() => setOwnPrice(null)}>Cancel</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -1591,7 +1669,6 @@ export function QuoteEditor({
             </div>
           ) : null}
           {partLines.some((l) => l.left_off) ? <p className="text-xs text-muted">A part left off stays on the car&apos;s list, counts for nothing here and is not ordered. Put back with one tap.</p> : null}
-          {!isQuotation && !disabled ? <div><Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "part", title: "Part", quantity: 1 })}>+ Part (estimate)</Button></div> : null}
         </Card>
 
         {/* Block 3: other charges */}
@@ -1835,7 +1912,11 @@ export function QuoteEditor({
           itemKey={null}
           source="custom"
           onDone={(entries) => {
-            for (const e of entries) save({ requestPart: { description: e.name, quantity: e.qty, positions: e.positions, catalogue_id: e.catalogue_id, source_type: null, source_key: null } });
+            // A job's part goes to the Parts desk as a request; an estimate's part is a line the advisor names, then sends to the parts desk.
+            for (const e of entries) {
+              if (isQuotation) save({ requestPart: { description: e.name, quantity: e.qty, positions: e.positions, catalogue_id: e.catalogue_id, source_type: null, source_key: null } });
+              else addLine({ line_type: "part", title: e.name, quantity: e.qty, positions: e.positions });
+            }
             setPartPicker(false);
           }}
           onClose={() => setPartPicker(false)}

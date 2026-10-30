@@ -37,6 +37,11 @@ export default async function NewEstimatePage({ searchParams }: { searchParams: 
           testId="estimate"
         />
       </Card>
+      {/* 30 October 2026: the free 10-day final check after a PPF job is a visit, never an estimate. */}
+      <Card className="max-w-3xl flex flex-wrap items-center gap-3" data-recheck-hint>
+        <span className="min-w-0 flex-1 text-sm"><span className="font-bold">PPF RECHECK (FREE)?</span> No estimate needed: gate the car in and choose PPF RECHECK (FREE), or use the button on the car&apos;s page.</span>
+        <LinkButton href="/gate-in" tone="secondary" size="md">Gate in a PPF recheck</LinkButton>
+      </Card>
     </>
   );
 }

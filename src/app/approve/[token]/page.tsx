@@ -37,7 +37,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
 
   const { data: req } = await admin
     .from("approval_requests")
-    .select("id, job_id, status, opened_at, approved_at, approver_name, terms_text, terms_text_ar, declaration_text, declaration_text_ar, inspection_fee_aed, inspection_fee_notice, inspection_fee_notice_ar, sent_to_name, sent_by")
+    .select("id, job_id, status, opened_at, approved_at, approver_name, terms_text, terms_text_ar, declaration_text, declaration_text_ar, inspection_fee_aed, no_fee, inspection_fee_notice, inspection_fee_notice_ar, sent_to_name, sent_by")
     .eq("token", token)
     .maybeSingle();
   if (!req) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
@@ -70,8 +70,11 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   const location = gateIn.location_type === "branch" ? (gateIn.location_name ?? "") : [gateIn.location_name, gateIn.location_address].filter(Boolean).join(", ");
   const declaration = req.declaration_text ?? settings.declaration_text;
   const declarationAr = req.declaration_text_ar ?? settings.declaration_text_ar;
-  const feeNoticeEn = req.inspection_fee_notice ?? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed);
-  const feeNoticeAr = req.inspection_fee_notice_ar ?? feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed);
+  // 30 October 2026: No inspection fee = nothing about a fee on this page; a fee shows the wording copied onto the link
+  // (with VAT) - an older link without one falls back to the Settings wording.
+  const noFee = (req as { no_fee?: boolean }).no_fee === true;
+  const feeNoticeEn = noFee ? null : (req.inspection_fee_notice ?? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed));
+  const feeNoticeAr = noFee ? null : (req.inspection_fee_notice_ar ?? feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed));
   const details: [string, string | null][] = [
     ["Received at", location || null],
     ["Arrived by", labelOf(ARRIVED_BY, gateIn.arrived_by)],
@@ -99,7 +102,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
             <form id="approval-form" method="post" action={`/api/approve/${token}`} className="flex flex-col gap-3 py-1">
               <p className="text-xs text-[#5F6368]">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
               {feeNoticeEn ? (
-                <div className="rounded-lg bg-white px-3 py-2.5 flex flex-col gap-1.5">
+                <div className="rounded-lg bg-white px-3 py-2.5 flex flex-col gap-1.5" data-fee-notice>
                   <span className="text-sm font-bold">{feeNoticeEn}</span>
                   {feeNoticeAr ? <span className="text-sm font-bold" dir="rtl" lang="ar">{feeNoticeAr}</span> : null}
                 </div>

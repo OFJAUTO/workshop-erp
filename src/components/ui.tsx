@@ -117,9 +117,10 @@ const badgeClass: Record<BadgeTone, string> = {
   ink: "bg-ink text-white tracking-[0.08em]",
 };
 
-export function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: BadgeTone }) {
+export function Badge({ children, tone = "neutral", ...data }: { children: ReactNode; tone?: BadgeTone } & { [key: `data-${string}`]: string | number | boolean | undefined }) {
   return (
     <span
+      {...data}
       className={`inline-flex max-w-full items-center text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeClass[tone]}`}
     >
       {children}

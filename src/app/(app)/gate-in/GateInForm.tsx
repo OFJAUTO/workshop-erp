@@ -8,8 +8,10 @@ import { GateInAssist } from "@/components/GateInAssist";
 import { ImageCropper } from "@/components/ImageCropper";
 import { MileageInput } from "@/components/MileageInput";
 import { RequestsList } from "@/components/RequestsList";
+import { InspectionFeeChoice } from "@/components/InspectionFeeChoice";
+import type { FeeBounds, FeeInput } from "@/lib/inspection-fee";
 import { FormDraft } from "@/components/FormDraft";
-import { Card, ChoiceButtons, Field, Input, SectionLabel, Textarea } from "@/components/ui";
+import { Card, ChoiceButtons, Field, Input, LinkButton, SectionLabel, Textarea } from "@/components/ui";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS } from "@/lib/jobs";
 import type { MileageUnit } from "@/lib/mileage";
 import type { Branch } from "@/lib/settings";
@@ -37,6 +39,8 @@ export function GateInForm({
   returnTo,
   recoveryTypes = [],
   inspectionFee = null,
+  rechecks = [],
+  initialVisit = "normal",
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -52,7 +56,11 @@ export function GateInForm({
   mileageUnit?: MileageUnit;
   /** What the mileage checks compare against. */
   mileageContext?: { modelYear: number | null; lastKm: number | null; lastVisitAt: string | null };
-  /** Accepted estimates for this car that no job has used yet. */
+  /** 30 October 2026: this car's delivered PPF jobs - a PPF RECHECK (FREE) visit is for one of them. */
+  rechecks?: { id: string; number: string; date: string; what: string; checkDone: string | null }[];
+  /** Opened with ?visit=recheck: the recheck is chosen already. */
+  initialVisit?: "normal" | "recheck";
+  /** Every open estimate of this car that no job has taken yet (30 October 2026: all carry over). */
   estimates?: { id: string; label: string; hint: string }[];
   /** Jobs of this car gated out within the comeback window. */
   comebacks?: { id: string; label: string; hint: string }[];
@@ -63,13 +71,14 @@ export function GateInForm({
   /** Where Save returns to: "media" for the photos step (its Back button leads here). */
   returnTo?: string;
   /** Section 8: the inspection fee if no work is approved - the default (premium brands higher), who may lower it, and the lock after approval. */
-  inspectionFee?: { default: number; premium: boolean; isOwner: boolean; locked: boolean } | null;
+  /** 30 October 2026: the fee choice when an advisor or the owner does the gate-in (null for the gate-in person). */
+  inspectionFee?: { initial: FeeInput; bounds: FeeBounds; isOwner: boolean; locked: boolean; words: string } | null;
 }) {
   const [arrivedBy, setArrivedBy] = useState(initialValues?.arrived_by ?? "");
-  const [fee, setFee] = useState(initialValues?.inspection_fee ?? String(inspectionFee?.default ?? 750));
-  const [feeOther, setFeeOther] = useState(() => { const f = initialValues?.inspection_fee ?? String(inspectionFee?.default ?? 750); return ![750, 1000, 1500, 2000].includes(Number(f)); });
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
+  const [visit, setVisit] = useState<"normal" | "recheck">(initialValues?.visit_type === "recheck" || (initialVisit === "recheck" && rechecks.length) ? "recheck" : "normal");
+  const recheck = visit === "recheck";
   const atBranch = branches.some((b) => b.name === location);
 
   return (
@@ -77,9 +86,37 @@ export function GateInForm({
       {(v) => (
         <>
           {draftKey ? <FormDraft draftKey={draftKey} skip={["requests"]} /> : null}
+          {v.open_job_id ? (
+            <div className="rounded-control border-2 border-ink p-4 flex flex-wrap items-center gap-3" data-open-job={v.open_job_number}>
+              <span className="font-semibold">The car is on job {v.open_job_number}.</span>
+              <LinkButton href={`/jobs/${v.open_job_id}`} size="lg" data-open-job-link>Open {v.open_job_number}</LinkButton>
+            </div>
+          ) : null}
           <input type="hidden" name="is_electric" value={isElectric ? "yes" : "no"} />
           {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
           {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
+
+          {mode === "create" && rechecks.length ? (
+            // 30 October 2026: the free 10-day final check after a PPF job is its own visit, next to the normal one.
+            <Card className="flex flex-col gap-4" data-visit-type={visit}>
+              <SectionLabel>Visit</SectionLabel>
+              <input type="hidden" name="visit_type" value={visit} />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {([["normal", "Normal visit", "Inspection, quotation, the customer approves"], ["recheck", "PPF RECHECK (FREE)", "The 10-day final check of a PPF job: no fee, no quotation, no invoice"]] as const).map(([key, title, hint]) => (
+                  <button key={key} type="button" onClick={() => setVisit(key)} aria-pressed={visit === key} data-visit={key} className={`min-h-20 rounded-card border-2 px-4 py-3 text-left flex flex-col gap-1 ${visit === key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                    <span className="text-base font-extrabold">{title}</span>
+                    <span className={`text-xs ${visit === key ? "text-white/80" : "text-muted"}`}>{hint}</span>
+                  </button>
+                ))}
+              </div>
+              {recheck ? (
+                <Field label="Which PPF job is this the final check for?">
+                  <ChoiceButtons name="recheck_of" columns={2} defaultValue={v.recheck_of ?? (rechecks.length === 1 ? rechecks[0].id : null)} options={rechecks.map((r) => ({ value: r.id, label: `${r.number} · delivered ${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Dubai" }).format(new Date(r.date))}`, hint: `${r.what}${r.checkDone ? " · final check already done" : ""}` }))} />
+                </Field>
+              ) : null}
+              {recheck ? <p className="text-sm text-muted" data-recheck-note>Goes straight to the PPF team. The customer is not asked to approve anything and nothing is charged: the time and any film go to the original job.</p> : null}
+            </Card>
+          ) : null}
 
           {pictureMode !== "none" ? (
             <Card className="flex flex-col gap-4">
@@ -185,14 +222,30 @@ export function GateInForm({
 
               <Card className="flex flex-col gap-5">
                 <SectionLabel>Plan</SectionLabel>
-                {estimates.length ? (
-                  <Field label="Accepted estimate" hint="Attach it and it opens as the quotation, pre-filled, once the inspection is approved.">
-                    <ChoiceButtons name="estimate_id" columns={2} defaultValue={v.estimate_id ?? estimates[0].id} options={[...estimates.map((e) => ({ value: e.id, label: e.label, hint: e.hint })), { value: "", label: "No estimate" }]} />
+                {estimates.length && !recheck ? (
+                  // 30 October 2026: every open estimate of the car carries over; each opens as its own quotation (the first as
+                  // the original, the others as additional ones) once the inspection is approved. Untick one to leave it off.
+                  <Field label={estimates.length === 1 ? "Estimate for this car" : `${estimates.length} estimates for this car`} hint="Ticked estimates carry over to the job: each opens as its own quotation, pre-filled, once the inspection is approved.">
+                    <div className="flex flex-col gap-2" data-carry-estimates={estimates.length}>
+                      {estimates.map((e) => (
+                        <label key={e.id} className="flex min-h-11 items-start gap-3 rounded-control border border-line-strong bg-white px-3 py-2.5 cursor-pointer" data-carry-estimate={e.label.split(" ")[0]}>
+                          <input type="checkbox" name="carry_estimate" value={e.id} defaultChecked className="mt-0.5 h-5 w-5 shrink-0 accent-ink" />
+                          <span className="flex flex-col">
+                            <span className="text-sm font-bold">{e.label}</span>
+                            {e.hint ? <span className="text-xs text-muted">{e.hint}</span> : null}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </Field>
                 ) : null}
-                <Field label="Department" hint="Which side of the workshop the car goes to. Both: it moves on only when both sides are finished.">
-                  <ChoiceButtons name="department" columns={3} defaultValue={v.department} options={JOB_DEPARTMENTS.map((d) => ({ value: d.value, label: d.label }))} />
-                </Field>
+                {recheck ? (
+                  <input type="hidden" name="department" value="bodyshop" />
+                ) : (
+                  <Field label="Department" hint="Which side of the workshop the car goes to. Both: it moves on only when both sides are finished.">
+                    <ChoiceButtons name="department" columns={3} defaultValue={v.department} options={JOB_DEPARTMENTS.map((d) => ({ value: d.value, label: d.label }))} />
+                  </Field>
+                )}
                 <label className="flex items-center gap-3 min-h-11 cursor-pointer">
                   <input type="checkbox" name="vip" checked={vip} onChange={(e) => setVip(e.target.checked)} className="h-5 w-5 accent-ink" />
                   <span className="text-sm font-bold">VIP</span>
@@ -203,27 +256,20 @@ export function GateInForm({
                     <Textarea name="vip_note" defaultValue={v.vip_note} rows={2} />
                   </Field>
                 ) : null}
-                {comebacks.length ? (
+                {comebacks.length && !recheck ? (
                   <Field label="Is this a comeback for a previous job?" hint="A car back within the window for the same problem. The manager picks the cause after the inspection; only the owner can make it free.">
                     <ChoiceButtons name="comeback_of" columns={2} defaultValue={v.comeback_of ?? ""} options={[{ value: "", label: "No, a new visit" }, ...comebacks.map((c) => ({ value: c.id, label: c.label, hint: c.hint }))]} />
                   </Field>
                 ) : null}
-                {inspectionFee && !inspectionFee.locked ? (
-                  <Field label="Inspection fee if no work is approved" hint={`${inspectionFee.premium ? `Premium brand: defaults to AED ${inspectionFee.default.toLocaleString("en-GB")}. ` : ""}${inspectionFee.isOwner ? "" : "Below AED 750 or waiving goes to the owner for approval."}`}>
-                    <div className="flex flex-wrap items-center gap-2" data-inspection-fee>
-                      {[750, 1000, 1500, 2000].map((f) => (
-                        <button key={f} type="button" onClick={() => { setFee(String(f)); setFeeOther(false); }} aria-pressed={!feeOther && fee === String(f)} data-fee-chip={f}
-                          className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${!feeOther && fee === String(f) ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
-                          {f.toLocaleString("en-GB")}
-                        </button>
-                      ))}
-                      <button type="button" onClick={() => setFeeOther(true)} aria-pressed={feeOther} data-fee-other className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${feeOther ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Other…</button>
-                      {feeOther ? <Input value={fee} onChange={(e) => setFee(e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" aria-label="Inspection fee (AED)" placeholder="AED" className="w-28 text-right" data-fee-box /> : null}
-                      <input type="hidden" name="inspection_fee" value={fee} />
-                    </div>
-                  </Field>
+                {recheck ? (
+                  <p className="text-sm font-semibold text-green" data-recheck-no-fee>No inspection fee: the PPF final check is free.</p>
+                ) : inspectionFee && !inspectionFee.locked ? (
+                  // 30 October 2026: THE fee choice (Inspection fee with the amount, or No inspection fee with the reason).
+                  <div data-inspection-fee>
+                    <InspectionFeeChoice initial={inspectionFee.initial} bounds={inspectionFee.bounds} isOwner={inspectionFee.isOwner} />
+                  </div>
                 ) : inspectionFee?.locked ? (
-                  <p className="text-sm text-muted" data-inspection-fee-locked>Inspection fee if no work is approved: <span className="font-bold">AED {inspectionFee.default.toLocaleString("en-GB")}</span> — locked (the customer approved the job card).</p>
+                  <p className="text-sm text-muted" data-inspection-fee-locked><span className="font-bold">{inspectionFee.words}</span> — locked (the customer approved the job card). Only the owner changes it, on the job card.</p>
                 ) : null}
                 <Field label="Priority">
                 <ChoiceButtons

@@ -132,7 +132,9 @@ const roles = [
 ].filter(Boolean).filter((r) => wants(r.name));
 
 // Pages reached from inside another page (not in the menu) that still need checking.
-const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new"], advisor: ["/estimates/new"], accounts: ["/commissions", "/card-settlements"] };
+// The parts desk's estimate pricing page (30 October 2026) opens any estimate read-only: the newest one is used.
+const anEstimate = (await sql("select id from public.quotations where kind = 'estimate' and is_active and deleted_at is null order by created_at desc limit 1"))[0]?.id ?? null;
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new", "/reports/inspection-fees"], advisor: ["/estimates/new"], accounts: ["/commissions", "/card-settlements"], parts: anEstimate ? [`/parts/estimate/${anEstimate}`] : [] };
 const slice = (list) => {
   if (partOf <= 1) return list;
   const size = Math.ceil(list.length / partOf);

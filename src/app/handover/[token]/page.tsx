@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { customerWarrantyStatus, customerWarrantyTitle } from "@/lib/warranty";
 import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { loadHandover } from "@/lib/bodyshop-public";
 import { companyFromSettings } from "@/lib/company";
@@ -79,7 +80,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
             </figure>
           </div>
         ) : null}
-        {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={wCard.status} /> : data.warranty ? (
+        {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={{ kind: customerWarrantyStatus(wCard.status).kind, title: customerWarrantyTitle(wCard.status) }} /> : data.warranty ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-4 flex flex-col gap-1" data-warranty>
             <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{brand} · {years}-year warranty</span>
             <span className="text-sm">{data.filmText}. Installed {formatDate(data.warranty.installDate)}, valid until {formatDate(data.warranty.validUntil)}. Certificate {data.warranty.certificateNo}.</span>

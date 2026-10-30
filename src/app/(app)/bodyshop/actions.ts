@@ -15,6 +15,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bodyshopScopeOf, isBodyshopManagerScope, mayActOnSection, mayPickPerson } from "@/lib/team-scope";
 import { jobAdvisorIds, notifyStaff } from "@/lib/notifications";
+import { saveRecheckPoint } from "@/lib/recheck";
+import { RECHECK_POINTS, type RecheckPoint, type RecheckPointKey } from "@/lib/recheck-points";
 
 const enc = encodeURIComponent;
 function refresh(jobId?: string | null) {
@@ -334,4 +336,15 @@ export async function answerProblemAction(jobId: string, problemId: string, form
   refresh(jobId);
   revalidatePath("/bodyshop/mine");
   back(jobId, null, "Answer sent.", "#problems");
+}
+
+/** 30 October 2026: one point of the PPF recheck checklist (OK / Needs fixing / Not on this car, the note, Fixed). The PPF team or a bodyshop manager. */
+export async function saveRecheckPointAction(jobId: string, key: string, patch: { status?: "ok" | "fix" | "na"; note?: string | null; fixed?: boolean }): Promise<{ error?: string; points?: RecheckPoint[] }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "View only." };
+  if (!mayActOnSection(bodyshopScopeOf(staff), "ppf")) return { error: "The PPF team leader (or a bodyshop manager) does the final check." };
+  if (!RECHECK_POINTS.some((p) => p.key === key)) return { error: "Unknown point." };
+  const r = await saveRecheckPoint(jobId, key as RecheckPointKey, patch, staff);
+  refresh(jobId);
+  return r;
 }

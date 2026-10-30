@@ -264,7 +264,14 @@ export type JobRow = {
   comeback_claim_supplier: string | null;
   invoice_sent_at: string | null;
   service_sticker: Record<string, unknown> | null;
-  job_kind: "car" | "loose";
+  job_kind: "car" | "loose" | "recheck";
+  /** A PPF recheck visit (30 October 2026): the original PPF job it checks. */
+  recheck_of?: string | null;
+  /** The inspection fee choice (30 October 2026): fee / none (null on older jobs), the reason, full or quick. */
+  inspection_fee_choice?: "fee" | "none" | null;
+  no_fee_reason?: string | null;
+  no_fee_note?: string | null;
+  inspection_type?: "full" | "quick" | null;
   assessment_note: string | null;
   brought_by: string | null;
   owner_report_at: string | null;

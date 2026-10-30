@@ -50,8 +50,10 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, note: `Gated out by ${staff.display_name}, ${new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())}, while the car was still at ${STATUS_LABELS[job.status as JobStatus]}. Reason: owner override, before QC, the wash and the invoice`, created_by: staff.id });
   }
   // A bodyshop car leaves only after the release sign-off (the owner signs on behalf of anyone on the bodyshop page).
-  const { data: jd } = await admin.from("jobs").select("department").eq("id", jobId).maybeSingle();
-  const bodyshopCar = jd?.department === "bodyshop" || jd?.department === "both";
+  const { data: jd } = await admin.from("jobs").select("department, job_kind").eq("id", jobId).maybeSingle();
+  // A PPF recheck (30 October 2026) goes back after its checklist: no release sign-off, no new final check to book.
+  const recheckVisit = jd?.job_kind === "recheck";
+  const bodyshopCar = !recheckVisit && (jd?.department === "bodyshop" || jd?.department === "both");
   if (bodyshopCar) {
     const st = await signoffState(jobId);
     if (st.hasStages && !st.complete) return { error: `Release sign-off missing: waiting on ${st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. Sign it on the bodyshop page.`, values };

@@ -38,7 +38,7 @@ const DEFAULTS = {
   bodyshop_cost_rate_aed: 50 as string | number,
   /** Bodyshop costing: the fallback installer hours for a bodyshop service with no figure of its own. */
   bodyshop_default_installer_hours: 8 as string | number,
-  whatsapp_aftercare_template: "Good day! Your car is due for its complimentary 10-day after-care check on [date]. It takes about half an hour - we check the film edges and polish anything that needs it. When would suit you?",
+  whatsapp_aftercare_template: "Good day! Your OFJ BESPOKE final check is due on [date]. It is free and takes about half an hour: we check the film edges and fix anything that needs it. When would suit you?",
   /** Section 12: the warranty terms per product (src/lib/warranty.ts reads them; the owner edits them in Settings). */
   warranty_terms: {} as unknown,
   whatsapp_warranty_card_template: "Hello [name], your OFJ warranty card for the [make model] ([plate]): [link]. It shows what is covered and until when. Please book your 10-day after-care check to activate it. OFJ Automotive",
@@ -256,10 +256,13 @@ const DEFAULTS = {
   branches: [{ name: "OFJ Automotive (Al Quoz, Dubai)", address: "" }] as Branch[],
   approval_reminder_hours: 4,
   inspection_fee_aed: 750,
+  /** 30 October 2026: the advisor sets each car's fee between these (before VAT); only the owner goes outside. */
+  inspection_fee_min_aed: 500,
+  inspection_fee_max_aed: 2500,
   /** Section 8: brands whose inspection fee defaults higher, and that default. */
   premium_brands: [] as string[],
   premium_brand_fee_aed: 1500,
-  inspection_fee_notice: "If no work is approved after the inspection, an inspection fee of AED [amount] will apply.",
+  inspection_fee_notice: "If no work is approved after the inspection, an inspection fee of AED [total] including VAT (AED [amount] + VAT) will apply.",
   // Zoho Books (26 October 2026, docs/zoho-plan.md): the REAL organization is read-only until go-live.
   zoho_org_real: "942979945",
   zoho_org_test: "",
@@ -275,7 +278,7 @@ const DEFAULTS = {
   zoho_last_live_test_at: "" as string,
   // The grey note at the end of every receipt (26 October 2026), edited by the owner in Settings.
   receipt_footer_note: "This is a payment receipt, not a tax invoice. The tax invoice is issued when the job is paid in full, with this amount deducted.",
-  inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [amount] درهمًا.",
+  inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [total] درهمًا شاملة ضريبة القيمة المضافة ([amount] درهمًا + الضريبة).",
   opening_hour: 8,
   closing_hour: 17,
   appointments_per_day: 8,

@@ -1,4 +1,5 @@
 import { formatDate } from "@/lib/format";
+import { estimateTaskWords, loadEstimatesToPrice } from "@/lib/estimate-parts-data";
 import { seesCustomers } from "@/lib/customer-data";
 import { partsWithNoHome } from "@/lib/handover";
 import { CarThumb } from "@/components/CarThumb";
@@ -36,6 +37,8 @@ const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_
 
 export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string }> }) {
   const staff = await requirePermission("priceParts");
+  // 30 October 2026: estimates whose parts were sent to the desk (or priced by the advisor, to check). The car is not here yet.
+  const estimatesToPrice = await loadEstimatesToPrice();
   // Customers are for the owner, advisors and accounts only (29 October 2026): Parts find a car by plate, job number or VIN.
   const seesCust = seesCustomers(staff.role_id);
   const { message, error, q: rawQ } = await searchParams;
@@ -191,6 +194,22 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
               </Card>
             );
           })}
+        </section>
+      ) : null}
+
+      {estimatesToPrice.length ? (
+        <section className="flex flex-col gap-3" data-estimates-to-price={estimatesToPrice.length}>
+          <SectionLabel right={`${estimatesToPrice.length}`}>Estimates to price <span className="cursor-help font-normal text-muted" title="An advisor's estimate before the car arrives: price each part he named. A price the advisor typed himself is marked Priced by advisor: check it.">ⓘ</span></SectionLabel>
+          {estimatesToPrice.map((e) => (
+            <Card key={e.id} className={`flex flex-wrap items-center justify-between gap-3 ${e.toPrice ? "!border-amber-bar" : ""}`} data-estimate-to-price={e.number}>
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <Link href={`/parts/estimate/${e.id}`} className="font-extrabold hover:underline underline-offset-4">ESTIMATE {e.number} – car not here yet</Link>
+                <span className="text-sm"><span className="font-bold">{e.plate}</span> · {e.car}{e.advisor ? <span className="text-muted"> · Advisor {e.advisor}</span> : null}</span>
+                <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber">{estimateTaskWords(e)}{e.vin ? <CopyVin vin={e.vin} /> : <span className="text-xs font-normal text-muted">VIN not known yet</span>}</span>
+              </span>
+              <LinkButton href={`/parts/estimate/${e.id}`} size="md" data-estimate-price-open>{e.toPrice ? "Price the parts" : "Check the price"}</LinkButton>
+            </Card>
+          ))}
         </section>
       ) : null}
 

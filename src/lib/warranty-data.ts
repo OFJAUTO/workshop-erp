@@ -155,7 +155,7 @@ export async function warrantyCardOf(jobId: string, settings: Settings, opts: { 
     fittedOf(jobId),
     warrantyEntriesOf(jobId),
     tintSpecForJob(jobId),
-    admin.from("aftercare_checks").select("id, due_date, done_at, done_by, activated_at, activation_note, reminded_at, reminded_12_at, reminded_20_at, doneBy:staff!aftercare_checks_done_by_fkey(display_name)").eq("job_id", jobId).eq("is_active", true).maybeSingle(),
+    admin.from("aftercare_checks").select("id, due_date, done_at, done_by, recheck_job_id, activated_at, activation_note, reminded_at, reminded_12_at, reminded_20_at, doneBy:staff!aftercare_checks_done_by_fkey(display_name)").eq("job_id", jobId).eq("is_active", true).maybeSingle(),
   ]);
   const terms = termsOf(settings.warranty_terms);
   const handoverDay = job.gated_out_at ? dubaiDay(job.gated_out_at) : null;
@@ -204,7 +204,9 @@ export async function warrantyCardOf(jobId: string, settings: Settings, opts: { 
   const today = opts.today ?? dubaiDay(new Date().toISOString());
   let checkPhotos: WarrantyCard["checkPhotos"] = [];
   if (opts.photos && check?.done_at) {
-    const { data: files } = await admin.from("job_files").select("id, storage_path, caption").eq("job_id", jobId).eq("caption", "10-day check").is("removed_at", null).order("taken_at");
+    // The photos of the check: on this job (the old sign-off) or on the PPF recheck visit (30 October 2026).
+    const recheckJob = (checkRow?.recheck_job_id as string | null | undefined) ?? null;
+    const { data: files } = await admin.from("job_files").select("id, storage_path, caption").in("job_id", recheckJob ? [jobId, recheckJob] : [jobId]).like("caption", "10-day check%").is("removed_at", null).order("taken_at");
     const paths = (files ?? []).map((f) => f.storage_path as string);
     const { data: signed } = paths.length ? await admin.storage.from(JOB_FILES_BUCKET).createSignedUrls(paths, 3600) : { data: [] as { path: string | null; signedUrl: string }[] };
     const urlOf = new Map((signed ?? []).filter((s) => s.path).map((s) => [s.path as string, s.signedUrl]));

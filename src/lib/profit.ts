@@ -38,6 +38,8 @@ export type JobProfit = {
   commission: number;
   /** Bodyshop materials (film, paint, consumables) from the internal box. */
   materialsCost: number;
+  /** 30 October 2026: the free PPF recheck visits of this job - their clocked time and film, a cost of THIS job. */
+  recheckCost: number;
   profit: number;
   provisional: boolean;
   provisionalWhy: string[];
@@ -86,6 +88,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
   const chargeTotals = await chargeTotalsByJob(jobIds);
+  const { recheckCostsFor } = await import("./recheck");
+  const rechecks = await recheckCostsFor(jobIds, settings);
   // A car the customer declined (or an invoice that is only INSPECTION CHARGES, the manual way): its cost is the real
   // clocked time on the car - gate-in, inspection, road test, QC, work - booked as labour, never a typed "our cost".
   const { data: declinedJobs } = jobIds.length ? await admin.from("jobs").select("id").in("id", jobIds).not("declined_out_at", "is", null) : { data: [] as { id: string }[] };
@@ -151,7 +155,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     if (unsettledCards) why.push("card fee estimated until the bank settles");
     if (jobTrips.some((t) => t.delivered_at && t.price_aed === null)) why.push("the driver's recovery price to come");
     const bal = invoiceBalance(invoice, pays);
-    const profit = round2(revenue - partsCost - otherCost - stockCost - labourCost - bankCharges - recoveryCost - commission - materialsCost);
+    const recheckCost = invoice.job_id ? (rechecks.get(invoice.job_id)?.cost ?? 0) : 0;
+    const profit = round2(revenue - partsCost - otherCost - stockCost - labourCost - bankCharges - recoveryCost - commission - materialsCost - recheckCost);
     const ours = job?.comeback_of ? job.comeback_cause === "workmanship" || job.comeback_cause === "faulty_part" : false;
     const claimPaid = job?.comeback_claim_status === "paid" ? Number(job.comeback_claim_amount) || 0 : 0;
     const myComebacks = (cbJobs ?? []).filter((c) => c.comeback_of === invoice.job_id).map((c) => cbProfits.find((p) => p.invoice.job_id === c.id)).filter((p): p is JobProfit => !!p);
@@ -171,6 +176,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
       recoveryCost,
       commission,
       materialsCost,
+      recheckCost,
       profit,
       provisional: why.length > 0,
       provisionalWhy: why,

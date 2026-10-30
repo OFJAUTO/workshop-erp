@@ -17,8 +17,8 @@ import { QuoteResponse } from "./QuoteResponse";
 import { TintCard } from "@/components/TintCard";
 import { aboveLimit, cleanTintSpec, decorateTint, lineIsTint, tintSummary } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
-import { additionalToOf } from "@/lib/quote-history-data";
-import { additionalLine } from "@/lib/quote-history";
+import { additionalToOf, estimateAddsTo } from "@/lib/quote-history-data";
+import { additionalEstimateLine, additionalLine } from "@/lib/quote-history";
 
 export const dynamic = "force-dynamic";
 
@@ -107,8 +107,10 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const dangerous = !isEstimate && lines.some((l) => l.dangerous);
   // An additional quotation says so, with the quotation(s) it adds to: extra work, not a replacement.
   const addsTo = isEstimate ? [] : await additionalToOf(q.job_id, q.number);
-  const addsToLine = additionalLine(addsTo);
-  const title = isEstimate ? "Estimate" : addsTo.length ? "Additional quotation" : q.version > 1 ? "Revised quotation" : "Quotation";
+  // An additional estimate (30 October 2026): "Additional estimate" with the estimate it adds to.
+  const estBase = isEstimate ? await estimateAddsTo(q) : null;
+  const addsToLine = isEstimate ? additionalEstimateLine(estBase) : additionalLine(addsTo);
+  const title = isEstimate ? (estBase ? "Additional estimate" : "Estimate") : addsTo.length ? "Additional quotation" : q.version > 1 ? "Revised quotation" : "Quotation";
   const open = q.status === "sent" || q.status === "opened";
   const meta = [
     { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },

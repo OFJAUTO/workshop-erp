@@ -191,5 +191,6 @@ export function tintCostFactor(spec: TintSpec | null, doubleLayerHours: number):
 
 /** Whether a document line or package item is tint work at all. */
 export function isTintText(s: string | null | undefined): boolean {
-  return /\btint(s|ing|ed)?\b|window film|wind(shield|screen) film|roof film/i.test(s ?? "");
+  // A check visit ("tint recheck", "10-day check") names tint but fits none (30 October 2026).
+  return /\btint(s|ing|ed)?\b|window film|wind(shield|screen) film|roof film/i.test(s ?? "") && !/re-?check|\bcheck\b|inspect|after-?care/i.test(s ?? "");
 }

@@ -33,6 +33,7 @@ import { formatPlate } from "@/lib/types";
 import { markReminderSent } from "./actions";
 import { jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { APPOINTMENT_SELECT, appointmentCarText, appointmentCustomerName, fillCustomerNames, reminderTemplateFor, type AppointmentFull } from "./form-data";
+import { Words } from "@/components/Words";
 
 type JobLite = {
   id: string;
@@ -282,9 +283,7 @@ function JobItem({ j, kind, compact = false }: { j: JobLite; kind: "due" | "out"
   const cls = kind === "due" ? "bg-amber-soft border-amber-bar" : "bg-green-soft border-green";
   return (
     <Link href={`/jobs/${j.id}`} className={`block rounded-control border px-2 py-1.5 hover:border-ink ${cls}`}>
-      <span className="block text-xs font-bold">
-        {kind === "due" ? "Due" : `Left ${j.gated_out_at ? dubaiTimeOf(j.gated_out_at) : ""}`} · {j.vehicle ? formatPlate(j.vehicle) : j.job_number}
-      </span>
+      <Words className="block text-xs font-bold" text={`${kind === "due" ? "Due" : `Left ${j.gated_out_at ? dubaiTimeOf(j.gated_out_at) : ""}`} · ${j.vehicle ? formatPlate(j.vehicle) : j.job_number}`} />
       {!compact ? <span className="block text-[11px] text-muted truncate">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span> : null}
     </Link>
   );

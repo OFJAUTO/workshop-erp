@@ -1,4 +1,5 @@
 import "server-only";
+import { customerWarrantyTitle } from "@/lib/warranty";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { formatDate } from "@/lib/format";
 import type { Settings } from "@/lib/settings";
@@ -26,7 +27,7 @@ export async function renderWarrantyPdf(card: WarrantyCard, verifyUrl: string, s
         startNote={card.handoverDay ? `From the handover on ${formatDate(card.handoverDay)}` : "Starts on the handover day"}
         rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: r.rollBatch ?? "—", cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
       />
-      <WarrantyPanel logo={logo} qr={panelQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={card.status.title} />
+      <WarrantyPanel logo={logo} qr={panelQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={customerWarrantyTitle(card.status)} />
       <View style={{ marginTop: px(16) }}>
         {termKeys.map((k) => (
           <View key={k} style={{ marginBottom: px(10) }} wrap={false}>

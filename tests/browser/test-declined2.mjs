@@ -46,7 +46,7 @@ try {
     await go(page, `${base}/jobs/${jobId}`);
     await page.locator("[data-declined-all]").first().click();
     await page.locator("[data-declined-dialog]").waitFor({ timeout: 8000 });
-    check("B the window asks to charge the fee agreed at gate-in", /Charge the inspection fee of AED 750 agreed at gate-in\?/.test((await page.locator("[data-declined-question]").textContent()) ?? ""));
+    check("B the window asks to charge the fee the customer agreed to, with VAT", /Charge the inspection fee of AED 750 \+ VAT \(AED 787\.50\) the customer agreed to\?/.test((await page.locator("[data-declined-question]").textContent()) ?? ""));
     await page.locator("[data-declined-change]").click();
     await page.locator("[data-declined-amount]").fill("500");
     await page.locator("[data-declined-confirm]").click();

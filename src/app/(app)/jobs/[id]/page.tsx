@@ -1,4 +1,11 @@
 import { VinCopy } from "@/components/VinCopy";
+import { OwnerFeeChange } from "@/components/OwnerFeeChange";
+import { feeWords, isQuickJob } from "@/lib/inspection-fee";
+import { feeBoundsFor, feeInputOf } from "@/lib/inspection-fee-server";
+import { recheckStateOf } from "@/lib/recheck";
+import { staffFinalCheckWords } from "@/lib/warranty";
+import Link from "next/link";
+import { recheckProgress } from "@/lib/recheck-points";
 import { DeclinedAllButton } from "@/components/DeclinedAllButton";
 import { TimeSpentPanel } from "@/components/TimeSpentPanel";
 import { timeSpentOf } from "@/lib/time-spent";
@@ -55,7 +62,7 @@ import { DepositRequestSend } from "./DepositRequestSend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
-import { assignJob, decideInspectionFee, moveJob, setJobPriority, setPromisedDate } from "../actions";
+import { assignJob, decideInspectionFee, moveJob, ownerChangeInspectionFee, setJobPriority, setPromisedDate } from "../actions";
 import { decideRoadTest, remindManager, setAssignmentNote } from "../assignment-actions";
 import { decideMove, requestMove } from "../move-actions";
 import { remindManagerToConfirm } from "../work-actions";
@@ -134,6 +141,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   // Loose items: no inspection, no wash; the items card replaces the gate-in media.
   const loose = job.job_kind === "loose";
+  // 30 October 2026: a PPF RECHECK (FREE) visit - no approval, no quotation, no invoice; the checklist is the PPF team's.
+  const recheckJob = job.job_kind === "recheck";
+  const recheckState = recheckJob ? await recheckStateOf(id) : null;
   const looseItems = loose ? await loadJobItems(id) : [];
   const itemPhotoUrls = new Map<string, string>();
   for (const m of media) if (m.kind === "item_photo" && m.item_id && mediaUrls.get(m.storage_path)) itemPhotoUrls.set(m.item_id, mediaUrls.get(m.storage_path)!);
@@ -315,7 +325,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // done = the real thing happened (approved, report approved, quotation approved, every part received),
   // never just "the stage moved on"; in progress = amber; not started = grey. Full-strength fills - the old
   // tile used bg-green-soft/50, which reads as white (why the earlier fix looked like coloured text only).
-  const trackStages = (loose ? STAGE_ORDER.filter((s) => !LOOSE_SKIP_STAGES.includes(s as Stage)) : STAGE_ORDER) as Stage[];
+  // A quick job (no fee, no full inspection, 30 October 2026) has no Inspection stage either.
+  const skipStages: Stage[] = loose ? LOOSE_SKIP_STAGES : isQuickJob(job) ? ["inspection"] : [];
+  const trackStages = STAGE_ORDER.filter((s) => !skipStages.includes(s as Stage)) as Stage[];
   // Approved work stays approved while an additional quotation waits: the Approval step never jumps back.
   const quoteApproved = quoteFamilies.length ? anyApproved(quoteFamilies) : latestQuote ? latestQuote.status === "approved" : null;
   // Batch 29 Oct (2), section 2: the owner and advisors record "the customer declined all work" while nothing is approved;
@@ -374,7 +386,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
-            {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : <Badge tone="outline" data-fee-badge>Inspection fee: AED {Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}{job.first_approval_at ? " · locked" : ""}</Badge>}
+            {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : <Badge tone={job.inspection_fee_choice === "none" ? "green" : "outline"} data-fee-badge={job.inspection_fee_choice ?? "legacy"}>{job.inspection_fee_choice ? feeWords(job) : `Inspection fee: AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}`}{job.first_approval_at ? " · locked" : ""}</Badge>}
             <AdvisorBadge name={inChargeName} />
             {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-white" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
             {tintWords ? <span className="inline-flex items-center rounded-control border border-ink px-3 py-1 text-sm font-semibold normal-case" data-tint-summary>Tint: {tintWords}</span> : null}
@@ -461,6 +473,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {wToken ? <a href={`/warranty/${wToken}`} target="_blank" rel="noreferrer" className="ml-auto text-sm font-semibold underline underline-offset-4" data-warranty-open>Open the warranty card</a> : null}
           </div>
           <p className="text-sm">{wCard.rows.map((r) => `${r.name}: ${r.coverage} (${r.period})`).join(" · ")}</p>
+          {staffFinalCheckWords(wCard.status) ? <p className={`text-sm font-bold ${wCard.status.checkDate ? "text-green" : "text-red"}`} data-final-check-staff>{staffFinalCheckWords(wCard.status)}</p> : null}
           {wCard.missing.length ? <p className="text-xs font-semibold text-red">Details still missing: {wCard.missing.join(", ")} (bodyshop page).</p> : null}
           {wMessage && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? (
             <WarrantyCardSend jobId={id} message={wMessage} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={wCard.sentAt} />
@@ -523,7 +536,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {docAlerts.map((a) => <Badge key={a.key} tone={a.tone === "muted" ? "neutral" : a.tone}>{a.text}</Badge>)}
               </div>
             ) : null}
-            <StageTrack stage={job.stage} timing={timing} skip={loose ? LOOSE_SKIP_STAGES : undefined} states={barStates} extra={hasDeposit ? [{ after: "approval" as Stage, key: "advance", label: "Advance payment", state: barStates.advance ?? "later" }] : []} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
+            <StageTrack stage={job.stage} timing={timing} skip={skipStages.length ? skipStages : undefined} states={barStates} extra={hasDeposit ? [{ after: "approval" as Stage, key: "advance", label: "Advance payment", state: barStates.advance ?? "later" }] : []} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
@@ -609,12 +622,21 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {stickerData ? <ServiceStickerCard jobId={id} data={stickerData} canPrint={(["owner", "gate_in", "parts", "service_advisor"].includes(role) || can(role, "manageWork")) && !staff.viewingAs && job.is_open} printedBy={null} /> : null}
       {job.summary ? <JobSummaryCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} /> : null}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {recheckJob ? (
+        <Card className="flex flex-col gap-2 border-2 border-ink" data-recheck-card>
+          <span className="text-lg font-extrabold">PPF RECHECK (FREE){recheckState ? <> of <Link href={`/jobs/${recheckState.originalId}`} className="underline underline-offset-4" data-recheck-original>{recheckState.originalNumber}</Link></> : null}</span>
+          <span className="text-sm">The free 10-day final check of the PPF job: no inspection fee, no quotation, no customer approval, no invoice. The time and any film count on the original job.</span>
+          <span className="text-sm font-semibold" data-recheck-progress>{recheckState?.doneAt ? `Final check done ${formatDateTime(recheckState.doneAt)}` : recheckState ? recheckProgress(recheckState.points) : "Not linked to its PPF job"}</span>
+          <div><LinkButton href={`/bodyshop/${id}#recheck`} size="md" data-recheck-open>{recheckState?.doneAt ? "See the checklist" : "Open the checklist"}</LinkButton></div>
+        </Card>
+      ) : null}
+      <div className={recheckJob ? "hidden" : "grid grid-cols-2 lg:grid-cols-4 gap-3"}>
         {!loose ? (
         <Card className={tile(approvalBox)} data-stage-card="approval" data-state={approvalBox}>
           <span className={boxTitle(approvalBox)}>{tick(approvalBox)}Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
-          {seesCustomerDetails ? <ApprovalSendControl jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} /> : job.first_approval_at ? <span className="text-sm font-semibold" data-approval-plain>Approved {formatDayTime(job.first_approval_at)}</span> : latestApproval ? <span className="text-sm font-semibold" data-approval-plain>{approvalState.text}</span> : null}
+          {seesCustomerDetails ? <ApprovalSendControl fee={!job.first_approval_at && !staff.viewingAs ? { initial: feeInputOf(job), bounds: feeBoundsFor(settings, vehicle?.make?.name), isOwner: role === "owner" } : null} jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} /> : job.first_approval_at ? <span className="text-sm font-semibold" data-approval-plain>Approved {formatDayTime(job.first_approval_at)}</span> : latestApproval ? <span className="text-sm font-semibold" data-approval-plain>{approvalState.text}</span> : null}
+          {job.first_approval_at && role === "owner" && !staff.viewingAs && job.is_open ? <OwnerFeeChange action={ownerChangeInspectionFee.bind(null, id)} initial={feeInputOf(job)} bounds={feeBoundsFor(settings, vehicle?.make?.name)} /> : null}
           <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" size="md" className="mt-auto" data-gate-in-details>
             Gate-in details
           </LinkButton>
@@ -652,10 +674,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} />
           {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(job.inspection_fee_aed) || 0} isOwner={role === "owner"} /></div> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
-            {!latestQuote && canQuote && (loose || inspection?.inspection.status === "approved" || role === "owner") ? (
+            {!latestQuote && canQuote && (loose || isQuickJob(job) || inspection?.inspection.status === "approved" || role === "owner") ? (
               <form action={startQuotation.bind(null, id)} className="flex flex-col gap-1">
-                <Button type="submit" size="md" tone={!loose && inspection?.inspection.status !== "approved" ? "secondary" : "primary"}>Start quotation</Button>
-                {!loose && inspection?.inspection.status !== "approved" ? <span className="text-xs text-muted">{inspection ? "Normally after the workshop manager approves the report" : "Normally after the inspection"}</span> : null}
+                <Button type="submit" size="md" tone={!loose && !isQuickJob(job) && inspection?.inspection.status !== "approved" ? "secondary" : "primary"}>Start quotation</Button>
+                {!loose && !isQuickJob(job) && inspection?.inspection.status !== "approved" ? <span className="text-xs text-muted">{inspection ? "Normally after the workshop manager approves the report" : "Normally after the inspection"}</span> : null}
               </form>
             ) : !latestQuote && canQuote ? (
               <span className="flex flex-col gap-1">

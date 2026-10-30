@@ -167,13 +167,19 @@ export function SettingsForm({
               <Field label="Approval link reminder (hours)" hint="Remind the advisor if a sent link is not opened in time.">
                 <Input name="approval_reminder_hours" defaultValue={v.approval_reminder_hours} inputMode="numeric" required />
               </Field>
-              <Field label="Inspection fee (AED)" hint="The default chosen at gate-in; charged when no work is approved after the inspection. Below AED 750 or waiving needs the owner.">
+              <Field label="Suggested inspection fee (AED, before VAT)" hint="Only a suggestion: the advisor chooses Inspection fee (any amount between the lowest and highest below) or No inspection fee for each car.">
                 <Input name="inspection_fee_aed" defaultValue={v.inspection_fee_aed} inputMode="numeric" required />
               </Field>
-              <Field label="Premium brands" hint="One per line. Cars of these makes default to the premium inspection fee at gate-in (changeable per car).">
+              <Field label="Inspection fee: lowest an advisor can set (AED)" hint="Before VAT. Only the owner can go below it.">
+                <Input name="inspection_fee_min_aed" defaultValue={v.inspection_fee_min_aed ?? "500"} inputMode="numeric" required data-fee-min />
+              </Field>
+              <Field label="Inspection fee: highest an advisor can set (AED)" hint="Before VAT. Only the owner can go above it.">
+                <Input name="inspection_fee_max_aed" defaultValue={v.inspection_fee_max_aed ?? "2500"} inputMode="numeric" required data-fee-max />
+              </Field>
+              <Field label="Premium brands" hint="One per line. For cars of these makes the premium amount below is pre-filled as the suggestion (the advisor can change it per car).">
                 <Textarea name="premium_brands" defaultValue={v.premium_brands ?? listTexts.premium_brands} rows={4} data-premium-brands />
               </Field>
-              <Field label="Premium brand inspection fee (AED)">
+              <Field label="Suggested inspection fee for premium brands (AED, before VAT)">
                 <Input name="premium_brand_fee_aed" defaultValue={v.premium_brand_fee_aed} inputMode="numeric" />
               </Field>
               <Field label="Inspection target (minutes of working time)" hint="Past this the department manager and the owner are warned and the card turns red.">
@@ -217,7 +223,7 @@ export function SettingsForm({
             <Field label="Declaration (Arabic)">
               <Textarea name="declaration_text_ar" defaultValue={v.declaration_text_ar} rows={3} dir="rtl" lang="ar" />
             </Field>
-            <Field label="Inspection fee notice (English)" hint="Shown above the tick box on the approval page. [amount] is replaced by the fee. Every approval keeps the exact wording and amount shown.">
+            <Field label="Inspection fee notice (English)" hint="Shown above the tick box on the approval page when the car has an inspection fee (nothing is shown without one). [total] is the fee with VAT, [amount] the fee before VAT. Every approval keeps the exact wording and amount shown.">
               <Textarea name="inspection_fee_notice" defaultValue={v.inspection_fee_notice} rows={2} required />
             </Field>
             <Field label="Inspection fee notice (Arabic)">
@@ -646,7 +652,7 @@ export function SettingsForm({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="PPF brand name"><Input name="ppf_brand_name" defaultValue={v.ppf_brand_name} /></Field>
               <Field label="PPF warranty" hint="Set with the other warranty terms."><input type="hidden" name="ppf_warranty_years" value={v.ppf_warranty_years} /><a href="/settings/warranty" className="flex min-h-11 items-center text-sm font-semibold underline underline-offset-4">{v.ppf_warranty_years} years · Warranty terms</a></Field>
-              <Field label="Final check: days after handover" hint="7 to 14; the gate-out picks this day by default."><Input name="bodyshop_final_check_days" defaultValue={v.bodyshop_final_check_days} inputMode="numeric" /></Field>
+              <Field label="Final check: days after handover" hint="7 to 14; the gate-out picks this day by default. The advisor is reminded two days before; from this day the car shows in Waiting on you until it comes in for its PPF RECHECK."><Input name="bodyshop_final_check_days" defaultValue={v.bodyshop_final_check_days} inputMode="numeric" /></Field>
             </div>
             <input type="hidden" name="ppf_warranty_text" value={v.ppf_warranty_text} />
             <Field label="Care instructions (handover page and certificate)"><Textarea name="ppf_care_text" defaultValue={v.ppf_care_text} rows={4} /></Field>

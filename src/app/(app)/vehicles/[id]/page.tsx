@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ppfJobsOfCar } from "@/lib/recheck";
 import { CarThumb } from "@/components/CarThumb";
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -13,7 +14,8 @@ import { addVehiclePhoto, setVehicleActive, setVehicleProfilePhoto } from "../ac
 import { PhotoUploadForm } from "./PhotoUploadForm";
 import { ProfilePhotoForm } from "./ProfilePhotoForm";
 import { QuotePicker } from "@/components/QuotePicker";
-import { loadQuoteHistory } from "@/lib/quote-history-data";
+import { loadEstimateHistory, loadQuoteHistory } from "@/lib/quote-history-data";
+import { QuotationList } from "@/components/QuotationList";
 import { pickItems } from "@/lib/quote-history";
 
 type Row = VehicleRow & {
@@ -63,6 +65,10 @@ export default async function VehiclePage({
   const visits = (visitRows ?? []) as { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean }[];
   // Section 1 (29 October 2026): each visit's quotations, every one reachable (owner and advisors).
   const visitQuotes = role === "owner" || role === "service_advisor" ? await loadQuoteHistory(visits.map((j) => j.id)) : new Map();
+  // 30 October 2026: every estimate of the car with its versions (additional ones and what was carried over to a job), in the same list as a job's quotations.
+  const estimateFamilies = can(role, "viewEstimates") ? ((await loadEstimateHistory({ vehicleIds: [id] })).get(id) ?? []) : [];
+  // 30 October 2026: the car's delivered PPF jobs: a PPF RECHECK (FREE) visit is one tap away.
+  const ppfJobs = can(role, "gateIn") ? await ppfJobsOfCar(id) : [];
 
   const allPaths = [...photos.map((p) => p.storage_path), ...(v.photo_path ? [v.photo_path] : [])];
   const signed = allPaths.length ? await supabase.storage.from("vehicle-photos").createSignedUrls(allPaths, 3600) : { data: [] };
@@ -162,6 +168,19 @@ export default async function VehiclePage({
               </ul>
             )}
           </Card>
+
+          {can(role, "viewEstimates") ? (
+            <Card className="flex flex-col gap-3" data-car-estimates={estimateFamilies.length}>
+              <SectionLabel right={`${estimateFamilies.length}`}>Estimates</SectionLabel>
+              {estimateFamilies.length ? <QuotationList kind="estimate" families={estimateFamilies} canQuote={false} jobOpen={false} /> : <p className="text-sm text-muted">No estimates for this car.</p>}
+              {!staff.viewingAs ? (
+                <div className="flex flex-wrap gap-2">
+                  <LinkButton href={`/estimates/new?customer=${v.customer_id}&vehicle=${v.id}`} tone="secondary" size="md" data-car-new-estimate>New estimate for this car</LinkButton>
+                  {ppfJobs.length && can(role, "gateIn") ? <LinkButton href={`/gate-in/new?vehicle=${v.id}&visit=recheck`} tone="secondary" size="md" data-car-recheck>PPF RECHECK (FREE)</LinkButton> : null}
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
 
           <section className="flex flex-col gap-3">
             <SectionLabel right={`${photos.length} photo${photos.length === 1 ? "" : "s"}`}>Photos</SectionLabel>

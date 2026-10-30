@@ -114,6 +114,20 @@ export function makeChecks() {
   return { results, check, summary };
 }
 
+/** THE inspection fee choice (30 October 2026), required when an advisor or the owner does the gate-in: a fee of AED amount, or no fee with a reason. */
+export async function chooseInspectionFee(page, amount = 1000) {
+  const box = page.locator("[data-fee-choice-box]").first();
+  if (!(await box.count())) return;
+  if (amount) {
+    await box.locator('[data-fee-choice="fee"]').click();
+    await box.locator(`[data-fee-chip="${amount}"]`).click();
+  } else {
+    await box.locator('[data-fee-choice="none"]').click();
+    await box.locator('[data-no-fee-reason="regular_customer"]').first().click();
+    await box.locator('[data-inspection-type="full"]').click();
+  }
+}
+
 /** Ticks a person in THE staff picker; someone already on a car asks once ("Put on this car as well?") and the test says yes. */
 export async function pickPerson(scope, id) {
   await scope.locator(id ? `[data-pick-person="${id}"]` : "[data-pick-person]").first().click();

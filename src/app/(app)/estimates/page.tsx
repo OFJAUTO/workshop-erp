@@ -17,7 +17,7 @@ function olderThanDays(iso: string | null, days: number) {
   return !!iso && Date.now() - Date.parse(iso) > days * 86400000;
 }
 
-type Row = { id: string; number: string; version: number; status: QuoteStatus; cancel_reason: string | null; cancelled_at: string | null; total_aed: number; sent_at: string | null; opened_at: string | null; responded_at: string | null; valid_until: string | null; created_at: string; created_by: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; creator: { display_name: string } | null };
+type Row = { id: string; number: string; version: number; status: QuoteStatus; cancel_reason: string | null; cancelled_at: string | null; total_aed: number; sent_at: string | null; opened_at: string | null; responded_at: string | null; valid_until: string | null; created_at: string; created_by: string | null; additional_to_id: string | null; carried_job_id: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; creator: { display_name: string } | null };
 
 /** Estimates before the car arrives: being prepared, sent, accepted, expired or no reply, with follow-ups. */
 export default async function EstimatesPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
@@ -25,22 +25,26 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const { message } = await searchParams;
   const settings = await getSettings();
   const admin = createAdminClient();
-  let query = admin.from("quotations").select("id, number, version, status, cancel_reason, cancelled_at, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), creator:staff!quotations_created_by_fkey(display_name)").eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
+  let query = admin.from("quotations").select("id, number, version, status, cancel_reason, cancelled_at, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, additional_to_id, carried_job_id, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), creator:staff!quotations_created_by_fkey(display_name)").eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
   if (staff.role_id !== "owner") query = query.eq("created_by", staff.id);
   const { data } = await query;
   const rows = (data ?? []) as unknown as Row[];
   // Section 1 (29 October 2026): every version of each estimate stays one tap away (old versions open read-only).
   const { data: versionRows } = rows.length ? await admin.from("quotations").select("id, number, version, status").eq("kind", "estimate").eq("is_active", true).in("number", Array.from(new Set(rows.map((r) => r.number)))) : { data: [] as { id: string; number: string; version: number; status: string }[] };
   const versionsOf = (n: string) => ((versionRows ?? []) as { id: string; number: string; version: number; status: string }[]).filter((v) => v.number === n).map((v) => ({ id: v.id, version: Number(v.version) || 1, status: v.status }));
+  const { data: baseRows } = rows.some((r) => r.additional_to_id) ? await admin.from("quotations").select("id, number").in("id", rows.map((r) => r.additional_to_id).filter((x): x is string => !!x)) : { data: [] as { id: string; number: string }[] };
+  const numberOf = new Map((baseRows ?? []).map((b) => [b.id as string, b.number as string]));
   const followDays = Number(settings.estimate_followup_days) || 2;
   const needsFollowUp = (r: Row) => (r.status === "sent" || r.status === "opened") && olderThanDays(r.sent_at, followDays);
   // Cancelled (sent, then withdrawn) and expired (past "valid until" without a reply) share one folded section at the end.
-  const bucket = (r: Row) => (r.status === "approved" ? "accepted" : r.status === "expired" || r.status === "cancelled" ? "closed" : r.status === "declined" ? "declined" : needsFollowUp(r) ? "noreply" : r.status === "sent" || r.status === "opened" ? "sent" : "draft");
+  // 30 October 2026: an estimate carried over to a job at gate-in is at the workshop, never a follow-up.
+  const bucket = (r: Row) => (r.carried_job_id && r.status !== "cancelled" ? "carried" : r.status === "approved" ? "accepted" : r.status === "expired" || r.status === "cancelled" ? "closed" : r.status === "declined" ? "declined" : needsFollowUp(r) ? "noreply" : r.status === "sent" || r.status === "opened" ? "sent" : "draft");
   const sections: { key: string; title: string; folded?: boolean }[] = [
     { key: "noreply", title: "No reply: follow up" },
     { key: "sent", title: "Sent" },
     { key: "draft", title: "Being prepared" },
     { key: "accepted", title: "Accepted" },
+    { key: "carried", title: "Carried over to a job" },
     { key: "declined", title: "Declined" },
     { key: "closed", title: "Cancelled / expired", folded: true },
   ];
@@ -63,6 +67,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
               <span className="font-semibold">{r.vehicle ? `${formatPlate(r.vehicle)} · ${[r.vehicle.make?.name, r.vehicle.model?.name].filter(Boolean).join(" ")}` : "No car"}</span>
               <span className="text-sm text-muted">{r.customer?.company_name ?? r.customer?.full_name}</span>
               <Badge tone={tone(r.status)}>{QUOTE_STATUS_LABELS[r.status]}</Badge>
+              {r.additional_to_id ? <span className="rounded-full border border-ink px-2 py-0.5 text-[10px] font-extrabold tracking-[0.08em]" data-estimate-additional-chip>ADDITIONAL{numberOf.get(r.additional_to_id) ? ` · to ${numberOf.get(r.additional_to_id)}` : ""}</span> : null}
               {r.status === "cancelled" && r.cancel_reason ? <span className="text-xs font-semibold text-muted" data-cancel-reason>{r.cancel_reason}</span> : null}
               <span className="ml-auto text-sm font-semibold">{aed(r.total_aed)}</span>
               <span className="text-xs text-muted">

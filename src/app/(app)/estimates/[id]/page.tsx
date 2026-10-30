@@ -21,6 +21,7 @@ import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
 import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { EstimateMenu } from "../EstimateMenu";
+import { loadCatalogue } from "@/lib/parts-catalogue";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
 
 export const dynamic = "force-dynamic";
@@ -36,8 +37,11 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const { quotation: q, vehicle, customer } = bundle;
   const mine = q.created_by === staff.id;
   const isOwner = role === "owner";
-  if (!(isOwner || (can(role, "viewEstimates") && mine))) redirect("/estimates");
-  const canEdit = !staff.viewingAs && q.status === "draft";
+  // 30 October 2026: every advisor may OPEN an estimate (the open-estimate question and the car page link here, never a
+  // dead end); only the advisor who made it, or the owner, changes or sends it.
+  if (!(isOwner || can(role, "viewEstimates"))) redirect("/estimates");
+  const mayManage = !staff.viewingAs && (isOwner || mine);
+  const canEdit = mayManage && q.status === "draft";
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
   const { data: locker } = lockFresh ? await createAdminClient().from("staff").select("display_name").eq("id", q.editing_by!).maybeSingle() : { data: null };
@@ -51,7 +55,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
   const accepted = q.status === "approved";
-  const { data: attached } = await createAdminClient().from("jobs").select("id, job_number").eq("estimate_id", q.id).maybeSingle();
+  const { data: attachedRows } = await createAdminClient().from("jobs").select("id, job_number").or(q.carried_job_id ? `estimate_id.eq.${q.id},id.eq.${q.carried_job_id}` : `estimate_id.eq.${q.id}`).limit(1);
+  const attached = attachedRows?.[0] ?? null;
+  const addsTo = q.additional_to_id ? (await createAdminClient().from("quotations").select("id, number").eq("id", q.additional_to_id).maybeSingle()).data : null;
   const tone = accepted ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
 
   return (
@@ -63,12 +69,14 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {customerName}</span>
             <Badge tone={tone}>{QUOTE_STATUS_LABELS[q.status]}</Badge>
+            {addsTo ? <Link href={`/estimates/${addsTo.id}`} className="rounded-full border border-ink px-2 py-0.5 text-[11px] font-extrabold tracking-[0.06em] whitespace-nowrap" data-estimate-adds-to={addsTo.number}>ADDITIONAL · in addition to {addsTo.number}</Link> : null}
+            {attached ? <Link href={`/jobs/${attached.id}`} className="text-xs font-bold underline underline-offset-4 whitespace-nowrap" data-estimate-carried={attached.job_number}>Carried over to {attached.job_number}</Link> : null}
           </span>
         }
         actions={
           <>
             <LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>
-            <EstimateMenu id={q.id} number={q.number} status={q.status} neverSent={!q.sent_at} canManage={!staff.viewingAs && (isOwner || mine)} />
+            <EstimateMenu id={q.id} number={q.number} status={q.status} neverSent={!q.sent_at} canManage={mayManage} />
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>
@@ -95,7 +103,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             </p>
           ) : (
             <>
-              <p className="text-sm text-muted">Book the car in. At gate-in, attach this estimate and it opens as the quotation, pre-filled.</p>
+              <p className="text-sm text-muted">Book the car in. At gate-in every open estimate of the car carries over to the job and opens as its own quotation, pre-filled.</p>
               <div className="flex flex-wrap gap-2">
                 <LinkButton href={`/calendar/new?customer=${q.customer_id}&vehicle=${q.vehicle_id ?? ""}`} size="md">Book the car into the calendar</LinkButton>
                 {can(role, "gateIn") && q.vehicle_id ? <LinkButton href={`/gate-in/new?vehicle=${q.vehicle_id}`} tone="secondary" size="md">Gate in now</LinkButton> : null}
@@ -113,6 +121,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         quotation={q}
         lines={bundle.lines}
         parts={[]}
+        catalogue={await loadCatalogue()}
         categories={services.categories}
         services={services.services}
         usage={services.usage}
@@ -147,7 +156,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         readOnly={!canEdit}
         lockedBy={lockedBy}
         showProfit
-        canSend={!staff.viewingAs}
+        canSend={mayManage}
         isOwner={isOwner}
         siteUrl={site}
         shortLink={q.token ? await shortFor(`${PRODUCTION_SITE_URL}/quote/${q.token}`) : null}
@@ -158,7 +167,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         recoveryProviders={(settings.recovery_providers ?? []) as string[]}
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
       />
-      {!staff.viewingAs && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
+      {mayManage && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
         <Card className="flex flex-col gap-2 max-w-xl">
           <SectionLabel>Revise</SectionLabel>
           <form action={reviseQuotation.bind(null, q.id)}>

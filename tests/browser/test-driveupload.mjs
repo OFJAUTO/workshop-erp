@@ -83,6 +83,8 @@ try {
   const job = (await sql("insert into public.jobs (vehicle_id, customer_id, department, status, stage, gated_in_by, advisor_id) values ($1, $2, 'mechanical', 'gate_in_pending', 'gate_in', $3, $3) returning id, job_number", [car, cust, owner]))[0];
   const trip = (await sql("insert into public.recovery_trips (job_id, kind, driver_name, driver_phone, token, location_details, location_url, scheduled_date, status, created_by, updated_by) values ($1, 'pickup', 'E2e Driver', '+971500000098', 'e2etrip' || md5(random()::text), 'E2e Villa 2, Al Barari', 'https://maps.google.com/maps?q=25.100362,55.320000', current_date, 'open', $2, $2) returning id, token", [job.id, owner]))[0];
   madeTrips.push(trip.id);
+  // The office typed a pick-up contact who is not the customer (the villa's concierge): the driver gets both.
+  await sql("update public.recovery_trips set contact_name = 'E2e Concierge', contact_phone = '+971500000096' where id = $1", [trip.id]);
 
   const browser = await chromium.launch({ executablePath: EDGE, headless: true });
   const big = await bigJpeg(browser);
@@ -95,6 +97,8 @@ try {
   await page.goto(`${base}/drive/${trip.token}`, { waitUntil: "load", timeout: 60000 });
   const contact = page.locator("[data-drive-contact]");
   check("A the driver sees the customer's name with [Call] and [WhatsApp], the address and the map", /E2e Driver Customer/i.test(await text(contact)) && (await contact.locator("[data-drive-call]").getAttribute("href")) === "tel:+971500000097" && (await contact.locator("[data-drive-whatsapp]").getAttribute("href")) === "https://wa.me/971500000097" && /Al Barari/.test(await text(contact)) && (await contact.locator("[data-drive-map]").count()) === 1, await text(contact));
+  const other = contact.locator("[data-drive-other-contact]");
+  check("A the pick-up contact typed by the office shows too: \"Pick-up contact: E2e Concierge\" with its own Call and WhatsApp", /Pick-up contact: E2e Concierge/i.test(await text(other)) && (await other.locator('a[href="tel:+971500000096"]').count()) === 1 && (await other.locator('a[href="https://wa.me/971500000096"]').count()) === 1, await text(other));
   await page.screenshot({ path: path.join(SHOTS, "A-driver-contact-412x915.png"), fullPage: true });
 
   /* ---------------- B ---------------- */
@@ -143,7 +147,7 @@ try {
   /* ---------------- D ---------------- */
   await page.goto(`${base}/drive/${trip.token}`, { waitUntil: "load" });
   const body = (await page.textContent("body")) ?? "";
-  check("D the trip finished: \"Done. Thank you!\" and nothing about the customer (no name, no phone, no address)", /Done\. Thank you!/.test(body) && !/E2e Driver Customer/i.test(body) && !/500000097/.test(body) && !/Al Barari/.test(body) && (await page.locator("[data-drive-contact]").count()) === 0);
+  check("D the trip finished: \"Done. Thank you!\" and nothing about the customer (no name, no phone, no address)", /Done\. Thank you!/.test(body) && !/E2e Driver Customer/i.test(body) && !/500000097/.test(body) && !/Al Barari/.test(body) && !/Concierge|500000096/i.test(body) && (await page.locator("[data-drive-contact]").count()) === 0);
   await page.screenshot({ path: path.join(SHOTS, "D-finished-412x915.png"), fullPage: true });
 
   /* ---------------- E ---------------- */

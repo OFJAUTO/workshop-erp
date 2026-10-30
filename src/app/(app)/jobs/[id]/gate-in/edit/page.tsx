@@ -1,4 +1,6 @@
 import { VinCopy } from "@/components/VinCopy";
+import { feeBoundsFor, feeInputOf } from "@/lib/inspection-fee-server";
+import { feeWords } from "@/lib/inspection-fee";
 import { notFound } from "next/navigation";
 import { LinkButton, Notice, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -37,7 +39,7 @@ export default async function AmendGateInPage({ params, searchParams }: { params
       <div className="max-w-3xl">
         <GateInForm
           action={updateGateIn.bind(null, id)}
-          inspectionFee={{ default: Number(card.job.inspection_fee_aed ?? settings.inspection_fee_aed) || 750, premium: false, isOwner: staff.role_id === "owner", locked: !!card.job.first_approval_at }}
+          inspectionFee={staff.role_id === "service_advisor" || staff.role_id === "owner" ? { initial: feeInputOf(card.job), bounds: feeBoundsFor(settings, card.vehicle?.make?.name), isOwner: staff.role_id === "owner", locked: !!card.job.first_approval_at, words: feeWords(card.job) } : null}
           draftKey={`gate-in-edit-${id}`}
           isElectric={card.vehicle.fuel_type === "electric"}
           mode="edit"

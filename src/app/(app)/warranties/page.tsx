@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { staffFinalCheckWords } from "@/lib/warranty";
 import { redirect } from "next/navigation";
 import { Badge, Button, Card, Input, PageHeader } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -73,6 +74,7 @@ export default async function WarrantiesPage({ searchParams }: { searchParams: P
                 <span className="font-extrabold">{c.plate ?? "No plate"} · {c.car}</span>
                 <span className="text-sm text-muted">{cust?.company_name || cust?.full_name || ""}</span>
                 <span data-warranty-item-status={c.status.kind}><Badge tone={tone(c.status.kind)}>{c.status.title}</Badge></span>
+                {staffFinalCheckWords(c.status) ? <span className={`text-xs font-bold ${c.status.checkDate ? "text-green" : "text-red"}`} data-final-check-staff>{staffFinalCheckWords(c.status)}</span> : null}
                 <span className="ml-auto flex flex-wrap gap-3 text-sm">
                   <Link href={`/jobs/${c.jobId}`} className="font-semibold underline underline-offset-4">{c.jobNumber}</Link>
                   {c.token ? <a href={`/warranty/${c.token}`} target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-4">Warranty page</a> : null}

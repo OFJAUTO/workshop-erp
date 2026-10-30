@@ -11,6 +11,7 @@ import { toSnapshot } from "@/lib/packages";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
+import { formatPlate, type PlateFields } from "@/lib/types";
 
 type LinePatch = {
   package_key?: string | null;
@@ -66,6 +67,8 @@ type LinePatch = {
   price_display?: string | null;
   /** Bodyshop costing: the estimated installer hours on the line (internal only). */
   installer_hours?: number | string | null;
+  /** Estimate parts: the advisor's note for the parts desk ("OEM only", "front left"). */
+  parts_note?: string | null;
 };
 type Body = {
   quotationId?: string;
@@ -84,6 +87,10 @@ type Body = {
   requestPart?: { description: string; quantity?: number | string; source_type?: string | null; source_key?: string | null; positions?: unknown; catalogue_id?: string | null };
   /** A finding the advisor is not quoting, with the reason; a null reason takes the mark off again. */
   notQuoted?: { key: string; reason: string | null };
+  /** Estimate parts (30 October 2026): send these part lines to the parts desk to be priced. */
+  sendToDesk?: { ids: string[] };
+  /** Estimate parts: the advisor already has a price (a dealer on the phone). Marked "Priced by advisor"; the parts desk checks it. */
+  advisorPrice?: { id: string; cost: number | string; supplier: string };
 };
 
 const n = (v: unknown): number | null => {
@@ -182,7 +189,13 @@ export async function POST(request: NextRequest) {
     if (p.quantity !== undefined) out.quantity = Math.max(0.01, n(p.quantity) ?? 1);
     if (p.unit_cost !== undefined) {
       if (type === "part" && q.kind === "quotation") return "The cost of a part comes from Parts.";
+      if (type === "part") return "Send the part to the parts desk, or use \"I have a price\".";
       out.unit_cost = n(p.unit_cost);
+    }
+    if (p.parts_note !== undefined) {
+      const pn = p.parts_note ? String(p.parts_note).trim() : "";
+      if (pn.length > LINE_TEXT_MAX) return tooLongWords(pn.length);
+      out.parts_note = pn || null;
     }
     if (p.unit_price !== undefined) out.unit_price = n(p.unit_price);
     if (p.price_display !== undefined) out.price_display = p.price_display && ["complimentary", "included"].includes(String(p.price_display)) ? String(p.price_display) : "normal";
@@ -337,6 +350,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  if (body.sendToDesk || body.advisorPrice) {
+    if (q.kind !== "estimate") return NextResponse.json({ error: "A job's parts go through \"+ Add a part\"." }, { status: 400 });
+    const vehicleWords = async () => {
+      const { data: v } = q.vehicle_id ? await admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
+      const car = v as unknown as (PlateFields & { make: { name: string } | null; model: { name: string } | null }) | null;
+      return car ? `${formatPlate(car)} · ${[car.make?.name, car.model?.name].filter(Boolean).join(" ")}` : "";
+    };
+    if (body.sendToDesk) {
+      const ids = Array.isArray(body.sendToDesk.ids) ? body.sendToDesk.ids.map(String).slice(0, 100) : [];
+      const { data: rows } = ids.length ? await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, unit_cost, price_requested_at, is_active").eq("quotation_id", q.id).in("id", ids) : { data: [] };
+      const nameless = (rows ?? []).filter((l) => l.is_active && l.line_type === "part" && !l.part_item_id && !String(l.title ?? "").trim());
+      if (nameless.length) return NextResponse.json({ error: "Type the name of the part first: the parts desk prices what it says." }, { status: 400 });
+      const toSend = (rows ?? []).filter((l) => l.is_active && l.line_type === "part" && !l.part_item_id && (l.unit_cost === null || l.unit_cost === undefined) && !l.price_requested_at);
+      if (!toSend.length) return NextResponse.json({ ok: true, sent: 0 });
+      const now = new Date().toISOString();
+      const { error } = await admin.from("quotation_lines").update({ price_requested_at: now, price_requested_by: staff.id, ...stamp }).in("id", toSend.map((l) => l.id));
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "parts_to_desk", note: `${staff.display_name} sent ${toSend.length} part${toSend.length === 1 ? "" : "s"} to the parts desk to price: ${toSend.map((l) => l.title).join(", ")}`, created_by: staff.id });
+      await notifyRoles(["parts"], { type: "estimate_parts_to_price", title: `ESTIMATE ${q.number} – car not here yet: ${toSend.length} part${toSend.length === 1 ? "" : "s"} to price`, body: `${await vehicleWords()} · ${toSend.map((l) => `${l.title} × ${Number(l.quantity) || 1}`).join(", ")} · asked by ${staff.display_name}`, href: `/parts/estimate/${q.id}` });
+      await refreshed();
+      return NextResponse.json({ ok: true, sent: toSend.length });
+    }
+    const ap = body.advisorPrice!;
+    const cost = n(ap.cost);
+    const supplier = String(ap.supplier ?? "").trim().slice(0, 120);
+    if (cost === null || cost <= 0) return NextResponse.json({ error: "Type the cost of one part (before VAT)." }, { status: 400 });
+    if (!supplier) return NextResponse.json({ error: "Who quoted the price? Type the supplier." }, { status: 400 });
+    const { data: cur } = await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, is_active").eq("id", String(ap.id)).eq("quotation_id", q.id).maybeSingle();
+    if (!cur || !cur.is_active || cur.line_type !== "part" || cur.part_item_id) return NextResponse.json({ error: "Part line not found." }, { status: 404 });
+    if (!String(cur.title ?? "").trim()) return NextResponse.json({ error: "Type the name of the part first." }, { status: 400 });
+    const now = new Date().toISOString();
+    const { error } = await admin.from("quotation_lines").update({ unit_cost: cost, supplier_text: supplier, priced_by_advisor: true, priced_at: now, priced_by: staff.id, price_checked_at: null, price_checked_by: null, ...stamp }).eq("id", cur.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_priced_by_advisor", note: `${staff.display_name} priced ${cur.title} at AED ${cost.toLocaleString("en-GB")} each from ${supplier} (priced by advisor; the parts desk checks it)`, created_by: staff.id });
+    await notifyRoles(["parts"], { type: "estimate_price_check", title: `Check this price · ESTIMATE ${q.number}`, body: `${cur.title}: AED ${cost.toLocaleString("en-GB")} each from ${supplier}, typed by ${staff.display_name}. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
+    await refreshed();
+    return NextResponse.json({ ok: true });
+  }
+
   if (body.requestPart) {
     if (!q.job_id) return NextResponse.json({ error: "An estimate has no job for Parts to price. Type the part as a line instead." }, { status: 400 });
     const description = String(body.requestPart.description ?? "").trim();
@@ -390,8 +442,12 @@ export async function POST(request: NextRequest) {
         linked = { name: svc.name, rows: (svc.parts_requests as string[]).map((label, i) => ({ job_id: q.job_id, source_type: "manual", source_key: `${svc.id}:${Date.now()}:${i}`, label, requested_text: `For ${svc.name}, added by ${staff.display_name} on ${q.number}`, created_by: staff.id, ...stamp })) };
       }
     } else if (type === "part") {
-      // Estimates only: the car is not here, so the advisor types the part with cost and markup.
-      Object.assign(row, { unit_cost: n(a.unit_cost), markup_percent: Math.max(minMarkup, n(a.markup_percent) ?? minMarkup), quantity: Math.max(0.01, n(a.quantity) ?? 1), title: row.title || "Part" });
+      // Estimates only (30 October 2026): the advisor names the part; the parts desk prices it (or the advisor types a
+      // price he has, through advisorPrice). The minimum markup is set at once so the selling price follows the cost.
+      const positions = Array.isArray(a.positions) ? Array.from(new Set(a.positions.map((x) => String(x).trim().slice(0, 30)).filter(Boolean))).slice(0, 8) : [];
+      const note = a.parts_note ? String(a.parts_note).trim() : "";
+      if (note.length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(note.length) }, { status: 400 });
+      Object.assign(row, { unit_cost: null, markup_percent: Math.max(minMarkup, n(a.markup_percent) ?? minMarkup), quantity: Math.max(0.01, n(a.quantity) ?? 1), positions, parts_note: note || null });
     } else {
       const patch = cleanPatch(a, null);
       if (typeof patch === "string") return NextResponse.json({ error: patch }, { status: 400 });

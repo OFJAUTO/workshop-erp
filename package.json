@@ -63,7 +63,6 @@
     "test:urgency": "node --env-file=.env.local tests/browser/test-urgency.mjs",
     "test:depositpanel": "node --env-file=.env.local tests/browser/test-deposit-panel.mjs",
     "test:waiting": "node --env-file=.env.local tests/browser/test-waiting.mjs",
-    "test:fee": "node --env-file=.env.local tests/browser/test-fee.mjs",
     "test:gatein": "node --env-file=.env.local tests/browser/test-gatein-page.mjs",
     "test:scanlive": "node --env-file=.env.local tests/browser/test-scanlive.mjs",
     "test:reorder": "node --env-file=.env.local tests/browser/test-reorder.mjs",
@@ -125,7 +124,11 @@
     "test:customers1": "node --env-file=.env.local tests/browser/test-customers1.mjs",
     "test:declined2": "node --env-file=.env.local tests/browser/test-declined2.mjs",
     "test:waiting3": "node --env-file=.env.local tests/browser/test-waiting3.mjs",
-    "test:addest": "node --env-file=.env.local tests/browser/test-addest.mjs"
+    "test:addest": "node --env-file=.env.local tests/browser/test-addest.mjs",
+    "test:estparts": "node --env-file=.env.local tests/browser/test-estparts.mjs",
+    "test:recheck": "node --env-file=.env.local tests/browser/test-recheck.mjs",
+    "test:driveupload": "node --env-file=.env.local tests/browser/test-driveupload.mjs",
+    "test:feechoice": "node --env-file=.env.local tests/browser/test-feechoice.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

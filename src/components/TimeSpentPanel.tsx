@@ -31,6 +31,12 @@ export function TimeSpentPanel({ t }: { t: TimeSpent }) {
         <span className="font-bold">Total clocked: {hoursAndMinutes(t.clockedMinutes)}</span>
         <span className="text-muted"> · cost {aed(t.cost)} (AED {t.costRate}/h) · worth {aed(t.worth)} at our selling rate (AED {t.sellRate}/h)</span>
       </p>
+      {t.recheck ? (
+        <p className="text-sm" data-time-recheck>
+          <span className="font-bold">{t.recheck.words}</span>
+          <span className="text-muted"> · the free PPF final check ({t.recheck.visits.map((v) => v.number).join(", ")}){t.recheck.film ? `, film AED ${t.recheck.film.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}: a cost of this job</span>
+        </p>
+      ) : null}
       <p className="text-sm" data-time-in-workshop>
         <span className="font-bold">Car in the workshop: {daysAndHours(t.inWorkshop.minutes)}</span>
         <span className="text-muted"> (gate-in {t.inWorkshop.from ? formatDayTime(t.inWorkshop.from) : "—"} → {t.inWorkshop.to ? `gate-out ${formatDayTime(t.inWorkshop.to)}` : "now"})</span>
