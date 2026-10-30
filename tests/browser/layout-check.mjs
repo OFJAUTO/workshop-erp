@@ -132,7 +132,7 @@ const roles = [
 ].filter(Boolean).filter((r) => wants(r.name));
 
 // Pages reached from inside another page (not in the menu) that still need checking.
-const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements"], accounts: ["/commissions", "/card-settlements"] };
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new"], advisor: ["/estimates/new"], accounts: ["/commissions", "/card-settlements"] };
 const slice = (list) => {
   if (partOf <= 1) return list;
   const size = Math.ceil(list.length / partOf);

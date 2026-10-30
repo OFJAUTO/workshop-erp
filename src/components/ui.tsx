@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { NumericInput } from "./NumericInput";
 import { CasedInput, CasedTextarea } from "./CasedInput";
+import { KeptSelect } from "./KeptSelect";
 import type { TextCase } from "@/lib/text-case";
 import type { ReactNode } from "react";
 
@@ -174,6 +175,14 @@ export function Textarea({ className = "", textCase, ...props }: React.TextareaH
 }
 
 export function Select({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  // A controlled drop-down keeps its choice through React's form reset after a server action (KeptSelect).
+  if (props.value !== undefined) {
+    return (
+      <KeptSelect className={`${controlClass} ${className}`} {...props}>
+        {children}
+      </KeptSelect>
+    );
+  }
   return (
     <select className={`${controlClass} ${className}`} {...props}>
       {children}

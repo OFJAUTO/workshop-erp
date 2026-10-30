@@ -15,27 +15,72 @@ import { greetingNameOf } from "@/lib/messages";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { shortFor } from "@/lib/short-links";
 import { formatPlate } from "@/lib/types";
+import { aed } from "@/lib/quotes";
+import { amountOf, statusWords, type QuoteVersionRow } from "@/lib/quote-history";
 
 /** Open estimates (not answered, not cancelled): a second one for the same car is asked about first. */
 const OPEN_ESTIMATE = ["draft", "pending_owner", "sent", "opened", "urgent_requested"];
+
+/**
+ * The open estimates of ONE car, oldest first, with the words the question shows: "E-00035 · AED 6,615.00 · sent
+ * 30 Oct". Estimates already carried over to a job at gate-in no longer count. Another car of the same customer
+ * never shows here.
+ */
+async function openEstimatesOfCar(vehicleId: string): Promise<{ id: string; number: string; line: string }[]> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("quotations")
+    .select("id, job_id, number, version, kind, status, total_aed, approved_total_aed, rounded_total_aed, sent_at, opened_at, responded_at, approver_name, created_at, created_by, token")
+    .eq("kind", "estimate")
+    .eq("is_active", true)
+    .is("deleted_at", null)
+    .eq("vehicle_id", vehicleId)
+    .in("status", OPEN_ESTIMATE)
+    .order("created_at");
+  const rows = (data ?? []) as unknown as QuoteVersionRow[];
+  if (!rows.length) return [];
+  const { data: used } = await admin.from("jobs").select("estimate_id").in("estimate_id", rows.map((r) => r.id));
+  const taken = new Set((used ?? []).map((j) => j.estimate_id as string));
+  return rows
+    .filter((r) => !taken.has(r.id))
+    .map((r) => {
+      const words = statusWords(r);
+      return { id: r.id, number: r.number, line: `${r.number} · ${aed(amountOf(r))} · ${words.charAt(0).toLowerCase()}${words.slice(1)}` };
+    });
+}
 
 /** An estimate before the car arrives: customer and car, then lines on the builder. */
 export async function createEstimate(_state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("viewEstimates");
   const values = formValues(formData);
-  // The customer and the car from the three-choice chooser (created here when they are new).
-  const picked = await resolveCustomerCar(formData, staff);
-  if ("error" in picked) return { error: picked.error, values: chooserValues(values, picked) };
-  const { customerId, vehicleId } = picked;
   const admin = createAdminClient();
-  // Section 4 (23 October 2026): the same customer and car already have an open estimate - open it instead?
-  if (String(formData.get("confirm_new") ?? "") !== "1") {
-    let dupQuery = admin.from("quotations").select("id, number, customer:customers(full_name, company_name)").eq("kind", "estimate").eq("is_active", true).eq("customer_id", customerId).in("status", OPEN_ESTIMATE).order("created_at", { ascending: false }).limit(1);
-    dupQuery = vehicleId ? dupQuery.eq("vehicle_id", vehicleId) : dupQuery.is("vehicle_id", null);
-    const { data: dup } = await dupQuery.maybeSingle();
-    if (dup) {
-      const c = dup.customer as unknown as { full_name: string; company_name: string | null } | null;
-      return { values: { ...values, mode: "existing", customer_id: customerId, vehicle_id: vehicleId ?? "", estimate_dup_id: dup.id as string, estimate_dup_number: dup.number as string, estimate_dup_name: c?.company_name ?? c?.full_name ?? "This customer" } };
+  // "Make an additional estimate" (30 October 2026): the question's own estimate names the customer and the car, so
+  // nothing behind the window (a box reset by the browser, a changed choice) can stop it. It always creates one.
+  const confirmNew = String(formData.get("confirm_new") ?? "") === "1";
+  const addToId = String(formData.get("additional_to") ?? "");
+  let customerId: string;
+  let vehicleId: string;
+  let addTo: { id: string; number: string } | null = null;
+  if (confirmNew && addToId) {
+    const { data: base } = await admin.from("quotations").select("id, number, kind, customer_id, vehicle_id").eq("id", addToId).maybeSingle();
+    if (!base || base.kind !== "estimate" || !base.vehicle_id) return { error: "That estimate was not found. Choose the car again.", values };
+    customerId = base.customer_id as string;
+    vehicleId = base.vehicle_id as string;
+    addTo = { id: base.id as string, number: base.number as string };
+  } else {
+    // The customer and the car from the three-choice chooser (created here when they are new).
+    const picked = await resolveCustomerCar(formData, staff);
+    if ("error" in picked) return { error: picked.error, values: chooserValues(values, picked) };
+    customerId = picked.customerId;
+    vehicleId = picked.vehicleId;
+    // The CHOSEN car already has an open estimate: the question names it (number, amount, sent) with Open it or
+    // Make an additional estimate. Only that car counts; the customer's other cars never ask.
+    if (!confirmNew) {
+      const open = await openEstimatesOfCar(vehicleId);
+      if (open.length) {
+        const { data: car } = await admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant").eq("id", vehicleId).maybeSingle();
+        return { values: { ...values, mode: "existing", customer_id: customerId, vehicle_id: vehicleId, estimate_dup_id: open[0].id, estimate_dup_number: open[0].number, estimate_dup_car: car ? formatPlate(car) : "", estimate_dup_list: JSON.stringify(open) } };
+      }
     }
   }
   const settings = await getSettings();
@@ -46,6 +91,7 @@ export async function createEstimate(_state: FormState, formData: FormData): Pro
     .single();
   if (error || !created) return { error: error?.message ?? "Could not create the estimate.", values };
   await logQuoteEvent(created.id, null, staff.id, "estimate_started", `Estimate ${created.number} started by ${staff.display_name}`);
+  if (addTo) await logQuoteEvent(created.id, null, staff.id, "estimate_additional", `Additional estimate ${created.number}, in addition to ${addTo.number}, started by ${staff.display_name}`);
   revalidatePath("/estimates");
   // Section 6: started from the bodyshop button - land in the editor with the package picker open.
   redirect(`/estimates/${created.id}${String(formData.get("bodyshop") ?? "") === "1" ? "?packages=1" : ""}`);

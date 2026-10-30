@@ -80,13 +80,15 @@ await go(page, `${base}/estimates/new?customer=${job.customer_id}&vehicle=${job.
 await page.locator('[data-start-form="estimate"] button[type="submit"]').first().click();
 const dup = page.locator("[data-estimate-duplicate]");
 await dup.waitFor({ timeout: 20000 });
-check(`4: '${custName} already has ${old.number} – open it instead?'`, (await text(dup)).includes(`${custName} already has ${old.number} – open it instead?`), await text(dup));
+// 30 October 2026: the question names the CAR's open estimates (number, amount, sent), never 'usually a mistake'.
+// (${sent.number} was cancelled in section 2, so ${old.number} is the car's one open estimate.)
+check(`4: 'This car already has an open estimate: ${old.number} · AED … · …'`, (await text(dup)).includes(`This car already has an open estimate: ${old.number} · AED `) && !/usually a mistake/.test(await text(dup)), await text(dup));
 await page.screenshot({ path: shot("est4-5-duplicate.png") });
 check("4: 'Open' goes to the existing estimate", ((await page.locator("[data-estimate-open-existing]").getAttribute("href")) ?? "").endsWith(old.id));
 const before = (await sql("select count(*)::int as n from public.quotations where kind = 'estimate' and customer_id = $1 and is_active", [job.customer_id]))[0].n;
 await page.locator("[data-estimate-new-anyway]").click();
 await page.waitForURL(/\/estimates\/[0-9a-f-]{36}/, { timeout: 30000 });
-check("4: 'Create a new one anyway' makes a second one on purpose", (await sql("select count(*)::int as n from public.quotations where kind = 'estimate' and customer_id = $1 and is_active", [job.customer_id]))[0].n === before + 1);
+check("4: 'Make an additional estimate' makes one on purpose", (await sql("select count(*)::int as n from public.quotations where kind = 'estimate' and customer_id = $1 and is_active", [job.customer_id]))[0].n === before + 1);
 
 /* 5. Copy estimate - the commission is not copied */
 await go(page, `${base}/estimates/${old.id}`);
@@ -108,4 +110,6 @@ await browser.close();
 
 cleanupDb();
 check("cleanup: no test estimates left", (await sql("select count(*)::int as n from public.quotations where customer_id = $1", [job.customer_id]))[0].n === 0);
+// Estimate numbers are real: the test gives back the ones it used.
+await sql("select setval('public.estimate_number_seq', greatest(1, coalesce((select max(substring(number from 3)::int) from public.quotations where number ~ '^E-[0-9]+$'), 1)))");
 process.exit(summary() ? 1 : 0);
