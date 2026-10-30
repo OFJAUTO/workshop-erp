@@ -100,3 +100,114 @@ work is outside the bonus.
 **3.5 Recovery company:** THE picker (`RecoveryProviderPicker`) on the quotation's recovery line offers the saved list
 plus "+ Add new" (name and phone). There is no free typing any more. The owner's card on the Recovery page flags
 names that look like typing mistakes (`looksLikeJunk`: "YGHUHGHU", "SH"), with Remove.
+
+## Section 4 – Damage already on the car (LIVE; parts wait for migration 20261201120000)
+
+**4.1 The outline.** It is now car-shaped, with FRONT / REAR / LEFT / RIGHT printed around it. Every panel is named
+"Part – position", for example "Headlight – front right". `tests/unit/panels.test.mjs` checks each name against where the
+panel is drawn. None of the old names were wrong.
+
+**4.2 The section.** ONE model (`src/lib/damage.ts`, `src/lib/damage-data.ts`) and ONE section (`DamageSection`).
+"Damage already on the car" appears in English and Arabic on the customer's job card link. It shows the outline, the
+list, and each panel's own photos (caption `panel:<key>`). With no damage it says "No damage noted at check-in". The
+same block (`DamagePdf`) is on the customer's job card PDF (`/api/pdf/jobcard/[token]`, the View button) and on the
+internal gate-in PDF.
+
+**4.3 The check-in details.** "Damage noted: N panels (see above)" replaces "Major damage noted".
+
+**4.4 The panel marker.** The note box reads "Note (shown to the customer)" and each panel takes photos. The bodyshop
+pre-work check keeps a plain "Note".
+
+**4.5 Approval.** The checkbox adds the confirmation line in both languages. `approval_requests.damage_snapshot`
+keeps what was confirmed (dormant until the migration is applied).
+
+**4.6 Found after check-in.** Anyone on the car records it, from the job card or the technician screen. The advisor in
+charge is told (`damage_found_after`). The customer roles send the WhatsApp message (template in Settings). This needs
+`gate_ins.damage_after` (dormant until the migration is applied).
+
+**4.7 One diagram everywhere.** The same diagram is on the gate-out and the technician screen.
+
+**PDF note:** the PDF fonts have no Arabic, so the PDFs are in English. The link carries the Arabic.
+
+## Section 5 – Complimentary jobs (LIVE; dormant until migration 20261201130000)
+
+**The rules.** `src/lib/complimentary.ts` sets them. A line counts as free when it is:
+
+- marked Complimentary,
+- discounted 100%,
+- a free recovery (pre-approved only with a PPF package), or
+- on a quotation that totals nothing.
+
+Free lines need a reason:
+
+- our mistake, with the original job;
+- goodwill, with a note;
+- warranty, with the original job.
+
+**Approval.** The owner approves through the existing owner approval (pending_owner). His notification shows the
+normal price and the cost to us. The owner's own sending approves it by itself (logged).
+
+**Cost to us.** It comes from THE profit calculation. PPF work that is not a package now carries its share of a car's
+film, everywhere, so it is never 0.
+
+**Customer words.** Goodwill shows "COMPLIMENTARY (value AED X)". Our mistake and warranty show "NO CHARGE".
+
+**Where it shows.**
+
+- Rework appears on the original job card and on Comebacks.
+- Goodwill this year appears on the customer's record.
+- Wholly free jobs with no invoice count as a cost in the daily figure.
+- The monthly Complimentary report is at Reports > Complimentary.
+
+**Invoice.** A wholly free job gets no tax invoice by default. A Settings switch changes this, and
+`docs/complimentary-vat-note.md` asks Mathew to confirm.
+
+**Simplification.** The cost moves to the original job on screen only. The daily profit counts it on the free job
+itself, so the bonus is never touched.
+
+## Section 6 – Quotation PDF (LIVE)
+
+**6.1 Text drawn on top.** The overlap came from a Text with `flex: 1` inside a column. The package rows now align at
+the top, and each tick sits on the first line of its item. "COMPLIMENTARY (value …)" puts the value on its own line.
+
+**6.2 PDF check.** `npm run test:pdf` runs `tests/unit/pdf-check-lib.mjs` and `pdf-layout.test.mjs`. It is also part
+of `test:unit`. It fails on:
+
+- text drawn on top of other text,
+- text running off the page,
+- an amount split across two lines,
+- a tick not level with its line.
+
+**6.3 Free pick-up shown once.** It shows only as the package badge, and an empty Other charges section is hidden.
+
+**6.4 Tint.** Tint items name the windows chosen and their darkness. Each window's choice reads "Not needed" when off.
+
+**6.5 Package items.** Any package item can be marked "Not needed", including the pick-up and after-care badges.
+
+**6.6 AED 0 package.** A package at AED 0.00 cannot be sent: "set the package price first".
+
+## Section 7 – "+ Add a part" (LIVE; the owner's list is filled by migration 20261201140000)
+
+**The parts.** Body (with the lights), Glass and Interior come from `src/lib/body-parts.ts` until the migration copies
+them into the owner's list.
+
+**Sides.** A part that comes in sides becomes one line per side: "Headlight – front right".
+
+**Search.** It forgives spelling ("grill", "head light", "bumpr", "fender", "windshield").
+
+**From the damage list.** This first tab on quotations and estimates lists the parts from the damaged panels.
+
+**Most used.** It counts the parts actually asked for.
+
+## Section 10 – Uploads (PARTLY; the rest waits for the test database)
+
+**Done tonight.** `ImageShrinker` sits in the root layout. A full-size phone photo is redrawn in the browser to at most
+2,560 px and about 2.5 MB before any form sends it through the server. That covers the 14 server-upload places at
+once. It was checked in the browser: a 41 MB picture became 2.1 MB, and a form sent while it was still being redrawn
+waited, then sent the small file.
+
+**Waiting for the test database:**
+
+- resumable videos (TUS, built, switched off by `NEXT_PUBLIC_RESUMABLE_UPLOADS`),
+- the offline queue on every staff upload screen (today only the driver page uses `src/lib/upload-queue.ts`),
+- the 200 MB slow-network test.
