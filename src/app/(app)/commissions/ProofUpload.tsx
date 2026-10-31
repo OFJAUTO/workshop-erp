@@ -1,35 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { QueuedProofUpload } from "@/components/QueuedProofUpload";
+import { refreshWhenIdle } from "@/lib/refresh-idle";
 
-/** The signed voucher photo or the bank slip: one picker, straight onto the payment. */
+/**
+ * The signed voucher photo or the bank slip, 31 October 2026: one picker that keeps the file on this device until OFJ's
+ * server has it and sends it straight to storage, onto the payment (an expense already in Zoho runs once more to attach
+ * it). The page shows "Proof ✓" when the server has it.
+ */
 export function ProofUpload({ paymentId, label = "Upload signed voucher" }: { paymentId: string; label?: string }) {
   const router = useRouter();
-  const ref = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function send(file: File) {
-    setBusy(true);
-    setError(null);
-    const fd = new FormData();
-    fd.set("payment_id", paymentId);
-    fd.set("file", file);
-    const r = await fetch("/api/commissions/proof", { method: "POST", body: fd });
-    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    setBusy(false);
-    if (!r.ok || !d.ok) { setError(d.error ?? "Could not upload."); return; }
-    router.refresh();
-  }
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      <input ref={ref} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void send(f); e.target.value = ""; }} />
-      <button type="button" disabled={busy} onClick={() => ref.current?.click()} className="min-h-10 rounded-control border-2 border-amber-bar bg-white px-3 text-xs font-bold disabled:opacity-50" data-proof-upload={paymentId}>
-        {busy ? "Uploading…" : label}
-      </button>
-      {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
-    </span>
-  );
+  return <QueuedProofUpload target="commission_proof" scopeId={paymentId} label={label} buttonData={{ "data-proof-upload": paymentId }} readyWords="Proof saved" onSent={() => refreshWhenIdle(() => router.refresh())} />;
 }

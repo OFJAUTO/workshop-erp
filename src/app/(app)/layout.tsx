@@ -98,6 +98,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Suspense fallback={null}><ModeGuard serverMode={tabMode} /></Suspense>
       {can(role, "viewCustomers") ? <CustomerPanelHost /> : null}
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
+      {/* Who is signed in, for the send queue: a sending permit is only ever kept and used for this person. */}
+      <meta name="erp-staff-id" content={staff.id} />
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         searchCustomers={can(role, "viewCustomers")}

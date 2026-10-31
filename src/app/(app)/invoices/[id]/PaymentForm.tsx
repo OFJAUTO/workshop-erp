@@ -1,20 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button, Input } from "@/components/ui";
 import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
-import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
-import { newUuid } from "@/lib/uuid";
+import { JobFileUpload, markFormSent, useFormKey, useRenewAfterAnswer, type FilesWaiting, type JobFile } from "@/components/JobFileUpload";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 import { AuthCodeInput } from "@/components/AuthCodeInput";
 import { needsAuthCode } from "@/lib/auth-code";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-function RecordButton({ label }: { label: string }) {
+function RecordButton({ label, disabled = false }: { label: string; disabled?: boolean }) {
   const { pending } = useFormStatus();
-  return <Button type="submit" size="lg" disabled={pending} data-record-payment>{pending ? "Recording…" : label}</Button>;
+  return <Button type="submit" size="lg" disabled={pending || disabled} data-record-payment>{pending ? "Recording…" : label}</Button>;
 }
 
 /**
@@ -37,11 +36,14 @@ export function PaymentForm({
   invoiceNumber = "",
   isProforma = false,
   nextTaxNumber = null,
+  spentKeys,
 }: {
   invoiceId: string | null;
   jobId: string | null;
-  /** The job the invoice belongs to: the proof photo uploads straight to storage under it. */
+  /** The job the invoice belongs to: the proof photo goes through the send queue under it. */
   proofJobId?: string | null;
+  /** The client keys of payments already recorded on this job: a form still holding one of them starts a new key. */
+  spentKeys?: string[];
   balance: number | null;
   action: (formData: FormData) => void;
   /** Bank charge per method, in percent. */
@@ -65,22 +67,40 @@ export function PaymentForm({
   const [authCode, setAuthCode] = useState("");
   const [confirming, setConfirming] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const [clientKey] = useState(newUuid);
-  const [proofs, setProofs] = useState<JobFile[]>([]);
+  // The form's own key ties the proof to the payment. It stays the same across a reload or a new version (a proof still
+  // waiting on the device stays with this form) and is renewed once a payment with it is recorded.
+  const formTag = invoiceId ? `payment:${invoiceId}` : `payment:job:${jobId ?? proofJobId ?? "none"}`;
+  const { key: clientKey, renew } = useFormKey(formTag, proofJobId);
+  // The page came back with "message" after this form was submitted: that payment is recorded, the key is spent (a reused
+  // key would be taken for the same payment, "already recorded"). The page's own list of recorded keys says the same.
+  useRenewAfterAnswer(formTag, clientKey, renew);
+  useEffect(() => {
+    if (clientKey && spentKeys?.includes(clientKey)) renew(clientKey);
+  }, [spentKeys, clientKey, renew]);
+  // The proofs the server has for THIS key (a new key starts with none).
+  const [proofState, setProofState] = useState<{ key: string | null; files: JobFile[] }>({ key: null, files: [] });
+  if (proofState.key !== clientKey) setProofState({ key: clientKey, files: [] });
+  const proofs = proofState.key === clientKey ? proofState.files : [];
+  const [proofWait, setProofWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
   const rule = charges[method];
   const value = mode === "full" && balance ? balance : Number(amount) || 0;
   const over = balance !== null && value > balance + 0.005;
   const settles = balance !== null && balance > 0 && value >= balance - 0.005 && !over;
+  // A card or transfer payment is recorded only once the server has its proof - never on a file still on the device.
+  const needsProof = method === "card" || method === "transfer";
+  const proofBlocked = needsProof && !!proofJobId && proofs.length === 0;
+  const proofLine = !proofBlocked ? null : proofWait.stopped ? "The proof could not be sent – try again or remove it, then attach it again." : proofWait.count ? "The proof is still sending – Record works once it has arrived." : "Attach the proof first.";
+  const blocked = !clientKey || proofBlocked;
   if (!methods.length) return <p className="text-sm text-muted">Payments are recorded by accounts (bank side) or the advisor at the counter.</p>;
 
   return (
     <>
-      <form ref={formRef} action={action} className="flex flex-col gap-3" data-payment-form>
+      <form ref={formRef} action={action} onSubmit={() => markFormSent(formTag, clientKey)} className="flex flex-col gap-3" data-payment-form>
         {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
         {invoiceId ? <input type="hidden" name="invoice_id" value={invoiceId} /> : null}
         {jobId ? <input type="hidden" name="job_id" value={jobId} /> : null}
         <input type="hidden" name="method" value={method} />
-        <input type="hidden" name="client_key" value={clientKey} />
+        <input type="hidden" name="client_key" value={clientKey ?? ""} />
         <input type="hidden" name="amount" value={mode === "full" && balance ? balance.toFixed(2) : amount} />
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {methods.map((m) => (
@@ -117,18 +137,36 @@ export function PaymentForm({
         ) : method === "transfer" ? (
           <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Transfer reference (optional)" className="max-w-72" data-reference />
         ) : null}
-        {method === "card" || method === "transfer" ? (
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
-            {proofJobId ? (
-              <>
-                <JobFileUpload jobId={proofJobId} kind="payment_proof" refId={clientKey} files={proofs} accept="any" label="Take photo / attach" compact removable onAdded={(f) => setProofs((x) => [...x, f])} onRemoved={(f) => setProofs((x) => x.filter((y) => y.id !== f.id))} />
-                {proofs.length === 0 ? <span className="text-xs font-semibold text-amber-bar" data-proof-missing>Attach the proof first.</span> : null}
-              </>
-            ) : (
-            <input type="file" name="proof" accept="image/*,.pdf" required className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input />
-            )}
-          </label>
+        {needsProof ? (
+          proofJobId ? (
+            // A plain box, not a label: a tap on the words must never press the first button inside (a thumbnail, Try again).
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
+              {clientKey ? (
+                <JobFileUpload
+                  jobId={proofJobId}
+                  kind="payment_proof"
+                  refId={clientKey}
+                  form={{ tag: formTag, key: clientKey }}
+                  files={proofs}
+                  accept="any"
+                  label="Take photo / attach"
+                  compact
+                  removable
+                  onAdded={(f) => setProofState((s) => (f.refId === s.key && !s.files.some((x) => x.id === f.id) ? { ...s, files: [...s.files, f] } : s))}
+                  onRemoved={(f) => setProofState((s) => ({ ...s, files: s.files.filter((x) => x.id !== f.id) }))}
+                  onPending={setProofWait}
+                />
+              ) : null}
+              {proofLine ? <span className="text-xs font-semibold text-amber-bar" data-proof-missing {...(proofWait.count && !proofWait.stopped ? { "data-proof-sending": "" } : {})}>{proofLine}</span> : null}
+            </div>
+          ) : (
+            // An invoice without a job (none today): the proof still goes with the form through the server.
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
+              <input type="file" name="proof" accept="image/*,.pdf" required className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input />
+            </label>
+          )
         ) : null}
         <p className="text-xs text-muted">
           {feeRuleWords(rule) !== "no bank fee" ? `Bank fee ${feeRuleWords(rule)} on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (estimated ${money(feesFor(value, rule).cost)}${feesFor(value, rule).vat > 0 ? ` + VAT ${money(feesFor(value, rule).vat)}` : ""})` : ""}, internal, never shown to the customer.` : "No bank fee on this method."}
@@ -136,7 +174,7 @@ export function PaymentForm({
         </p>
         {over ? <p className="text-sm font-semibold text-amber">{isOwner ? "More than the balance: recorded as the owner." : "More than the balance: the owner is asked to approve it before it counts."}</p> : null}
         {/* A full payment is confirmed in words first: it creates the tax invoice, which can never be undone. */}
-        <div>{settles && invoiceId ? <Button type="button" size="lg" onClick={() => setConfirming(true)} data-record-payment>Record full payment</Button> : <RecordButton label={over && !isOwner ? "Request owner approval" : "Record"} />}</div>
+        <div>{settles && invoiceId ? <Button type="button" size="lg" disabled={blocked} onClick={() => setConfirming(true)} data-record-payment>Record full payment</Button> : <RecordButton label={over && !isOwner ? "Request owner approval" : "Record"} disabled={blocked} />}</div>
       </form>
 
       {confirming ? (

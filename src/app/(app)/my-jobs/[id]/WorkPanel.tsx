@@ -161,6 +161,8 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
   const [reportOpen, setReportOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [findingFiles, setFindingFiles] = useState<JobFile[]>([]);
+  // Photos of the finding still on this device: the report waits for them (the manager must see what was found).
+  const [findingWaiting, setFindingWaiting] = useState(0);
   return (
     <div className="flex flex-col gap-4">
       <Card className="flex flex-col gap-2">
@@ -205,11 +207,11 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
                 <Select name="work_line_id" defaultValue=""><option value="">None</option>{lines.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</Select>
               </label>
             ) : null}
-            <JobFileUpload jobId={jobId} kind="additional_work" files={findingFiles} label="Add photos" onAdded={(f) => setFindingFiles((p) => [...p, f])} />
+            <JobFileUpload jobId={jobId} kind="additional_work" files={findingFiles} label="Add photos" onAdded={(f) => setFindingFiles((p) => [...p, f])} onPending={(w) => setFindingWaiting(w.count)} />
             {findingFiles.map((f) => <input key={f.id} type="hidden" name="file" value={f.id} />)}
             <p className="text-xs text-muted">The workshop manager gets it at once and sends it to the advisor to quote, or dismisses it. Carry on with the original work.</p>
             <div className="flex gap-2">
-              <Button type="submit" size="lg">Send to the manager</Button>
+              <Button type="submit" size="lg" disabled={findingWaiting > 0} data-finding-send>{findingWaiting > 0 ? `Wait: ${findingWaiting} photo${findingWaiting === 1 ? "" : "s"} still sending` : "Send to the manager"}</Button>
               <Button type="button" tone="ghost" size="lg" onClick={() => setReportOpen(false)}>Cancel</Button>
             </div>
           </form>

@@ -6,9 +6,9 @@ import { Card, Input, SectionLabel } from "@/components/ui";
 import { DAMAGE_TYPES, SEVERITIES, damageWords, panelLabel, toneOf, type PanelMarks } from "@/lib/car-outline";
 import { clearPending, readPending, writePending } from "@/lib/pending-draft";
 import { reloadIfStale } from "@/lib/app-version";
-import { MediaCapture } from "@/components/MediaCapture";
+import { MediaCapture, useDeviceFiles } from "@/components/MediaCapture";
 import { ViewerThumb } from "@/components/PhotoViewer";
-import { panelCaption, type DamagePhoto } from "@/lib/damage";
+import { captionPanel, panelCaption, type DamagePhoto } from "@/lib/damage";
 
 /**
  * Damage marked on the car outline - the same outline as the inspection's bodyshop findings - for the gate-in
@@ -16,10 +16,20 @@ import { panelCaption, type DamagePhoto } from "@/lib/damage";
  * note; every tap is saved. Read-only when canEdit is off.
  * 30 October 2026 (night batch section 4.4): the note is labelled "shown to the customer" (it prints on the customer's
  * job card), and with `photos` each panel takes its own photos (gate_in_media damage_photo, caption "panel:<key>").
+ * 31 October 2026: those photos go through THE send queue - kept on the device until the server has them, so tapping
+ * another panel never drops one; the list says which panels still have photos on this device.
  */
 export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer = null, photos = null, noteForCustomer = true }: { title: string; hint: string; initial: PanelMarks; save: (json: string) => Promise<{ error?: string }>; canEdit: boolean; hook: string; footer?: React.ReactNode; photos?: { jobId: string; token?: string; byPanel: Record<string, DamagePhoto[]> } | null; noteForCustomer?: boolean }) {
   const [marks, setMarks] = useState<PanelMarks>(initial);
   const [selected, setSelected] = useState<string | null>(null);
+  // Panel photos still on this device (any panel, also one not marked yet), so switching panels never hides one.
+  const device = useDeviceFiles(photos?.jobId ?? null);
+  const onDevice: Record<string, number> = {};
+  for (const f of device) {
+    const p = f.kind === "damage_photo" ? captionPanel(f.caption) : null;
+    if (p) onDevice[p] = (onDevice[p] ?? 0) + 1;
+  }
+  const deviceWords = (n: number) => `${n} photo${n === 1 ? "" : "s"} still on this device`;
   const [state, setState] = useState<"saved" | "saving" | "error">("saved");
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,6 +69,8 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
   };
   const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold disabled:opacity-60 ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
   const marked = Object.entries(marks);
+  // Panels with photos on this device but nothing ticked yet, listed too (a photo is never out of sight).
+  const unmarkedOnDevice = Object.keys(onDevice).filter((k) => !marks[k]);
   return (
     <Card className="flex flex-col gap-3" data-panel-marker={hook}>
       <div className="flex flex-wrap items-center gap-2">
@@ -101,7 +113,7 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
               ) : null}
             </div>
           )}
-          {marked.length ? (
+          {marked.length || unmarkedOnDevice.length ? (
             <ul className="flex flex-col gap-1 border-t border-line pt-2 text-sm" data-marker-list>
               {marked.map(([k, m]) => (
                 <li key={k}>
@@ -109,6 +121,16 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
                     <span className={`inline-block h-3 w-3 rounded-full ${toneOf(m) === "red" ? "bg-red-bar" : "bg-amber-bar"}`} aria-hidden />
                     <span className="font-bold">{panelLabel(k)}</span>
                     <span className="text-muted">{[damageWords(m.damage), m.note].filter(Boolean).join(" – ")}</span>
+                    {onDevice[k] ? <span className="text-xs font-semibold text-amber" data-marker-device={k}>↑ {deviceWords(onDevice[k])}</span> : null}
+                  </button>
+                </li>
+              ))}
+              {unmarkedOnDevice.map((k) => (
+                <li key={k}>
+                  <button type="button" onClick={() => setSelected(k)} className="flex flex-wrap items-center gap-2 text-left">
+                    <span className="inline-block h-3 w-3 rounded-full border border-amber-bar" aria-hidden />
+                    <span className="font-bold">{panelLabel(k)}</span>
+                    <span className="text-xs font-semibold text-amber" data-marker-device={k}>↑ {deviceWords(onDevice[k])}</span>
                   </button>
                 </li>
               ))}

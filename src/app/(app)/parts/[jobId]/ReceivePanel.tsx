@@ -1,18 +1,15 @@
 "use client";
 
-import { newUuid } from "@/lib/uuid";
 import { PositionsLine } from "@/components/PositionsLine";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
+import { useFormKey, type FilesWaiting } from "@/components/JobFileUpload";
 import { Button } from "@/components/ui";
 
 export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null };
 export type ReceivedRow = { id: string; description: string; positions?: string[] | null; qty: number };
 type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
-
-// A real uuid: a supplier invoice scan uploaded before the save is tied to it in job_files.ref_id (a uuid column).
-const newKey = () => newUuid();
 
 /**
  * Receiving parts from the supplier, all on this page: a tick box per line, Select all, "Mark N received",
@@ -26,7 +23,12 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [panel, setPanel] = useState(false);
   const [noSticker, setNoSticker] = useState<Set<string>>(new Set());
-  const [clientKey, setClientKey] = useState(newKey);
+  // A real uuid: a supplier invoice scan sent before the save is tied to it in job_files.ref_id (a uuid column). It
+  // stays the same for this car's receiving across a reload (a scan still waiting on the device stays with it) and is
+  // renewed after each successful save.
+  const formTag = `receive:${jobId}`;
+  const { key: clientKey, renew } = useFormKey(formTag, jobId);
+  const [scanWait, setScanWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
   const [msg, setMsg] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [pending, start] = useTransition();
   const ticked = rows.filter((r) => !unticked.has(r.id));
@@ -40,6 +42,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
     const fd = formRef.current ? new FormData(formRef.current) : new FormData();
     for (const r of ticked) fd.append("part", r.id);
     const stickerIds = ticked.filter((r) => !noSticker.has(r.id)).map((r) => r.id);
+    const usedKey = clientKey;
     const r = await action(fd);
     if (r.error) { setMsg({ tone: "error", text: r.error }); return; }
     if (print && stickerIds.length) window.open(`/parts/labels/${jobId}?parts=${stickerIds.join(",")}&auto=1`, "_blank", "noopener");
@@ -47,9 +50,11 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
     setPanel(false);
     setUnticked(new Set());
     setNoSticker(new Set());
-    setClientKey(newKey());
+    renew(usedKey);
     router.refresh();
   });
+  // The save waits while the invoice photo is only on this device: its path and its tie to the LPO need the server's copy.
+  const scanHeld = scanWait.count > 0;
   return (
     <form ref={formRef} onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-3" data-receive-panel>
       {rows.length ? (
@@ -95,13 +100,18 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
                   );
                 })}
               </ul>
-              <input type="hidden" name="client_key" value={clientKey} />
-              <SupplierInvoiceBox jobId={jobId} poId={singlePoId} poTotal={poTotal} clientKey={clientKey} />
+              <input type="hidden" name="client_key" value={clientKey ?? ""} />
+              <SupplierInvoiceBox jobId={jobId} poId={singlePoId} poTotal={poTotal} clientKey={clientKey} formTag={formTag} onWaiting={setScanWait} />
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="lg" disabled={pending} onClick={() => submit(true)} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
-                <Button type="button" tone="secondary" size="lg" disabled={pending} onClick={() => submit(false)} data-no-stickers>No stickers</Button>
+                <Button type="button" size="lg" disabled={pending || scanHeld || !clientKey} onClick={() => submit(true)} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
+                <Button type="button" tone="secondary" size="lg" disabled={pending || scanHeld || !clientKey} onClick={() => submit(false)} data-no-stickers>No stickers</Button>
                 <Button type="button" tone="ghost" size="lg" onClick={() => setPanel(false)}>Back</Button>
               </div>
+              {scanHeld ? (
+                <span className="text-xs font-semibold text-amber-bar" data-scan-sending>
+                  {scanWait.stopped ? "The invoice photo could not be sent – try again or remove it (it can be added on the LPO later)." : "The invoice photo is still sending – the save waits for it (or remove it and add it on the LPO later)."}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { JobFileUpload, type JobFile } from "./JobFileUpload";
+import { JobFileUpload, type FilesWaiting, type JobFile } from "./JobFileUpload";
 import { Input } from "./ui";
 import { checkSupplierInvoice, dubaiToday, invoiceNumberLooksReal } from "@/lib/supplier-invoice";
 
@@ -12,14 +12,38 @@ import { checkSupplierInvoice, dubaiToday, invoiceNumberLooksReal } from "@/lib/
  * confirmed); photos or PDFs, several, with thumbnails and an X; the number is checked for
  * keyboard-mash and the date cannot be in the future. It renders FIELDS ONLY and lives inside the
  * caller's form: invoice_number, invoice_date, invoice_amount, to_follow, amount_confirmed, scan_path.
+ * The scans go through the send queue (31 October 2026): scan_path is filled only once the server has the file.
  */
-export function SupplierInvoiceBox({ jobId, poId, poTotal, clientKey, canFollow = true }: { jobId: string | null; poId: string | null; poTotal: number | null; /** Ties the uploaded files to this save when the LPO is not known yet (the receiving panel). */ clientKey?: string | null; canFollow?: boolean }) {
+export function SupplierInvoiceBox({
+  jobId,
+  poId,
+  poTotal,
+  clientKey,
+  canFollow = true,
+  formTag,
+  onWaiting,
+}: {
+  jobId: string | null;
+  poId: string | null;
+  poTotal: number | null;
+  /** Ties the uploaded files to this save when the LPO is not known yet (the receiving panel). */
+  clientKey?: string | null;
+  canFollow?: boolean;
+  /** The form the key belongs to (useFormKey): scans it already sent come back after a reload. */
+  formTag?: string;
+  /** Scans still on their way: the caller's save waits for them. */
+  onWaiting?: (w: FilesWaiting) => void;
+}) {
   const [toFollow, setToFollow] = useState(false);
   const [number, setNumber] = useState("");
   const [date, setDate] = useState("");
   const [amount, setAmount] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const [files, setFiles] = useState<JobFile[]>([]);
+  // The scans are tied to the LPO, else to the save's key; the list follows that reference (a new one starts empty).
+  const ref = poId ?? clientKey ?? null;
+  const [fileState, setFileState] = useState<{ ref: string | null; files: JobFile[] }>({ ref, files: [] });
+  if (fileState.ref !== ref) setFileState({ ref, files: [] });
+  const files = fileState.ref === ref ? fileState.files : [];
   const amountNum = Number(amount.replace(/[^\d.]/g, "")) || null;
   const check = checkSupplierInvoice({ toFollow, number: number || null, date: date || null, amount: amountNum, poTotal, amountConfirmed: confirmed, today: dubaiToday() });
   const amountOff = !toFollow && amountNum !== null && amountNum > 0 && poTotal !== null && poTotal > 0 && Math.abs(amountNum - poTotal) / poTotal > 0.05;
@@ -63,7 +87,22 @@ export function SupplierInvoiceBox({ jobId, poId, poTotal, clientKey, canFollow 
           {jobId ? (
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Photo or PDF of the invoice (several pages are fine; needed before the supplier is paid)</span>
-              <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={poId ?? clientKey ?? null} files={files} accept="pdf" label="Take photo / attach" compact removable onAdded={(f) => setFiles((x) => [...x, f])} onRemoved={(f) => setFiles((x) => x.filter((y) => y.id !== f.id))} />
+              {ref ? (
+                <JobFileUpload
+                  jobId={jobId}
+                  kind="supplier_invoice"
+                  refId={ref}
+                  form={formTag && clientKey ? { tag: formTag, key: clientKey } : null}
+                  files={files}
+                  accept="pdf"
+                  label="Take photo / attach"
+                  compact
+                  removable
+                  onAdded={(f) => setFileState((s) => (f.refId === s.ref && !s.files.some((x) => x.id === f.id) ? { ...s, files: [...s.files, f] } : s))}
+                  onRemoved={(f) => setFileState((s) => ({ ...s, files: s.files.filter((x) => x.id !== f.id) }))}
+                  onPending={onWaiting}
+                />
+              ) : null}
               <input type="hidden" name="scan_path" value={files[0]?.path ?? ""} />
             </div>
           ) : null}

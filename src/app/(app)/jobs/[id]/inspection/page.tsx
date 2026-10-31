@@ -487,7 +487,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
             </p>
           ) : null}
         </div>
-        {canApprove && insp.status === "submitted" ? <><div className="h-20" /><ReviewBar /></> : null}
+        {canApprove && insp.status === "submitted" ? <><div className="h-20" /><ReviewBar inspectionId={insp.id} /></> : null}
       </div>
     </>
   );

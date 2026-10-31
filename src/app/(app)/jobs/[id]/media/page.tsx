@@ -54,7 +54,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
             <LinkButton href={`/jobs/${id}/gate-in/edit?from=media`} tone="ghost" size="lg" data-back-to-details>
               ← Back to details
             </LinkButton>
-            <FinishGateInButton check={check} href={gateInOnly ? "/gate-in" : `/jobs/${id}`} completeLabel={gateInOnly ? "Done, next car" : "Open job card"} />
+            <FinishGateInButton jobId={id} check={check} href={gateInOnly ? "/gate-in" : `/jobs/${id}`} completeLabel={gateInOnly ? "Done, next car" : "Open job card"} />
           </div>
         }
       />
@@ -71,7 +71,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
         <div className="flex flex-col gap-6">
           <Card className="flex flex-col gap-3 items-center text-center">
             <SectionLabel>Use a phone instead</SectionLabel>
-            <p className="text-sm text-muted">Scan this with the phone camera. The page opens with the same buttons, no login needed. Valid for 30 minutes. This page updates by itself as the phone uploads.</p>
+            <p className="text-sm text-muted">Scan this with the phone camera. The page opens with the same buttons, no login needed. Valid for 30 minutes. This page updates by itself as the phone uploads. Photos and videos taken without signal stay on the phone and send by themselves later.</p>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qr} alt="QR code for phone upload" width={260} height={260} className="rounded-card border border-line" />
             <Link href={phoneUrl} className="text-xs text-muted underline underline-offset-4 break-all" target="_blank" rel="noreferrer">

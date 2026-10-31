@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { recordDepositPanel, type RecordDepositResult } from "@/app/(app)/dashboard/record-deposit-actions";
-import { JobFileUpload, type JobFile } from "./JobFileUpload";
+import { JobFileUpload, useFormKey, type FilesWaiting, type JobFile } from "./JobFileUpload";
 import { SendLinkDialog } from "./SendLinkDialog";
 import { Button, Input } from "./ui";
-import { newUuid } from "@/lib/uuid";
 import { reloadIfStale } from "@/lib/app-version";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 import { AuthCodeInput } from "@/components/AuthCodeInput";
@@ -54,14 +53,20 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
   const [chequeNo, setChequeNo] = useState("");
   const [chequeBank, setChequeBank] = useState("");
   const [chequeDate, setChequeDate] = useState(todayDubai);
-  const [files, setFiles] = useState<JobFile[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Extract<RecordDepositResult, { ok: true }> | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
-  // A real uuid: the proof files are tied to it in job_files.ref_id (a uuid column) until the save re-points them.
-  const [clientKey] = useState(newUuid);
+  // A real uuid: the proof files are tied to it in job_files.ref_id (a uuid column) until the save re-points them. It
+  // stays the same for this job's deposit across a reload or a new version (a proof still waiting on the device stays
+  // with it) and is renewed once the deposit is recorded.
+  const formTag = `deposit:${d.jobId}`;
+  const { key: clientKey, renew } = useFormKey(formTag, d.jobId);
+  const [proofState, setProofState] = useState<{ key: string | null; files: JobFile[] }>({ key: null, files: [] });
+  if (proofState.key !== clientKey) setProofState({ key: clientKey, files: [] });
+  const files = proofState.key === clientKey ? proofState.files : [];
+  const [proofWait, setProofWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
 
   const value = Number(amount.replace(/[^\d.]/g, "")) || 0;
   const overBy = Math.max(0, Math.round((value - d.outstanding) * 100) / 100);
@@ -85,20 +90,25 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
     fd.set("reference", needsAuthCode(method) ? "" : reference);
     fd.set("auth_code", needsAuthCode(method) ? authCode : "");
     fd.set("received_date", date);
-    fd.set("client_key", clientKey);
+    fd.set("client_key", clientKey ?? "");
     if (method === "cheque") {
       fd.set("cheque_number", chequeNo);
       fd.set("cheque_bank", chequeBank);
       fd.set("cheque_date", chequeDate);
     }
+    const usedKey = clientKey;
     const r = await recordDepositPanel(fd).catch((e) => ({ error: reloadIfStale(e) ? "A new version is loading – nothing was recorded, record it again in a moment." : "Couldn't save – nothing was recorded. Try again or tell the owner." }) as RecordDepositResult);
     setBusy(false);
     setConfirming(false);
     if ("error" in r) {
+      // Above the balance the receipt WAS made, waiting for the owner: this key is spent, the next try is a new payment.
+      if (/owner for approval/i.test(r.error) || ("renewKey" in r && r.renewKey)) renew(usedKey);
       setError(r.error);
       return;
     }
     setDone(r);
+    // Recorded: the next deposit on this job gets a key of its own (a proof still sending under this one joins this receipt).
+    renew(usedKey);
     router.refresh();
   }
 
@@ -162,7 +172,22 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                 </div>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">Proof{needsProof ? " (required: the card slip or the transfer screenshot)" : " (optional)"}</span>
-                  <JobFileUpload jobId={d.jobId} kind="payment_proof" refId={clientKey} files={files} accept="any" label="Take photo / attach" compact removable onAdded={(f) => setFiles((x) => [...x, f])} onRemoved={(f) => setFiles((x) => x.filter((y) => y.id !== f.id))} />
+                  {clientKey ? (
+                    <JobFileUpload
+                      jobId={d.jobId}
+                      kind="payment_proof"
+                      refId={clientKey}
+                      form={{ tag: formTag, key: clientKey }}
+                      files={files}
+                      accept="any"
+                      label="Take photo / attach"
+                      compact
+                      removable
+                      onAdded={(f) => setProofState((s) => (f.refId === s.key && !s.files.some((x) => x.id === f.id) ? { ...s, files: [...s.files, f] } : s))}
+                      onRemoved={(f) => setProofState((s) => ({ ...s, files: s.files.filter((x) => x.id !== f.id) }))}
+                      onPending={setProofWait}
+                    />
+                  ) : null}
                 </div>
                 {error ? <p className="text-sm font-semibold text-red" data-deposit-error>{error}</p> : null}
                 {confirming ? (
@@ -175,10 +200,15 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                   </div>
                 ) : (
                   <div>
-                    <Button type="button" size="lg" disabled={!(value > 0) || (needsProof && files.length === 0)} onClick={() => setConfirming(true)} data-deposit-record>
+                    <Button type="button" size="lg" disabled={!clientKey || !(value > 0) || (needsProof && files.length === 0)} onClick={() => setConfirming(true)} data-deposit-record>
                       Record {value > 0 ? aed(value) : "the deposit"}
                     </Button>
-                    {needsProof && files.length === 0 ? <p className="mt-1 text-xs font-semibold text-amber-bar">Attach the proof first.</p> : null}
+                    {/* Only a proof the server has counts: one still on the device holds the button with plain words. */}
+                    {needsProof && files.length === 0 ? (
+                      <p className="mt-1 text-xs font-semibold text-amber-bar" {...(proofWait.count && !proofWait.stopped ? { "data-proof-sending": "" } : {})}>
+                        {proofWait.stopped ? "The proof could not be sent – try again or remove it, then attach it again." : proofWait.count ? "The proof is still sending – Record works once it has arrived." : "Attach the proof first."}
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </>

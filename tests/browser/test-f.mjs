@@ -121,14 +121,15 @@ await section("A gate-in missing items", async () => {
   await sleep(200);
   check("A2: closing the crop asks 'Use this photo as it is?'", (await page.locator("[data-ask-close]").count()) === 1 && /Use this photo as it is\?/.test((await page.locator("[data-ask-close]").textContent()) ?? ""));
   await page.locator("[data-ask-close]").getByRole("button", { name: "Keep framing" }).click();
-  // A failed upload: the register step is cut off.
-  await page.route("**/api/media/register", (r) => r.abort());
+  // A refused upload (31 October 2026: every upload goes through /api/uploads and is kept on the device; a cut-off
+  // connection now waits amber and sends by itself, so the red case is the server refusing it for good).
+  await page.route("**/api/uploads/register", (r) => r.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "You can't add files here any more (no permission, or the place is closed).", permanent: true }) }));
   await page.locator("[data-car-crop]").getByRole("button", { name: "Use photo" }).click();
   const failed = await waitStatus(page, "car_picture", "failed");
   check("A2: a cut-off upload shows red with the preview and Retry, never 'Waiting'", failed === "failed" && (await car.locator("[data-car-preview]").count()) === 1 && (await car.locator("[data-retry]").count()) === 1 && /border-red-bar/.test((await car.locator("[data-car-tile]").getAttribute("class")) ?? ""));
-  const logged = await until(async () => (await sql("select step, error, user_agent, staff_id from public.upload_failures where job_id = $1 and kind = 'car_picture' order by created_at desc limit 1", [jobId]))[0] ?? null, 20, 500);
+  const logged = await until(async () => (await sql("select step, error, user_agent, staff_id from public.upload_failures where job_id = $1 and kind in ('car_picture', 'gate_in:car_picture') order by created_at desc limit 1", [jobId]))[0] ?? null, 20, 500);
   check("A2: the failure is recorded with the step, the error, the person and the browser", !!logged && logged.step === "register" && !!logged.error && !!logged.user_agent && !!logged.staff_id, JSON.stringify(logged));
-  await page.unroute("**/api/media/register");
+  await page.unroute("**/api/uploads/register");
   await car.locator("[data-retry]").click();
   const done = await waitStatus(page, "car_picture", "done");
   check("A2: Retry uploads and the item is Done only once the server confirms", done === "done" && (await car.locator("> button.border-green").count()) === 1);

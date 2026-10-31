@@ -1,55 +1,67 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { ActionForm, type FormAction } from "@/components/forms";
-import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
+import { InspectionMedia, fileOfSent, useFilesOnDevice, useSendGuard, whereOf, type InspectionFile } from "@/components/InspectionMedia";
 import { JumpButton, ProblemsBar, jumpTo } from "@/components/FormAssist";
 import { Card, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { CHECK_STATUSES, ITEM_STATUS_LABELS, type CheckStatus } from "@/lib/inspection";
 import { ROAD_TEST_ITEMS, roadTestProblems, type RoadTestItems } from "@/lib/road-test";
 import { chipSentence, type ChipRow } from "@/lib/road-test-chips";
+import type { PendingFile } from "@/lib/use-send-queue";
 
 const STATUS_CLASS: Record<CheckStatus, string> = { good: "border-green bg-green text-white", average: "border-amber-bar bg-amber-bar text-white", bad: "border-red-bar bg-red-bar text-white" };
 
-function SubmitRow({ problems, attempted, notPossible, onAttempt, onJump }: { problems: { key: string; label: string }[]; attempted: boolean; notPossible: boolean; onAttempt: () => void; onJump: (k: string) => void }) {
+type RoadFile = InspectionFile & { itemKey: string | null };
+
+function SubmitRow({ problems, attempted, notPossible, onSave, note }: { problems: { key: string; label: string }[]; attempted: boolean; notPossible: boolean; onSave: () => void; note: ReactNode }) {
   const { pending } = useFormStatus();
-  const open = notPossible ? [] : problems;
   return (
-    <ProblemsBar
-      problems={open}
-      attempted={attempted}
-      progress={{ done: ROAD_TEST_ITEMS.length - open.length, total: ROAD_TEST_ITEMS.length }}
-      onJump={onJump}
-      submitLabel={notPossible ? "Save: road test not possible" : "Save road test"}
-      submitting={pending}
-      onSubmit={() => {
-        if (open.length) {
-          onAttempt();
-          onJump(open[0].key);
-          return;
-        }
-        const form = document.querySelector('input[name="outcome"]')?.closest("form");
-        form?.requestSubmit();
-      }}
-    />
+    // The bar and, right above its button, what is still on this device ("2 photos still sending from this phone").
+    <div className="sticky bottom-0 z-30">
+      {note ? (
+        <div className="-mx-4 border-t border-line bg-amber-soft py-2 pl-4 pr-16 sm:-mx-6 sm:pl-6 lg:-mx-8 lg:pl-8" data-send-note>
+          {note}
+        </div>
+      ) : null}
+      <ProblemsBar
+        problems={problems}
+        attempted={attempted}
+        progress={{ done: ROAD_TEST_ITEMS.length - problems.length, total: ROAD_TEST_ITEMS.length }}
+        onJump={jumpTo}
+        submitLabel={notPossible ? "Save: road test not possible" : "Save road test"}
+        submitting={pending}
+        onSubmit={onSave}
+      />
+    </div>
   );
 }
 
 /**
  * Eight checks, each GOOD / AVERAGE / BAD. On Bad or Average, rows of one-tap chips (what, where, when) write the
- * remark; the sentence stays editable and typing is always possible. Photos or video per item; or "not possible"
- * with a reason.
+ * remark; the sentence stays editable and typing is always possible. Photos or video per item, through the send queue
+ * (kept on the phone until the server has them, so a drive with no signal loses nothing); or "not possible" with a
+ * reason. Saving while files are still on the phone asks once: wait, or save now (they keep sending by themselves).
  */
-export function RoadTestForm({ action, inspectionId, initial, initialFiles, initialNotPossible, initialReason, readOnly, chips = {} }: { action: FormAction; inspectionId: string | null; initial: RoadTestItems; initialFiles: (InspectionFile & { itemKey: string | null })[]; initialNotPossible: boolean; initialReason: string; readOnly: boolean; chips?: Record<string, ChipRow[]> }) {
+export function RoadTestForm({ action, inspectionId, initial, initialFiles, initialNotPossible, initialReason, readOnly, chips = {} }: { action: FormAction; inspectionId: string | null; initial: RoadTestItems; initialFiles: RoadFile[]; initialNotPossible: boolean; initialReason: string; readOnly: boolean; chips?: Record<string, ChipRow[]> }) {
   const [items, setItems] = useState<RoadTestItems>(initial);
   const [notPossible, setNotPossible] = useState(initialNotPossible);
   const [files, setFiles] = useState(initialFiles);
+  // A refresh hands the server's list again: it joins what this screen has; a photo taken off here stays off.
+  const [goneIds, setGoneIds] = useState<string[]>([]);
+  const serverKey = initialFiles.map((f) => f.id).join(",");
+  const [prevKey, setPrevKey] = useState(serverKey);
+  if (prevKey !== serverKey) {
+    setPrevKey(serverKey);
+    setFiles((local) => [...initialFiles.filter((f) => !goneIds.includes(f.id)), ...local.filter((l) => !initialFiles.some((f) => f.id === l.id))]);
+  }
   const [attempted, setAttempted] = useState(false);
   // The chips tapped per item, row by row; the sentence they make goes into the remark.
   const [picked, setPicked] = useState<Record<string, string[][]>>({});
   const problems = roadTestProblems(items);
   const problemKeys = new Set(problems.map((p) => p.key));
+  const open = notPossible ? [] : problems;
   const setStatus = (key: string, status: CheckStatus) => setItems((p) => ({ ...p, [key]: { ...(p[key as keyof RoadTestItems] ?? {}), status } }));
   const setRemarks = (key: string, remarks: string) => setItems((p) => ({ ...p, [key]: { ...(p[key as keyof RoadTestItems] ?? {}), remarks } }));
   const toggleChip = (key: string, rowIndex: number, chip: string) => {
@@ -61,6 +73,45 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
     setPicked((p) => ({ ...p, [key]: next }));
     setRemarks(key, chipSentence(key, rows, next));
   };
+
+  // Only files the server has recorded join the list, each once.
+  const addFile = (itemKey: string) => (f: InspectionFile) => setFiles((p) => (p.some((x) => x.id === f.id) ? p : [...p, { ...f, itemKey }]));
+  const removeFile = (id: string) => {
+    setFiles((p) => p.filter((x) => x.id !== id));
+    setGoneIds((g) => (g.includes(id) ? g : [...g, id]));
+  };
+  // Every road-test photo or video still on this device (an item's uploader may be off the screen when it arrives).
+  const pending = useFilesOnDevice({
+    target: "inspection",
+    scopeId: inspectionId,
+    match: (f) => String(f.itemKey ?? "").startsWith("road."),
+    onSent: (r, fields) => {
+      const f = fileOfSent(r);
+      const key = whereOf(fields).itemKey;
+      if (f && key) addFile(key)(f);
+    },
+  });
+  const save = () => {
+    if (open.length) {
+      setAttempted(true);
+      jumpTo(open[0].key);
+      return;
+    }
+    const form = document.querySelector('input[name="outcome"]')?.closest("form");
+    form?.requestSubmit();
+  };
+  const placeOf = (p: PendingFile) => {
+    const key = whereOf(p.fields).itemKey ?? "";
+    return { label: ROAD_TEST_ITEMS.find((i) => `road.${i.key}` === key)?.label ?? "Road test", key: key || null };
+  };
+  // Saving while photos are still on this phone asks once: wait (it then saves by itself), or save now – the queue keeps
+  // sending after the page has gone, and the server takes road-test photos while the car is in.
+  const guard = useSendGuard({
+    pending,
+    go: save,
+    placeOf,
+    words: { wait: "Wait, then save", now: "Save the road test now", nowNote: "They keep sending by themselves and join the road test when they arrive.", goes: "the road test is saved by itself." },
+  });
 
   return (
     <ActionForm action={action} className="flex flex-col gap-4">
@@ -135,7 +186,7 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
                       <Textarea name={`remarks__${it.key}`} value={v.remarks ?? ""} onChange={(e) => setRemarks(it.key, e.target.value)} rows={2} disabled={readOnly} spellCheck lang="en" />
                     </label>
                     {inspectionId ? (
-                      <InspectionMedia inspectionId={inspectionId} files={files.filter((f) => f.itemKey === `road.${it.key}`)} where={{ itemKey: `road.${it.key}` }} disabled={readOnly} onAdded={(f) => setFiles((p) => [...p, { ...f, itemKey: `road.${it.key}` }])} />
+                      <InspectionMedia inspectionId={inspectionId} files={files.filter((f) => f.itemKey === `road.${it.key}`)} where={{ itemKey: `road.${it.key}` }} disabled={readOnly} onAdded={addFile(`road.${it.key}`)} onRemoved={removeFile} />
                     ) : (
                       <p className="text-xs text-muted">Photos and video can be added once the technician&apos;s inspection record exists.</p>
                     )}
@@ -144,7 +195,26 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
               })
             : null}
 
-          {readOnly ? <Notice tone="info">View only.</Notice> : <SubmitRow problems={problems} attempted={attempted} notPossible={notPossible} onAttempt={() => setAttempted(true)} onJump={jumpTo} />}
+          {readOnly ? (
+            <Notice tone="info">View only.</Notice>
+          ) : (
+            <SubmitRow
+              problems={open}
+              attempted={attempted}
+              notPossible={notPossible}
+              note={guard.note}
+              onSave={() => {
+                if (open.length) {
+                  setAttempted(true);
+                  jumpTo(open[0].key);
+                  return;
+                }
+                if (!guard.mayGo()) return;
+                save();
+              }}
+            />
+          )}
+          {guard.dialog}
           <JumpButton />
         </>
       )}

@@ -108,6 +108,15 @@ export async function recordPayment(formData: FormData) {
   // The proof photo normally goes straight to storage from the browser (no size limit through the server), tied to
   // the form's client key; a file sent with the form is still taken (an invoice without a job).
   const clientKeyIn = blankToNull(formData.get("client_key"));
+  // The same tap again (its answer was lost): the receipt it already made, before the proof check (its proof already moved
+  // onto that receipt). A different payment on a used key is never put on that receipt.
+  if (isUuid(clientKeyIn)) {
+    const { data: same } = await createAdminClient().from("payments").select("id, number, amount_aed, method").eq("client_key", clientKeyIn).maybeSingle();
+    if (same) {
+      const differs = Math.abs(Number(same.amount_aed) - amount) > 0.005 || String(same.method) !== method;
+      redirect(`${back}${sep}${differs ? "error" : "message"}=${encodeURIComponent(differs ? `This form was already used for ${same.number}. Nothing new was recorded – reload the page and record it again.` : `${same.number} was already recorded.`)}`);
+    }
+  }
   const proofJobId = jobIdIn ?? (invoiceId ? ((await loadInvoice(invoiceId))?.invoice.job_id ?? null) : null);
   const { data: proofRows } = !proofFile && proofJobId && isUuid(clientKeyIn) ? await createAdminClient().from("job_files").select("id, storage_path").eq("job_id", proofJobId).eq("kind", "payment_proof").eq("ref_id", clientKeyIn).is("removed_at", null).order("created_at") : { data: [] };
   const uploaded = (proofRows ?? []) as { id: string; storage_path: string }[];
@@ -124,12 +133,14 @@ export async function recordPayment(formData: FormData) {
     notes: blankToNull(formData.get("notes")),
     clientKey: blankToNull(formData.get("client_key")),
   }, settings);
-  if (!r.error && r.paymentId && !proofFile && uploaded.length) {
+  // The form's key was already used for another receipt (a copied tab): that earlier receipt is never touched.
+  if (r.repeat && (Math.abs(r.repeat.amount - amount) > 0.005 || r.repeat.method !== String(formData.get("method") ?? ""))) redirect(`${back}${sep}error=${encodeURIComponent(`This form was already used for ${r.number ?? "an earlier receipt"}. Nothing new was recorded – reload the page and record it again.`)}`);
+  if (!r.error && r.paymentId && !r.repeat && !proofFile && uploaded.length) {
     const admin = createAdminClient();
     await admin.from("payments").update({ proof_path: uploaded[0].storage_path, updated_by: staff.id }).eq("id", r.paymentId);
     await admin.from("job_files").update({ ref_id: r.paymentId }).in("id", uploaded.map((u) => u.id));
   }
-  if (!r.error && r.paymentId && proofFile) {
+  if (!r.error && r.paymentId && !r.repeat && proofFile) {
     const admin = createAdminClient();
     const ext = proofFile.type.includes("png") ? "png" : proofFile.type.includes("webp") ? "webp" : proofFile.type.includes("pdf") ? "pdf" : "jpg";
     const path = `payments/${r.paymentId}.${ext}`;

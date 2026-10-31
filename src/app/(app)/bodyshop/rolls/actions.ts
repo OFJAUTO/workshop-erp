@@ -9,6 +9,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bodyshopScopeOf, mayEnterProduct } from "@/lib/team-scope";
 import { recordCeramicUsage } from "@/lib/film";
+import { objectExists } from "@/lib/upload-targets/common";
+import { JOB_FILES_BUCKET } from "@/lib/work-data";
 
 const BODYSHOP_DEPTS = ["bodyshop", "paint", "ppf_tint", "detailing"];
 
@@ -36,6 +38,17 @@ export async function finishRollAction(rollId: string) {
   redirect(`/bodyshop/rolls?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
 }
 
+/**
+ * The plotter photo's path handed over by the page: a file of this car in the job files (sent there straight from the
+ * device as a "Film plotter" job file), and only once it really arrived. Anything else is no photo: it is optional.
+ */
+async function plotterPhotoOf(jobId: string, raw: FormDataEntryValue | null): Promise<string | null> {
+  const path = typeof raw === "string" ? raw.trim() : "";
+  const name = path.slice(jobId.length + 1);
+  if (!jobId || !path.startsWith(`${jobId}/`) || !name || name.length > 80 || name.includes("/") || name.includes("..")) return null;
+  return (await objectExists(JOB_FILES_BUCKET, path)) ? path : null;
+}
+
 /** The PPF leader's metres for one car, with the optional plotter photo. */
 export async function filmUsageAction(jobId: string, formData: FormData) {
   const staff = await rollStaff();
@@ -44,9 +57,14 @@ export async function filmUsageAction(jobId: string, formData: FormData) {
   const rollId = String(formData.get("roll_id") ?? "");
   const metres = Number(String(formData.get("metres") ?? "").replace(",", "."));
   if (!rollId) redirect(`${back}?error=${encodeURIComponent("Pick the roll.")}`);
+  // 31 October 2026: the page sends the photo straight to storage (a job file) and hands over its path; a tab opened
+  // before that still sends the file itself.
   let photoPath: string | null = null;
+  const sentPath = formData.get("photo_path");
   const photo = formData.get("photo");
-  if (photo instanceof File && photo.size > 0 && photo.size <= 15 * 1024 * 1024) {
+  if (typeof sentPath === "string" && sentPath.trim()) {
+    photoPath = await plotterPhotoOf(jobId, sentPath);
+  } else if (photo instanceof File && photo.size > 0 && photo.size <= 15 * 1024 * 1024) {
     const admin = createAdminClient();
     photoPath = `film/${jobId}/${Date.now()}.jpg`;
     const { error } = await admin.storage.from("job-files").upload(photoPath, Buffer.from(await photo.arrayBuffer()), { contentType: photo.type || "image/jpeg", upsert: true });

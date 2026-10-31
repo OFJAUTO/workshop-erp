@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FormDraft } from "@/components/FormDraft";
+import { thisDevice, useFilesOnDevice, useSendGuard } from "@/components/InspectionMedia";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 import { Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
 import { QC_KIND_LABELS, type QcItem } from "@/lib/qc-items";
+import type { SentResult } from "@/lib/use-send-queue";
+
+/** The server's answer for a post-scan that arrived, as the form's file. */
+function scanOfSent(r: SentResult): JobFile | null {
+  if (!r.id || !r.path) return null;
+  return { id: r.id, path: r.path, url: r.url ?? null, caption: typeof r.caption === "string" ? r.caption : null, contentType: /\.pdf$/i.test(r.path) ? "application/pdf" : "image/jpeg" };
+}
 
 /** The QC checklist: every item Pass or Fail with a remark on Fail, the mileage, and the post-scan PDF or a reason. */
 export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, waivedReason, notes, readOnly, loose = false, action }: { /** Loose items: no mileage, no Autel scan. */ loose?: boolean; jobId: string; items: QcItem[]; initialMileage: number | null; mileageUnit: string; postscan: JobFile | null; waivedReason: string | null; notes: string | null; readOnly: boolean; action: (formData: FormData) => void }) {
@@ -29,20 +37,32 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
   const [scan, setScan] = useState<JobFile | null>(postscan);
   const [attempted, setAttempted] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const kinds = Array.from(new Set(items.map((i) => i.kind)));
   const missing = items.filter((i) => !results[i.key]);
   const fails = items.filter((i) => results[i.key] === "fail").length;
+  // The post-scan is kept with the check by the form (its path goes with Finish or Save), so a PDF still on this device
+  // holds both buttons until the server has it: asked once – wait (it then goes on by itself), or go on without it.
+  const scanSending = useFilesOnDevice({
+    target: "job_file",
+    scopeId: loose ? null : jobId,
+    match: (f) => f.kind === "qc_postscan",
+    onSent: (r) => {
+      const f = scanOfSent(r);
+      if (f) setScan((cur) => cur ?? f);
+    },
+  });
+  const placeOf = () => ({ label: "Post-scan PDF", key: null });
 
   /** Every reason the check cannot be finished, in plain words, shown next to the button. Nothing fails silently. */
-  function finish(e: React.MouseEvent<HTMLButtonElement>) {
-    const form = (e.currentTarget as HTMLButtonElement).closest("form")!;
+  function finishWith(form: HTMLFormElement) {
     const fd = new FormData(form);
     const reasons: string[] = [];
     if (missing.length) reasons.push(`${missing.length} item${missing.length === 1 ? "" : "s"} not marked Pass or Fail`);
     const noRemark = items.filter((i) => results[i.key] === "fail" && !String(fd.get(`remark__${i.key}`) ?? "").trim());
     if (noRemark.length) reasons.push(`write what is wrong on: ${noRemark.map((i) => i.label).join(", ")}`);
     if (!loose && !String(fd.get("mileage") ?? "").replace(/[^\d]/g, "")) reasons.push("record the mileage");
-    if (!loose && !scan && !String(fd.get("postscan_waived_reason") ?? "").trim()) reasons.push("attach the post-scan PDF or write why there is none");
+    if (!loose && !scan && !String(fd.get("postscan_waived_reason") ?? "").trim()) reasons.push(scanSending.length ? `the post-scan PDF is still sending from ${thisDevice()} – wait for it, or write why there is none` : "attach the post-scan PDF or write why there is none");
     if (reasons.length) {
       setAttempted(true);
       setProblem(`Cannot finish yet: ${reasons.join("; ")}.`);
@@ -56,9 +76,35 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
     } catch {}
     form.requestSubmit();
   }
+  const finishNow = () => {
+    if (formRef.current) finishWith(formRef.current);
+  };
+  const saveNow = () => {
+    const form = formRef.current;
+    if (!form) return;
+    (form.querySelector("#qc-finish") as HTMLInputElement).value = "no";
+    form.requestSubmit();
+  };
+  const finishGuard = useSendGuard({
+    pending: scanSending,
+    go: finishNow,
+    placeOf,
+    words: { wait: "Wait, then finish", now: "Finish without it", nowNote: "Only with a reason why there is no post-scan: a PDF that arrives after is not kept with this check.", goes: "the check is finished by itself." },
+  });
+  const saveGuard = useSendGuard({
+    pending: scanSending,
+    go: saveNow,
+    placeOf,
+    words: { wait: "Wait, then save", now: "Save without it", nowNote: "It keeps sending by itself. Save again once it shows here, so it is kept with the check.", goes: "the check is saved by itself." },
+  });
+  function finish() {
+    if (!finishGuard.mayGo()) return;
+    finishNow();
+  }
+  const sendNote = saveGuard.waiting ? saveGuard.note : finishGuard.note;
 
   return (
-    <form action={action} className="flex flex-col gap-4" noValidate>
+    <form ref={formRef} action={action} className="flex flex-col gap-4" noValidate>
       <input type="hidden" name="finish" value="no" id="qc-finish" />
       <FormDraft draftKey={`qc-${jobId}`} />
       {kinds.map((kind) => (
@@ -107,11 +153,13 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
       {!readOnly ? (
         <div className="sticky bottom-0 z-10 flex flex-col gap-2 rounded-card border border-ink bg-white p-3">
           {problem ? <p className="text-sm font-bold text-red">{problem}</p> : null}
+          {/* The post-scan still on this device, said next to the buttons. */}
+          {sendNote ? <div className="rounded-control bg-amber-soft px-3 py-2" data-send-note>{sendNote}</div> : null}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold">{missing.length ? `${missing.length} not marked` : fails ? `${fails} fail${fails === 1 ? "" : "s"}: the car goes back to Work` : "All pass: the car goes to the wash"}</span>
             {attempted && missing.length ? <button type="button" className="text-xs font-bold text-red underline underline-offset-4" onClick={() => document.getElementById(`item-${missing[0].key}`)?.scrollIntoView({ block: "center" })}>Show the first</button> : null}
             <span className="ml-auto flex gap-2">
-              <Button type="submit" tone="secondary" size="md">Save for later</Button>
+              <Button type="submit" tone="secondary" size="md" onClick={(e) => { if (!saveGuard.mayGo()) e.preventDefault(); }}>Save for later</Button>
               <Button type="button" size="md" onClick={finish}>{fails ? "Finish: fail, back to Work" : "Finish: pass"}</Button>
             </span>
           </div>
@@ -119,6 +167,8 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
       ) : (
         <Notice tone="info">View only.</Notice>
       )}
+      {finishGuard.dialog}
+      {saveGuard.dialog}
     </form>
   );
 }

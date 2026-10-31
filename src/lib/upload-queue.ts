@@ -49,9 +49,12 @@ async function run<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => I
     try {
       const tx = db.transaction(STORE, mode);
       const req = fn(tx.objectStore(STORE));
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-      tx.oncomplete = () => db.close();
+      let result: T | null = null;
+      req.onsuccess = () => { result = req.result; };
+      // Kept only when the transaction really committed (a quota failure aborts it after the request succeeded).
+      tx.oncomplete = () => { db.close(); resolve(result); };
+      tx.onerror = () => { db.close(); resolve(null); };
+      tx.onabort = () => { db.close(); resolve(null); };
     } catch {
       resolve(null);
     }

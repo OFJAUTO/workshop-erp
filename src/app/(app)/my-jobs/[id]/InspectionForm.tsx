@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { PositionsLine } from "@/components/PositionsLine";
 import { flushTimers, onPageLeave } from "@/lib/app-version";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
-import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
+import { InspectionMedia, fileOfSent, thisDevice, useFilesOnDevice, useSendGuard, whereMatch, whereOf, type InspectionFile, type InspectionWhere } from "@/components/InspectionMedia";
+import type { PendingFile } from "@/lib/use-send-queue";
 import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, acPartFor, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
 import { PartPicker } from "@/components/PartPicker";
 import { BodyshopFindings, type BodyStateProps } from "./BodyshopFindings";
@@ -333,6 +334,17 @@ export function InspectionForm({
   const [measurements, setMeasurements] = useState(initialMeasurements);
   const latestMeasurements = useRef(initialMeasurements);
   const [files, setFiles] = useState(initialFiles);
+  // A live refresh hands the server's list again (files sent from the phone, or from another tab): it joins what this
+  // screen already has; a file taken off here stays off.
+  const [goneIds, setGoneIds] = useState<string[]>([]);
+  const serverFilesKey = initialFiles.map((f) => f.id).join(",");
+  const [prevFilesKey, setPrevFilesKey] = useState(serverFilesKey);
+  if (prevFilesKey !== serverFilesKey) {
+    setPrevFilesKey(serverFilesKey);
+    setFiles((local) => [...initialFiles.filter((f) => !goneIds.includes(f.id)), ...local.filter((l) => !initialFiles.some((f) => f.id === l.id))]);
+  }
+  // The panels with a bodyshop finding (told by the findings card as they change): a finding needs a photo that arrived.
+  const [bodyPanels, setBodyPanels] = useState<string[]>(() => (body?.initial.findings ?? []).map((f) => f.panel));
   const [notes, setNotes] = useState(initialNotes);
   const [tags, setTags] = useState<string[]>(initialTags);
   const [estimate, setEstimate] = useState(initialEstimate);
@@ -507,11 +519,31 @@ export function InspectionForm({
     patchItem(it.key, { disc_condition: next.disc_condition, disc_action: next.disc_action, remarks, ...(status ? { status } : {}) });
   }
 
-  const filesFor = (where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }) =>
+  const filesFor = (where: InspectionWhere) =>
     files.filter((f) => (where.isPrescan ? f.isPrescan : !f.isPrescan && (f.itemKey ?? null) === (where.itemKey ?? null) && (f.requestId ?? null) === (where.requestId ?? null)));
-  const removeFile = (id: string) => setFiles((f) => f.filter((x) => x.id !== id));
-  const addFile = (where: { itemKey?: string | null; requestId?: string | null; isPrescan?: boolean }) => (f: InspectionFile) =>
-    setFiles((prev) => [...prev, { ...f, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan }]);
+  const removeFile = (id: string) => {
+    setFiles((f) => f.filter((x) => x.id !== id));
+    setGoneIds((g) => (g.includes(id) ? g : [...g, id]));
+  };
+  // Only files the server has recorded join the list, each once (the place's uploader and this form both hear of it).
+  const addFile = (where: InspectionWhere) => (f: InspectionFile) =>
+    setFiles((prev) => (prev.some((x) => x.id === f.id) ? prev : [...prev, { ...f, itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan }]));
+  // Every file of this report still on this device, whatever its place: for the question at Submit, and so a file that
+  // arrives while its place is off the screen (an item set back to Good, another bodyshop panel open) still joins the list.
+  const onDevice = useFilesOnDevice({
+    target: "inspection",
+    scopeId: inspectionId,
+    onSent: (r, fields) => {
+      const f = fileOfSent(r);
+      const w = whereOf(fields);
+      if (f && !(w.itemKey ?? "").startsWith("road.")) addFile(w)(f);
+    },
+  });
+  const reportPending = onDevice.filter((p) => !String(p.fields.itemKey ?? "").startsWith("road."));
+  const pendingFor = (where: InspectionWhere) => {
+    const m = whereMatch(where);
+    return reportPending.filter((p) => m(p.fields));
+  };
 
   const reportState = { items, measurements, estimatedHours: submitAction ? estimate : null, scan: scanState?.gate ? { required: true, read: !!scanState.readAt, approved: !!scanState.approvedAt } : undefined };
   const problems = reportProblemsOf(reportState, { limits });
@@ -569,6 +601,65 @@ export function InspectionForm({
   );
   const complaintTag = (sectionKey: string) => (complaintSections.has(sectionKey) ? <span className="rounded-control border border-ink px-2 py-0.5 text-[11px] font-bold">Customer complaint</span> : null);
 
+  /** The submit itself: the problems first, then everything typed is saved, so the server checks what the screen shows. */
+  const trySubmit = () => {
+    if (problems.length) {
+      setAttempted(true);
+      jumpTo(problems[0].key);
+      return;
+    }
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    void flush().finally(() => (document.getElementById("inspection-submit") as HTMLButtonElement | null)?.click());
+  };
+  /** Where a file waiting on this device belongs, in the report's own words. */
+  const placeOf = (p: PendingFile): { label: string; key: string | null } => {
+    const w = whereOf(p.fields);
+    if (w.isPrescan) return { label: "Pre-scan report", key: "prescan" };
+    const k = w.itemKey ?? "";
+    const itemLabel = (key: string) => items.find((i) => i.key === key)?.label;
+    const label = k.startsWith("tyre.")
+      ? `${[...TYRE_POSITIONS, { key: "spare", label: "Spare" }].find((t) => t.key === k.slice(5))?.label ?? "A"} tyre`
+      : k.startsWith("item.")
+        ? `${itemLabel(k.slice(5)) ?? "Brake discs"} (discs)`
+        : k === "measure.vent"
+          ? "A/C vent reading"
+          : k === "measure.battery"
+            ? "Battery tester printout"
+            : k.startsWith("measure.pad")
+              ? k.endsWith("rear") ? "Rear brake pads" : "Front brake pads"
+              : k.startsWith("body.")
+                ? `Bodyshop · ${panelLabel(k.slice(5))}`
+                : (itemLabel(k) ?? "The report");
+    return { label, key: k || null };
+  };
+  // The server sends the report only when every bodyshop finding has a photo that arrived: a finding whose only photo is
+  // still on this device holds it, said in plain words (wait, and it goes by itself).
+  const bodyWaiting = body ? bodyPanels.filter((panel) => filesFor({ itemKey: `body.${panel}` }).length === 0 && pendingFor({ itemKey: `body.${panel}` }).length > 0) : [];
+  const bodyStuck = bodyWaiting.filter((panel) => pendingFor({ itemKey: `body.${panel}` }).every((p) => p.state === "stopped"));
+  const panelsWords = (list: string[]) => {
+    const names = list.map((p) => panelLabel(p).toLowerCase());
+    return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : (names[0] ?? "");
+  };
+  const bodyOnTheWay = bodyWaiting.filter((p) => !bodyStuck.includes(p));
+  const bodyBlocked = bodyWaiting.length
+    ? [
+        bodyOnTheWay.length ? `Each bodyshop finding needs a photo that has arrived: the ${panelsWords(bodyOnTheWay)} photo is still on its way. Wait, and the report goes by itself as soon as it is in.` : null,
+        bodyStuck.length ? `The photo of the ${panelsWords(bodyStuck)} could not be sent: tap Try again under it, or remove it and take a new one.` : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : null;
+  const guard = useSendGuard({
+    pending: reportPending,
+    go: trySubmit,
+    blocked: bodyBlocked,
+    placeOf,
+    words: { wait: "Wait, then send", now: "Send the report now", nowNote: "Photos and videos taken before you send still join the report when they arrive.", goes: "the report goes by itself." },
+  });
+  const prescanSending = pendingFor({ isPrescan: true }).length > 0;
+
   return (
     <div className="flex flex-col gap-6 pb-24">
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -578,7 +669,7 @@ export function InspectionForm({
         <div id="item-prescan">
           <Card className={`flex flex-col gap-3 ${scanGateOpen ? "" : "border-ink"}`}>
             <div className="flex items-center justify-between gap-2">
-              <SectionLabel right={prescanFiles.length ? `${prescanFiles.length} attached` : "waiting for the scanner's email"}>Step 1 · Scan report</SectionLabel>
+              <SectionLabel right={prescanFiles.length ? `${prescanFiles.length} attached` : prescanSending ? `sending from ${thisDevice()}` : "waiting for the scanner's email"}>Step 1 · Scan report</SectionLabel>
               <Dot ok={scanGateOpen} attempted={attempted} />
             </div>
             {scanGateOpen ? (
@@ -810,7 +901,7 @@ export function InspectionForm({
                       </div>
                     </div>
                   ) : null}
-                  {needsDetail || filesFor({ itemKey: it.key }).length ? (
+                  {needsDetail || filesFor({ itemKey: it.key }).length || pendingFor({ itemKey: it.key }).length ? (
                     <div className="flex flex-wrap items-start gap-3">
                       <InspectionMedia inspectionId={inspectionId} files={filesFor({ itemKey: it.key })} where={{ itemKey: it.key }} disabled={locked} onAdded={addFile({ itemKey: it.key })} onRemoved={removeFile} extra={!locked ? <QuickCodeButton jobId={jobId} target={it.key} label="Photo from my phone" icon /> : null} />
                     </div>
@@ -1133,8 +1224,10 @@ export function InspectionForm({
           canCheck={body.canCheck}
           photos={(panel) => {
             const where = { itemKey: `body.${panel}` };
-            return { count: filesFor(where).length, node: <InspectionMedia inspectionId={inspectionId} files={filesFor(where)} where={where} disabled={!body.canEdit} onAdded={addFile(where)} onRemoved={removeFile} /> };
+            // One uploader per panel (keyed), so a photo picked for one panel never shows under another.
+            return { count: filesFor(where).length, pending: pendingFor(where).length, node: <InspectionMedia key={where.itemKey} inspectionId={inspectionId} files={filesFor(where)} where={where} disabled={!body.canEdit} onAdded={addFile(where)} onRemoved={removeFile} /> };
           }}
+          onPanels={setBodyPanels}
           parts={(panel) => (
             <div className="flex flex-wrap items-center gap-1.5" data-body-parts={panel}>
               {partsList.filter((e) => e.item_key === `body.${panel}`).map((e) => (
@@ -1173,31 +1266,40 @@ export function InspectionForm({
               {(_v, s) => <><button type="submit" id="inspection-submit" /><SubmitOutcome error={s.error ?? null} onError={(e) => { setSubmitting(false); setSubmitError(e); }} /></>}
             </ActionForm>
           ) : null}
-          <ProblemsBar
-            problems={problems}
-            attempted={attempted}
-            progress={progress}
-            onJump={jumpTo}
-            submitLabel={submitLabel}
-            submitting={submitting}
-            error={submitError}
-            onSubmit={
-              submitAction
-                ? () => {
-                    if (problems.length) {
-                      setAttempted(true);
-                      jumpTo(problems[0].key);
-                      return;
+          {/* The bar and, right above its button, what is still on this device ("2 photos still sending from this tablet").
+              The manager's review has its own bar with Approve, which says it there. */}
+          <div className="sticky bottom-0 z-30">
+            {submitAction && guard.note ? (
+              <div className="-mx-4 border-t border-line bg-amber-soft py-2 pl-4 pr-16 sm:-mx-6 sm:pl-6 lg:-mx-8 lg:pl-8" data-send-note>
+                {guard.note}
+              </div>
+            ) : null}
+            <ProblemsBar
+              problems={problems}
+              attempted={attempted}
+              progress={progress}
+              onJump={jumpTo}
+              submitLabel={submitLabel}
+              submitting={submitting}
+              error={submitError}
+              onSubmit={
+                submitAction
+                  ? () => {
+                      if (problems.length) {
+                        setAttempted(true);
+                        jumpTo(problems[0].key);
+                        return;
+                      }
+                      if (submitting) return;
+                      // Files still on this device: asked once – wait for them (it then goes by itself), or send now.
+                      if (!guard.mayGo()) return;
+                      trySubmit();
                     }
-                    if (submitting) return;
-                    setSubmitting(true);
-                    setSubmitError(null);
-                    // Everything typed so far is saved first, so the server checks the same report the screen shows.
-                    void flush().finally(() => (document.getElementById("inspection-submit") as HTMLButtonElement | null)?.click());
-                  }
-                : undefined
-            }
-          />
+                  : undefined
+              }
+            />
+          </div>
+          {guard.dialog}
           <JumpButton />
         </>
       ) : null}

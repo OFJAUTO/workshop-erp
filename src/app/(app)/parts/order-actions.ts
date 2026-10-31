@@ -19,8 +19,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 import { SUPPLIER_PAY_METHODS, flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
-import { ensureWorkLines } from "@/lib/work-data";
+import { JOB_FILES_BUCKET, ensureWorkLines } from "@/lib/work-data";
 import { checkPickable } from "@/lib/staff-picker";
+import { objectExists } from "@/lib/upload-targets/common";
 
 function refresh(jobId: string | null, poId?: string) {
   revalidatePath("/parts");
@@ -342,6 +343,18 @@ export async function decideInvoiceCheck(lineId: string, formData: FormData) {
 }
 
 /**
+ * A proof's path handed over by the page: only one in this LPO's own folder of the job files (where the send queue puts
+ * it, src/lib/upload-targets/supplier-proof.ts), and only once the file really arrived there.
+ */
+async function proofPathOf(poId: string, raw: FormDataEntryValue | null): Promise<string | null> {
+  const path = typeof raw === "string" ? raw.trim() : "";
+  const head = `supplier-payments/${poId}/`;
+  const name = path.slice(head.length);
+  if (!path.startsWith(head) || !name || name.length > 80 || name.includes("/") || name.includes("..")) return null;
+  return (await objectExists(JOB_FILES_BUCKET, path)) ? path : null;
+}
+
+/**
  * "Paid to supplier" on an LPO (the owner or accounts). Refused unless the supplier invoice is on file in
  * full: the number, the date printed on it, and at least one scan or photo. That is the whole point of the
  * invoice gate: no payment without the paper.
@@ -370,20 +383,34 @@ export async function markSupplierPaid(poId: string, formData: FormData) {
   const method = SUPPLIER_PAY_METHODS.some((m) => m.key === methodRaw) ? methodRaw : "transfer";
   const methodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === method)!.label;
   // The proof (bank slip, card slip, signed receipt or cheque copy): with the payment, or uploaded on the LPO later.
-  const proof = formData.get("proof");
+  // 31 October 2026: the page sends it straight to storage first (it waits on the device without signal) and hands over
+  // its path; a tab opened before that still sends the file itself.
   let proofPath: string | null = null;
-  if (proof instanceof File && proof.size > 0) {
-    if (proof.size > 15 * 1024 * 1024) redirect(`${back}?error=${encodeURIComponent("The proof is over 15 MB. Take a smaller photo.")}`);
-    const ext = (proof.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
-    proofPath = `supplier-payments/${poId}/${Date.now()}.${ext}`;
-    const { error: upErr } = await admin.storage.from("job-files").upload(proofPath, Buffer.from(await proof.arrayBuffer()), { contentType: proof.type || "application/octet-stream", upsert: true });
-    if (upErr) redirect(`${back}?error=${encodeURIComponent("Couldn't save the proof – nothing was recorded. Try again.")}`);
+  const sentPath = formData.get("proof_path");
+  if (typeof sentPath === "string" && sentPath.trim()) {
+    proofPath = await proofPathOf(poId, sentPath);
+    if (!proofPath) redirect(`${back}?error=${encodeURIComponent("The proof is not on the server – nothing was recorded. Add the proof again, or mark it paid without it and add it afterwards.")}`);
+  } else {
+    const proof = formData.get("proof");
+    if (proof instanceof File && proof.size > 0) {
+      if (proof.size > 15 * 1024 * 1024) redirect(`${back}?error=${encodeURIComponent("The proof is over 15 MB. Take a smaller photo.")}`);
+      const ext = (proof.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
+      proofPath = `supplier-payments/${poId}/${Date.now()}.${ext}`;
+      const { error: upErr } = await admin.storage.from("job-files").upload(proofPath, Buffer.from(await proof.arrayBuffer()), { contentType: proof.type || "application/octet-stream", upsert: true });
+      if (upErr) redirect(`${back}?error=${encodeURIComponent("Couldn't save the proof – nothing was recorded. Try again.")}`);
+    }
   }
   const now = new Date().toISOString();
   await admin
     .from("purchase_orders")
     .update({ supplier_paid_at: now, supplier_paid_by: staff.id, supplier_paid_reference: reference ? reference.slice(0, 120) : null, supplier_paid_method: method, ...(proofPath ? { supplier_paid_proof_path: proofPath, supplier_paid_proof_at: now, supplier_paid_proof_by: staff.id } : {}), updated_by: staff.id })
     .eq("id", poId);
+  // A proof picked a moment ago and still on its way lands on the LPO by itself when it arrives. One that arrived while
+  // this payment was being saved (its record step looked at the LPO a moment too early) is put on here.
+  if (!proofPath) {
+    const arrived = await proofPathOf(poId, formData.get("proof_pending"));
+    if (arrived) await admin.from("purchase_orders").update({ supplier_paid_proof_path: arrived, supplier_paid_proof_at: new Date().toISOString(), supplier_paid_proof_by: staff.id, updated_by: staff.id }).eq("id", poId).is("supplier_paid_proof_path", null);
+  }
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: paid to ${po.supplier_name} by ${methodLabel.toLowerCase()}${reference ? ` (${reference})` : ""} — ${staff.display_name}`, created_by: staff.id });
   // Zoho Books phase 2: the payment settles the supplier's bill (which posts first if it has not yet).
   await tryEnqueueZoho("billpayment", poId, po.job_id, staff.id);

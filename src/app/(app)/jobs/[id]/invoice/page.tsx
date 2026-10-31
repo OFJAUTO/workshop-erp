@@ -67,8 +67,12 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const { data: livePays } = live ? await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", live.id).eq("is_active", true).order("received_at") : { data: [] };
   const payments = ((livePays ?? []) as Record<string, unknown>[]).map(toPayment);
   const bal = live ? invoiceBalance(live, payments) : null;
-  const depositRows = ((deposits ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
+  const allDeposits = ((deposits ?? []) as Record<string, unknown>[]).map(toPayment);
+  const depositRows = allDeposits.filter((p) => p.status === "recorded");
   const depositTotal = depositRows.reduce((a, p) => a + p.amount_aed, 0);
+  // The client keys already spent on this job (any status): a payment form still holding one starts a new key, so the
+  // next payment is never taken for the one already recorded.
+  const spentKeys = [...payments, ...allDeposits].map((p) => p.client_key).filter((k): k is string => !!k && !k.startsWith("ngenius:"));
   // The deposit receipt goes to the customer with the quotation's own link token and the message from Settings.
   const { data: approvedQ } = await createAdminClient().from("quotations").select("number, token").eq("job_id", id).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("version", { ascending: false }).limit(1).maybeSingle();
   const dep = await depositState(id);
@@ -252,7 +256,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     {canRecord ? (
                       <details className="border-t border-line pt-2" data-record-block data-folded>
                         <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a payment before the proforma is sent</summary>
-                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
+                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
                       </details>
                     ) : null}
                   </div>
@@ -262,7 +266,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 return (
                   <div className="flex flex-col gap-2" data-record-block>
                     {creditDays ? <p className="text-sm font-semibold">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p> : <p className="text-sm font-semibold">Record the payment against {live!.number}.</p>}
-                    <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
+                    <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
                     {creditDays && can(role, "gateOut") && acting ? <div><LinkButton href={`/jobs/${id}/gate-out`} size="md" tone="secondary">Gate out on credit</LinkButton></div> : null}
                   </div>
                 );
@@ -321,7 +325,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               <details className="border-t border-line pt-2 text-sm" data-advance-fold>
                 <summary className="cursor-pointer min-h-11 flex items-center font-bold text-muted">Record an advance payment (customer paying at the counter, before the proforma)</summary>
                 <p className="text-xs text-muted">It is recorded as a deposit with its own receipt and comes off the invoice total by itself. The receipt shows the method it was really paid by. Only accounts and the owner record money.</p>
-                <div className="pt-2"><PaymentForm invoiceId={null} jobId={id} balance={draft.lines.length ? balanceDue : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /></div>
+                {/* 31 October 2026: the card slip / transfer proof goes through the send queue like every other proof (job files). */}
+                <div className="pt-2"><PaymentForm invoiceId={null} jobId={id} proofJobId={id} spentKeys={spentKeys} balance={draft.lines.length ? balanceDue : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /></div>
               </details>
             ) : null}
             {live && unpaid ? (

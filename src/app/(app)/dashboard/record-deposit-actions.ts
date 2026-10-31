@@ -16,7 +16,7 @@ import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { isUuid } from "@/lib/uuid";
 
 export type RecordDepositResult =
-  | { error: string }
+  | { error: string; renewKey?: boolean }
   | {
       ok: true;
       number: string;
@@ -62,6 +62,20 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
   if (!(amount > 0)) return { error: "Enter the amount received." };
   const cheque = method === "cheque" ? { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) } : null;
   if (method === "cheque" && !cheque?.number) return { error: "Enter the cheque number." };
+  // The same tap again (its answer was lost): the receipt it already made, before anything else is asked for - its proof
+  // has already moved onto that receipt, so the proof check below could never pass a second time.
+  if (isUuid(clientKey)) {
+    const { data: same, error: sameError } = await admin.from("payments").select("id, number, amount_aed, method").eq("client_key", clientKey).maybeSingle();
+    if (sameError) {
+      await logAppError("record deposit: repeat lookup", sameError, { staffId: staff.id, jobId });
+      return { error: SAVE_FAILED };
+    }
+    if (same) {
+      if (Math.abs(Number(same.amount_aed) - amount) > 0.005 || String(same.method) !== method) return { error: `This form was already used for ${same.number}. Nothing new was recorded – press Record again.`, renewKey: true };
+      revalidatePath("/dashboard");
+      return { ok: true, number: String(same.number ?? ""), paymentId: String(same.id), overBy: 0, receiptMessage: "", phoneDigits: "", pdfHref: `/api/pdf/receipt/${same.id}` };
+    }
+  }
   // The proof: uploaded before this call, tied to the panel's client key.
   const { data: proofRows, error: proofError } = isUuid(clientKey) ? await admin.from("job_files").select("id, storage_path").eq("job_id", jobId).eq("kind", "payment_proof").eq("ref_id", clientKey).is("removed_at", null).order("created_at") : { data: [], error: null };
   if (proofError) {
@@ -75,6 +89,12 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
   const actor: Actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id, is_head_accountant: staff.is_head_accountant };
   const r = await recordPaymentCore(actor, { invoiceId: null, jobId, method, amount, reference, authCode: blankToNull(formData.get("auth_code")), cheque, clientKey }, settings);
   if (r.error || !r.paymentId) return { error: r.error ?? "Could not record the deposit." };
+  // The panel's key was already used (a copied tab, a second deposit with an old key): never touch that earlier receipt.
+  if (r.repeat) {
+    if (Math.abs(r.repeat.amount - amount) > 0.005 || r.repeat.method !== method) return { error: `This form was already used for ${r.number ?? "an earlier receipt"}. Nothing new was recorded – press Record again.`, renewKey: true };
+    revalidatePath("/dashboard");
+    return { ok: true, number: r.number ?? "", paymentId: r.paymentId, overBy: 0, receiptMessage: "", phoneDigits: "", pdfHref: `/api/pdf/receipt/${r.paymentId}` };
+  }
   if (r.pendingOwner) return { error: "The amount is above the job's balance: it went to the owner for approval." };
   const paymentId = r.paymentId;
   const number = r.number ?? "";

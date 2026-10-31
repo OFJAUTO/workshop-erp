@@ -4,23 +4,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui";
 import { PhotoButton } from "./PhotoButton";
+import { PendingRows, gateInFields } from "./MediaCapture";
 import type { Checklist } from "@/lib/media";
-import { reportUploadFailure, uploadFile } from "@/lib/upload-client";
+import { refreshWhenIdle } from "@/lib/refresh-idle";
+import { reportUploadFailure, shrinkPhoto } from "@/lib/upload-client";
+import { pendingWords, useSendQueue } from "@/lib/use-send-queue";
 
 const FILL = "#e6e7ea";
 const MAX_ZOOM = 4;
 const OUT_W = 960;
 const OUT_H = 600;
 
-type Phase = "idle" | "uploading" | "failed" | "saved";
-
 /**
  * The car picture for the dashboard tile, cropped on the spot: a frame in the tile's shape (16:10),
- * pinch and drag on a phone, slider and drag on a PC, then "Use photo". The cropped picture stays on the
- * item as a preview with "Uploading…" until the server confirms the saved file; only then is it Done. A
- * failed or interrupted upload shows red with the preview and Retry, never a quiet "Waiting". Closing the
- * crop with a photo in it asks "Use this photo as it is?" instead of throwing it away. Tapping the finished
- * item opens the crop again with the current picture.
+ * pinch and drag on a phone, slider and drag on a PC, then "Use photo". The cropped picture is kept on the device
+ * until the server has it (no signal, a reload, the tablet's idle lock: it still goes by itself) and stays on the
+ * item as its preview the whole way: amber "on this device" or "Sending…", red with Try again and Remove only when it
+ * can never go by itself, Done only when the server's checklist counts it. Closing the crop with a photo in it asks
+ * "Use this photo as it is?" instead of throwing it away. Tapping the finished item opens the crop again with the
+ * current picture.
  */
 export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car picture (for our dashboard)", attempted = false, onChecklist }: { jobId: string; token?: string; done: boolean; currentUrl?: string | null; label?: string; /** Someone tried to finish the gate-in: a missing picture shows in red. */ attempted?: boolean; /** The server's fresh checklist once the file is recorded. */ onChecklist?: (c: Partial<Checklist>) => void }) {
   const router = useRouter();
@@ -28,11 +30,17 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [progress, setProgress] = useState(0);
-  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
+  // The cropped picture of this visit (made on the device): the item's preview from "Use photo" through to Done.
+  const [preview, setPreview] = useState<{ id: string | null; url: string } | null>(null);
+  // The server's own address of the picture, for a picture that was waiting from an earlier visit.
+  const [sentUrl, setSentUrl] = useState<string | null>(null);
+  const [serverDone, setServerDone] = useState(false);
+  const [seenDone, setSeenDone] = useState(done);
+  if (seenDone !== done) {
+    setSeenDone(done);
+    setServerDone(false);
+  }
   const [askClose, setAskClose] = useState(false);
   const [loadingCurrent, setLoadingCurrent] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,8 +48,26 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
   const previewRef = useRef<string | null>(null);
-  useEffect(() => { previewRef.current = preview; }, [preview]);
+  useEffect(() => { previewRef.current = preview?.url ?? null; }, [preview]);
   useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
+
+  const { pending, add, retry, remove } = useSendQueue({
+    target: "gate_in",
+    scopeId: jobId,
+    grantBody: gateInFields("car_picture", { token }),
+    match: (f) => f.kind === "car_picture",
+    onSent: (result) => {
+      const checklist = (result.checklist ?? {}) as Partial<Checklist>;
+      if (checklist.carPicture !== true) {
+        reportUploadFailure({ jobId, kind: "car_picture", step: "register", error: "Sent and recorded, but the checklist did not count the car picture", token, contentType: "image/jpeg", extra: { queued: true } });
+      } else {
+        setServerDone(true);
+      }
+      if (typeof result.url === "string" && result.url) setSentUrl(result.url);
+      onChecklist?.(checklist);
+      refreshWhenIdle(() => router.refresh());
+    },
+  });
 
   const minZoom = img ? Math.min(OUT_W / img.naturalWidth, OUT_H / img.naturalHeight) / Math.max(OUT_W / img.naturalWidth, OUT_H / img.naturalHeight) : 1;
   const clampZoom = useCallback((z: number) => Math.min(MAX_ZOOM, Math.max(minZoom, z)), [minZoom]);
@@ -151,25 +177,34 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     if (pointers.current.size < 2) pinch.current = null;
   }
 
-  /** The upload itself: the preview stays on the item until the server says the file is recorded and counted. */
+  /** Keeps the cropped picture on the device and hands it to the queue: the preview stays on the item the whole way. */
   async function send(blob: Blob) {
-    setPhase("uploading");
-    setProgress(0);
     setError(null);
+    const small = await shrinkPhoto(blob);
+    let url: string | null = null;
     try {
-      const checklist = (await uploadFile(jobId, "car_picture", new File([blob], "car.jpg", { type: "image/jpeg" }), "image/jpeg", setProgress, { token })) as Partial<Checklist>;
-      if (checklist.carPicture !== true) {
-        reportUploadFailure({ jobId, kind: "car_picture", step: "register", error: "Sent and recorded, but the checklist did not count the car picture", token, sizeBytes: blob.size, contentType: "image/jpeg" });
-        throw new Error("The picture was sent but the gate-in did not count it. Tap Retry.");
-      }
-      setPhase("saved");
-      setPendingBlob(null);
-      onChecklist?.(checklist);
-      router.refresh();
-    } catch (err) {
-      setPhase("failed");
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      url = URL.createObjectURL(small.blob);
+    } catch {
+      url = null;
     }
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    setPreview(url ? { id: null, url } : null);
+    try {
+      const [id] = await add([{ blob: small.blob, contentType: small.type || "image/jpeg", name: "car.jpg", fields: gateInFields("car_picture", { token }) }]);
+      if (url && id) setPreview((cur) => (cur && cur.url === url ? { id, url } : cur));
+    } catch {
+      setError("The picture could not be kept on this device. Take it again.");
+      reportUploadFailure({ jobId, kind: "car_picture", step: "upload", error: "Could not put the cropped picture in the send queue", token, sizeBytes: small.blob.size, contentType: small.type });
+    }
+  }
+
+  /** Remove a picture that never arrived: its preview goes with it. */
+  function removeQueued(id: string) {
+    if (preview?.id === id) {
+      URL.revokeObjectURL(preview.url);
+      setPreview(null);
+    }
+    void remove(id);
   }
 
   async function usePhoto() {
@@ -197,53 +232,52 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
     setAskClose(false);
     setOpen(false);
     setImg(null);
-    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-    setPreview(URL.createObjectURL(blob));
-    setPendingBlob(blob);
     await send(blob);
   }
 
-  const saved = phase === "saved";
-  const finished = (done || saved) && phase !== "failed" && phase !== "uploading";
-  const uploading = phase === "uploading";
-  const failed = phase === "failed";
-  const red = failed || (attempted && !finished && !uploading);
+  const counted = done || serverDone;
+  const stopped = pending.find((p) => p.state === "stopped") ?? null;
+  const sending = pending.find((p) => p.state === "sending") ?? null;
+  const onDevice = pending.length > 0;
+  const lead = stopped ?? sending ?? pending.find((p) => p.state === "waiting") ?? pending[pending.length - 1] ?? null;
+  const finished = counted && !onDevice;
+  const red = !!stopped || (attempted && !counted && !onDevice);
+  const status = stopped ? "failed" : sending ? "uploading" : onDevice ? "device" : counted ? "done" : "waiting";
+  // The cropped picture of this visit, else the picture waiting from an earlier visit, else the server's copy.
+  const shown = preview?.url ?? lead?.previewUrl ?? sentUrl;
   const previewW = 360;
   const previewH = Math.round((previewW * OUT_H) / OUT_W);
   const sliderValue = Math.round(((clampZoom(zoom) - minZoom) / (MAX_ZOOM - minZoom)) * 100);
-  const text = uploading
-    ? `Uploading… ${Math.round(progress * 100)}%`
-    : failed
-      ? (error ?? "Couldn't save the picture.")
-      : finished
-        ? "Done. Tap to replace."
-        : attempted
-          ? "Missing. Tap to take the photo."
-          : "Front three-quarter view. Tap to take a photo, then frame it.";
+  const text = lead
+    ? pendingWords(lead)
+    : finished
+      ? "Done. Tap to replace."
+      : attempted
+        ? "Missing. Tap to take the photo."
+        : "Front three-quarter view. Tap to take a photo, then frame it.";
 
   return (
-    <div className="flex flex-col gap-2" data-media-item="car_picture" data-missing={finished ? "false" : "true"} data-media-status={uploading ? "uploading" : failed ? "failed" : finished ? "done" : "waiting"}>
-      <button type="button" data-car-tile onClick={() => (open ? requestClose() : openWithCurrent())} disabled={uploading} className={`flex min-h-16 w-full items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${finished ? "border-green bg-green-soft" : red ? "border-red-bar bg-red-soft" : uploading ? "border-amber-bar bg-amber-soft" : "border-line-strong bg-white"}`}>
+    <div className="flex flex-col gap-2" data-media-item="car_picture" data-missing={counted ? "false" : "true"} data-media-status={status} data-device-files={pending.length}>
+      <button type="button" data-car-tile onClick={() => (open ? requestClose() : openWithCurrent())} className={`flex min-h-16 w-full items-center justify-between gap-3 rounded-card border-2 px-4 text-left ${finished ? "border-green bg-green-soft" : red ? "border-red-bar bg-red-soft" : onDevice ? "border-amber-bar bg-amber-soft" : "border-line-strong bg-white"}`}>
         <span className="flex items-center gap-3 min-w-0">
-          {preview ? (
+          {shown ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="" className={`h-12 w-[4.8rem] shrink-0 rounded-md object-cover ${failed ? "opacity-70" : ""}`} data-car-preview />
+            <img src={shown} alt="" className={`h-12 w-[4.8rem] shrink-0 rounded-md object-cover ${stopped ? "opacity-70" : ""}`} data-car-preview />
           ) : null}
           <span className="flex flex-col min-w-0">
             <span className="font-bold">{label}</span>
-            <span className={`text-xs ${failed ? "font-semibold text-red" : "text-muted"}`}>{text}</span>
+            <span className={`text-xs ${stopped ? "font-semibold text-red" : onDevice ? "font-semibold text-amber" : "text-muted"}`} data-media-words>{text}</span>
           </span>
         </span>
-        <span className={`text-2xl font-bold ${finished ? "text-green" : red ? "text-red" : "text-faint"}`}>{finished ? "✓" : uploading ? "…" : red ? "!" : "+"}</span>
+        <span className={`text-2xl font-bold ${finished ? "text-green" : red ? "text-red" : onDevice ? "text-amber" : "text-faint"}`}>{finished ? "✓" : red ? "!" : onDevice ? "↑" : "+"}</span>
       </button>
-      {uploading ? (
+      {sending ? (
         <div className="h-2 rounded-full bg-track overflow-hidden">
-          <div className="h-full bg-ink transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+          <div className="h-full bg-ink transition-[width]" style={{ width: `${Math.round(sending.progress * 100)}%` }} />
         </div>
       ) : null}
-      {failed && pendingBlob ? (
-        <Button type="button" size="md" className="self-start" onClick={() => void send(pendingBlob)} data-retry>Retry</Button>
-      ) : null}
+      <PendingRows pending={pending} onRetry={(id) => void retry(id)} onRemove={removeQueued} />
+      {error && !open ? <p className="text-sm font-semibold text-red" data-media-problem>{error}</p> : null}
       {open ? (
         <div className="rounded-card border border-ink p-3 flex flex-col gap-3" data-car-crop>
           <div className="flex flex-wrap gap-2">
@@ -280,7 +314,7 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
               </div>
             </div>
           ) : null}
-          {error && !failed ? <p className="text-sm font-semibold text-red">{error}</p> : null}
+          {error ? <p className="text-sm font-semibold text-red">{error}</p> : null}
         </div>
       ) : null}
     </div>

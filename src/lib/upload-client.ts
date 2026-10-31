@@ -19,16 +19,12 @@ export type UploadKind =
 /** Seconds without any progress before an upload is given up and offered again with Retry. */
 const STALL_SECONDS = 90;
 
-export async function prepareUpload(jobId: string, kind: UploadKind, contentType: string, token?: string) {
-  const res = await fetch("/api/media/prepare", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jobId, kind, contentType, token }),
-  });
-  const data = (await res.json()) as { path?: string; url?: string; error?: string };
-  if (!res.ok || !data.path || !data.url) throw new Error(data.error ?? "Could not prepare the upload.");
-  return { path: data.path, url: data.url };
-}
+/*
+ * The gate-in's own prepare -> send -> register steps (prepareUpload, registerMedia, uploadFile) are gone (31 October
+ * 2026): every gate-in file - the checklist tiles, the outline's panel photos, the damage found after check-in - goes
+ * through THE send queue (src/lib/send-queue.ts, useSendQueue with target "gate_in"), which keeps it on the device
+ * until /api/uploads/register has recorded it. /api/media/prepare and /api/media/register stay for the tests' scripts.
+ */
 
 /**
  * Sends the file straight to storage and reports progress from 0 to 1 (30 October 2026, batch 2 section 5.2): a file
@@ -36,9 +32,9 @@ export async function prepareUpload(jobId: string, kind: UploadKind, contentType
  * dropped signal costs one piece, never the whole file. ONE door for every upload screen.
  */
 export function putWithProgress(url: string, file: Blob, contentType: string, onProgress: (p: number) => void): Promise<void> {
-  // Resumable sends are switched on by NEXT_PUBLIC_RESUMABLE_UPLOADS=1 once proven on the test database (30 October 2026);
-  // until then every file goes in one PUT, as before.
-  const resumable = process.env.NEXT_PUBLIC_RESUMABLE_UPLOADS === "1";
+  // Resumable sends are ON (31 October 2026, after the 200 MB slow-3G test on the test database: tests/browser/
+  // test-uploads-video.mjs). NEXT_PUBLIC_RESUMABLE_UPLOADS=0 switches them off again (one PUT per file, as before).
+  const resumable = process.env.NEXT_PUBLIC_RESUMABLE_UPLOADS !== "0";
   return resumable && file.size > TUS_CHUNK && signedParts(url) && tusEndpoint() ? resumableUpload(url, file, contentType, onProgress) : putSingle(url, file, contentType, onProgress);
 }
 
@@ -61,18 +57,20 @@ export function signedParts(url: string): { bucket: string; object: string; toke
   }
 }
 
-/** The project's direct storage address for resumable sends (recommended by Supabase for large files). */
+/** The project's direct storage address for resumable sends with a one-time address (recommended by Supabase for large files). */
 function tusEndpoint(): string | null {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!base) return null;
-  return `https://${new URL(base).hostname.split(".")[0]}.storage.supabase.co/storage/v1/upload/resumable`;
+  // The SIGNED resumable endpoint: it takes the one-time address's token (x-signature). The plain /upload/resumable is
+  // for a signed-in user and checks the bucket's row rules, so with the anon key every piece was refused (403).
+  return `https://${new URL(base).hostname.split(".")[0]}.storage.supabase.co/storage/v1/upload/resumable/sign`;
 }
 
 const b64 = (v: string) => btoa(unescape(encodeURIComponent(v)));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One request with the stall detector; progress of the body as 0..1. */
-function xhrRequest(method: string, url: string, headers: Record<string, string>, body: Blob | null, onProgress?: (p: number) => void): Promise<{ status: number; header: (name: string) => string | null }> {
+function xhrRequest(method: string, url: string, headers: Record<string, string>, body: Blob | null, onProgress?: (p: number) => void): Promise<{ status: number; header: (name: string) => string | null; text: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let stall: ReturnType<typeof setTimeout> | null = null;
@@ -91,7 +89,7 @@ function xhrRequest(method: string, url: string, headers: Record<string, string>
     };
     xhr.onload = () => {
       if (stall) clearTimeout(stall);
-      resolve({ status: xhr.status, header: (n) => xhr.getResponseHeader(n) });
+      resolve({ status: xhr.status, header: (n) => xhr.getResponseHeader(n), text: String(xhr.responseText ?? "").slice(0, 300) });
     };
     xhr.onerror = () => {
       if (stall) clearTimeout(stall);
@@ -122,7 +120,7 @@ export async function resumableUpload(url: string, file: Blob, contentType: stri
   if (resumedAt === null) {
     const created = await xhrRequest("POST", endpoint, { ...auth, "Upload-Length": String(file.size), "Upload-Metadata": `bucketName ${b64(parts.bucket)},objectName ${b64(parts.object)},contentType ${b64(contentType)},cacheControl ${b64("3600")}`, "x-upsert": "false" }, null);
     const loc = created.header("Location");
-    if (created.status !== 201 || !loc) throw Object.assign(new Error(`Upload failed (${created.status}).`), { status: created.status });
+    if (created.status !== 201 || !loc) throw Object.assign(new Error(`Upload failed (${created.status}).`), { status: created.status, body: created.text });
     location = new URL(loc, endpoint).toString();
     offset = 0;
     try { localStorage.setItem(key, location); } catch { /* the browser may refuse: the send still works */ }
@@ -145,7 +143,7 @@ export async function resumableUpload(url: string, file: Blob, contentType: stri
       if (r.status === 404 || r.status === 410) {
         try { localStorage.removeItem(key); } catch { /* nothing */ }
       }
-      throw Object.assign(new Error(`Upload failed (${r.status}).`), { status: r.status });
+      throw Object.assign(new Error(`Upload failed (${r.status}).`), { status: r.status, body: r.text });
     } catch (err) {
       failures++;
       // Offline, or tried enough: the caller decides (Retry, or the queue that sends when the signal is back).
@@ -184,30 +182,13 @@ function putSingle(url: string, file: Blob, contentType: string, onProgress: (p:
       done();
       if (xhr.status >= 200 && xhr.status < 300) return resolve();
       // The status rides on the error, so the plain words (uploadProblem) can tell an expired address from a server fault.
-      reject(Object.assign(new Error(`Upload failed (${xhr.status}).`), { status: xhr.status }));
+      reject(Object.assign(new Error(`Upload failed (${xhr.status}).`), { status: xhr.status, body: String(xhr.responseText ?? "").slice(0, 300) }));
     };
     xhr.onerror = () => { done(); reject(new Error("Upload failed. Check the connection.")); };
     xhr.onabort = () => { done(); };
     armStall();
     xhr.send(file);
   });
-}
-
-export async function registerMedia(
-  jobId: string,
-  kind: UploadKind,
-  path: string,
-  extra: { duration?: number; caption?: string; token?: string } = {},
-) {
-  const res = await fetch("/api/media/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jobId, kind, path, ...extra }),
-  });
-  const data = (await res.json()) as { ok?: boolean; error?: string; checklist?: Record<string, unknown> };
-  if (!res.ok || !data.ok) throw new Error(data.error ?? "Could not record the file.");
-  // The server's own checklist, computed from the recorded files: the one truth every tick follows.
-  return data.checklist ?? {};
 }
 
 export type UploadStep = "prepare" | "upload" | "register" | "camera" | "decode";
@@ -228,34 +209,6 @@ export function reportUploadFailure(info: { jobId?: string | null; inspectionId?
     void fetch("/api/media/failure", { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => undefined);
   } catch {
     // Nothing to do: the log is best effort.
-  }
-}
-
-/** Prepare, send, record. A failure at any step is logged with the step it failed at, then thrown for the Retry button. */
-export async function uploadFile(
-  jobId: string,
-  kind: UploadKind,
-  file: Blob,
-  contentType: string,
-  onProgress: (p: number) => void,
-  extra: { duration?: number; caption?: string; token?: string } = {},
-) {
-  let step: UploadStep = "prepare";
-  // Photos are shrunk on the phone first (30 October 2026): about 0.5 MB instead of 5-12 MB on 4G.
-  if (contentType.startsWith("image/")) {
-    const small = await shrinkPhoto(file);
-    file = small.blob;
-    contentType = small.type;
-  }
-  try {
-    const { path, url } = await prepareUpload(jobId, kind, contentType, extra.token);
-    step = "upload";
-    await putWithProgress(url, file, contentType, onProgress);
-    step = "register";
-    return await registerMedia(jobId, kind, path, extra);
-  } catch (err) {
-    reportUploadFailure({ jobId, kind, step, error: err, token: extra.token, sizeBytes: file.size, contentType });
-    throw err;
   }
 }
 

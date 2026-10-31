@@ -175,6 +175,9 @@ await section("3-10 stages, leader, tablet, updates", async () => {
   // So the first tap clocks him in on the current stage (Strip) and a second tap clocks him out again.
   const tapPin = async () => {
     await tp.locator(`[data-tablet-person='${people.installer}']`).click();
+    // A car with a tint choice (or parts ready) asks first what the person is doing: here, clocking.
+    await until(async () => ((await tp.locator("[data-pin-pad], [data-tablet-mode-clock]").count()) ? 1 : null), 20, 300);
+    if (await tp.locator("[data-tablet-mode-clock]").count()) await tp.locator("[data-tablet-mode-clock]").click();
     await until(async () => ((await tp.locator("[data-pin-pad]").count()) ? 1 : null), 20, 300);
     for (const k of ["1", "2", "3", "4"]) await tp.locator("[data-pin-pad] button", { hasText: new RegExp(`^${k}$`) }).click();
     return until(async () => (await tp.locator("[data-tablet-note]").textContent().catch(() => null)) || null, 30, 300);

@@ -279,7 +279,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                     </div>
                     <div className="flex flex-wrap items-end gap-2">
                       <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
-                      <label className="flex flex-col gap-1 min-w-40"><span className="text-xs font-semibold text-muted">Proof: bank slip, card slip, signed receipt or cheque copy</span><input type="file" name="proof" accept="image/*,application/pdf" className="text-sm min-h-11" data-pay-proof /></label>
+                      <SupplierProofUpload poId={po.id} inForm />
                       <Button type="submit" size="md" data-mark-supplier-paid>Paid to supplier</Button>
                     </div>
                   </form>

@@ -1,31 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui";
+import { enqueue, listRecords, onSendEvent, removeQueued, retryNow, type SendRecord } from "@/lib/send-queue";
+import { reportUploadFailure, shrinkPhoto } from "@/lib/upload-client";
+import { pendingWords, type PendingFile } from "@/lib/use-send-queue";
 
 export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[]; /** Section 10: the PPF cutting method badge (HAND-CUT / PRE-CUT / MIXED). */ cut?: { badge: string; note: string | null } | null; /** Section 11: the tint choice per window, in the documents' words. */ tint?: string | null };
 export type TabletPerson = { id: string; name: string; photoUrl: string | null; clockedOn: string | null };
 
-/** A tablet photo redrawn as a JPEG of at most 1600 px (a few hundred KB); the original when the browser cannot decode it. */
-async function shrinkPhoto(file: File): Promise<Blob> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    return blob ?? file;
-  } catch {
-    return file;
-  }
-}
+/** A tint photo kept on this tablet until OFJ's server has it: its picture, its car, who took it and what is happening. */
+type SendingPhoto = PendingFile & { plate: string; by: string };
+type Note = { text: string; tone: "ok" | "bad" | "wait" };
+
+const NOTE_CLASS: Record<Note["tone"], string> = { ok: "bg-green-soft text-green", bad: "bg-red-soft text-red", wait: "bg-amber-soft text-amber" };
+
+/** The tablet's own photos in the queue (the tint photo after fitting), as they come back after a reload. */
+const isTabletPhoto = (r: Pick<SendRecord, "target" | "fields">) => r.target === "job_file" && r.fields.tablet === "tint";
 
 /**
  * The shared section tablet: the section's cars in due order; tap a car, tap your face, type your PIN, and you are
  * clocked in (or out). Nothing else, no typing. Refreshes itself every two minutes while the screen is on.
+ *
+ * 31 October 2026: the PIN step is one request and never carries the photo. Once the PIN is checked, the tint photo goes to
+ * THE send queue with a permit for that car under the PIN holder: it stays on the tablet until the server has it (no
+ * signal is fine), shown at the top with its own picture, and the next person can carry on meanwhile.
  */
 export function SectionTablet({ section, cars, people }: { section: string; cars: TabletCar[]; people: TabletPerson[] }) {
   const router = useRouter();
@@ -33,10 +33,17 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const [personId, setPersonId] = useState<string | null>(null);
   const [pin, setPin] = useState("");
   const [mode, setMode] = useState<"clock" | "parts" | "tint" | null>(null);
-  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
+  const [photo, setPhoto] = useState<{ blob: Blob; type: string; url: string; takenAt: number } | null>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const [note, setNote] = useState<Note | null>(null);
+  const [sending, setSending] = useState<SendingPhoto[]>([]);
+  const urls = useRef(new Map<string, string>());
+  // The photos as last shown, read when the queue's news arrives (never during a render).
+  const shown = useRef<SendingPhoto[]>([]);
+  useEffect(() => {
+    shown.current = sending;
+  });
   useEffect(() => {
     // A shared tablet has no login, so no live feed reaches it: a check every two minutes, only while the screen is on.
     const t = setInterval(() => document.visibilityState === "visible" && router.refresh(), 120000);
@@ -47,6 +54,69 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
     const t = setTimeout(() => setNote(null), 4000);
     return () => clearTimeout(t);
   }, [note]);
+
+  // The tint photos still on this tablet (an earlier visit, a reload), and the queue's news about them.
+  useEffect(() => {
+    const map = urls.current;
+    let live = true;
+    const viewOf = (r: SendRecord): SendingPhoto => {
+      let url = map.get(r.id) ?? null;
+      if (!url) {
+        try {
+          url = URL.createObjectURL(r.blob);
+          map.set(r.id, url);
+        } catch {
+          url = null;
+        }
+      }
+      return { id: r.id, kind: "image", previewUrl: url, name: null, state: r.permanent ? "stopped" : r.attempts > 0 ? "waiting" : "queued", progress: 0, error: r.lastError, fields: r.fields, memoryOnly: !!r.memoryOnly, takenAt: r.takenAt, size: r.size, plate: String(r.fields.plate ?? ""), by: String(r.fields.by ?? "") };
+    };
+    const free = (id: string) => {
+      const u = map.get(id);
+      if (u) URL.revokeObjectURL(u);
+      map.delete(id);
+    };
+    const add = (rows: SendRecord[]) => {
+      if (!live) return;
+      const views = rows.filter(isTabletPhoto).map(viewOf);
+      if (views.length) setSending((cur) => [...cur, ...views.filter((v) => !cur.some((s) => s.id === v.id))]);
+    };
+    void listRecords().then(add);
+    const off = onSendEvent((e) => {
+      if (e.type === "queued") {
+        void listRecords(e.scope).then((rows) => add(rows.filter((x) => x.id === e.id)));
+        return;
+      }
+      if (e.type === "sent" || e.type === "removed") {
+        const had = shown.current.find((s) => s.id === e.id);
+        setSending((cur) => cur.filter((s) => s.id !== e.id));
+        free(e.id);
+        if (e.type === "sent" && (had || (e.scope.startsWith("job_file:") && e.fields.tablet === "tint"))) {
+          // Green only now: the server has the photo.
+          const by = had?.by ?? String(e.fields.by ?? "");
+          const plate = had?.plate ?? String(e.fields.plate ?? "");
+          setNote({ text: `${by ? `${by}: ` : ""}tint photo saved${plate ? ` (${plate})` : ""}.`, tone: "ok" });
+          router.refresh();
+        }
+        return;
+      }
+      setSending((cur) =>
+        cur.map((s) => {
+          if (s.id !== e.id) return s;
+          if (e.type === "sending") return { ...s, state: "sending", progress: e.progress, error: null };
+          if (e.type === "waiting") return { ...s, state: "waiting", progress: 0, error: e.error };
+          return { ...s, state: "stopped", progress: 0, error: e.error };
+        }),
+      );
+    });
+    return () => {
+      live = false;
+      off();
+      for (const u of map.values()) URL.revokeObjectURL(u);
+      map.clear();
+    };
+  }, [router]);
+
   const car = cars.find((c) => c.jobId === carId) ?? null;
   const person = people.find((p) => p.id === personId) ?? null;
   const direction: "in" | "out" = person && car && person.clockedOn === car.jobId ? "out" : "in";
@@ -57,28 +127,49 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const tintPhoto = mode === "tint" && !!car?.tint;
   async function submit(fullPin: string) {
     if (!car || !person || busy) return;
-    if (tintPhoto && !photo) { setNote({ text: "Take the photo first.", ok: false }); setPin(""); return; }
+    if (tintPhoto && !photo) { setNote({ text: "Take the photo first.", tone: "bad" }); setPin(""); return; }
     setBusy(true);
-    let res: Response;
-    if (tintPhoto && photo) {
-      const fd = new FormData();
-      fd.set("jobId", car.jobId);
-      fd.set("staffId", person.id);
-      fd.set("pin", fullPin);
-      fd.set("action", "tint_photo");
-      fd.set("photo", photo.blob, "tint-fitted.jpg");
-      res = await fetch("/api/tablet/bodyshop", { method: "POST", body: fd });
-    } else {
-      res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(receiving ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "receive_parts", partIds: tickedParts.map((p) => p.id) } : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction }) });
-    }
-    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string };
-    setBusy(false);
-    setPin("");
-    if (!res.ok || !data.ok) {
-      setNote({ text: data.error ?? "Try again.", ok: false });
+    // The PIN step is one small request; the tint photo never rides in it (it follows through the send queue).
+    const payload = tintPhoto
+      ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "tint_photo" }
+      : receiving
+        ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "receive_parts", partIds: tickedParts.map((p) => p.id) }
+        : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction };
+    let ok = false;
+    let data: { ok?: boolean; error?: string; message?: string; grant?: string; stageId?: string | null; caption?: string } = {};
+    try {
+      const res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000), cache: "no-store" });
+      data = (await res.json().catch(() => ({}))) as typeof data;
+      ok = res.ok && !!data.ok;
+    } catch {
+      setBusy(false);
+      setPin("");
+      setNote({ text: "No connection – nothing was saved. Try again.", tone: "bad" });
       return;
     }
-    setNote({ text: data.message ?? "Done.", ok: true });
+    setBusy(false);
+    setPin("");
+    if (!ok) {
+      setNote({ text: data.error ?? "Try again.", tone: "bad" });
+      return;
+    }
+    let tone: Note["tone"] = "ok";
+    if (tintPhoto && photo) {
+      // The PIN is checked: the photo goes to the queue with the permit the server handed over (never the PIN).
+      if (!data.grant) {
+        setNote({ text: "The photo could not be sent. Type your PIN again.", tone: "bad" });
+        return;
+      }
+      try {
+        await enqueue({ target: "job_file", scopeId: car.jobId, blob: photo.blob, contentType: photo.type, fields: { kind: "bodyshop_photo", refId: data.stageId ?? undefined, caption: data.caption ?? "Tint fitted", tablet: "tint", plate: car.plate, by: person.name }, takenAt: photo.takenAt, grant: data.grant });
+        tone = "wait";
+      } catch (err) {
+        reportUploadFailure({ jobId: car.jobId, kind: "job_file:bodyshop_photo", step: "upload", error: err, extra: { tablet: true } });
+        setNote({ text: "The photo could not be kept on this tablet. Take it again.", tone: "bad" });
+        return;
+      }
+    }
+    setNote({ text: data.message ?? "Done.", tone });
     setPersonId(null);
     setCarId(null);
     setMode(null);
@@ -96,7 +187,32 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
 
   return (
     <div className="flex flex-col gap-4" data-section-tablet={section}>
-      {note ? <div className={`rounded-control px-4 py-3 text-base font-bold ${note.ok ? "bg-green-soft text-green" : "bg-red-soft text-red"}`} data-tablet-note>{note.text}</div> : null}
+      {note ? <div className={`rounded-control px-4 py-3 text-base font-bold ${NOTE_CLASS[note.tone]}`} data-tablet-note data-tablet-note-tone={note.tone}>{note.text}</div> : null}
+      {sending.length ? (
+        <div className="flex flex-col gap-2" data-tablet-sending>
+          {sending.map((s) => {
+            const stopped = s.state === "stopped";
+            return (
+              <div key={s.id} className={`flex flex-wrap items-center gap-3 rounded-card border-2 bg-white p-2 ${stopped ? "border-red-bar" : "border-amber-bar"}`} data-tablet-sending-row={s.id} data-tablet-sending-state={s.state}>
+                {s.previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={s.previewUrl} alt="" className="h-14 w-14 shrink-0 rounded-control object-cover bg-chip" />
+                ) : <span className="h-14 w-14 shrink-0 rounded-control bg-chip" />}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-base font-bold">Tint photo{s.plate ? ` · ${s.plate}` : ""}{s.by ? ` · ${s.by}` : ""}</span>
+                  <span className={`text-sm ${stopped ? "font-semibold text-red" : "text-amber"}`}>{pendingWords(s)}</span>
+                </span>
+                {stopped ? (
+                  <span className="flex gap-2">
+                    <button type="button" onClick={() => void retryNow(s.id)} className="min-h-12 rounded-control border-2 border-line-strong bg-white px-4 text-base font-bold" data-tablet-sending-retry>Try again</button>
+                    <button type="button" onClick={() => { if (window.confirm("Remove this photo? It will not be sent.")) void removeQueued(s.id); }} className="min-h-12 rounded-control border border-line bg-white px-4 text-base font-semibold text-muted" data-tablet-sending-remove>Remove</button>
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {!car ? (
         <div className="flex flex-col gap-2">
           {cars.length === 0 ? <p className="text-lg text-muted">No cars for this section right now.</p> : null}
@@ -177,7 +293,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               ) : null}
               <label className="flex min-h-14 cursor-pointer items-center justify-center rounded-card border-2 border-line-strong bg-white px-6 text-lg font-extrabold">
                 {photo ? "Take it again" : "Take the photo"}
-                <input type="file" accept="image/*" capture="environment" className="sr-only" data-tablet-tint-file onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f) return; const blob = await shrinkPhoto(f); if (photo) URL.revokeObjectURL(photo.url); setPhoto({ blob, url: URL.createObjectURL(blob) }); }} />
+                <input type="file" accept="image/*" capture="environment" className="sr-only" data-tablet-tint-file onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f) return; const takenAt = Date.now(); const small = await shrinkPhoto(f); if (photo) URL.revokeObjectURL(photo.url); setPhoto({ blob: small.blob, type: small.type, url: URL.createObjectURL(small.blob), takenAt }); }} />
               </label>
               <p className="text-base mt-1">{photo ? "Then your PIN:" : "Take the photo, then your PIN."}</p>
             </div>

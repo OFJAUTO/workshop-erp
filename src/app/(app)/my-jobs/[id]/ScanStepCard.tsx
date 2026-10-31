@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { InspectionMedia, type InspectionFile } from "@/components/InspectionMedia";
+import { InspectionMedia, thisDevice, useFilesOnDevice, whereMatch, type InspectionFile } from "@/components/InspectionMedia";
 import { Card, Input, SectionLabel } from "@/components/ui";
 
 /**
@@ -19,6 +19,8 @@ export function ScanStepCard({ jobId, inspectionId, files, receivedAt, readAt, a
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const done = !!readAt || !!approvedAt;
+  // A PDF attached by hand that is still on this device: said as such, never as attached.
+  const sending = useFilesOnDevice({ target: "inspection", scopeId: inspectionId, match: whereMatch({ isPrescan: true }) }).length > 0;
 
   // A live refresh hands fresh props: keep the server's list, plus anything attached here that the
   // server has not echoed back yet. Without this an emailed report stayed invisible until a reload.
@@ -45,7 +47,7 @@ export function ScanStepCard({ jobId, inspectionId, files, receivedAt, readAt, a
 
   return (
     <Card className={`flex flex-col gap-3 ${done ? "border-green" : "border-ink ring-2 ring-ink"}`} data-flash-id={jobId} data-scan-step>
-      <SectionLabel right={done ? "done" : list.length ? `${list.length} attached` : "waiting for the scanner's email"}>Step 1 · Scan report</SectionLabel>
+      <SectionLabel right={done ? "done" : list.length ? `${list.length} attached` : sending ? `sending from ${thisDevice()}` : "waiting for the scanner's email"}>Step 1 · Scan report</SectionLabel>
       {receivedWords && !done ? (
         <p className="rounded-control bg-green-soft px-3 py-2 text-sm font-bold" data-scan-received>{receivedWords}</p>
       ) : null}
@@ -54,7 +56,9 @@ export function ScanStepCard({ jobId, inspectionId, files, receivedAt, readAt, a
       ) : (
         <p className="text-sm">Plug in the scanner and run the scan. The report arrives here by email, or attach the PDF by hand. Then tap that you have read it. If a scan is not possible, say why; the workshop manager approves that.</p>
       )}
-      <InspectionMedia inspectionId={inspectionId} files={list} where={{ isPrescan: true }} accept="pdf" disabled={!canAct} onAdded={(f) => setList((l) => [...l, f])} />
+      {/* A PDF picked here shows at once as "sending" and counts as attached only once the server has it (the read
+          button stays off until then); the same PDF may also be heard of by the form's own step card: kept once. */}
+      <InspectionMedia inspectionId={inspectionId} files={list} where={{ isPrescan: true }} accept="pdf" disabled={!canAct} onAdded={(f) => setList((l) => (l.some((x) => x.id === f.id) ? l : [...l, f]))} />
       {!done && canAct ? (
         <div className="flex flex-col gap-3 border-t border-line pt-3">
           <button type="button" disabled={!list.length || busy} onClick={() => send({ inspection: { scan_read: true } })} className={`min-h-14 rounded-control text-base font-extrabold ${list.length ? "bg-ink text-white" : "bg-chip text-muted"}`} data-scan-read>

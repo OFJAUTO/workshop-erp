@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { JobFileUpload, type JobFile } from "./JobFileUpload";
+import { JobFileUpload, type FilesWaiting, type JobFile } from "./JobFileUpload";
 import { Field, Input, Textarea } from "./ui";
 import { checkFinalReading, formatThousands, parseMileage, UNREADABLE_REASONS, type MileageUnit } from "@/lib/mileage";
 
@@ -10,14 +10,17 @@ import { checkFinalReading, formatThousands, parseMileage, UNREADABLE_REASONS, t
  * of the WHOLE instrument cluster (km, fuel, warning lights) as proof of how the car left. Both are required; when the
  * reading cannot be taken (battery dead, cluster not working, leaves on a recovery truck) the person picks the reason
  * and still adds the photo. "Driven while with us" shows as the figure is typed, red when it is lower than at gate-in.
- * The server checks the same rules (checkFinalReading) before the car can leave.
+ * The server checks the same rules (checkFinalReading) before the car can leave. The photo goes through the send queue
+ * (31 October 2026): it counts once the server has it, and `onSending` holds the gate-out while it is on its way (the
+ * server keeps the NEWEST photo, so a retake replaces the one still waiting).
  */
-export function FinalMileage({ jobId, unit, inReading, alertKm, initial }: { jobId: string; unit: MileageUnit; inReading: number | null; alertKm: number; initial?: { reading?: string; reason?: string; note?: string; photo?: JobFile | null } }) {
+export function FinalMileage({ jobId, unit, inReading, alertKm, initial, onSending }: { jobId: string; unit: MileageUnit; inReading: number | null; alertKm: number; initial?: { reading?: string; reason?: string; note?: string; photo?: JobFile | null }; onSending?: (sending: boolean) => void }) {
   const [text, setText] = useState(initial?.reading ?? "");
   const [unreadable, setUnreadable] = useState(!!initial?.reason);
   const [reason, setReason] = useState(initial?.reason ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
   const [photo, setPhoto] = useState<JobFile | null>(initial?.photo ?? null);
+  const [wait, setWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
   const reading = parseMileage(text);
   const check = !unreadable && reading !== null ? checkFinalReading(reading, inReading, unit) : null;
   const lower = !!check && "error" in check;
@@ -61,9 +64,30 @@ export function FinalMileage({ jobId, unit, inReading, alertKm, initial }: { job
         </div>
       ) : null}
       <Field label="Photo of the whole instrument cluster" hint="Km, fuel and any warning lights in one photo: the proof of how the car left. Internal only.">
-        <JobFileUpload jobId={jobId} kind="odometer_out" caption="Dashboard at gate-out" files={photo ? [photo] : []} accept="photo" label={photo ? "Retake the photo" : "Take the photo"} removable onAdded={(f) => setPhoto(f)} onRemoved={() => setPhoto(null)} />
+        <JobFileUpload
+          jobId={jobId}
+          kind="odometer_out"
+          caption="Dashboard at gate-out"
+          files={photo ? [photo] : []}
+          accept="photo"
+          single
+          label={photo || wait.count ? "Retake the photo" : "Take the photo"}
+          removable
+          onAdded={(f) => setPhoto(f)}
+          onRemoved={() => setPhoto(null)}
+          onPending={(w) => {
+            setWait(w);
+            onSending?.(w.count > 0);
+          }}
+        />
       </Field>
-      {!photo ? <p className="text-xs font-semibold text-amber" data-mileage-photo-missing>The photo is required before the car can leave.</p> : null}
+      {wait.count ? (
+        <p className={`text-xs font-semibold ${wait.stopped ? "text-red" : "text-amber"}`} data-mileage-photo-sending {...(!photo ? { "data-mileage-photo-missing": "" } : {})}>
+          {wait.stopped ? "The photo could not be sent – try again, or remove it and take it again." : "The photo is still sending – the car can leave once it has arrived."}
+        </p>
+      ) : !photo ? (
+        <p className="text-xs font-semibold text-amber" data-mileage-photo-missing>The photo is required before the car can leave.</p>
+      ) : null}
     </div>
   );
 }

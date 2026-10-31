@@ -31,15 +31,21 @@ export function BodyshopFindings({
   canCheck,
   photos,
   parts,
+  onPanels,
 }: {
   inspectionId: string;
   initial: BodyStateProps;
   canEdit: boolean;
   canCheck: boolean;
-  /** The photo strip for a panel (the form's InspectionMedia with item key body.<panel>) and how many photos it has. */
-  photos: (panel: string) => { node: ReactNode; count: number };
+  /**
+   * The photo strip for a panel (the form's InspectionMedia with item key body.<panel>), how many photos the server has
+   * for it, and how many are still on this device (a photo counts for the finding only once it has arrived).
+   */
+  photos: (panel: string) => { node: ReactNode; count: number; pending?: number };
   /** The parts strip for a panel (the form's parts list with item key body.<panel>). */
   parts: (panel: string) => ReactNode;
+  /** Told the panels with a finding whenever they change (the report's Submit checks each has a photo that arrived). */
+  onPanels?: (panels: string[]) => void;
 }) {
   const [state, setState] = useState<BodyStateProps>(initial);
   const [open, setOpen] = useState(!!initial.openedAt || initial.findings.length > 0);
@@ -72,13 +78,17 @@ export function BodyshopFindings({
       if (!r || !r.ok) { setError(j?.error ?? "Not saved: no connection. Try again."); return; }
       setError(null);
       // The server's answer keeps the ids; the panel being typed keeps its local words.
-      if (j?.state && pending.current === 0 && !timer.current) setState(j.state);
+      if (j?.state && pending.current === 0 && !timer.current) {
+        setState(j.state);
+        onPanels?.(j.state.findings.map((f) => f.panel));
+      }
     });
   };
   const finding = (panel: string): BodyFindingState => state.findings.find((f) => f.panel === panel) ?? { panel, damage: [], severity: null, action: null, remark: null, labour_hours: null };
   const change = (panel: string, patch: Partial<BodyFindingState>, slow = false) => {
     const next = { ...finding(panel), ...patch };
     setState((s) => ({ ...s, findings: s.findings.some((f) => f.panel === panel) ? s.findings.map((f) => (f.panel === panel ? next : f)) : [...s.findings, next] }));
+    if (!state.findings.some((f) => f.panel === panel)) onPanels?.([...state.findings.map((f) => f.panel), panel]);
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     if (slow) {
       waiting.current = next;
@@ -101,6 +111,9 @@ export function BodyshopFindings({
 
   const sel = selected ? finding(selected) : null;
   const pics = sel ? photos(sel.panel) : null;
+  // Red while the finding has no photo; amber while its only photos are still on their way from this device.
+  const noPhoto = !!sel && !!pics && pics.count === 0 && state.findings.some((f) => f.panel === sel.panel);
+  const photoOnTheWay = noPhoto && (pics?.pending ?? 0) > 0;
   return (
     <Card className="flex flex-col gap-4" id="body" data-body-findings="open">
       <div className="flex flex-wrap items-center gap-2">
@@ -129,7 +142,9 @@ export function BodyshopFindings({
                 {BODY_ACTIONS.map((d) => <Chip key={d.value} hook={`action-${d.value}`} disabled={!canEdit} on={sel.action === d.value} onClick={() => change(sel.panel, { action: sel.action === d.value ? null : d.value })}>{d.label}</Chip>)}
               </div>
               <div className="flex flex-col gap-1">
-                <span className={`text-xs font-semibold ${pics && pics.count === 0 && state.findings.some((f) => f.panel === sel.panel) ? "text-red" : "text-muted"}`} data-body-photo-label>Photos (required)</span>
+                <span className={`text-xs font-semibold ${photoOnTheWay ? "text-amber" : noPhoto ? "text-red" : "text-muted"}`} data-body-photo-label data-photo-on-the-way={photoOnTheWay ? "1" : undefined}>
+                  Photos (required){photoOnTheWay ? ` · ${pics?.pending} still sending, counted once it has arrived` : ""}
+                </span>
                 {pics?.node}
               </div>
               <label className="flex flex-col gap-1">
@@ -149,7 +164,7 @@ export function BodyshopFindings({
                 {parts(sel.panel)}
               </div>
               {canEdit && state.findings.some((f) => f.panel === sel.panel) ? (
-                <button type="button" onClick={() => { setState((s) => ({ ...s, findings: s.findings.filter((f) => f.panel !== sel.panel) })); post({ op: "remove", panel: sel.panel }); setSelected(null); }} className="self-start text-xs font-bold text-red underline underline-offset-4" data-body-remove>Remove this finding</button>
+                <button type="button" onClick={() => { setState((s) => ({ ...s, findings: s.findings.filter((f) => f.panel !== sel.panel) })); onPanels?.(state.findings.filter((f) => f.panel !== sel.panel).map((f) => f.panel)); post({ op: "remove", panel: sel.panel }); setSelected(null); }} className="self-start text-xs font-bold text-red underline underline-offset-4" data-body-remove>Remove this finding</button>
               ) : null}
             </div>
           )}

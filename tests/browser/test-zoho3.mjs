@@ -297,10 +297,12 @@ await section("7e supplier payment method and proof", async () => {
     await page.locator("[data-pay-proof]").setInputFiles({ name: "receipt.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
     await page.locator("[data-mark-supplier-paid]").click();
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
-    const row = await until(async () => { const r = (await sql("select supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path from public.purchase_orders where id = $1", [po.id]))[0]; return r?.supplier_paid_method === "cash" ? r : null; });
+    const row = await until(async () => { const r = (await sql("select supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path from public.purchase_orders where id = $1", [po.id]))[0]; return r?.supplier_paid_method === "cash" && r?.supplier_paid_proof_path ? r : null; });
+    // 31 October 2026: the proof goes by the send queue and lands on the LPO a moment after "Paid" (waited for above).
     check("7e: paid by cash, with the reference and the proof stored", row?.supplier_paid_method === "cash" && row?.supplier_paid_reference === "Receipt 77" && /^supplier-payments\//.test(row?.supplier_paid_proof_path ?? ""), JSON.stringify(row));
     await park("billpayment", po.id);
     await park("bill", po.id);
+    await go(page, `${base}/parts/orders/${po.id}`);
     check("7e: the LPO shows Cash and the proof link", /Cash/.test((await page.locator("[data-paid-line]").textContent()) ?? "") && (await page.locator("[data-paid-proof]").count()) === 1);
     if (row?.supplier_paid_proof_path) await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/job-files/${row.supplier_paid_proof_path}`, { method: "DELETE", headers: { authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, apikey: process.env.SUPABASE_SERVICE_ROLE_KEY } }).catch(() => null);
   } finally {

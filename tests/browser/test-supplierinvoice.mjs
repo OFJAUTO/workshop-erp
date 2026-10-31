@@ -101,8 +101,13 @@ await page.locator("[data-to-follow]").check();
 await page.waitForTimeout(250);
 check("to-follow folds the fields away and says what happens", (await page.locator("[data-invoice-number]").count()) === 0 && /Invoice missing/.test((await page.locator("[data-supplier-invoice-box]").textContent()) ?? ""));
 await page.locator("[data-no-stickers]").click();
-await page.waitForTimeout(2000);
-check("the delivery records with the invoice marked to follow", (await sql("select supplier_invoice_status from public.purchase_orders where id = $1", [po2.id]))[0].supplier_invoice_status === "to_follow" && (await sql("select order_status from public.part_items where id = $1", [partB.id]))[0].order_status === "received");
+// Waits for the save itself (a fixed two seconds was sometimes too short for the cold server).
+let followed = false;
+for (let i = 0; i < 40 && !followed; i++) {
+  followed = (await sql("select supplier_invoice_status from public.purchase_orders where id = $1", [po2.id]))[0]?.supplier_invoice_status === "to_follow" && (await sql("select order_status from public.part_items where id = $1", [partB.id]))[0]?.order_status === "received";
+  if (!followed) await page.waitForTimeout(500);
+}
+check("the delivery records with the invoice marked to follow", followed, ((await page.locator('[data-receive-panel] [role="alert"]').textContent().catch(() => "")) ?? "").slice(0, 160));
 
 // The daily Parts reminder (cron step 24): once, not twice.
 const cron = async () => (await fetch(`${base}/api/cron/housekeeping`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } })).json();

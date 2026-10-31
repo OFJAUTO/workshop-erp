@@ -119,7 +119,11 @@ await section("4 final confirmation and the tax invoice", async () => {
   check("4: the expected method is pre-selected", (await page.locator('[data-method="transfer"]').getAttribute("aria-pressed")) === "true");
   await page.locator("[data-reference]").fill("12345");
   // A transfer now needs its proof photo before it can be recorded.
-  await page.locator("[data-proof-input]").setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
+  // Since 28 October the proof goes straight to storage through the job-file uploader (the old "proof" field is gone);
+  // Record waits until the server has it.
+  const payForm = page.locator("[data-payment-form]").first();
+  await payForm.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
+  for (let i = 0; i < 80 && (await payForm.locator("[data-proof-missing]").count()) > 0; i++) await page.waitForTimeout(500);
   await page.locator("[data-record-payment]").click();
   await page.locator("[data-confirm-full]").waitFor({ timeout: 10000 });
   const text = plainText(await page.locator("[data-confirm-full]").innerHTML());

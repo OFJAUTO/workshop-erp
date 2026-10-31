@@ -93,6 +93,8 @@ export function GateOutForm({
   const [returned, setReturned] = useState<string>(String(keysCount));
   const [chain, setChain] = useState<string>(keychain ? "yes" : "no");
   const [photos, setPhotos] = useState<JobFile[]>([]);
+  // The dashboard photo still on its way from this device: the car leaves once the server has it (the newest is the record).
+  const [odoSending, setOdoSending] = useState(false);
   const mismatch = keysDiffer && (Number(returned) !== keysCount || (chain === "yes") !== keychain);
   const onCredit = balance.state !== "no_invoice" && balance.balance > 0 && creditDays > 0;
   // Nothing to pay on a declined job: no invoice at all, or none owed.
@@ -104,7 +106,7 @@ export function GateOutForm({
     <ActionForm action={action}>
       {(v) => (
         <>
-          {mileage ? <FinalMileage jobId={jobId} unit={mileage.unit} inReading={mileage.inReading} alertKm={mileage.alertKm} initial={{ reading: v.mileage_out, reason: v.mileage_unreadable_reason, note: v.mileage_unreadable_note, photo: mileage.photo }} /> : null}
+          {mileage ? <FinalMileage jobId={jobId} unit={mileage.unit} inReading={mileage.inReading} alertKm={mileage.alertKm} initial={{ reading: v.mileage_out, reason: v.mileage_unreadable_reason, note: v.mileage_unreadable_note, photo: mileage.photo }} onSending={setOdoSending} /> : null}
           <Field label="How does the car leave?">
             <div onChange={(e) => setMethod((e.target as HTMLInputElement).value)}>
               <ChoiceButtons name="leave_method" columns={3} defaultValue={v.leave_method ?? "customer"} options={[{ value: "customer", label: "Customer collects" }, { value: "customer_driver", label: "Customer's driver collects" }, { value: "recovery", label: "Delivery by recovery" }]} />
@@ -299,7 +301,8 @@ export function GateOutForm({
           ) : null}
 
           <Field label={method === "recovery" ? "Photos at loading" : "Handover photos or video"} optional>
-            <JobFileUpload jobId={jobId} kind={method === "recovery" ? "delivery_photo" : "handover_photo"} files={photos} accept="any" label="Add photos or video" onAdded={(f) => setPhotos((p) => [...p, f])} />
+            {/* Each file keeps the kind of the moment it was picked; both kinds stay on screen while they send. */}
+            <JobFileUpload jobId={jobId} kind={method === "recovery" ? "delivery_photo" : "handover_photo"} alsoKinds={["handover_photo", "delivery_photo"]} files={photos} accept="any" label="Add photos or video" onAdded={(f) => setPhotos((p) => (p.some((x) => x.id === f.id) ? p : [...p, f]))} />
           </Field>
 
           {method !== "recovery" ? (
@@ -316,8 +319,9 @@ export function GateOutForm({
             </>
           ) : null}
 
-          <div>
-            <SubmitButton tone={(mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"}>{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
+          <div className="flex flex-col gap-1">
+            <SubmitButton tone={(mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"} disabled={odoSending} className="self-start">{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
+            {odoSending ? <p className="text-xs font-semibold text-amber" data-gate-out-waiting>Waiting for the dashboard photo to arrive – the car leaves once the server has it.</p> : null}
           </div>
         </>
       )}

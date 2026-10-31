@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button, Input } from "@/components/ui";
-import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
+import { JobFileUpload, type FilesWaiting, type JobFile } from "@/components/JobFileUpload";
 import { useSearchParams } from "next/navigation";
 
 type Action = (formData: FormData) => void | Promise<void>;
@@ -15,6 +15,8 @@ type Action = (formData: FormData) => void | Promise<void>;
 export function StageHandover({ jobId, stage, nextLabel, photos: initial, needPin, action, from }: { jobId: string; stage: { id: string; key: string; label: string }; nextLabel: string | null; photos: JobFile[]; needPin: boolean; action: Action; from?: string }) {
   const [open, setOpen] = useState(false);
   const [photos, setPhotos] = useState<JobFile[]>(initial);
+  // Photos still on their way from this device (the send queue): only the server's photos count for the sign-off.
+  const [wait, setWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
   // The page comes back with the server's answer (a refusal or the sign-off): the window closes so it is seen.
   const answer = useSearchParams().toString();
   const [seen, setSeen] = useState(answer);
@@ -38,7 +40,7 @@ export function StageHandover({ jobId, stage, nextLabel, photos: initial, needPi
             <span className="text-sm text-muted">{nextLabel ? `Next: ${nextLabel}. That team is told.` : "This is the last stage before QC and the handover."}</span>
             <div className="flex flex-col gap-1">
               <span className="text-sm font-semibold">Photos of the finished work <span className="font-medium text-muted">(at least one)</span></span>
-              <JobFileUpload jobId={jobId} kind="bodyshop_photo" refId={stage.id} files={photos} caption={`${stage.label} done`} removable onAdded={(f) => setPhotos((p) => [...p, f])} onRemoved={(f) => setPhotos((p) => p.filter((x) => x.id !== f.id))} />
+              <JobFileUpload jobId={jobId} kind="bodyshop_photo" refId={stage.id} files={photos} caption={`${stage.label} done`} removable onAdded={(f) => setPhotos((p) => (p.some((x) => x.id === f.id) ? p : [...p, f]))} onRemoved={(f) => setPhotos((p) => p.filter((x) => x.id !== f.id))} onPending={setWait} />
             </div>
             {needPin ? (
               <label className="flex flex-col gap-1">
@@ -51,7 +53,11 @@ export function StageHandover({ jobId, stage, nextLabel, photos: initial, needPi
               <Button type="submit" size="lg" disabled={!photos.length} data-stage-handover-send>Sign off and hand over</Button>
               <Button type="button" tone="secondary" size="lg" onClick={() => setOpen(false)}>Cancel</Button>
             </div>
-            {!photos.length ? <span className="text-xs font-semibold text-amber">Add a photo first.</span> : null}
+            {!photos.length ? (
+              <span className="text-xs font-semibold text-amber" {...(wait.count && !wait.stopped ? { "data-handover-photo-sending": "" } : {})}>
+                {wait.stopped ? "The photo could not be sent – try again, or remove it and take another." : wait.count ? "The photo is still sending – Sign off works once it has arrived." : "Add a photo first."}
+              </span>
+            ) : null}
           </form>
         </div>
       ) : null}

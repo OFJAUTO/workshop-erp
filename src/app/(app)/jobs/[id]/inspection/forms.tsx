@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useFilesOnDevice, useSendGuard } from "@/components/InspectionMedia";
 import { PARTS_LIST_TICKED_EVENT } from "@/components/PartsListTick";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ReasonChips } from "@/components/ReasonChips";
@@ -144,12 +145,28 @@ export function ReturnForm({ action, reasons = [] }: { action: FormAction; /** O
   );
 }
 
-/** The slim bar fixed to the bottom of the review: the two decisions, and nowhere else on the page. */
-export function ReviewBar() {
+/**
+ * The slim bar fixed to the bottom of the review: the two decisions, and nowhere else on the page. Photos the manager
+ * added that are still on this device are said above the buttons; Approve asks once: wait (it then approves by itself
+ * when they have arrived), or approve now (photos taken before the approval still join the report).
+ */
+export function ReviewBar({ inspectionId = null }: { inspectionId?: string | null }) {
   const [back, setBack] = useState(false);
   const submit = (id: string) => (document.getElementById(id) as HTMLFormElement | null)?.requestSubmit();
+  const pending = useFilesOnDevice({ target: "inspection", scopeId: inspectionId, match: (f) => !String(f.itemKey ?? "").startsWith("road.") });
+  const guard = useSendGuard({
+    pending,
+    go: () => submit("approve-form"),
+    words: { wait: "Wait, then approve", now: "Approve now", nowNote: "Photos and videos taken before you approve still join the report when they arrive.", goes: "the report is approved by itself." },
+  });
   return (
     <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
+      {guard.note ? (
+        <div className="mx-auto mb-2 max-w-6xl rounded-control bg-amber-soft px-3 py-2" data-send-note>
+          {guard.note}
+        </div>
+      ) : null}
+      {guard.dialog}
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
         {back ? (
           <>
@@ -160,7 +177,7 @@ export function ReviewBar() {
         ) : (
           <>
             <button type="button" onClick={() => { setBack(true); document.getElementById("return-form")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className="min-h-12 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">Send back to the technician</button>
-            <button type="button" onClick={() => submit("approve-form")} className="ml-auto min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">Approve and send to the advisor</button>
+            <button type="button" onClick={() => { if (guard.mayGo()) submit("approve-form"); }} className="ml-auto min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">Approve and send to the advisor</button>
           </>
         )}
       </div>

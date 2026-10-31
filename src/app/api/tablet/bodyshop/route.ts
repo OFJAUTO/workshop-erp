@@ -5,15 +5,26 @@ import { getSettings } from "@/lib/settings";
 import { getCurrentDevice } from "@/lib/devices";
 import { verifyPin } from "@/lib/pin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { mintGrant } from "@/lib/upload-grant";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
 
 export const dynamic = "force-dynamic";
+
+/** The words on the tint photo's job file: the bodyshop page and the tint card find the photo by them. */
+const TINT_CAPTION = "Tint fitted";
+
+/** The car's stage the tint photo belongs to: the tint stage, or the PPF install it is merged into ("PPF install and tint"). */
+async function tintStageOf(jobId: string): Promise<string | null> {
+  const { data } = await createAdminClient().from("bodyshop_stages").select("id, key, status").eq("job_id", jobId).eq("is_active", true).in("key", ["tint", "ppf"]).neq("status", "skipped").order("position");
+  const rows = (data ?? []) as { id: string; key: string }[];
+  return (rows.find((s) => s.key === "tint") ?? rows.find((s) => s.key === "ppf"))?.id ?? null;
+}
 
 /** The section tablet's clock in / clock out: a registered device, a bodyshop person and their PIN. No session is made. */
 export async function POST(request: NextRequest) {
   const device = await getCurrentDevice();
   if (!device) return NextResponse.json({ error: "This tablet is not registered." }, { status: 403 });
-  // A photo (section 11: the tint after fitting) arrives as a form; everything else as JSON.
+  // A tablet opened before 31 October 2026 sends the tint photo with the PIN, as a form; everything else is JSON.
   const isForm = (request.headers.get("content-type") ?? "").includes("multipart/form-data");
   const form = isForm ? await request.formData().catch(() => null) : null;
   const body = (form ? { jobId: form.get("jobId"), staffId: form.get("staffId"), pin: form.get("pin"), action: form.get("action") } : await request.json().catch(() => ({}))) as { jobId?: string; staffId?: string; pin?: string; action?: string; partIds?: string[] };
@@ -39,17 +50,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, message: `${person.display_name}: ${r.message ?? "parts received."}` });
   }
   if (body.action === "tint_photo") {
-    const file = form?.get("photo");
-    if (!(file instanceof Blob) || file.size === 0) return NextResponse.json({ error: "Take the photo first." }, { status: 400 });
-    if (file.size > 15 * 1024 * 1024) return NextResponse.json({ error: "The photo is too large. Take it again." }, { status: 400 });
-    const type = file.type && file.type.startsWith("image/") ? file.type : "image/jpeg";
-    const path = `${jobId}/bodyshop/tint-fitted-${Date.now()}.${type === "image/png" ? "png" : "jpg"}`;
-    const up = await admin.storage.from(JOB_FILES_BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: type, upsert: false });
-    if (up.error) return NextResponse.json({ error: "The photo did not upload. Try again." }, { status: 500 });
-    const { error: rowError } = await admin.from("job_files").insert({ job_id: jobId, kind: "bodyshop_photo", storage_path: path, content_type: type, caption: "Tint fitted", uploaded_by: staffId, created_by: staffId, updated_by: staffId });
-    if (rowError) return NextResponse.json({ error: rowError.message }, { status: 500 });
+    const stageId = await tintStageOf(job.id as string);
+    if (form) {
+      // An older tablet page: the photo came with the PIN.
+      const file = form.get("photo");
+      if (!(file instanceof Blob) || file.size === 0) return NextResponse.json({ error: "Take the photo first." }, { status: 400 });
+      if (file.size > 15 * 1024 * 1024) return NextResponse.json({ error: "The photo is too large. Take it again." }, { status: 400 });
+      const type = file.type && file.type.startsWith("image/") ? file.type : "image/jpeg";
+      const path = `${jobId}/bodyshop/tint-fitted-${Date.now()}.${type === "image/png" ? "png" : "jpg"}`;
+      const up = await admin.storage.from(JOB_FILES_BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: type, upsert: false });
+      if (up.error) return NextResponse.json({ error: "The photo did not upload. Try again." }, { status: 500 });
+      const { error: rowError } = await admin.from("job_files").insert({ job_id: jobId, kind: "bodyshop_photo", ref_id: stageId, storage_path: path, content_type: type, caption: TINT_CAPTION, uploaded_by: staffId, created_by: staffId, updated_by: staffId });
+      if (rowError) return NextResponse.json({ error: "The photo was not saved. Try again." }, { status: 500 });
+      await admin.from("job_events").insert({ job_id: jobId, event_type: "tint_photo", note: `Tint fitted: photo taken by ${person.display_name} on the PPF tablet`, created_by: staffId });
+      return NextResponse.json({ ok: true, message: `${person.display_name}: tint photo saved.` });
+    }
+    // 31 October 2026: the PIN is checked and the step recorded here; the photo follows from the tablet through the send
+    // queue (kept on the tablet until the server has it, no signal is fine), recorded under this person with a permit
+    // for this car only. The PIN never goes into the queue.
     await admin.from("job_events").insert({ job_id: jobId, event_type: "tint_photo", note: `Tint fitted: photo taken by ${person.display_name} on the PPF tablet`, created_by: staffId });
-    return NextResponse.json({ ok: true, message: `${person.display_name}: tint photo saved.` });
+    const { grant, expiresAt } = mintGrant({ t: "job_file", s: String(job.id).toLowerCase(), u: person.id as string, via: "pin" });
+    return NextResponse.json({ ok: true, message: `${person.display_name}: tint photo saved on this tablet – sending…`, grant, expiresAt, stageId, caption: TINT_CAPTION });
   }
   if (body.action === "out") {
     const { minutes } = await clockOut(staffId, staffId);

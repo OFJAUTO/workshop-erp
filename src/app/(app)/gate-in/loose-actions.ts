@@ -14,17 +14,23 @@ import { createClient } from "@/lib/supabase/server";
 import { knownWordsUp } from "@/lib/text-case";
 import { getSettings } from "@/lib/settings";
 
-type ItemInput = { item_type: string; description: string | null; quantity: number; notes: string | null; photo: File | null };
+type ItemInput = { row: number; item_type: string; description: string | null; quantity: number; notes: string | null; photo: File | null };
 
 /**
  * Gate-in of loose items (no car): the customer, one line per item, what the customer wants, and
  * what we saw at the counter. The job opens straight at Quote: there is no inspection report and no
  * wash on this path.
+ *
+ * 31 October 2026: the page keeps each item's photo on the device and sends it straight to storage once the items exist
+ * (THE send queue, it waits there without signal), so the form carries no photos: with `photos_by_browser` the answer
+ * hands back the job, the item of every line and the job card's address instead of opening it. A page opened before that
+ * still sends the photos with the form.
  */
 export async function createLooseGateIn(_state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("gateIn");
   const values = formValues(formData);
   const get = (k: string) => String(formData.get(k) ?? "").trim();
+  const browserSends = get("photos_by_browser") === "1";
 
   // Items
   const items: ItemInput[] = [];
@@ -36,8 +42,8 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
     if (!type && !description) continue;
     if (!type) return { error: `Item ${i + 1}: choose what it is, or type it.`, values };
     const qty = Math.max(1, Math.round(Number(get(`item_quantity_${i}`)) || 1));
-    const photo = formData.get(`item_photo_${i}`);
-    items.push({ item_type: type.charAt(0).toUpperCase() + type.slice(1), description, quantity: qty, notes: blankToNull(get(`item_notes_${i}`)), photo: photo instanceof File && photo.size > 0 ? photo : null });
+    const photo = browserSends ? null : formData.get(`item_photo_${i}`);
+    items.push({ row: i, item_type: type.charAt(0).toUpperCase() + type.slice(1), description, quantity: qty, notes: blankToNull(get(`item_notes_${i}`)), photo: photo instanceof File && photo.size > 0 ? photo : null });
   }
   if (items.length === 0) return { error: "Add at least one item.", values };
   for (const it of items) {
@@ -84,10 +90,12 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
 
   // Items, each with its own QR tag.
+  const itemOfRow = new Map<number, string>();
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const { data: row } = await admin.from("job_items").insert({ job_id: job.id, position: i + 1, item_type: it.item_type, description: it.description, quantity: it.quantity, notes: it.notes, created_by: staff.id, updated_by: staff.id }).select("id").single();
     if (!row) continue;
+    itemOfRow.set(it.row, row.id as string);
     const code = await ensureQrLink("item", { jobId: job.id, vehicleId: vehicle.id, refId: row.id }, staff.id);
     await admin.from("job_items").update({ qr_code: code }).eq("id", row.id);
     if (it.photo) {
@@ -105,5 +113,12 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
 
   revalidatePath("/dashboard");
   revalidatePath("/jobs");
-  redirect(`/jobs/${job.id}?message=${encodeURIComponent(`${job.job_number} opened for ${summary}. Print the tags and stick one on each item.`)}`);
+  const href = `/jobs/${job.id}?message=${encodeURIComponent(`${job.job_number} opened for ${summary}. Print the tags and stick one on each item.`)}`;
+  if (browserSends) {
+    // The item of every line of the form, in line order ("" for a line that was left empty): the page sends each photo to it.
+    const lines = items.reduce((m, it) => Math.max(m, it.row + 1), 0);
+    const itemIds = Array.from({ length: lines }, (_, i) => itemOfRow.get(i) ?? "").join(",");
+    return { success: `${job.job_number} opened for ${summary}. Opening the job card…`, values: { ...values, jobId: job.id as string, itemIds, href } };
+  }
+  redirect(href);
 }

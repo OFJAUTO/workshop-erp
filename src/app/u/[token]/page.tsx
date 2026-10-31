@@ -6,6 +6,7 @@ import { Card, Notice } from "@/components/ui";
 import { loadGateInFlags, loadMedia, mediaChecklist } from "@/lib/media";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { DeviceFilesNote } from "./DeviceFilesNote";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,10 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
     return (
       <PublicShell note="Phone upload">
         <div className="flex-1 flex items-center justify-center p-6">
-          <Card className="max-w-md w-full">
+          <Card className="max-w-md w-full flex flex-col gap-3">
             <Notice tone="error">This link has expired. Show the QR code again on the PC or tablet to get a new one.</Notice>
+            {/* Files this phone took before the link ran out still go by themselves: say so, so the page is not closed. */}
+            {link ? <DeviceFilesNote jobId={link.job_id} /> : null}
           </Card>
         </div>
       </PublicShell>
@@ -68,7 +71,7 @@ export default async function PhoneUploadPage({ params }: { params: Promise<{ to
           </p>
         </div>
         <MediaChecklist jobId={link.job_id} check={check} token={token} carPictureUrl={carPictureUrl} damageChips={damageChips} />
-        <p className="text-xs text-muted">This link works for 30 minutes. Uploads are recorded under the person who opened it.</p>
+        <p className="text-xs text-muted">This link works for 30 minutes. Each photo and video stays on this phone until it has arrived, and keeps sending while this page is open – also after the link runs out. Uploads are recorded under the person who opened it.</p>
       </div>
     </PublicShell>
   );

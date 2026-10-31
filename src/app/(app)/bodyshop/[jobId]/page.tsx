@@ -28,6 +28,7 @@ import { consumablesShare, jobFilmCost, rollsWithUse } from "@/lib/film";
 import { bodyshopLabourBySection } from "@/lib/bodyshop";
 import { ceramicUsageAction, filmUsageAction, tintUsageAction } from "../rolls/actions";
 import { RemovedItemForm } from "./RemovedItemForm";
+import { PlotterPhoto } from "./PlotterPhoto";
 import { SignoffPanel } from "./SignoffPanel";
 import { UpdatesPanel, type UpdateState } from "./UpdatesPanel";
 import { TintFittedPhotos } from "@/components/TintFittedPhotos";
@@ -491,10 +492,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
               <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Metres used
                 <Input name="metres" inputMode="decimal" placeholder="6.5" required style={{ width: "6rem" }} data-metres-box />
               </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Plotter photo (optional)
-                <input type="file" name="photo" accept="image/*" className="text-xs" />
-              </label>
-              <Button type="submit" size="md" data-save-metres>Save the metres</Button>
+              {/* The photo and Save together: Save waits while the photo is still on its way, so it is never left out. */}
+              <PlotterPhoto jobId={jobId} />
             </form> : null}
             {tintRolls.length && mayEnterProduct(scope, "tint") ? (
               <div className="flex flex-wrap items-center gap-2">

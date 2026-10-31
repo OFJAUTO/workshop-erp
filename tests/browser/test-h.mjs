@@ -309,7 +309,8 @@ await section("E inspection photos and viewer", async () => {
   if (thumb) {
     await page.locator("[data-inspection-thumb] button").first().click();
     const lb = await until(async () => ((await page.locator("[data-lightbox]").count()) ? 1 : null), 20, 300);
-    check("3: the viewer opens on the same tab with 'n of m'", !!lb && /1 of 1/.test((await page.locator("[data-lightbox-count]").textContent().catch(() => "")) ?? ""));
+    // The viewer counts "1 / 1" since the 29 October viewer upgrade (it said "1 of 1" before).
+    check("3: the viewer opens on the same tab with 'n / m'", !!lb && /1 (of|\/) 1/.test((await page.locator("[data-lightbox-count]").textContent().catch(() => "")) ?? ""));
     await page.keyboard.press("Escape");
     await sleep(400);
     check("3: Esc closes the viewer", (await page.locator("[data-lightbox]").count()) === 0);

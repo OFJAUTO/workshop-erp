@@ -12,6 +12,7 @@ import { verifyPin } from "@/lib/pin";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { objectExists } from "@/lib/upload-targets/common";
 
 function refresh(jobId: string) {
   revalidatePath(`/parts/handover/${jobId}`);
@@ -111,6 +112,26 @@ export async function notNeededAction(jobId: string, formData: FormData) {
   outcome(jobId, r, to);
 }
 
+/**
+ * A credit note scan's path handed over by the page: only one in this part's own folder of the parts bucket (where the
+ * send queue puts it, src/lib/upload-targets/credit-note.ts), and only once the file really arrived there.
+ */
+/** A scan's path before it has arrived: the shape the upload place gives it (credit-notes/<part>/<uuid>.<ext>), nothing else. */
+function pendingCreditNotePath(partId: string, raw: FormDataEntryValue | null): string | null {
+  const path = typeof raw === "string" ? raw.trim() : "";
+  const head = `credit-notes/${partId}/`;
+  if (!partId || !path.startsWith(head)) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|pdf)$/i.test(path.slice(head.length)) ? path : null;
+}
+
+async function creditNotePathOf(partId: string, raw: FormDataEntryValue | null): Promise<string | null> {
+  const path = typeof raw === "string" ? raw.trim() : "";
+  const head = `credit-notes/${partId}/`;
+  const name = path.slice(head.length);
+  if (!partId || !path.startsWith(head) || !name || name.length > 80 || name.includes("/") || name.includes("..")) return null;
+  return (await objectExists(PARTS_BUCKET, path)) ? path : null;
+}
+
 /** Where a part without a home ends up. Parts (or the owner); a credit note scan goes to the parts bucket. */
 export async function dispositionAction(jobId: string, formData: FormData) {
   const staff = await requireStaff();
@@ -120,16 +141,35 @@ export async function dispositionAction(jobId: string, formData: FormData) {
   const partId = String(formData.get("part") ?? "");
   const disposition = String(formData.get("disposition") ?? "");
   if (disposition !== "returned" && disposition !== "stock" && disposition !== "fit_pending" && disposition !== "scrap") outcome(jobId, { error: "Choose where the part goes." }, to);
+  // 31 October 2026: the page sends the scan straight to storage first (it waits on the device without signal) and hands
+  // over its path; a tab opened before that still sends the file itself.
   let creditNotePath: string | null = null;
-  const file = formData.get("credit_note");
-  if (file instanceof File && file.size > 0) {
-    if (file.size > 10 * 1024 * 1024) outcome(jobId, { error: "The scan is too big (10 MB at most)." }, to);
-    const ext = (file.name.split(".").pop() ?? "pdf").toLowerCase().replace(/[^a-z0-9]/g, "") || "pdf";
-    creditNotePath = `credit-notes/${partId}/${Date.now()}.${ext}`;
-    const { error: upError } = await createAdminClient().storage.from(PARTS_BUCKET).upload(creditNotePath, file, { contentType: file.type || "application/pdf", upsert: false });
-    if (upError) outcome(jobId, { error: `Could not save the scan: ${upError.message}` }, to);
+  const sentPath = formData.get("credit_note_path");
+  if (typeof sentPath === "string" && sentPath.trim()) {
+    creditNotePath = await creditNotePathOf(partId, sentPath);
+    if (!creditNotePath) outcome(jobId, { error: "The credit note scan is not on the server – nothing was saved. Add the scan again, or type the credit note number." }, to);
+  } else {
+    const file = formData.get("credit_note");
+    if (file instanceof File && file.size > 0) {
+      if (file.size > 10 * 1024 * 1024) outcome(jobId, { error: "The scan is too big (10 MB at most)." }, to);
+      const ext = (file.name.split(".").pop() ?? "pdf").toLowerCase().replace(/[^a-z0-9]/g, "") || "pdf";
+      creditNotePath = `credit-notes/${partId}/${Date.now()}.${ext}`;
+      const { error: upError } = await createAdminClient().storage.from(PARTS_BUCKET).upload(creditNotePath, file, { contentType: file.type || "application/pdf", upsert: false });
+      if (upError) outcome(jobId, { error: "Could not save the scan – nothing was saved. Try again." }, to);
+    }
   }
+  // A scan picked a moment ago and still on its way: when it has arrived by now it goes with the ending.
+  const waiting = creditNotePath ? null : formData.get("credit_note_pending");
+  // Still on its way: the chosen scan's own path is kept with a part sent back, so only that scan can land on it (an
+  // earlier pick that arrives first never takes its place).
+  if (waiting) creditNotePath = (await creditNotePathOf(partId, waiting)) ?? (disposition === "returned" ? pendingCreditNotePath(partId, waiting) : null);
   const r = await setDisposition(jobId, partId, actorOf(staff), { disposition: disposition as "returned" | "stock" | "fit_pending" | "scrap", note: blankToNull(formData.get("note")), creditNotePath });
+  // Otherwise it lands on the part by itself when it arrives; one that arrived while the ending was being saved (its record
+  // step looked at the part a moment too early) is put on here.
+  if (!r.error && waiting && !creditNotePath) {
+    const arrived = await creditNotePathOf(partId, waiting);
+    if (arrived) await createAdminClient().from("part_items").update({ credit_note_path: arrived, updated_by: staff.id }).eq("id", partId).eq("job_id", jobId).is("credit_note_path", null);
+  }
   refresh(jobId);
   revalidatePath("/parts/no-home");
   outcome(jobId, r, to);

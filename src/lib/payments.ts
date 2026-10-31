@@ -17,7 +17,7 @@ import { AUTH_CODE_RE, authCodeProblem, cleanAuthCode, needsAuthCode } from "./a
 /** Who records: a staff member, or the payment gateway (no id). */
 export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
 export type PaymentInput = { invoiceId: string | null; jobId: string | null; method: string; amount: number; reference?: string | null; /** The bank's 6-character auth code (card machine and payment link): required when staff record one. */ authCode?: string | null; cheque?: { number: string | null; bank: string | null; date: string | null } | null; notes?: string | null; clientKey?: string | null };
-export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string };
+export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string } };
 
 const money = (n: number) => `AED ${round2(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
@@ -71,8 +71,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   } else if (authCode && !AUTH_CODE_RE.test(authCode)) return { error: authCodeProblem(method, authCode) ?? "Check the auth code." };
   // The same tap twice: the second one is the same payment.
   if (input.clientKey) {
-    const { data: same } = await admin.from("payments").select("id, number").eq("client_key", input.clientKey).maybeSingle();
-    if (same) return { ok: true, number: same.number, paymentId: same.id, message: `${same.number} was already recorded.` };
+    const { data: same } = await admin.from("payments").select("id, number, amount_aed, method").eq("client_key", input.clientKey).maybeSingle();
+    if (same) return { ok: true, number: same.number, paymentId: same.id, message: `${same.number} was already recorded.`, repeat: { amount: Number(same.amount_aed), method: String(same.method) } };
   }
   let jobId = input.jobId;
   let customerId: string | null = null;
