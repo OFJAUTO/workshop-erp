@@ -28,7 +28,11 @@ async function gateInDashboard(jobId) {
 }
 async function carReady(km = 48210) {
   const seed = (await api("/api/e2e/stage", { stage: "ready" })).json;
-  await sql("update public.gate_ins set mileage = $2, mileage_unit = 'km', mileage_miles = round($2 / 1.609344) where job_id = $1", [seed.jobId, km]);
+  // One parameter per value: a parameter used as an integer AND in a division is refused ("inconsistent types"),
+  // and the e2e sql helper hides the refusal - the reading then silently stays at the seed's 42,000.
+  await sql("update public.gate_ins set mileage = $2::int, mileage_unit = 'km', mileage_miles = $3::int where job_id = $1", [seed.jobId, km, Math.round(km / 1.609344)]);
+  const set = (await sql("select mileage from public.gate_ins where job_id = $1", [seed.jobId]))[0]?.mileage;
+  if (Number(set) !== km) throw new Error(`the gate-in reading was not set (${set})`);
   await gateInDashboard(seed.jobId);
   return seed;
 }
@@ -36,7 +40,12 @@ async function carReady(km = 48210) {
 async function fillTheRest(page) {
   for (const name of ["keys_ok", "keychain_ok", "dash_cam_reconnected", "old_parts_handed", "handover_confirmed"]) {
     const box = page.locator(`input[name="${name}"]`);
-    if ((await box.count()) && (await box.first().isVisible())) await box.first().check();
+    if (!(await box.count()) || !(await box.first().isVisible())) continue;
+    // React resets the form a moment after the server's answer: a tick made in that moment is undone, so try again.
+    for (let i = 0; i < 5 && !(await box.first().isChecked()); i++) {
+      await box.first().check({ timeout: 3000 }).catch(() => null);
+      if (!(await box.first().isChecked())) await sleep(300);
+    }
   }
   const reason = page.locator('textarea[name="release_reason"]');
   if (await reason.count()) await reason.first().fill("E2e test release");
@@ -57,7 +66,8 @@ try {
   check("A the gate-out has the Final km box with the gate-in reading", (await page.locator("[data-final-mileage]").count()) === 1 && /48,210 km/.test(await text(page.locator("[data-final-mileage]"))));
   await fillTheRest(page);
   await submit(page);
-  await until(async () => /final km|Final km/.test(await text(page.locator("main"))), 40);
+  // Wait for the server's own words ("Final km" is always on the page as the box's label).
+  await until(async () => /Enter the final km/.test(await text(page.locator("main"))), 40);
   const noRow = (await sql("select count(*)::int as n from public.gate_outs where job_id = $1", [jobId]))[0].n;
   check("A without the final km: refused, nothing saved", /Enter the final km/.test(await text(page.locator("main"))) && noRow === 0, await text(page.locator("[role=alert], .text-red")));
   await page.locator("[data-final-mileage]").scrollIntoViewIfNeeded();
@@ -65,7 +75,7 @@ try {
   await page.locator("[data-mileage-out]").fill("48255");
   await fillTheRest(page);
   await submit(page);
-  await until(async () => /instrument cluster/.test(await text(page.locator("main"))), 40);
+  await until(async () => /Take the photo of the whole instrument cluster/.test(await text(page.locator("main"))), 40);
   check("A with the km but no photo: refused (the photo is required)", /Take the photo of the whole instrument cluster/.test(await text(page.locator("main"))) && (await sql("select count(*)::int as n from public.gate_outs where job_id = $1", [jobId]))[0].n === 0);
 
   /* B: lower than at gate-in */
@@ -76,7 +86,8 @@ try {
   check("B the cluster photo goes straight to storage (job file kind odometer_out)", !!odo);
   await fillTheRest(page);
   await submit(page);
-  await until(async () => /lower than at gate-in/.test(await text(page.locator("main"))), 40);
+  // The server's refusal ends with "Check the reading." (the screen's own red line says "lower than" at once).
+  await until(async () => /Check the reading/.test(await text(page.locator("main"))), 40);
   check("B the server refuses it too, nothing saved", (await sql("select count(*)::int as n from public.gate_outs where job_id = $1", [jobId]))[0].n === 0);
   await page.screenshot({ path: path.join(SHOTS, "B-lower-km-refused-1440.png") });
 

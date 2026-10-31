@@ -14,6 +14,10 @@ export async function schemaReady(table: string, columns: string): Promise<boole
   const now = Date.now();
   if (hit && now - hit.at < (hit.ok ? 3_600_000 : 60_000)) return hit.ok;
   const { error } = await createAdminClient().from(table).select(columns).limit(0);
+  // Only "this column / table does not exist" means not ready. A passing hiccup (no connection, a time-out) keeps the
+  // last answer and is asked again next time - it never switches a feature off for a minute.
+  const missing = !!error && /^(42703|42P01|PGRST204|PGRST205)$/.test(String(error.code ?? ""));
+  if (error && !missing) return hit?.ok ?? false;
   const ok = !error;
   cache.set(key, { ok, at: now });
   return ok;
