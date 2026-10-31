@@ -152,7 +152,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         {bundle.lines.filter((l) => l.section === "services" && !!l.package_items).map((l) => {
           const docModel = packageDocOf(l.package_items, { car: invoice.vehicle_snapshot?.title ?? (car || null), decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
           const disc = Number(l.discount_percent) || 0;
-          return docModel ? <PackageCard key={l.id} doc={docModel} price={Math.round(l.unit_price * l.quantity * 100) / 100} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: Math.round((l.unit_price * l.quantity - l.amount_aed) * 100) / 100 } : null} /> : null;
+          return docModel ? <PackageCard key={l.id} doc={docModel} price={Math.round(l.unit_price * l.quantity * 100) / 100} discount={disc > 0 ? { percent: disc, amount: Math.round((l.unit_price * l.quantity - l.amount_aed) * 100) / 100 } : null} /> : null;
         })}
       </CustomerFront>
     );

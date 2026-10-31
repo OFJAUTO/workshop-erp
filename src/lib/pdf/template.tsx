@@ -2,6 +2,7 @@ import "server-only";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ReactNode } from "react";
+import type { MoneyRow as DocMoneyRow } from "@/lib/doc-totals";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import { Document, Font, Image, Link, Page, Path, Polygon, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
 import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
@@ -43,6 +44,9 @@ export const GREEN = "#1b6b2f";
 // The design is 794 px wide at 96 dpi; a point is 0.75 of a px.
 export const px = (n: number) => Math.round(n * 0.75 * 100) / 100;
 
+// Tight spacing (31 October 2026): a document that overflows a page by a little is drawn again with less air before a
+// second page is used - every part takes a `tight` flag (React context is not allowed in a server module). Fonts never shrink.
+
 /**
  * One template for every document the workshop sends, following docs/ofj-invoice-design.html: white
  * header with the logo on the left and the legal name, address and large TRN on the right over a thick
@@ -59,7 +63,7 @@ export const styles = StyleSheet.create({
   compactTitle: { fontSize: px(11), fontWeight: 700, color: GREY, letterSpacing: 0.6, textTransform: "uppercase" },
   headerRight: { flexDirection: "row", alignItems: "stretch" },
   headerCol: { justifyContent: "center" },
-  headerDivider: { borderLeftWidth: 1, borderLeftColor: RULE, paddingLeft: px(22), marginLeft: px(22) },
+  headerDivider: { paddingLeft: px(22), marginLeft: px(22) },
   legalName: { fontSize: px(12), fontWeight: 700, letterSpacing: 0.2 },
   addressLine: { fontSize: px(10.5), color: GREY, marginTop: px(2) },
   trnLabel: { fontSize: px(9), fontWeight: 700, color: GREY, letterSpacing: 0.9, textTransform: "uppercase", marginBottom: px(3) },
@@ -108,7 +112,7 @@ export const styles = StyleSheet.create({
   footerText: { fontSize: px(10), color: GREY, marginTop: px(3) },
   footerStrong: { fontSize: px(10), color: INK, fontWeight: 600 },
   qr: { width: px(58), height: px(58) },
-  contact: { borderTopWidth: px(3), borderTopColor: INK, paddingTop: px(10), flexDirection: "row", justifyContent: "center", alignItems: "baseline", gap: px(34), fontSize: px(10.5) },
+  contact: { borderTopWidth: px(3), borderTopColor: INK, paddingTop: px(9), flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: px(20), fontSize: px(10.5) },
   contactLabel: { fontSize: px(9), fontWeight: 700, color: GREY, letterSpacing: 0.9, textTransform: "uppercase", marginRight: px(8) },
   photoRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 },
   photo: { width: 118, height: 88, objectFit: "cover", borderRadius: 3, backgroundColor: PALE },
@@ -150,7 +154,8 @@ export function companyOf(s: Settings): Company {
 }
 
 export const SITE_HOST = PRODUCTION_SITE_URL.replace(/^https?:\/\//, "");
-export const currencyOf = (s: Settings): Currency => (String(s.document_currency) === "aed" ? "aed" : "symbol");
+/** "AED" on every document and screen, always two decimals (31 October 2026): the dirham symbol is no longer used. */
+export const currencyOf = (s: Settings): Currency => { void s; return "aed"; };
 
 /** The dirham symbol drawn at the size of the text beside it. */
 export function DirhamMark({ size = 9, color = INK }: { size?: number; color?: string }) {
@@ -176,12 +181,16 @@ export function Amount({ value, currency, size = px(12), bold = false, color = I
   );
 }
 
-export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, computerGenerated = false, children }: { uppercase?: boolean; /** The tax invoice carries the "computer generated document" line; nothing else does. */ computerGenerated?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; children: ReactNode }) {
+export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, computerGenerated = false, tight = false, children }: { uppercase?: boolean; /** The tax invoice carries the "computer generated document" line; nothing else does. */ computerGenerated?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; /** 31 October 2026: drawn again with less air when it overflows a page by a little (fonts never shrink). */ tight?: boolean; children: ReactNode }) {
+  // The owner's mockup (31 October 2026): ONE footer row under a thick rule - Tel, Web, Email and "Page X of Y". Lines
+  // a document must carry (the tax invoice's computer-generated line, an LPO's instruction) and a QR sit just above it.
+  const extra = [computerGenerated ? "This is a computer generated document which requires no stamp and signature." : null, ...footerLines].filter((x): x is string => !!x);
+  const footerRoom = px(62) + extra.length * px(15) + (qr ? px(48) : 0);
   return (
     <Document title={title} author={company.tradingName} creator={company.tradingName} producer={company.tradingName}>
-      <Page size="A4" style={styles.page}>
+      <Page size="A4" style={[styles.page, { paddingTop: tight ? px(20) : px(30), paddingBottom: footerRoom }]}>
         <View
-          style={styles.header}
+          style={[styles.header, tight ? { paddingBottom: px(12), marginBottom: px(14) } : {}]}
           fixed
           render={({ pageNumber }) =>
             pageNumber > 1 ? (
@@ -191,7 +200,7 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
               </View>
             ) : (
               <>
-                {logo ? <Image src={{ data: logo, format: "png" }} style={styles.logo} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
+                {logo ? <Image src={{ data: logo, format: "png" }} style={[styles.logo, tight ? { height: px(64) } : {}]} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
                 <View style={styles.headerRight}>
                   <View style={styles.headerCol}>
                     <Text style={styles.legalName}>{company.legalName}</Text>
@@ -212,28 +221,29 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
         />
         {/* The footer sits before the content: react-pdf drops fixed elements placed after a block that wraps over pages. */}
         <View style={styles.footer} fixed>
-          <View style={styles.footerMain}>
-            <View style={{ flex: 1 }}>
-              {computerGenerated ? <Text style={styles.footerText}>This is a computer generated document which requires no stamp and signature.</Text> : null}
-              {footerLines.filter(Boolean).map((l, i) => (
-                <Text key={i} style={styles.footerText}>{l}</Text>
-              ))}
-              <Text style={styles.footerText} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
-            </View>
-            {qr ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: px(10) }}>
-                <Text style={[styles.footerText, { textAlign: "right", marginTop: 0 }]}>{scanLabel}</Text>
-                <Image src={{ data: qr, format: "png" }} style={styles.qr} />
+          {extra.length || qr ? (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: px(20), marginBottom: px(8) }}>
+              <View style={{ flex: 1 }}>
+                {extra.map((l, i) => (
+                  <Text key={i} style={styles.footerText}>{l}</Text>
+                ))}
               </View>
-            ) : null}
-          </View>
+              {qr ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: px(8) }}>
+                  <Text style={[styles.footerText, { textAlign: "right", marginTop: 0 }]}>{scanLabel}</Text>
+                  <Image src={{ data: qr, format: "png" }} style={{ width: px(48), height: px(48) }} />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
           <View style={styles.contact}>
             {company.phone ? <Text><Text style={styles.contactLabel}>Tel   </Text>{company.phone}</Text> : null}
             {company.website ? <Text><Text style={styles.contactLabel}>Web   </Text>{company.website}</Text> : null}
             {company.email ? <Text><Text style={styles.contactLabel}>Email   </Text>{company.email}</Text> : null}
+            <Text style={{ color: GREY }} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
           </View>
         </View>
-        <View style={uppercase ? { textTransform: "uppercase", flexGrow: 1 } : { flexGrow: 1 }}>{children}</View>
+        <View style={uppercase ? { textTransform: "uppercase" } : {}}>{children}</View>
       </Page>
     </Document>
   );
@@ -501,35 +511,49 @@ export function WordsAndPayments({ words, payments, bank, currency, showBank = t
 }
 
 /**
- * The end of a money document in a fixed order: the totals (never split), the amount in words with any
- * payments received, the notes, then the bank details as one block at the bottom of the last page, directly
- * above the footer.
+ * The end of a money document, as ONE block that never splits (the owner's mockup of 31 October 2026): the amount in
+ * words on the left beside the totals box, then under a thin rule the bank details on the left and the note on the
+ * right. It always follows the last lines on the same page - never alone on a page of its own. `before` (the customer
+ * note, the safety warning) comes just above it; `after` (the warranty table) follows it.
  */
-export function DocumentTail({ totals, words, payments = [], notes = null, bank = null }: { totals: ReactNode; words: string; payments?: PaymentLine[]; notes?: ReactNode; bank?: Company["bank"] | null }) {
+export function DocumentTail({ rows, words, bank = null, note = null, before = null, after = null, lead = null, tight = false }: { rows: DocMoneyRow[]; words: string; bank?: Company["bank"] | null; note?: string | null; before?: ReactNode; after?: ReactNode; /** The last lines held back by boxesWithTail: drawn first inside the block that never splits. */ lead?: ReactNode; tight?: boolean }) {
+  const hasBank = !!bank && !!(bank.iban || bank.accountNumber);
   return (
     <>
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: px(4) }}>{totals}</View>
-      <View style={{ marginTop: px(14) }} wrap={false}>
-        <Text style={styles.smallTitle}>Amount in words</Text>
-        <Text style={styles.words}>{words}</Text>
-        {payments.length ? (
-          <View>
-            <Text style={styles.smallTitle}>Payments received</Text>
-            {payments.map((p, i) => (
-              <Text key={i} style={styles.bankLine}>{p.date} · {p.method}{p.note ? ` · ${p.note}` : ""} · AED {moneyDigits(p.amount)}</Text>
-            ))}
+      {before}
+      <View wrap={false} style={{ marginTop: tight ? px(4) : px(10) }}>
+        {lead}
+        <View style={{ flexDirection: "row", gap: px(28), alignItems: "flex-start" }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.smallTitle}>Amount in words</Text>
+            <Text style={styles.words}>{words}</Text>
+          </View>
+          <View style={{ width: px(300) }}>
+            <DocTotalsBox rows={rows} tight={tight} />
+          </View>
+        </View>
+        {hasBank || note ? (
+          <View style={{ flexDirection: "row", justifyContent: "space-between", gap: px(28), marginTop: tight ? px(10) : px(20), paddingTop: tight ? px(9) : px(14), borderTopWidth: 1, borderTopColor: LINE }}>
+            <View style={{ flex: 1 }}>
+              {hasBank ? (
+                <>
+                  <Text style={styles.smallTitle}>Bank details</Text>
+                  <Text style={styles.bankLine}>{[bank!.name, bank!.accountName].filter(Boolean).join(" · ")}</Text>
+                  <Text style={styles.bankLine}>{[bank!.accountNumber ? `Account ${bank!.accountNumber}` : "", bank!.swift ? `SWIFT ${bank!.swift}` : ""].filter(Boolean).join(" · ")}</Text>
+                  {bank!.iban ? <Text style={styles.bankLine}>IBAN {bank!.iban}</Text> : null}
+                </>
+              ) : null}
+            </View>
+            {note ? (
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.smallTitle, { textAlign: "right" }]}>Note</Text>
+                <Text style={{ textAlign: "right", color: GREY, fontSize: px(10.5) }}>{note}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
-      {notes}
-      {bank && (bank.iban || bank.accountNumber) ? (
-        <View style={[styles.bank, { marginTop: "auto", paddingTop: px(14) }]} wrap={false}>
-          <Text style={styles.smallTitle}>Bank details</Text>
-          <Text style={styles.bankLine}>{[bank.name, bank.accountName].filter(Boolean).join(" · ")}</Text>
-          <Text style={styles.bankLine}>{[bank.accountNumber ? `Account ${bank.accountNumber}` : "", bank.swift ? `SWIFT ${bank.swift}` : ""].filter(Boolean).join(" · ")}</Text>
-          {bank.iban ? <Text style={styles.bankLine}>IBAN {bank.iban}</Text> : null}
-        </View>
-      ) : null}
+      {after}
     </>
   );
 }
@@ -598,7 +622,7 @@ export function qtyText(quantity: number, hours?: number | null) {
  * proforma and the tax invoice: only the title and the numbers change between them.
  * ------------------------------------------------------------------------------------------------------------------ */
 
-export type SectionLine = { description: string; /** The short form (ALL 4, FRONT PAIR): its own small line under the name. */ positions?: string | null; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; /** "Complimentary" or "Included" (defaults to Complimentary). */ compWord?: string; /** The line's own discount: the green bold row under the description. */ discountPercent?: number; discountAmount?: number; tag?: string | null };
+export type SectionLine = { /** The line's quantity: QTY and PRICE print only when a line in the box has more than 1. */ quantity?: number; description: string; /** The short form (ALL 4, FRONT PAIR): its own small line under the name. */ positions?: string | null; details?: string | null; qty: string; rate: number; amount: number; complimentary?: boolean; /** "Complimentary" or "Included" (defaults to Complimentary). */ compWord?: string; /** The line's own discount: the green bold row under the description. */ discountPercent?: number; discountAmount?: number; tag?: string | null };
 
 const sec = StyleSheet.create({
   box: { borderWidth: 1, borderColor: RULE, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
@@ -606,14 +630,14 @@ const sec = StyleSheet.create({
   barTitle: { fontSize: px(9.5), fontWeight: 700, color: INK, letterSpacing: 0.9, textTransform: "uppercase" },
   barCount: { fontSize: px(9.5), fontWeight: 600, color: GREY },
   head: { flexDirection: "row", paddingVertical: px(5), paddingHorizontal: px(12), borderBottomWidth: 1, borderBottomColor: LINE, fontSize: px(9), fontWeight: 700, color: GREY, textTransform: "uppercase", letterSpacing: 0.6 },
-  row: { flexDirection: "row", paddingVertical: px(7), paddingHorizontal: px(12), borderBottomWidth: 1, borderBottomColor: LINE },
+  row: { flexDirection: "row", paddingVertical: px(6), paddingHorizontal: px(12) },
   sub: { flexDirection: "row", backgroundColor: PALE, paddingVertical: px(7), paddingHorizontal: px(12), fontWeight: 700 },
-  no: { width: px(22), color: GREY },
-  desc: { flex: 1, paddingRight: px(8), textTransform: "uppercase" },
+  no: { width: px(30), color: GREY },
+  desc: { flex: 1, paddingRight: px(8) },
   qty: { width: px(54), textAlign: "right" },
   rate: { width: px(84), textAlign: "right" },
   amt: { width: px(96), textAlign: "right" },
-  totals: { width: px(262), borderWidth: 1, borderColor: RULE, borderRadius: px(8), paddingVertical: px(10), paddingHorizontal: px(14) },
+  totals: { borderWidth: 1, borderColor: RULE, borderRadius: px(8), paddingVertical: px(10), paddingHorizontal: px(14) },
   tRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: px(3) },
   tLabel: { color: GREY },
   tGreen: { fontWeight: 800, color: GREEN },
@@ -621,31 +645,39 @@ const sec = StyleSheet.create({
   tGrand: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: px(2), borderTopColor: INK, marginTop: px(4), paddingTop: px(8), fontSize: px(15), fontWeight: 800 },
 });
 
-/** One bordered box of lines with its heading bar and subtotal row. Lines are numbered from 1 inside the box. */
-export function SectionBox({ title, lines, subtotalLabel }: { title: string; lines: SectionLine[]; subtotalLabel: string }) {
-  const sum = lines.reduce((a, l) => a + l.amount, 0);
+/**
+ * One bordered box of lines with its heading bar (the owner's mockup of 31 October 2026). Lines are numbered from 1
+ * inside the box; QTY and PRICE only when a line in the box has a quantity above 1 (otherwise just AMOUNT); the pale
+ * subtotal row only when the document's money rule says so (docMoneyRows / sectionSubtotalShown in src/lib/doc-totals.ts).
+ * A box split by boxesWithTail keeps its numbering (`startAt`), the whole box's subtotal (`subtotalValue`) and the
+ * whole box's columns (`showQtyFrom`).
+ */
+export function SectionBox({ title, lines, subtotalLabel, showSubtotal = false, descLabel = "Description", tight = false, startAt = 1, subtotalValue = null, showQtyFrom = null }: { title: string; lines: SectionLine[]; subtotalLabel: string; showSubtotal?: boolean; descLabel?: string; tight?: boolean; startAt?: number; subtotalValue?: number | null; showQtyFrom?: SectionLine[] | null }) {
+  const sum = subtotalValue ?? lines.reduce((a, l) => a + l.amount, 0);
+  const showQty = (showQtyFrom ?? lines).some((l) => (l.quantity ?? 1) > 1);
+  const compWidth = showQty ? px(84 + 96) : px(160);
+  const pad = tight ? px(4) : px(6);
   return (
-    <View style={sec.box}>
+    <View style={[sec.box, tight ? { marginBottom: px(9) } : {}]}>
       <View style={sec.bar} fixed>
         <Text style={sec.barTitle}>{title}</Text>
-        <Text style={sec.barCount}>{lines.length} line{lines.length === 1 ? "" : "s"}</Text>
       </View>
       <View style={sec.head} fixed>
         <Text style={sec.no}>#</Text>
-        <Text style={sec.desc}>Description</Text>
-        <Text style={sec.qty}>Qty</Text>
-        <Text style={sec.rate}>Rate</Text>
+        <Text style={sec.desc}>{descLabel}</Text>
+        {showQty ? <Text style={sec.qty}>Qty</Text> : null}
+        {showQty ? <Text style={sec.rate}>Price</Text> : null}
         <Text style={sec.amt}>Amount</Text>
       </View>
       {lines.length === 0 ? (
-        <View style={sec.row}>
+        <View style={[sec.row, { paddingVertical: pad }]}>
           <Text style={[sec.desc, { color: GREY }]}>None</Text>
         </View>
       ) : null}
       {lines.map((l, i) => (
         // A short row stays in one piece; a very long description may continue on the next page (never clipped).
-        <View key={i} style={sec.row} wrap={l.description.length + (l.details?.length ?? 0) > 600}>
-          <Text style={sec.no}>{i + 1}</Text>
+        <View key={i} style={[sec.row, { paddingVertical: pad }]} wrap={l.description.length + (l.details?.length ?? 0) > 600}>
+          <Text style={sec.no}>{startAt + i}</Text>
           <View style={sec.desc}>
             <Text style={styles.lineTitle}>{cleanDocTitle(l.description)}</Text>
             {l.positions ? <Text style={{ fontSize: px(10), fontWeight: 700, color: GREY, letterSpacing: 0.3, marginTop: px(1) }}>{l.positions}</Text> : null}
@@ -657,85 +689,95 @@ export function SectionBox({ title, lines, subtotalLabel }: { title: string; lin
               </Text>
             ) : null}
           </View>
-          <Text style={sec.qty}>{l.qty}</Text>
+          {showQty ? <Text style={sec.qty}>{l.qty}</Text> : null}
           {l.complimentary ? (
             // "COMPLIMENTARY (value AED 12,350.00)": the word, then the value on its own line - an amount never splits.
-            <View style={{ width: px(84 + 96) }}>
+            <View style={{ width: compWidth }}>
               {(l.compWord ?? "Complimentary").split(/\s+(?=\(value )/).map((w, k) => (
-                <Text key={k} style={[sec.rate, { width: px(84 + 96), color: GREEN, fontWeight: 700 }, k ? { fontSize: px(10), fontWeight: 600 } : {}]}>{w}</Text>
+                <Text key={k} style={[sec.rate, { width: compWidth, color: GREEN, fontWeight: 700 }, k ? { fontSize: px(10), fontWeight: 600 } : {}]}>{w}</Text>
               ))}
             </View>
           ) : (
             <>
-              <Text style={sec.rate}>{moneyDigits(l.rate)}</Text>
-              <Text style={[sec.amt, { fontWeight: 600 }]}>{moneyDigits(l.amount)}</Text>
+              {showQty ? <Text style={sec.rate}>{moneyDigits(l.rate)}</Text> : null}
+              <Text style={sec.amt}>{moneyDigits(l.amount)}</Text>
             </>
           )}
         </View>
       ))}
-      <View style={sec.sub} wrap={false}>
-        <Text style={sec.no}>{""}</Text>
-        <Text style={sec.desc}>{subtotalLabel}</Text>
-        <Text style={sec.qty}>{""}</Text>
-        <Text style={sec.rate}>{""}</Text>
-        <Text style={sec.amt}>{moneyDigits(sum)}</Text>
-      </View>
+      {showSubtotal ? (
+        <View style={[sec.sub, { paddingVertical: pad }]} wrap={false}>
+          <Text style={sec.no}>{""}</Text>
+          <Text style={sec.desc}>{subtotalLabel}</Text>
+          <Text style={sec.amt}>{moneyDigits(sum)}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-export type MoneyRow = { label: string; value: number };
+/** One box of lines as a document describes it; `boxesWithTail` draws them. */
+export type BoxSpec = { key: string; title: string; descLabel?: string; lines: SectionLine[]; subtotalLabel: string; showSubtotal: boolean };
 
 /**
- * The totals box, aligned right: the three sections, then the labour discount and the round-off in bold green, a
- * thin line, the subtotal before VAT, VAT, and the grand total in bold and larger. Any rows after it (Paid, Balance)
- * and the status box follow.
+ * The boxes of lines, and - when `keepLast` is on - the last two lines held back to travel with the totals (31 October
+ * 2026: the totals never start a page alone). The held-back lines keep their numbers and their box's subtotal (the
+ * whole box's sum); they go in DocumentTail's `lead`, inside the block that never splits. react-pdf ignores `break`
+ * inside a box, so this is how the last lines move over.
  */
-export function TotalsBox({ sections, green = [], net, vatPercent, vat, total, totalLabel = "Grand total", after = [], status, currency }: { sections: MoneyRow[]; green?: MoneyRow[]; net: number; vatPercent: number; vat: number; total: number; totalLabel?: string; after?: TotalRow[]; status?: StatusBox | null; currency: Currency }) {
+export function boxesWithTail(boxes: BoxSpec[], keepLast: boolean, tight: boolean): { body: ReactNode[]; lead: ReactNode[] } {
+  const cut = new Map<string, number>();
+  let need = keepLast ? 2 : 0;
+  for (let i = boxes.length - 1; i >= 0 && need > 0; i--) {
+    const n = boxes[i].lines.length;
+    if (!n) continue;
+    // A box with a subtotal moves at least two lines: its subtotal never sits under a single line on the new page.
+    const take = Math.min(n, Math.max(need, boxes[i].showSubtotal ? 2 : 1));
+    cut.set(boxes[i].key, n - take);
+    need -= take;
+  }
+  const body: ReactNode[] = [];
+  const lead: ReactNode[] = [];
+  for (const b of boxes) {
+    const c = cut.get(b.key);
+    const sum = b.lines.reduce((a, l) => a + l.amount, 0);
+    if (c === undefined) {
+      body.push(<SectionBox key={b.key} tight={tight} title={b.title} descLabel={b.descLabel} lines={b.lines} subtotalLabel={b.subtotalLabel} showSubtotal={b.showSubtotal} />);
+      continue;
+    }
+    if (c > 0) body.push(<SectionBox key={`${b.key}-a`} tight={tight} title={b.title} descLabel={b.descLabel} lines={b.lines.slice(0, c)} subtotalLabel={b.subtotalLabel} showSubtotal={false} />);
+    lead.push(<SectionBox key={`${b.key}-b`} tight={tight} title={b.title} descLabel={b.descLabel} lines={b.lines.slice(c)} startAt={c + 1} subtotalLabel={b.subtotalLabel} showSubtotal={b.showSubtotal} subtotalValue={sum} showQtyFrom={b.lines} />);
+  }
+  return { body, lead };
+}
+
+/**
+ * The totals box on the right (the owner's mockup): the rows from docMoneyRows - each amount once - with "AED" and two
+ * decimals, the discounts in bold green, and TOTAL INCL. VAT large under a thick rule; payments and the balance due
+ * follow inside the same box.
+ */
+export function DocTotalsBox({ rows, tight = false }: { rows: DocMoneyRow[]; tight?: boolean }) {
+  const money = (v: number) => `AED ${moneyDigits(v)}`;
   return (
-    <View style={{ width: px(262) }} wrap={false}>
-      <View style={sec.totals}>
-        {sections.map((r) => (
-          <View key={r.label} style={sec.tRow}>
-            <Text style={[sec.tLabel, LABEL_CELL]}>{r.label}</Text>
-            <Text style={AMOUNT_CELL}>{moneyDigits(r.value)}</Text>
+    <View style={[sec.totals, tight ? { paddingVertical: px(6) } : {}]} wrap={false}>
+      {rows.map((r, i) => {
+        if (r.kind === "total" || r.kind === "balance") {
+          return (
+            <View key={i} style={[sec.tGrand, i === 0 ? { borderTopWidth: 0, marginTop: 0, paddingTop: 0 } : {}]}>
+              <Text style={[LABEL_CELL, { fontSize: px(10.5), fontWeight: 800, letterSpacing: 1.1, textTransform: "uppercase", color: r.kind === "balance" && r.value <= 0.004 ? GREEN : INK }]}>{r.label}</Text>
+              <Text style={[AMOUNT_CELL, { fontSize: px(r.kind === "total" ? 18 : 15), fontWeight: 800 }]}>{money(r.value)}</Text>
+            </View>
+          );
+        }
+        const green = r.kind === "green";
+        const minus = green || r.kind === "paid";
+        return (
+          <View key={i} style={sec.tRow}>
+            <Text style={[green ? sec.tGreen : sec.tLabel, LABEL_CELL]}>{r.label}</Text>
+            <Text style={[green ? sec.tGreen : {}, AMOUNT_CELL]}>{minus ? "− " : ""}{money(r.value)}</Text>
           </View>
-        ))}
-        {green.filter((r) => r.value).map((r) => (
-          <View key={r.label} style={sec.tRow}>
-            <Text style={[sec.tGreen, LABEL_CELL]}>{r.label}</Text>
-            <Text style={[sec.tGreen, AMOUNT_CELL]}>− {currency === "aed" ? "AED " : ""}{moneyDigits(r.value)}</Text>
-          </View>
-        ))}
-        <View style={sec.tRule} />
-        <View style={sec.tRow}>
-          <Text style={[sec.tLabel, LABEL_CELL]}>Subtotal before VAT</Text>
-          <Text style={AMOUNT_CELL}>{moneyDigits(net)}</Text>
-        </View>
-        <View style={sec.tRow}>
-          <Text style={[sec.tLabel, LABEL_CELL]}>VAT {vatPercent}%</Text>
-          <Text style={AMOUNT_CELL}>{moneyDigits(vat)}</Text>
-        </View>
-        <View style={sec.tGrand}>
-          <Text>{totalLabel}{currency === "aed" ? " AED" : ""}</Text>
-          {currency === "aed" ? <Text>{moneyDigits(total)}</Text> : <Amount value={total} currency={currency} size={px(15)} weight={800} />}
-        </View>
-        {after.map((r) => (
-          <View key={r.label} style={sec.tRow}>
-            <Text style={[r.bold ? styles.tBold : sec.tLabel, LABEL_CELL]}>{r.label}</Text>
-            <Text style={[r.bold ? styles.tBold : {}, AMOUNT_CELL]}>{r.negative ? "−" : ""}{moneyDigits(r.value)}</Text>
-          </View>
-        ))}
-      </View>
-      {status ? (
-        <View style={[styles.statusBox, { marginTop: px(10) }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.statusTitle}>{status.title}</Text>
-            {status.note ? <Text style={styles.statusNote}>{status.note}</Text> : null}
-          </View>
-          {status.value !== null && status.value !== undefined ? <Amount value={status.value} currency={currency === "symbol" ? "symbol" : "aed"} size={px(16)} weight={800} /> : null}
-        </View>
-      ) : null}
+        );
+      })}
     </View>
   );
 }
@@ -756,7 +798,7 @@ function Tick({ size = 9, color = GREEN }: { size?: number; color?: string }) {
 }
 
 const pkg = StyleSheet.create({
-  box: { borderWidth: 1.5, borderColor: INK, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
+  box: { borderWidth: 1, borderColor: RULE, borderRadius: px(8), marginBottom: px(14), overflow: "hidden" },
   bar: { backgroundColor: INK, paddingVertical: px(7), paddingHorizontal: px(12) },
   barTitle: { fontSize: px(9.5), fontWeight: 800, color: "#FFFFFF", letterSpacing: 1.2, textTransform: "uppercase" },
   head: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingTop: px(12), paddingBottom: px(10), paddingHorizontal: px(14), gap: px(12) },
@@ -780,18 +822,7 @@ const pkg = StyleSheet.create({
 
 export type PackageSectionDoc = { title: string; subtitle: string; items: { label: string; warranty: string | null; note?: string | null }[]; complimentary: string[]; completion: string | null; explain?: string | null };
 
-/** A small drawn ⓘ (the document font has no such glyph). */
-function InfoMark({ size = 9 }: { size?: number }) {
-  return (
-    <Svg width={px(size)} height={px(size)} viewBox="0 0 12 12">
-      <Path d="M6 1.2 A4.8 4.8 0 1 1 5.99 1.2 Z" stroke={GREY} strokeWidth={1} fill="none" />
-      <Path d="M6 5.3 L6 9" stroke={GREY} strokeWidth={1.3} />
-      <Path d="M6 3.2 L6 3.9" stroke={GREY} strokeWidth={1.4} />
-    </Svg>
-  );
-}
-
-export function PackageSection({ doc, price, subtotal, discount = null }: { doc: PackageSectionDoc; price: number; subtotal: number; /** The line's own discount, in bold green under the price. */ discount?: { percent: number | null; amount: number } | null }) {
+export function PackageSection({ doc, price, tight = false }: { doc: PackageSectionDoc; price: number; tight?: boolean }) {
   return (
     <View style={pkg.box}>
       <View style={pkg.bar} wrap={false}>
@@ -805,11 +836,6 @@ export function PackageSection({ doc, price, subtotal, discount = null }: { doc:
         <View>
           <Text style={pkg.priceLabel}>Package price</Text>
           <Text style={pkg.price}>AED {moneyDigits(price)}</Text>
-          {discount && discount.amount > 0.004 ? (
-            <Text style={{ fontSize: px(10), fontWeight: 800, color: GREEN, textAlign: "right", marginTop: px(2) }}>
-              Discount{discount.percent ? ` ${moneyDigits(discount.percent).replace(/\.00$/, "")}%` : ""}: −AED {moneyDigits(discount.amount)}
-            </Text>
-          ) : null}
         </View>
       </View>
       {doc.items.length ? (
@@ -819,17 +845,12 @@ export function PackageSection({ doc, price, subtotal, discount = null }: { doc:
             <Text style={pkg.listHeadText}>Warranty</Text>
           </View>
           {doc.items.map((i, k) => (
-            <View key={k} style={pkg.item} wrap={false}>
+            <View key={k} style={[pkg.item, tight ? { paddingVertical: px(4) } : {}]} wrap={false}>
               <View style={{ paddingTop: px(1.6) }}><Tick /></View>
               <View style={{ flex: 1 }}>
                 <Text style={pkg.itemText}>{i.label}</Text>
-                {i.note ? <Text style={{ fontSize: px(9.5), fontWeight: 700, color: INK, marginTop: px(1.5) }}>{i.note}</Text> : null}
-                {i.note && doc.explain && doc.items.findIndex((x) => !!x.note) === k ? (
-                  <View style={{ flexDirection: "row", alignItems: "flex-start", gap: px(4), marginTop: px(2) }}>
-                    <View style={{ paddingTop: px(1) }}><InfoMark /></View>
-                    <View style={{ flex: 1 }}><Text style={{ fontSize: px(8.5), color: GREY }}>{doc.explain}</Text></View>
-                  </View>
-                ) : null}
+                {/* The cutting method in small grey under the PPF item (the owner's mockup); the ⓘ sentence stays on the web page. */}
+                {i.note ? <Text style={{ fontSize: px(9.5), color: GREY, marginTop: px(1.5) }}>{i.note}</Text> : null}
               </View>
               <View style={{ width: px(150), paddingTop: px(1) }}><Text style={pkg.warranty}>{i.warranty ?? ""}</Text></View>
             </View>
@@ -846,11 +867,7 @@ export function PackageSection({ doc, price, subtotal, discount = null }: { doc:
           ))}
         </View>
       ) : null}
-      {doc.completion ? <Text style={pkg.completion}>Estimated completion: {doc.completion}</Text> : <View style={{ height: px(10) }} />}
-      <View style={pkg.sub} wrap={false}>
-        <Text style={pkg.subText}>Package subtotal</Text>
-        <Text style={pkg.subText}>AED {moneyDigits(subtotal)}</Text>
-      </View>
+      {doc.completion ? <Text style={[pkg.completion, tight ? { paddingTop: px(6), paddingBottom: px(8) } : {}]}>Estimated completion: <Text style={{ fontWeight: 800 }}>{doc.completion}</Text></Text> : <View style={{ height: px(10) }} />}
     </View>
   );
 }

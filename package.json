@@ -34,7 +34,7 @@
     "test:w": "node --env-file=.env.test.local tests/browser/test-w.mjs",
     "test:x": "node --env-file=.env.test.local tests/browser/test-x.mjs",
     "test:y": "node --env-file=.env.test.local tests/browser/test-y.mjs",
-    "test:layout": "node --env-file=.env.test.local tests/browser/layout-check.mjs",
+    "test:layout": "node --env-file=.env.test.local tests/browser/layout-check.mjs && node --env-file=.env.test.local tests/browser/test-docs.mjs",
     "test:perms": "node --env-file=.env.test.local tests/browser/test-perms.mjs",
     "test:preview": "node --env-file=.env.test.local tests/browser/test-preview.mjs",
     "test:live": "node --env-file=.env.test.local tests/browser/test-live.mjs",
@@ -138,7 +138,8 @@
     "test:mileage": "node --env-file=.env.test.local tests/browser/test-mileage.mjs",
     "test:roles": "node --env-file=.env.test.local tests/browser/test-roles.mjs",
     "test:unit": "node tests/unit/run-all.mjs",
-    "test:pdf": "node --import ./tests/unit/register.mjs tests/unit/pdf-layout.test.mjs"
+    "test:pdf": "node --import ./tests/unit/register.mjs tests/unit/pdf-layout.test.mjs",
+    "test:docs": "node --env-file=.env.test.local tests/browser/test-docs.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

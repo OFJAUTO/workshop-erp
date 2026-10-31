@@ -125,7 +125,6 @@ const TEXT_KEYS = [
   "bank_account_number",
   "bank_iban",
   "bank_swift",
-  "document_currency",
   "labour_rate_bodyshop_aed",
   "whatsapp_ready_template",
   "whatsapp_on_the_way_template",
@@ -235,7 +234,6 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (key === "declaration_text" && text.length < 10) return { error: "Enter the English declaration text.", values };
     if (key.startsWith("whatsapp_") && !key.startsWith("whatsapp_reminder") && key !== "whatsapp_followup_template" && key !== "whatsapp_final_check_template" && key !== "whatsapp_on_the_way_template" && !text.includes("[link]")) return { error: "The WhatsApp message must contain [link].", values };
     if (key === "company_legal_name" && text.length < 2) return { error: "Enter the legal name.", values };
-    if (key === "document_currency" && text !== "symbol" && text !== "aed") return { error: "Choose the currency shown on documents.", values };
     if (key === "labour_rate_bodyshop_aed" && text && !(Number(text) >= 0)) return { error: "The bodyshop labour rate must be a number, or empty.", values };
     if (key === "inspection_fee_notice" && text.length < 10) return { error: "Enter the English inspection fee notice.", values };
     if (key.startsWith("whatsapp_reminder") && text.length < 10) return { error: "Enter every WhatsApp reminder message.", values };

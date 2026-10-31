@@ -13,6 +13,7 @@ const t = await import("../../src/lib/pdf/template.tsx");
 const { DamagePdf } = await import("../../src/lib/pdf/damage-pdf.tsx");
 const { renderGateInPdf } = await import("../../src/lib/pdf/gate-in-pdf.tsx");
 const { checkPdf, pagePng, ticksOf } = await import("./pdf-check-lib.mjs");
+const { docMoneyRows } = await import("../../src/lib/doc-totals.ts");
 
 let failed = 0;
 const check = (name, ok, detail = "") => { if (!ok) failed++; console.log(`${ok ? "OK  " : "FAIL"} ${name}${detail ? ` · ${detail}` : ""}`); };
@@ -42,9 +43,10 @@ const lines = (long) => [
 ];
 const doc = (long) => h(t.PdfDocument, { title: "Quotation", company, logo: null }, [
   h(t.InfoBoxes, { key: "b", boxes: [{ title: "Quotation for", strong: long ? "Al Something Very Long Trading and Contracting Company LLC (Branch 2)" : "Customer", lines: ["+971 50 000 0000"] }, { title: "Vehicle", strong: "Mercedes-Benz S 580 · Dubai A 12345", lines: ["VIN WDD0000000000000"] }] }),
-  h(t.PackageSection, { key: "p", doc: pkgDoc(long), price: 20000, subtotal: 18000, discount: { percent: 10, amount: 2000 } }),
-  h(t.SectionBox, { key: "s", title: "Labour and services", lines: lines(long), subtotalLabel: "Labour and services subtotal" }),
-  h(t.TotalsBox, { key: "t", sections: [{ label: "Protection package (before discount)", value: 20000 }, { label: "Labour and services (before discount)", value: 11112023.51 }], green: [{ label: "Discount (labour and services)", value: -2087.5 }, { label: "Discount (rounding)", value: -3.51 }], net: 11129932.5, vatPercent: 5, vat: 556496.63, total: 11686429.13, currency: "aed" }),
+  h(t.PackageSection, { key: "p", doc: pkgDoc(long), price: 20000 }),
+  h(t.SectionBox, { key: "s", title: "Labour and services", lines: lines(long), subtotalLabel: "Labour subtotal", showSubtotal: true }),
+  // The 31 October layout: the totals box with the amount in words, the bank details and the note, as one block.
+  h(t.DocumentTail, { key: "t", words: "Eleven million six hundred eighty-six thousand four hundred twenty-nine dirhams and thirteen fils only", bank: company.bank, note: "Prices valid until the date above. Work starts once the quotation is approved.", rows: docMoneyRows({ sections: [{ key: "pkg", lines: 1 }, { key: "services", lines: 4 }], gross: 11132023.51, green: [{ label: "Package discount (10%)", value: 2000 }, { label: "Discount (labour and services)", value: 87.5 }, { label: "Round-off", value: 3.51 }], net: 11129932.5, vatPercent: 5, vat: 556496.63, total: 11686429.13 }) }),
 ]);
 
 for (const long of [false, true]) {

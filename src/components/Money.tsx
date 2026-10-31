@@ -10,7 +10,7 @@ export function Dirham({ className = "" }: { className?: string }) {
 }
 
 /** An amount on a customer page: the symbol before the number, or "AED" when the setting says so. */
-export function Money({ amount, currency = "symbol", className = "" }: { amount: number | null | undefined; currency?: Currency; className?: string }) {
+export function Money({ amount, currency = "aed", className = "" }: { amount: number | null | undefined; currency?: Currency; className?: string }) {
   const digits = moneyDigits(amount);
   if (currency === "aed") return <span className={className}>AED {digits}</span>;
   return (

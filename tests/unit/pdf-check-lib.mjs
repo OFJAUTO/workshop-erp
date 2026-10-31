@@ -117,3 +117,79 @@ export function ticksOf(buf, n = 0) {
     return { text: right?.text ?? null, dy: right ? (m.y0 + m.y1) / 2 - (right.y0 + right.y1) / 2 : null };
   });
 }
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * The money rules of the owner's mockup (31 October 2026): every amount printed once, a subtotal only where it adds
+ * something, no page holding only the totals or bank details, "AED" on every amount of the totals box.
+ * --------------------------------------------------------------------------------------------------------------- */
+const MONEY = /(?:AED\s*)?−?\s*([\d,]+\.\d{2})\b/;
+const LABELS = /(subtotal|total incl\. vat|before vat|package price|balance due)/i;
+
+function linesOf(page) {
+  const json = JSON.parse(page.toStructuredText("preserve-whitespace").asJSON());
+  return (json.blocks ?? []).flatMap((b) => b.lines ?? []).map((l) => ({ text: String(l.text ?? "").trim(), x0: l.bbox.x, y0: l.bbox.y, x1: l.bbox.x + l.bbox.w, y1: l.bbox.y + l.bbox.h })).filter((l) => l.text);
+}
+
+/** The labelled amounts of a document (Subtotal, PACKAGE PRICE, TOTAL INCL. VAT…), with the page they are on. */
+export function labelledAmounts(buf) {
+  const doc = mupdf.Document.openDocument(buf, "application/pdf");
+  const out = [];
+  for (let p = 0; p < doc.countPages(); p++) {
+    const lines = linesOf(doc.loadPage(p));
+    for (const l of lines) {
+      if (!LABELS.test(l.text)) continue;
+      const own = l.text.match(MONEY);
+      const cy = (l.y0 + l.y1) / 2;
+      // The amount on the same row (to the right), or right under a label like PACKAGE PRICE.
+      const right = lines.filter((r) => r !== l && r.x0 > l.x0 && Math.abs((r.y0 + r.y1) / 2 - cy) < 4 && MONEY.test(r.text)).sort((a, b) => a.x0 - b.x0)[0];
+      const below = /package price/i.test(l.text) ? lines.filter((r) => r.y0 > l.y1 - 1 && r.y0 - l.y1 < 14 && Math.abs(r.x1 - l.x1) < 30 && MONEY.test(r.text))[0] : null;
+      const src = own ? l.text : (right ?? below)?.text;
+      if (!src) continue;
+      const m = src.match(MONEY);
+      out.push({ page: p, label: l.text.replace(MONEY, "").trim(), value: Number(m[1].replace(/,/g, "")), aed: /AED/.test(src) || /AED/.test(l.text), y: l.y0 });
+    }
+  }
+  return out;
+}
+
+/** The money rules; `taxDocument` allows the taxable amount ("Subtotal before VAT") that UAE tax invoices must carry. */
+export function moneyProblems(buf, name = "PDF", { taxDocument = false } = {}) {
+  const problems = [];
+  const amounts = labelledAmounts(buf);
+  // 1. A total or subtotal printed twice (or a package price printed again as a subtotal or total).
+  for (let i = 0; i < amounts.length; i++) {
+    for (let j = i + 1; j < amounts.length; j++) {
+      const a = amounts[i], b = amounts[j];
+      if (Math.abs(a.value - b.value) > 0.004 || a.value === 0) continue;
+      if (taxDocument && [a, b].some((x) => /before vat/i.test(x.label))) continue;
+      if (/balance due/i.test(a.label + b.label) && [a, b].some((x) => /total incl/i.test(x.label))) continue;
+      problems.push(`${name}: AED ${a.value.toFixed(2)} is printed twice ("${a.label}" and "${b.label}")`);
+    }
+  }
+  // 2. "AED" on every amount of the totals box.
+  for (const a of amounts) if (!/subtotal$/i.test(a.label) && !/(labour|parts|charges) subtotal/i.test(a.label) && !a.aed) problems.push(`${name}: "${a.label}" has no AED`);
+  // 3. A section subtotal under a single line, and a page holding only the totals / bank details / footer.
+  const doc = mupdf.Document.openDocument(buf, "application/pdf");
+  for (let p = 0; p < doc.countPages(); p++) {
+    const page = doc.loadPage(p);
+    const [, , , height] = page.getBounds();
+    const lines = linesOf(page);
+    const bars = lines.filter((l) => /^(LABOUR AND SERVICES|PARTS|OTHER CHARGES)$/.test(l.text));
+    for (const sub of lines.filter((l) => /(labour|parts|other charges) subtotal/i.test(l.text))) {
+      const bar = bars.filter((b) => b.y0 < sub.y0).sort((a, b) => b.y0 - a.y0)[0];
+      const top = bar ? bar.y0 : 0;
+      // A row number may come out joined to its description ("34 Part 34"): count every line that starts with one.
+      const numbers = lines.filter((l) => /^\d+(\s|$)/.test(l.text) && l.y0 > top && l.y0 < sub.y0 && l.x0 < (bar ? bar.x0 + 24 : 80));
+      // The owner's rule: a subtotal that equals the ONLY line above it - a box of one line (numbered 1). A box that
+      // continues from the page before (its first number here is above 1) carries the whole box's sum, which is new.
+      if (numbers.length === 1 && /^1(\s|$)/.test(numbers[0].text)) problems.push(`${name} p${p + 1}: "${sub.text}" repeats the only line above it`);
+    }
+    if (p > 0) {
+      const body = lines.filter((l) => l.y0 > 40 && l.y1 < height - 70);
+      const words = body.find((l) => /AMOUNT IN WORDS|BANK DETAILS/i.test(l.text));
+      if (!body.length) problems.push(`${name} p${p + 1}: an empty page (header and footer only)`);
+      else if (words && !body.some((l) => l.y1 < words.y0 - 1)) problems.push(`${name} p${p + 1}: the totals or bank details sit alone on this page`);
+    }
+  }
+  return problems;
+}

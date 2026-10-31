@@ -6,9 +6,10 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
  * Section 9 (21 October): the PROTECTION PACKAGE card on the customer's links (estimate, quotation,
  * proforma, tax invoice). The same model as the PDF section (packageDocOf): the name large, "finish ·
  * car", the package price, what's included with a green tick and the warranty in its own column, the
- * complimentary extras as green badges, the estimated completion, and the package subtotal.
+ * complimentary extras as green badges and the estimated completion. The price once, beside the name: no package
+ * subtotal (31 October 2026, the owner's mockup).
  */
-export function PackageCard({ doc, price, subtotal, discount = null }: { doc: PackageDoc; price: number; subtotal: number; discount?: { percent: number | null; amount: number } | null }) {
+export function PackageCard({ doc, price, discount = null }: { doc: PackageDoc; price: number; discount?: { percent: number | null; amount: number } | null }) {
   return (
     <section className="overflow-hidden rounded-lg border-2 border-[#111113] bg-white" data-package-doc>
       <div className="bg-[#111113] px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.14em] text-white">Protection package</div>
@@ -62,11 +63,7 @@ export function PackageCard({ doc, price, subtotal, discount = null }: { doc: Pa
           ))}
         </div>
       ) : null}
-      {doc.completion ? <p className="px-4 pb-1 pt-3 text-sm font-bold" data-package-completion>Estimated completion: {doc.completion}</p> : null}
-      <div className="mt-3 flex justify-between bg-[#F4F4F5] px-4 py-2.5 text-sm font-extrabold">
-        <span>Package subtotal</span>
-        <span>{aed(subtotal)}</span>
-      </div>
+      {doc.completion ? <p className="px-4 pb-4 pt-3 text-sm font-bold" data-package-completion>Estimated completion: {doc.completion}</p> : <div className="h-4" />}
     </section>
   );
 }

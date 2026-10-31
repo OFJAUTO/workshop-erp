@@ -19,7 +19,9 @@ import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
-import { RED, PALE, INK, GREY, GREEN, Amount, DocumentTail, InfoBoxes, PackageSection, PdfDocument, PoLinesTable, SectionBox, TitleRow, TotalsBlock, TotalsBox, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type PoDocRow, type SectionLine, type StatusBox, type Box } from "./template";
+import { RED, PALE, INK, GREY, GREEN, Amount, DocumentTail, InfoBoxes, PackageSection, PdfDocument, PoLinesTable, TitleRow, boxesWithTail, type BoxSpec, TotalsBlock, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type PoDocRow, type SectionLine, type StatusBox, type Box } from "./template";
+import { docMoneyRows, sectionSubtotalShown } from "@/lib/doc-totals";
+import { renderByPageRules } from "@/lib/pdf-read";
 import { addMonthsIso, dubaiDay } from "@/lib/warranty";
 import { positionsWords } from "@/lib/parts-list";
 import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
@@ -29,9 +31,13 @@ const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", cr
 
 /** One invoice line in the section box: description, a small grey line of details, qty, rate, amount. Never a part number. */
 function docLineOf(l: InvoiceLineRow, compReason: string | null = null): SectionLine {
+  // A labour line stores its hours as the quantity: it counts as one line, so a labour box shows just the AMOUNT (the
+  // owner's mockup B), the same as on the quotation.
+  const quantity = l.hours !== null ? 1 : Number(l.quantity) || 1;
   const comp = l.price_display === "complimentary" || l.price_display === "included";
   const disc = Number(l.discount_percent) || 0;
   return {
+    quantity,
     description: l.description,
     positions: positionsWords(l.positions) || null,
     details: l.hours !== null ? detailsWithoutHours(l.details) : l.details,
@@ -43,10 +49,6 @@ function docLineOf(l: InvoiceLineRow, compReason: string | null = null): Section
     discountPercent: disc > 0 ? disc : undefined,
     discountAmount: disc > 0 ? round2(l.unit_price * l.quantity - l.amount_aed) : undefined,
   };
-}
-/** The lines' own discounts inside one section (already inside the stored amounts). */
-function lineDiscountsOf(lines: InvoiceLineRow[]): number {
-  return round2(lines.reduce((a, l) => a + ((Number(l.discount_percent) || 0) > 0 ? Math.max(0, l.unit_price * l.quantity - l.amount_aed) : 0), 0));
 }
 
 function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice">) {
@@ -64,7 +66,7 @@ function vehicleBox(b: Pick<InvoiceBundle, "vehicle" | "invoice" | "mileage">) {
   const plate = snap.plate ?? (v ? formatPlate(v) : null);
   const vin = snap.vin ?? v?.vin ?? null;
   const km = b.mileage?.in ? [`Mileage in ${b.mileage.in}`, b.mileage.out ? `out ${b.mileage.out}` : null].filter(Boolean).join(" · ") : null;
-  return { title: "Vehicle", strong: [title || "Vehicle", plate].filter(Boolean).join(" · "), lines: [snap.variant ?? v?.variant ?? null, vin ? `VIN ${vin}` : null, km] };
+  return { title: "Vehicle", strong: title || "Vehicle", lines: [snap.variant ?? v?.variant ?? null, plate ? `Plate ${plate}` : null, vin ? `VIN ${vin}` : null, km] };
 }
 
 /** What the status box says at this moment, from the payments: amount due, balance due, paid in full, or cheque pending. */
@@ -80,7 +82,6 @@ export function statusBoxFor(invoice: InvoiceBundle["invoice"], payments: Paymen
 /** A tax invoice, proforma invoice or credit note on the document template. The status reflects the moment it is downloaded. */
 export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings): Promise<Buffer> {
   const { invoice, lines, payments, job } = bundle;
-  const currency = currencyOf(settings);
   const vatPercent = invoice.taxable_aed ? round2((invoice.vat_aed / invoice.taxable_aed) * 100) || 5 : 5;
   // Section 9: a line billed from a bodyshop package gets the PROTECTION PACKAGE section; the rest stays in Labour and services.
   const pkgRows = lines.filter((l) => l.section === "services" && !!l.package_items);
@@ -100,21 +101,17 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const pickupInPackage = packagesGivePickup(pkgRows.map((l) => l.package_items));
   const fees = lines.filter((l) => l.section === "fees" && !(pickupInPackage && isPickupShownByPackage({ description: l.description }, Number(l.amount_aed) || 0))).map(docLine);
   const parts = lines.filter((l) => l.section === "parts").map(docLine);
-  const sum = (ls: SectionLine[]) => round2(ls.reduce((a, l) => a + l.amount, 0));
-  // The lines' own discounts (line 1's 22%): the sections show the pre-discount figure, the green row takes it off.
-  const lineDiscounts = lineDiscountsOf(lines);
   // The labour discount as a percentage when it divides cleanly, else the amount alone.
   const pkgSum = round2(pkgRows.reduce((a, l) => a + l.amount_aed, 0));
-  const labourSum = sum(services);
+  const labourSum = round2(services.reduce((a, l) => a + l.amount, 0));
   const discountBase = round2(labourSum + pkgSum);
   const pct = invoice.discount_aed && discountBase ? round2((invoice.discount_aed / discountBase) * 100) : 0;
   const discountWords = pkgRows.length ? "Package discount" : "Labour discount";
   const discountLabel = pct && Math.abs(pct - Math.round(pct)) < 0.011 ? `${discountWords} (${Math.round(pct)}%)` : discountWords;
-  const carTitle = (invoice.vehicle_snapshot?.title ?? [bundle.vehicle?.make?.name, bundle.vehicle?.model?.name, bundle.vehicle?.model_year].filter(Boolean).join(" ")) || null;
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live);
   const company = companyOf(settings);
-  const [logo, qr] = await Promise.all([loadLogo(), invoice.token ? qrPng(`${PRODUCTION_SITE_URL}/${invoice.kind === "proforma" ? "proforma" : "invoice"}/${invoice.token}`) : Promise.resolve(null)]);
+  const logo = await loadLogo();
   const isCredit = invoice.kind === "credit_note";
   const rounding = round2(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)));
   // Section 12: the tax invoice is the warranty card - the WARRANTY table per product, the framed panel with its QR,
@@ -123,8 +120,50 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const warrantyToken = card?.rows.length ? await ensureWarrantyToken(card.jobId) : null;
   const warrantyQr = warrantyToken ? await qrPng(`${PRODUCTION_SITE_URL}/warranty/${warrantyToken}`, 420) : null;
   const workmanship = card?.mechanical ? { period: card.mechanical.period, until: card.mechanical.validUntil ?? addMonthsIso(dubaiDay(invoice.issued_at), card.mechanical.months) } : null;
-  const doc = (
-    <PdfDocument title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} qr={qr} uppercase={settings.customer_documents_uppercase === true} scanLabel={"Scan to view\nthis invoice online"} footerLines={[]} computerGenerated={invoice.kind === "tax_invoice"}>
+
+  // THE money rows (31 October 2026, the owner's mockup): every amount once - the lines after their own discount, a
+  // package at its price with its discount among the green rows, one TOTAL INCL. VAT, then the payments and the balance
+  // due in the same box. A tax invoice and a credit note always print the taxable amount (UAE tax invoice field).
+  const sectionCounts = [...pkgRows.map((l) => ({ key: `pkg:${l.id}`, lines: 1 })), { key: "services", lines: services.length || (!pkgRows.length && !parts.length && !fees.length ? 1 : 0) }, { key: "parts", lines: parts.length }, { key: "fees", lines: fees.length }];
+  const pkgDiscounts = pkgRows.filter((l) => l.unit_price * l.quantity - l.amount_aed > 0.004).map((l) => ({ label: `Package discount${Number(l.discount_percent) > 0 ? ` (${String(Number(l.discount_percent))}%)` : ""}`, value: round2(l.unit_price * l.quantity - l.amount_aed) }));
+  const gross = round2(pkgRows.reduce((a, l) => a + l.unit_price * l.quantity, 0) + [...services, ...parts, ...fees].reduce((a, l) => a + l.amount, 0));
+  const paidRows = isCredit ? [] : live.map((p) => {
+    const pending = p.method === "cheque" && p.cheque_status !== "cleared";
+    const what = p.is_deposit ? (p.deposit_invoice_number ? `Deposit invoiced (${p.deposit_invoice_number})` : `Deposit paid (${p.number})`) : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`;
+    return { label: pending ? `Cheque pending, not counted yet (${p.number})` : what, value: p.amount_aed, kind: pending ? ("after" as const) : ("paid" as const) };
+  });
+  const rows = docMoneyRows({
+    sections: sectionCounts,
+    gross,
+    green: [...pkgDiscounts, ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []), ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []), ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : [])],
+    roundUp: rounding > 0 ? rounding : 0,
+    net: invoice.taxable_aed,
+    vatPercent,
+    vat: invoice.vat_aed,
+    total: invoice.total_aed,
+    taxDocument: invoice.kind === "tax_invoice" || isCredit,
+    totalLabel: isCredit ? "Credit total incl. VAT" : "Total incl. VAT",
+    after: paidRows,
+    balance: isCredit ? null : bal.balance,
+  });
+  const note = isCredit ? "This credit note corrects an earlier tax invoice." : bal.state === "paid" ? `Paid in full${bal.paidAt ? ` on ${formatDate(bal.paidAt)}` : ""}. Thank you.` : invoice.kind === "proforma" ? "Please pay the total to collect the vehicle. The tax invoice follows the payment." : "Thank you for your business.";
+  // The boxes of lines; when the totals would start a page alone, the last two lines travel with them (boxesWithTail).
+  const boxes: BoxSpec[] = [
+    ...(services.length || !pkgRows.length ? [{ key: "services", title: "Labour and services", lines: services, subtotalLabel: "Labour subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "services") }] : []),
+    ...(parts.length ? [{ key: "parts", title: "Parts", descLabel: "Part", lines: parts, subtotalLabel: "Parts subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "parts") }] : []),
+    ...(fees.length ? [{ key: "fees", title: "Other charges", lines: fees, subtotalLabel: "Other charges subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "fees") }] : []),
+  ];
+
+  const draw = ({ tight, keepLast }: { tight: boolean; keepLast: boolean }) => {
+    const { body, lead } = boxesWithTail(boxes, keepLast, tight);
+    const notes = invoice.notes ? (
+      <View style={styles.note} wrap={false}>
+        <Text style={styles.smallTitle}>Note</Text>
+        <Text>{invoice.notes}</Text>
+      </View>
+    ) : null;
+    return renderToBuffer(
+    <PdfDocument tight={tight} title={`${TITLES[invoice.kind]} ${invoice.number}`} company={company} logo={logo} uppercase={settings.customer_documents_uppercase === true} footerLines={[]} computerGenerated={invoice.kind === "tax_invoice"}>
       <TitleRow
         title={TITLES[invoice.kind]}
         meta={[
@@ -135,57 +174,20 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
       {pkgRows.map((l) => {
-        const docModel = packageDocOf(l.package_items, { car: carTitle, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
-        const disc = Number(l.discount_percent) || 0;
-        return docModel ? <PackageSection key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} subtotal={l.amount_aed} discount={disc > 0 ? { percent: disc, amount: round2(l.unit_price * l.quantity - l.amount_aed) } : null} /> : null;
+        const docModel = packageDocOf(l.package_items, { car: null, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
+        return docModel ? <PackageSection tight={tight} key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} /> : null;
       })}
-      {services.length || !pkgRows.length ? <SectionBox title="Labour and services" lines={services} subtotalLabel="Labour and services subtotal" /> : null}
-      {parts.length ? <SectionBox title="Parts" lines={parts} subtotalLabel="Parts subtotal" /> : null}
-      {fees.length ? <SectionBox title="Other charges" lines={fees} subtotalLabel="Other charges subtotal" /> : null}
+      {body}
       <DocumentTail
+        tight={tight}
+        rows={rows}
         words={amountInWords(invoice.total_aed)}
-        payments={live.map((p) => ({ date: formatDate(p.received_at), method: p.is_deposit ? (p.deposit_invoice_number ? `Less deposit invoiced (${p.deposit_invoice_number})` : `Less deposit received (${p.number})`) : METHOD_LABELS[p.method] + (p.method === "cheque" && p.cheque_status !== "cleared" ? " (pending)" : ""), amount: p.amount_aed, note: p.is_deposit ? METHOD_LABELS[p.method] : p.method === "cheque" ? p.cheque_number : p.reference }))}
         bank={!isCredit && bal.state !== "paid" ? company.bank : null}
-        totals={
-          <TotalsBox
-            currency={currency}
-            sections={[
-              ...(pkgRows.length ? [{ label: lineDiscounts > 0 ? "Protection package (before discount)" : "Protection package", value: round2(pkgSum + lineDiscountsOf(pkgRows)) }] : []),
-              ...(services.length || !pkgRows.length ? [{ label: lineDiscounts > 0 ? "Labour and services (before discount)" : "Labour and services", value: round2(labourSum + lineDiscountsOf(serviceRows)) }] : []),
-              ...(parts.length || !pkgRows.length ? [{ label: "Parts", value: round2(sum(parts) + lineDiscountsOf(lines.filter((l) => l.section === "parts"))) }] : []),
-              ...(fees.length ? [{ label: "Other charges", value: round2(sum(fees) + lineDiscountsOf(lines.filter((l) => l.section === "fees"))) }] : []),
-            ]}
-            green={[
-              ...(lineDiscounts > 0 ? [{ label: "Discount", value: lineDiscounts }] : []),
-              ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []),
-              ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []),
-              ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : []),
-            ]}
-            net={invoice.taxable_aed}
-            vatPercent={vatPercent}
-            vat={invoice.vat_aed}
-            total={invoice.total_aed}
-            totalLabel={isCredit ? "Credit total" : "Grand total"}
-            after={[
-              ...(rounding > 0 ? [{ label: "Rounding", value: rounding }] : []),
-              ...(!isCredit && bal.paid ? [{ label: "Paid", value: bal.paid, negative: true }] : []),
-            ]}
-            status={statusBoxFor(invoice, live)}
-          />
-        }
-        notes={
+        note={note}
+        lead={lead.length ? <>{lead}{notes}</> : null}
+        before={lead.length ? null : notes}
+        after={
           <>
-            {invoice.notes ? (
-              <View style={styles.note} wrap={false}>
-                <Text style={styles.smallTitle}>Note</Text>
-                <Text>{invoice.notes}</Text>
-              </View>
-            ) : null}
-            {isCredit && invoice.credit_of ? (
-              <View style={styles.note} wrap={false}>
-                <Text>This credit note corrects an earlier tax invoice.</Text>
-              </View>
-            ) : null}
             {workmanship ? (
               <View style={styles.note} wrap={false}>
                 <Text style={{ fontWeight: 700 }}>Workmanship warranty: {workmanship.period}, valid until {formatDate(workmanship.until)}</Text>
@@ -205,9 +207,11 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
           </>
         }
       />
-    </PdfDocument>
-  );
-  return renderToBuffer(doc);
+    </PdfDocument>,
+    );
+  };
+  // One page when it fits; a second page only when needed, never with the totals alone on it (src/lib/pdf-read.ts).
+  return renderByPageRules(draw);
 }
 
 /** A receipt for one payment, on the same template. */

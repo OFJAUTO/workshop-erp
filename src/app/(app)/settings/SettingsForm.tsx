@@ -120,12 +120,6 @@ export function SettingsForm({
               </div>
             </details>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Currency on customer documents" hint="The dirham symbol, or the letters AED. Staff screens always show AED.">
-                <Select name="document_currency" defaultValue={v.document_currency || "symbol"}>
-                  <option value="symbol">Dirham symbol</option>
-                  <option value="aed">AED</option>
-                </Select>
-              </Field>
               <Field label="Next invoice number" hint="Numbering continues from here (INV‑00001 and so on).">
                 <Input name="next_invoice_number" defaultValue={v.next_invoice_number} inputMode="numeric" required />
               </Field>

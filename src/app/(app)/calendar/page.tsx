@@ -283,8 +283,11 @@ function JobItem({ j, kind, compact = false }: { j: JobLite; kind: "due" | "out"
   const cls = kind === "due" ? "bg-amber-soft border-amber-bar" : "bg-green-soft border-green";
   return (
     <Link href={`/jobs/${j.id}`} className={`block rounded-control border px-2 py-1.5 hover:border-ink ${cls}`}>
-      <Words className="block text-xs font-bold" text={`${kind === "due" ? "Due" : `Left ${j.gated_out_at ? dubaiTimeOf(j.gated_out_at) : ""}`} · ${j.vehicle ? formatPlate(j.vehicle) : j.job_number}`} />
-      {!compact ? <span className="block text-[11px] text-muted truncate">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span> : null}
+      {/* "Due" and the plate (or job number) on their own lines: a narrow day cell with large text never pushes a code out. */}
+      <span className="block text-xs font-bold">{kind === "due" ? "Due" : `Left ${j.gated_out_at ? dubaiTimeOf(j.gated_out_at) : ""}`}</span>
+      <Words className="block text-xs font-bold" text={j.vehicle ? formatPlate(j.vehicle) : j.job_number} />
+      {/* The car and the job number - the number only when the line above shows the plate, never twice. */}
+      {!compact && (j.vehicle || j.vehicle === undefined) ? <span className="block text-[11px] text-muted truncate">{[[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "), j.vehicle ? j.job_number : null].filter(Boolean).join(" · ")}</span> : null}
     </Link>
   );
 }
@@ -334,7 +337,9 @@ function MonthGrid({ days, date, today, byDay, perDay, who, ctx }: { days: strin
 
 function WeekGrid({ days, today, byDay, perDay, who, ctx }: { days: string[]; today: string; byDay: Map<string, Entry>; perDay: number; who: string; ctx: Ctx }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
+    // Seven day columns only on a computer screen: on a tablet (and with large text) seven columns left cards too
+    // narrow to read and plates spilled over their edges (31 October 2026).
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
       {days.map((d) => {
         const e = byDay.get(d)!;
         return (

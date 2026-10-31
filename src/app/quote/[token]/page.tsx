@@ -9,7 +9,8 @@ import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
 import { loadQuotation } from "@/lib/quote-data";
-import { aed, discountLabelOf, hasPackageLine, isHidden, isUnchosen, lineDiscountAmount, linePrice, lineTotal, quoteTotals } from "@/lib/quotes";
+import { validUntilOf } from "@/lib/doc-totals";
+import { aed, discountLabelOf, hasPackageLine, isHidden, isUnchosen, lineDiscountAmount, linePrice, quoteTotals } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -115,7 +116,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const meta = [
     { label: isEstimate ? "Estimate no." : "Quotation no.", value: `${q.number}${q.version > 1 ? ` v${q.version}` : ""}` },
     { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
-    { label: "Valid until", value: q.valid_until ? formatDate(q.valid_until) : `${q.validity_days} days` },
+    // Always a date (31 October 2026): the quotation's date + the validity days from Settings.
+    { label: "Valid until", value: formatDate(validUntilOf(q) ?? q.created_at) },
     ...(job ? [{ label: "Job card", value: job.job_number }] : []),
   ];
   const boxes = customerBoxes(customer ? { full_name: customer.full_name, company_name: customer.company_name, phone: customer.phone } : null, vehicle ? { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: carName || "Vehicle" } : null);
@@ -164,7 +166,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         </div>
         {lines.filter((l) => !!l.package_key).map((l) => {
           const docModel = packageDocOf(l.package_items, { car: carName || null, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf(l) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
-          return docModel ? <PackageCard key={l.id} doc={docModel} price={linePrice(l)} subtotal={lineTotal(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
+          return docModel ? <PackageCard key={l.id} doc={docModel} price={linePrice(l)} discount={(l.discount_percent ?? 0) > 0 ? { percent: l.discount_percent ?? null, amount: lineDiscountAmount(l) } : null} /> : null;
         })}
         {hasPpf ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-3 flex flex-col gap-0.5" data-ppf-warranty>

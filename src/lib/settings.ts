@@ -69,7 +69,8 @@ const DEFAULTS = {
   labour_rate_bodyshop_aed: "" as string | number,
   next_invoice_number: 1,
   consumables_default_aed: 50,
-  document_currency: "symbol",
+  /** 31 October 2026: AED on every document and screen; the setting is kept for old rows and no longer read. */
+  document_currency: "aed",
   label_width_mm: 50,
   label_height_mm: 30,
   qc_general_checks: ["No warning lights on the dashboard", "Fluid levels correct", "No leaks under the car", "Wheel bolts torqued", "Tyre pressures set", "Undertrays, covers and clips refitted", "Battery terminals tight", "No tools, rags or old parts left in the car", "Interior clean, no grease marks", "Protective covers removed", "Service indicator reset where a service was done", "Dash cam reconnected if fitted", "Old parts kept for the customer if requested", "Road test after repair"] as string[],
