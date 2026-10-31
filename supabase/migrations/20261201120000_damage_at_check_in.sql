@@ -19,7 +19,7 @@ values ('whatsapp_damage_found_template', 'WhatsApp: damage found after check-in
 While working on your *[make model]* ([plate]) we found damage that could not be seen when the car arrived:
 [damage]
 
-The photos are on your job card:
+The photos are on your vehicle check-in:
 [link]
 
 OFJ Automotive'::text))

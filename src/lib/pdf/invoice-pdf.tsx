@@ -25,6 +25,7 @@ import { renderByPageRules } from "@/lib/pdf-read";
 import { addMonthsIso, dubaiDay } from "@/lib/warranty";
 import { positionsWords } from "@/lib/parts-list";
 import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
+import { contactNameOf } from "@/lib/messages";
 
 const TITLES = { tax_invoice: "TAX INVOICE", proforma: "PROFORMA INVOICE", credit_note: "CREDIT NOTE" } as const;
 const NUMBER_LABELS = { tax_invoice: "Invoice no.", proforma: "Proforma no.", credit_note: "Credit note no." } as const;
@@ -54,7 +55,9 @@ function docLineOf(l: InvoiceLineRow, compReason: string | null = null): Section
 function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice">) {
   const snap = b.invoice.customer_snapshot ?? {};
   const name = snap.company_name ?? b.customer?.company_name ?? snap.full_name ?? b.customer?.full_name ?? "Customer";
-  const person = snap.company_name ?? b.customer?.company_name ? (snap.full_name ?? b.customer?.full_name ?? null) : null;
+  // A company shows once: the contact line only for a real person whose name differs from it.
+  const company = snap.company_name ?? b.customer?.company_name ?? null;
+  const person = company ? contactNameOf(snap.full_name ?? b.customer?.full_name, company) : null;
   const trn = snap.trn ?? b.customer?.trn ?? null;
   return { title: "Billed to", strong: name, lines: [person, [snap.phone ?? b.customer?.phone, snap.email ?? b.customer?.email].filter(Boolean).join(" · ") || null], muted: [trn ? `TRN ${trn}` : null] };
 }
@@ -169,7 +172,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         meta={[
           { label: NUMBER_LABELS[invoice.kind], value: invoice.number },
           { label: "Date", value: formatDate(invoice.issued_at) },
-          job ? { label: "Job card", value: job.job_number } : null,
+          job ? { label: "Reference", value: job.job_number } : null,
         ]}
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
@@ -268,7 +271,7 @@ export async function renderReceiptPdf(data: ReceiptData, settings: Settings): P
     {
       title: "Received from",
       strong: customer?.company_name ?? customer?.full_name ?? "Customer",
-      lines: [customer?.company_name ? customer.full_name : null, customer?.phone ?? null],
+      lines: [customer?.company_name ? contactNameOf(customer.full_name, customer.company_name) : null, customer?.phone ?? null],
       muted: [customer?.trn ? `TRN ${customer.trn}` : null],
     },
     ...(vehicle
@@ -304,7 +307,7 @@ export async function renderReceiptPdf(data: ReceiptData, settings: Settings): P
           { label: "Receipt no.", value: payment.number },
           { label: "Date", value: formatDate(payment.received_at) },
           data.docRef ? { label: data.docRef.label, value: data.docRef.value } : null,
-          data.jobNumber ? { label: "Job card", value: data.jobNumber } : null,
+          data.jobNumber ? { label: "Reference", value: data.jobNumber } : null,
         ]}
       />
       {voided ? (

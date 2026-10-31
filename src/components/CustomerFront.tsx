@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Words } from "./Words";
 import { DocViewer } from "./DocViewer";
 import { Logo } from "./Logo";
+import { contactNameOf } from "@/lib/messages";
 
 export type FrontMeta = { label: string; value: string };
 export type FrontBox = { title: string; strong: string; rows: [string, string | null | undefined][] };
@@ -13,10 +14,12 @@ type Company = { tradingName: string; legalName: string; address: string[]; phon
  * no small print, no footers. "plain" header: the logo centred on a light grey band (the approval and
  * report links); "full": the company block and the TRN (quotations, proformas, invoices).
  */
-export function CustomerFront({ company, header = "full", title, meta, boxes, children, view, action, contact }: {
+export function CustomerFront({ company, header = "full", title, titleAr, meta, boxes, children, view, action, contact }: {
   company: Company;
   header?: "full" | "plain";
   title: string;
+  /** The title in Arabic, under the English one. */
+  titleAr?: string;
   meta: FrontMeta[];
   boxes: FrontBox[];
   /** The essentials: a total in large print, a note, a line of counts. */
@@ -55,7 +58,14 @@ export function CustomerFront({ company, header = "full", title, meta, boxes, ch
           )}
           <div className="flex flex-col gap-4 pt-5 pb-7">
             <section className="flex flex-wrap items-end justify-between gap-3">
-              <h1 className="text-[24px] sm:text-[28px] font-extrabold tracking-[0.02em] leading-none uppercase">{title}</h1>
+              {titleAr ? (
+                <div className="flex flex-col gap-1.5">
+                  <h1 className="text-[24px] sm:text-[28px] font-extrabold tracking-[0.02em] leading-none uppercase" data-front-title>{title}</h1>
+                  <span className="text-base sm:text-lg font-bold leading-tight" dir="rtl" lang="ar" data-front-title-ar>{titleAr}</span>
+                </div>
+              ) : (
+                <h1 className="text-[24px] sm:text-[28px] font-extrabold tracking-[0.02em] leading-none uppercase" data-front-title>{title}</h1>
+              )}
               <div className="flex flex-wrap justify-end gap-x-5 gap-y-1 text-right">
                 {meta.map((m) => (
                   <div key={m.label} className="flex flex-col">
@@ -100,10 +110,14 @@ export function ContactButtons({ phone, label = null }: { phone: string | null; 
   );
 }
 
-/** The customer and vehicle boxes every customer link shows, the VIN once. */
+/** The customer and vehicle boxes every customer link shows, the VIN once. A company shows once: the contact line only
+ *  for a real person whose name differs from it (`contactNameOf`). */
 export function customerBoxes(customer: { full_name?: string | null; company_name?: string | null; phone?: string | null } | null, vehicle: { kind?: string | null; variant?: string | null; vin?: string | null; plate?: string | null; title: string; mileageIn?: string | null; mileageOut?: string | null } | null): FrontBox[] {
   const out: FrontBox[] = [];
-  if (customer) out.push({ title: "Customer", strong: customer.company_name ?? customer.full_name ?? "Customer", rows: [["", customer.company_name ? customer.full_name : null], ["", customer.phone ?? null]] });
+  if (customer) {
+    const company = customer.company_name?.trim() || null;
+    out.push({ title: "Customer", strong: company ?? customer.full_name?.trim() ?? "Customer", rows: [["", company ? contactNameOf(customer.full_name, company) : null], ["", customer.phone ?? null]] });
+  }
   if (vehicle) {
     out.push(
       vehicle.kind === "loose"

@@ -40,7 +40,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     [vehicle.fuel_type === "electric" ? "Battery" : "Fuel level", vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : "") : labelOf(FUEL_LEVELS, gateIn.fuel_level)],
     ["Cleanliness", labelOf(CLEANLINESS, gateIn.cleanliness)],
     ["Dash cam", gateIn.dash_cam ? "Fitted, to be disconnected" : "Not fitted"],
-    ["Damage noted", damageCountWords(damage)],
+    ["Damage noted", damageCountWords(damage, "below")],
     ["Mileage", describeMileage(gateIn.mileage, gateIn.mileage_unit ?? "km")],
     ["Keys", `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}`],
     ["Old parts returned to customer", gateIn.old_parts_return ? "Yes" : "No"],

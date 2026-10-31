@@ -20,7 +20,7 @@ export async function renderWarrantyPdf(card: WarrantyCard, verifyUrl: string, s
   const termKeys = Array.from(new Set<TermsKey>([...card.rows.map((r) => r.product), ...(card.mechanical ? (["mechanical"] as TermsKey[]) : [])]));
   const doc = (
     <PdfDocument title={`OFJ warranty ${card.certificateNo}`} company={company} logo={logo} qr={qr} scanLabel={"Scan to view and\nverify your warranty"} footerLines={[`Warranty ${card.certificateNo} · ${company.tradingName}`]}>
-      <TitleRow title="WARRANTY CERTIFICATE" meta={[{ label: "Certificate no.", value: card.certificateNo }, { label: "Job card", value: card.jobNumber }, card.handoverDay ? { label: "Handed over", value: formatDate(card.handoverDay) } : null]} />
+      <TitleRow title="WARRANTY CERTIFICATE" meta={[{ label: "Certificate no.", value: card.certificateNo }, { label: "Reference", value: card.jobNumber }, card.handoverDay ? { label: "Handed over", value: formatDate(card.handoverDay) } : null]} />
       <InfoBoxes boxes={[{ title: "Vehicle", strong: [card.car, card.colour].filter(Boolean).join(" · "), lines: [card.plate, card.vin ? `VIN ${card.vin}` : null] }, { title: "Status", strong: card.status.title, lines: [card.status.checkDate ? `10-day check completed ${formatDate(card.status.checkDate)}` : card.status.manual ? `Activated by OFJ Automotive ${formatDate(card.status.manual.at)}` : null] }]} />
       <WarrantySection
         vehicle={[card.car, card.plate, card.vin ? `VIN ${card.vin}` : null].filter(Boolean).join(" · ")}

@@ -121,11 +121,12 @@ export function buildCarDamage(input: { marks: unknown; after?: unknown; note?: 
   };
 }
 
-/** "Damage noted: 2 panels (see above)" / "No damage noted" - the check-in details line. */
-export function damageCountWords(d: Pick<CarDamage, "items" | "loose">): string {
+/** "Damage noted: 2 panels (see above)" / "No damage noted" - the check-in details line. The PDFs print the damage
+ *  section after the details, so they say "below". */
+export function damageCountWords(d: Pick<CarDamage, "items" | "loose">, where: "above" | "below" = "above"): string {
   const n = d.items.length;
-  if (n) return `${n} panel${n === 1 ? "" : "s"} (see above)`;
-  return d.loose.length ? "Yes, see the damage photos above" : "None noted";
+  if (n) return `${n} panel${n === 1 ? "" : "s"} (see ${where})`;
+  return d.loose.length ? `Yes, see the damage photos ${where}` : "None noted";
 }
 
 /** "Front bumper: Scratch, Dent (Minor) – note": one line per panel, for messages and the snapshot. */
@@ -146,4 +147,4 @@ export const DAMAGE_WORDS_AR = {
 export const DAMAGE_CONFIRM_EN = "…and I confirm the damage shown above was on the vehicle when it arrived.";
 
 /** The WhatsApp message for damage found after check-in (the Settings default; the owner edits it in Settings). */
-export const DEFAULT_DAMAGE_FOUND = "Dear [name],\n\nWhile working on your *[make model]* ([plate]) we found damage that could not be seen when the car arrived:\n[damage]\n\nThe photos are on your job card:\n[link]\n\nOFJ Automotive";
+export const DEFAULT_DAMAGE_FOUND = "Dear [name],\n\nWhile working on your *[make model]* ([plate]) we found damage that could not be seen when the car arrived:\n[damage]\n\nThe photos are on your vehicle check-in:\n[link]\n\nOFJ Automotive";

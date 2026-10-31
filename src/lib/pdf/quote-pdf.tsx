@@ -22,6 +22,7 @@ import { moneyDigits } from "@/lib/money";
 import { renderByPageRules } from "@/lib/pdf-read";
 import { additionalToOf, estimateAddsTo } from "@/lib/quote-history-data";
 import { additionalEstimateLine, additionalLine } from "@/lib/quote-history";
+import { contactNameOf } from "@/lib/messages";
 
 /**
  * The customer's quotation or estimate on the ONE document layout (the owner's mockup of 31 October 2026): the header,
@@ -150,13 +151,13 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
           { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
           // Always a date (31 October 2026): the quotation's date + the validity days from Settings.
           validUntil ? { label: "Valid until", value: formatDate(validUntil) } : null,
-          job ? { label: "Job card", value: job.job_number } : null,
+          job ? { label: "Reference", value: job.job_number } : null,
         ]}
       />
       {addsToLine ? <Text style={{ fontSize: px(12), fontWeight: 700, marginTop: px(-8), marginBottom: px(12) }}>{addsToLine}</Text> : null}
       <InfoBoxes
         boxes={[
-          { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? customer.full_name : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
+          { title: isEstimate ? "Estimate for" : "Quotation for", strong: customer?.company_name ?? customer?.full_name ?? "Customer", lines: [customer?.company_name ? contactNameOf(customer.full_name, customer.company_name) : null, [customer?.phone, customer?.email].filter(Boolean).join(" · ") || null], muted: [customer?.trn ? `TRN ${customer.trn}` : null] },
           vehicle?.kind === "loose" ? { title: "Items", strong: vehicle.variant ?? "Loose items" } : { title: "Vehicle", strong: carName || "Vehicle", lines: [vehicle?.variant ?? null, vehicle ? `Plate ${formatPlate(vehicle)}` : null, vehicle?.vin ? `VIN ${vehicle.vin}` : null] },
         ]}
       />

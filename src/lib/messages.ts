@@ -25,7 +25,7 @@ const LEGAL_FIXES: [RegExp, string][] = [
 ];
 const LEGAL_ENDING = /\s*(LLC|FZE|FZCO|FZ-LLC|DMCC|EST\.?|L\.L\.C\.?)\s*\.?$/i;
 
-/** "Luxe Shortlet Holiday Homes Rental L.l.c" -> "Luxe Shortlet Holiday Homes Rental LLC". */
+/** "Al Noor General Trading L.l.c" -> "Al Noor General Trading LLC". */
 export function cleanCompanyName(name: string | null | undefined): string {
   let s = String(name ?? "").trim();
   for (const [re, to] of LEGAL_FIXES) s = s.replace(re, to);
@@ -34,12 +34,12 @@ export function cleanCompanyName(name: string | null | undefined): string {
 
 /**
  * Who a message greets: a person by their name; a company by its saved contact person when there is one, else the
- * company name without the legal ending ("Dear Luxe Shortlet Holiday Homes,").
+ * company name without the legal ending ("Dear Al Noor General Trading,").
  */
 export function greetingNameOf(customer: { full_name?: string | null; company_name?: string | null } | null | undefined): string {
   const company = cleanCompanyName(customer?.company_name);
   const person = String(customer?.full_name ?? "").trim();
-  if (company && person && person.toLowerCase() !== company.toLowerCase()) return person;
+  if (company && person && !sameName(person, company)) return person;
   if (company) return company.replace(LEGAL_ENDING, "").trim() || company;
   return person || "Customer";
 }
@@ -47,4 +47,18 @@ export function greetingNameOf(customer: { full_name?: string | null; company_na
 /** The customer's name for the body of a message (not the greeting): the company kept whole, only tidied. */
 export function displayNameOf(customer: { full_name?: string | null; company_name?: string | null } | null | undefined): string {
   return cleanCompanyName(customer?.company_name) || String(customer?.full_name ?? "").trim() || "Customer";
+}
+
+/** One name written two ways ("AL NOOR TRADING LLC", "Al Noor Trading L.L.C.", "Al Noor Trading"): letters and digits only, the legal ending off. */
+export function sameName(a: string | null | undefined, b: string | null | undefined): boolean {
+  const key = (x: string | null | undefined) => cleanCompanyName(x).replace(LEGAL_ENDING, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const ka = key(a);
+  return !!ka && ka === key(b);
+}
+
+/** The contact line under a company on a customer document: a real person's name only, never the company again (or nothing). */
+export function contactNameOf(person: string | null | undefined, company: string | null | undefined): string | null {
+  const p = String(person ?? "").trim();
+  if (!p) return null;
+  return company && sameName(p, company) ? null : p;
 }

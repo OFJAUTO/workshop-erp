@@ -17,16 +17,18 @@ import { thumbsFor } from "@/lib/media-urls";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { DamageSection } from "@/components/DamageSection";
 import { DAMAGE_CONFIRM_EN, DAMAGE_WORDS_AR, damageCountWords } from "@/lib/damage";
+import { CHECK_IN, approvedLine, checkInFileName } from "@/lib/check-in";
 import { loadCarDamage } from "@/lib/damage-data";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  return customerPageMetadata("OFJ Automotive, Vehicle Check-In", "Review your vehicle's check-in video and job card, then approve to begin");
+  return customerPageMetadata(CHECK_IN.pageTitle, CHECK_IN.pageDescription);
 }
 
 /**
- * The job card the customer opens from the WhatsApp link: the plain logo banner, the number and date, the
+ * The VEHICLE CHECK-IN the customer opens from the WhatsApp link (31 October 2026: for the customer it is never the
+ * "job card" - that is the workshop's own work order, and staff screens keep the word): the plain logo banner, the number and date, the
  * customer and the car, the requests, the videos and photos, then one light green box with the terms tick,
  * the name and the only Approve button, and Call and WhatsApp. No bar, no greeting, no small print.
  */
@@ -45,7 +47,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     .maybeSingle();
   if (!req) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const card = await loadJobCard(admin, req.job_id, { customerPage: true });
-  if (!card || !card.gateIn) return plain(<Notice tone="error">This job card is no longer available.</Notice>);
+  if (!card || !card.gateIn) return plain(<Notice tone="error">{CHECK_IN.gone}</Notice>);
   const { vehicle, gateIn, requests, media, mediaUrls, job } = card;
 
   // "View as customer" from the gate-in details page: the same page, but a staff preview never counts as
@@ -98,9 +100,10 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     <CustomerFront
       company={company}
       header="plain"
-      title="Job card"
-      meta={[{ label: "Job card", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }]}
-      view={{ href: `/api/pdf/jobcard/${token}`, label: "View job card (PDF)", fileName: `OFJ Job card ${job.job_number}.pdf` }}
+      title={CHECK_IN.title}
+      titleAr={CHECK_IN.titleAr}
+      meta={[{ label: "Reference", value: job.job_number }, { label: "Received", value: formatDateTime(job.gated_in_at) }]}
+      view={{ href: `/api/pdf/jobcard/${token}`, label: CHECK_IN.download, fileName: checkInFileName(job.job_number) }}
       boxes={customerBoxes({ full_name: customerName, company_name: card.customer?.company_name ?? null, phone: card.customer?.phone ?? null }, { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: car || "Vehicle" })}
       action={
         !approved ? (
@@ -125,7 +128,8 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
                 </span>
               </label>
               <Field label="Your full name">
-                <Input name="approver_name" defaultValue={req.sent_to_name ?? ""} required minLength={2} autoComplete="name" className="bg-white" />
+                {/* Empty on purpose: the person approving types their own name (never the company's, never pre-filled). */}
+                <Input name="approver_name" defaultValue="" placeholder="Type your full name" required minLength={2} autoComplete="name" className="bg-white" data-approver-name />
               </Field>
               <Button type="submit" size="lg" className="w-full">Approve</Button>
             </form>
@@ -134,7 +138,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       }
       contact={<ContactButtons phone={company.phone} />}
     >
-      {approved ? <Notice tone="success">Approved by {req.approver_name} on {formatDateTime(req.approved_at)}. Thank you.</Notice> : null}
+      {approved ? <div data-approved-line><Notice tone="success">{approvedLine(req.approver_name, card.customer?.company_name, formatDateTime(req.approved_at))} Thank you.</Notice></div> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <section className="flex flex-col gap-1">
         <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Your requests</h2>

@@ -10,13 +10,15 @@ import { renderGateInPdf } from "@/lib/pdf/gate-in-pdf";
 import { pdfResponse } from "@/lib/pdf/response";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { CHECK_IN, approvedLine, checkInFileName } from "@/lib/check-in";
 import { formatPlate } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * The customer's copy of the job card (section 4, 30 October 2026), opened from the View button on their link: the car,
+ * The customer's VEHICLE CHECK-IN (section 4, 30 October 2026; renamed from "job card" 31 October), opened from the
+ * Download button on their link: the car,
  * the check-in details, "Damage already on the car" with the outline, the list and each panel's photos, the requests and
  * the approval. No staff names, nothing internal; the link's token is the key.
  */
@@ -26,7 +28,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
   const { data: req } = await admin.from("approval_requests").select("id, job_id, approved_at, approver_name, inspection_fee_notice, no_fee").eq("token", token).maybeSingle();
   if (!req) return new NextResponse("This link is not valid.", { status: 404 });
   const card = await loadJobCard(admin, req.job_id, { customerPage: true });
-  if (!card || !card.gateIn) return new NextResponse("This job card is no longer available.", { status: 404 });
+  if (!card || !card.gateIn) return new NextResponse(CHECK_IN.gone, { status: 404 });
   const { job, vehicle, gateIn, requests, media, mediaUrls } = card;
   const settings = await getSettings();
   const damage = await loadCarDamage(job.id, { media, urls: mediaUrls });
@@ -37,7 +39,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
     ["Condition on arrival", labelOf(CONDITIONS, gateIn.condition)],
     [vehicle.fuel_type === "electric" ? "Battery" : "Fuel level", vehicle.fuel_type === "electric" ? (gateIn.battery_percent != null ? `${gateIn.battery_percent}%` : "") : labelOf(FUEL_LEVELS, gateIn.fuel_level)],
     ["Cleanliness", labelOf(CLEANLINESS, gateIn.cleanliness)],
-    ["Damage noted", damageCountWords(damage)],
+    ["Damage noted", damageCountWords(damage, "below")],
     ["Mileage", describeMileage(gateIn.mileage, gateIn.mileage_unit ?? "km")],
     ["Keys received", `${gateIn.keys_count} key${gateIn.keys_count === 1 ? "" : "s"}, ${gateIn.keys_keychain ? "with keychain" : "no keychain"}`],
     ["Old parts returned to you", gateIn.old_parts_return ? "Yes" : "No"],
@@ -58,7 +60,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
     gatedInBy: "",
     details,
     requests: requests.map((r) => r.text),
-    approval: req.approved_at ? `Approved by ${req.approver_name ?? "the customer"} on ${formatDateTime(req.approved_at)}.` : "Not approved yet.",
+    approval: req.approved_at ? approvedLine(req.approver_name, card.customer?.company_name, formatDateTime(req.approved_at)) : "Not approved yet.",
     feeLine: noFee ? "" : (req.inspection_fee_notice ?? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed)),
     gateOut: null,
     photos: [],
@@ -67,5 +69,5 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
     printedBy: "",
     printedAt: "",
   });
-  return pdfResponse(pdf, `OFJ Job card ${job.job_number}.pdf`);
+  return pdfResponse(pdf, checkInFileName(job.job_number));
 }

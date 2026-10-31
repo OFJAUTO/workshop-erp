@@ -19,7 +19,7 @@ const CASES = [
   ["q/wbot1", "Your quotation"],
   ["i/wbot2", "Your invoice"],
   ["r/wbot3", "Your receipt"],
-  ["m/wbot4", "Your job card"],
+  ["m/wbot4", "Vehicle check-in"],
   ["d/wbot5", "Delivery"],
 ];
 for (const [path, title] of CASES) {

@@ -322,7 +322,7 @@ const DEFAULTS = {
   whatsapp_reminder_template:
     "Dear [name],\n\nA reminder of your appointment at OFJ Automotive tomorrow:\n*[date] at [time]*\nFor: [reason]\n\nPlease reply to confirm.\n\nOFJ Automotive",
   /** Section 4.6 (30 October 2026): damage found after check-in, told to the customer with the job card link. */
-  whatsapp_damage_found_template: "Dear [name],\n\nWhile working on your *[make model]* ([plate]) we found damage that could not be seen when the car arrived:\n[damage]\n\nThe photos are on your job card:\n[link]\n\nOFJ Automotive",
+  whatsapp_damage_found_template: "Dear [name],\n\nWhile working on your *[make model]* ([plate]) we found damage that could not be seen when the car arrived:\n[damage]\n\nThe photos are on your vehicle check-in:\n[link]\n\nOFJ Automotive",
   /** Section 5.7: a wholly complimentary job gets a tax invoice at AED 0 (off: the job completion note "No charge" only). */
   comp_tax_invoice: false as boolean,
   whatsapp_approval_template: "Dear [name],\n\nYour *[make model]* ([plate]) has been received at OFJ Automotive.\n\nPlease review the check-in and approve the inspection:\n[link]\n\nOFJ Automotive",

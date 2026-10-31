@@ -10,6 +10,7 @@ import { reportVideos, videoLabel } from "./report-videos";
 import { roadTestSummary, type RoadTestRow } from "./road-test";
 import type { Settings } from "./settings";
 import { formatPlate } from "./types";
+import { contactNameOf } from "./messages";
 
 /**
  * Everything the inspection report shows (29 October 2026, section 8), read once for the customer's link, the PDF
@@ -107,7 +108,7 @@ export async function loadReportData(card: JobCard, bundle: InspectionBundle, ro
       vin: v.vin ?? null,
       colour: v.colour ?? null,
       customer: c?.company_name ?? c?.full_name ?? "Customer",
-      customerSub: c?.company_name ? (c.full_name ?? null) : null,
+      customerSub: c?.company_name ? contactNameOf(c.full_name, c.company_name) : null,
       phone: c?.phone ?? null,
       inspectedAt: insp.submitted_at,
       approvedAt: insp.approved_at,

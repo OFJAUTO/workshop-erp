@@ -61,7 +61,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   const meta = [
     { label: isProforma ? "Proforma no." : isTax ? "Invoice no." : "Credit note no.", value: invoice.number },
     { label: "Date", value: formatDate(invoice.issued_at) },
-    ...(job ? [{ label: "Job card", value: job.job_number }] : []),
+    ...(job ? [{ label: "Reference", value: job.job_number }] : []),
   ];
   // Section 11: the job's tint specification on the tint items; tint outside a package gets its own small card.
   const tintSpec = await tintSpecForJob(invoice.job_id);

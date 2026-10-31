@@ -322,12 +322,12 @@ function ReportDoc({ data, pics, look, token, company, logo, qr }: { data: Repor
   );
   return (
     <PdfDocument title={`Inspection report ${head.jobNumber}`} company={company} logo={logo} qr={qr} uppercase={false} footerLines={["This report describes the condition found at inspection. A quotation for any work follows separately."]}>
-      <TitleRow title="INSPECTION REPORT" meta={[{ label: "Job card", value: head.jobNumber }]} />
+      <TitleRow title="INSPECTION REPORT" meta={[{ label: "Reference", value: head.jobNumber }]} />
       <InfoBoxes
         boxes={[
           head.loose ? { title: "Items", strong: head.car } : { title: "Vehicle", strong: head.car, rows: [["Plate", head.plate], ["Mileage", head.mileage], ["VIN", head.vin]] },
           { title: "Customer", strong: head.customer, lines: [head.customerSub, head.phone] },
-          { title: "Inspected", strong: head.inspectedAt ? formatDate(head.inspectedAt) : "—", rows: [["Job card", head.jobNumber], ["Approved", head.approvedAt ? formatDate(head.approvedAt) : null]] },
+          { title: "Inspected", strong: head.inspectedAt ? formatDate(head.inspectedAt) : "—", rows: [["Reference", head.jobNumber], ["Approved", head.approvedAt ? formatDate(head.approvedAt) : null]] },
         ]}
       />
 

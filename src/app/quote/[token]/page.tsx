@@ -118,7 +118,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
     { label: "Date", value: formatDate(q.sent_at ?? q.created_at) },
     // Always a date (31 October 2026): the quotation's date + the validity days from Settings.
     { label: "Valid until", value: formatDate(validUntilOf(q) ?? q.created_at) },
-    ...(job ? [{ label: "Job card", value: job.job_number }] : []),
+    ...(job ? [{ label: "Reference", value: job.job_number }] : []),
   ];
   const boxes = customerBoxes(customer ? { full_name: customer.full_name, company_name: customer.company_name, phone: customer.phone } : null, vehicle ? { kind: vehicle.kind ?? null, variant: vehicle.variant ?? null, vin: vehicle.vin ?? null, plate: formatPlate(vehicle), title: carName || "Vehicle" } : null);
   const statusNotes = (

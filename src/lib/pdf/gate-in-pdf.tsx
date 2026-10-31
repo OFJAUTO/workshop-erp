@@ -4,6 +4,7 @@ import { Document, Image, Page, Text, View, renderToBuffer } from "@react-pdf/re
 import { loadLogo } from "./images";
 import { DamagePdf, type DamagePdfData } from "./damage-pdf";
 import { GREY, INK, LINE, PALE, px, styles } from "./template";
+import { CHECK_IN } from "@/lib/check-in";
 
 /**
  * "GATE-IN RECORD - INTERNAL": everything recorded when the car arrived, on paper. The customer and the
@@ -34,7 +35,7 @@ export type GateInPdfData = {
   printedAt: string;
   /** Section 4 (30 October 2026): the damage already on the car, with each panel's photos. */
   damage?: DamagePdfData | null;
-  /** The customer's copy of the job card (from their link): no staff names, nothing internal. */
+  /** The customer's VEHICLE CHECK-IN (from their link; never called "job card" for them): no staff names, nothing internal. */
   customer?: boolean;
 };
 
@@ -57,15 +58,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export async function renderGateInPdf(d: GateInPdfData): Promise<Buffer> {
   const logo = await loadLogo();
   const doc = (
-    <Document title={d.customer ? `Job card ${d.jobNumber}` : `Gate-in record ${d.jobNumber}`}>
+    <Document title={d.customer ? `Vehicle check-in ${d.jobNumber}` : `Gate-in record ${d.jobNumber}`}>
       <Page size="A4" style={[styles.page, { paddingTop: px(28), paddingBottom: px(56), paddingHorizontal: px(42) }]}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: px(3), borderBottomColor: INK, paddingBottom: px(10), marginBottom: px(14) }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: px(14) }}>
             {logo ? <Image src={logo} style={{ height: px(40), width: px(80), objectFit: "contain", objectPosition: "left" }} /> : null}
-            <Text style={{ fontSize: px(15), fontWeight: 800, letterSpacing: 0.5 }}>{d.customer ? "JOB CARD" : "GATE-IN RECORD – INTERNAL"}</Text>
+            <Text style={{ fontSize: px(15), fontWeight: 800, letterSpacing: 0.5 }}>{d.customer ? CHECK_IN.pdfTitle : "GATE-IN RECORD – INTERNAL"}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
-            <Text style={{ fontSize: px(12), fontWeight: 800 }}>{d.jobNumber} · {d.plate}</Text>
+            <Text style={{ fontSize: px(12), fontWeight: 800 }}>{d.customer ? `Reference ${d.jobNumber}` : d.jobNumber} · {d.plate}</Text>
             <Text style={{ fontSize: px(9.5), color: GREY }}>{d.car}{d.vin ? ` · VIN ${d.vin}` : ""}</Text>
             <Text style={{ fontSize: px(9.5), color: GREY }}>{d.customer ? `Received ${d.gatedIn}` : `Printed ${d.printedAt} by ${d.printedBy}`}</Text>
           </View>
@@ -94,7 +95,7 @@ export async function renderGateInPdf(d: GateInPdfData): Promise<Buffer> {
           </Section>
         ) : null}
 
-        <Section title="Job card approval">
+        <Section title={d.customer ? CHECK_IN.approvalSection : "Job card approval"}>
           <Text style={{ fontSize: px(10.5), paddingVertical: px(2) }}>{d.approval}</Text>
           <Text style={{ fontSize: px(10.5), paddingVertical: px(2), fontWeight: 700 }}>{d.feeLine}</Text>
         </Section>

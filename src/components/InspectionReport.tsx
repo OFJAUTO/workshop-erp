@@ -21,7 +21,7 @@ export function reportBoxes(head: ReportHead): FrontBox[] {
       ? { title: "Items", strong: head.car, rows: [] }
       : { title: "Vehicle", strong: head.car, rows: [["Plate", head.plate], ["Mileage", head.mileage], ["VIN", head.vin]] },
     { title: "Customer", strong: head.customer, rows: [["", head.customerSub], ["", head.phone]] },
-    { title: "Inspected", strong: head.inspectedAt ? formatDate(head.inspectedAt) : "—", rows: [["Job card", head.jobNumber], ["Approved", head.approvedAt ? formatDate(head.approvedAt) : null]] },
+    { title: "Inspected", strong: head.inspectedAt ? formatDate(head.inspectedAt) : "—", rows: [["Reference", head.jobNumber], ["Approved", head.approvedAt ? formatDate(head.approvedAt) : null]] },
   ];
 }
 

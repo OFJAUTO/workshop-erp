@@ -139,7 +139,8 @@
     "test:roles": "node --env-file=.env.test.local tests/browser/test-roles.mjs",
     "test:unit": "node tests/unit/run-all.mjs",
     "test:pdf": "node --import ./tests/unit/register.mjs tests/unit/pdf-layout.test.mjs",
-    "test:docs": "node --env-file=.env.test.local tests/browser/test-docs.mjs"
+    "test:docs": "node --env-file=.env.test.local tests/browser/test-docs.mjs",
+    "test:checkin": "node --env-file=.env.test.local tests/browser/test-checkin.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",
