@@ -144,11 +144,12 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "parts_exchange", label: "A wrong or faulty part needs exchanging", locked: true },
   { type: "parts_no_home", label: "A part has no home: not needed, wrong, or back with Parts (owner)", locked: true },
   { type: "quote_other_editor", label: "Another advisor changed or sent your quotation", locked: true },
+  { type: "quote_handed_back", label: "The owner approved or edited your estimate or quotation: check and send", locked: true },
   { type: "advisor_change", label: "A car was put under your name (advisor in charge)", locked: true },
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */
-export const HANDOVER_TYPES = new Set(["bodyshop_signoff", "bodyshop_due_out", "bodyshop_left", "bodyshop_not_ready", "bodyshop_handover_moved", "parts_not_received", "parts_exchange", "job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
+export const HANDOVER_TYPES = new Set(["bodyshop_signoff", "bodyshop_due_out", "bodyshop_left", "bodyshop_not_ready", "bodyshop_handover_moved", "parts_not_received", "parts_exchange", "job_awaiting_assignment", "assignment_overdue", "job_assigned", "road_test_assigned", "road_test_decided", "inspection_open", "inspection_submitted", "inspection_returned", "parts_request", "parts_priced", "quote_owner_approval", "quote_handed_back", "quote_approved", "quote_declined", "quote_urgent_requested", "planning", "parts_to_order", "parts_arrived", "handover", "work_done", "work_complete", "work_sendback", "work_ready", "qc_result", "wash", "car_ready", "invoice_issued", "payment_received", "release_approval", "delivery", "owner_report", "loose_gated_in", "dangerous_found"]);
 
 export type NotificationInput = { type: string; title: string; body?: string | null; jobId?: string | null; href?: string | null };
 

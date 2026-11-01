@@ -6,6 +6,7 @@ import { loadWaitingOnYou, type Urgency, type WaitingItem } from "@/lib/waiting"
 import { RecordDeposit, type RecordDepositData } from "./RecordDeposit";
 import { markDeclinedCalled } from "@/app/(app)/jobs/declined-actions";
 import { declinedFollowUps } from "@/lib/declined";
+import { handbacksFor } from "@/lib/quote-lead";
 import { Button, Card, LinkButton } from "./ui";
 import type { BankFees } from "@/lib/bank-fees";
 
@@ -40,7 +41,7 @@ const ORDER: Record<Urgency, number> = { red: 0, amber: 1, grey: 2 };
 
 function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankFees }) {
   return (
-    <li className={`py-2 pl-3 border-l-4 ${URGENCY_BAR[i.urgency]} flex flex-wrap items-center gap-x-3 gap-y-1 text-sm`} title={i.hint} data-waiting-row data-urgency={i.urgency}>
+    <li className={`py-2 pl-3 border-l-4 ${URGENCY_BAR[i.urgency]} flex flex-wrap items-center gap-x-3 gap-y-1 text-sm`} title={i.hint} data-waiting-row data-waiting-job={i.jobId} data-urgency={i.urgency}>
       <span className={`inline-flex min-h-6 items-center rounded-control px-1.5 text-[10px] font-bold uppercase tracking-[0.06em] ${URGENCY_CHIP[i.urgency]}`}>{URGENCY_WORD[i.urgency]}</span>
       <span className="font-bold">{i.plate}</span>
       {i.car ? <span className="text-muted">{i.car}</span> : null}
@@ -83,7 +84,9 @@ export async function WaitingPanel({ staff, extra: given = [] }: { staff: Curren
   const settings = await getSettings();
   // The advisor's calls about declined work, due after the set number of days (29 October 2026).
   const followUps = (await declinedFollowUps(staff)).map((d): ExtraWaiting => ({ jobId: d.jobId, plate: d.plate, car: d.car, what: d.what, amount: null, actionLabel: "Called ✓", href: d.href, always: true, urgency: "amber", since: d.since, inline: { kind: "declined_called", ids: d.ids } }));
-  const extra = [...given, ...followUps];
+  // 1 November 2026 (E-00055): estimates and quotations the owner approved or edited, back with their advisor.
+  const handbacks = (await handbacksFor(staff)).map((h): ExtraWaiting => ({ jobId: `quote:${h.id}`, plate: h.plate, car: h.car, what: `${h.kind === "estimate" ? "ESTIMATE" : "QUOTATION"} ${h.number} · ${h.words}${h.summary ? ` · ${h.summary}` : ""}`, amount: null, actionLabel: "Open", href: h.href, always: true, urgency: "amber", since: h.since, hint: h.summary }));
+  const extra = [...given, ...followUps, ...handbacks];
   const items = await loadWaitingOnYou(staff, settings);
   const owner = staff.role_id === "owner";
   const charges = bankFeesOf(settings);

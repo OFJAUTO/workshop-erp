@@ -26,6 +26,8 @@ import { EstimateMenu } from "../EstimateMenu";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
 import { refuseRecord } from "@/lib/refusal";
+import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
+import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +41,11 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const [bundle, settings, site] = await Promise.all([loadQuotation(id), getSettings(), getSiteUrl()]);
   if (!bundle || bundle.quotation.kind !== "estimate") return refuseRecord("estimate", id);
   const { quotation: q, vehicle, customer } = bundle;
-  const mine = q.created_by === staff.id;
+  // 1 November 2026 (E-00055): the advisor who STARTED it stays in charge, whoever made this version.
+  const lead = (await startersOf([q.number])).get(q.number) ?? q.created_by;
+  const mine = lead === staff.id;
+  const [handback, leadNames] = await Promise.all([handbackOf(q.id), staffNamesOf([lead ?? "", ...bundle.versions.map((v) => (v as { created_by?: string | null }).created_by ?? "")])]);
+  const leadName = lead ? (leadNames.get(lead) ?? null) : null;
   const isOwner = role === "owner";
   // 30 October 2026: every advisor may OPEN an estimate (the open-estimate question and the car page link here, never a
   // dead end); only the advisor who made it, or the owner, changes or sends it.
@@ -72,7 +78,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {customerName}</span>
-            <Badge tone={tone}>{QUOTE_STATUS_LABELS[q.status]}</Badge>
+            {leadName ? <span data-estimate-lead>· started by {leadName}</span> : null}
+            <Badge tone={handback ? "green" : tone}>{handback ? "Ready to send" : QUOTE_STATUS_LABELS[q.status]}</Badge>
             {addsTo ? <Link href={`/estimates/${addsTo.id}`} className="rounded-full border border-ink px-2 py-0.5 text-[11px] font-extrabold tracking-[0.06em] whitespace-nowrap" data-estimate-adds-to={addsTo.number}>ADDITIONAL · in addition to {addsTo.number}</Link> : null}
             {attached ? <Link href={`/jobs/${attached.id}`} className="text-xs font-bold underline underline-offset-4 whitespace-nowrap" data-estimate-carried={attached.job_number}>Carried over to {attached.job_number}</Link> : null}
           </span>
@@ -94,9 +101,10 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         <div className="flex flex-wrap items-center gap-2 text-sm" data-quote-version-bar>
           {q.version < Math.max(...bundle.versions.map((v) => v.version)) ? <span className="rounded-card border border-line-strong bg-[#EDEDEF] px-3 py-2 font-bold text-[#3F3F46]" data-old-version-banner>OLD VERSION – v{q.version} of {bundle.versions.length}, kept for the record</span> : null}
           <span className="font-semibold text-muted">Versions of {q.number}:</span>
-          <QuoteVersionSelect base="/estimates/" versions={bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status }))} selectedId={q.id} />
+          <QuoteVersionSelect base="/estimates/" versions={bundle.versions.map((v) => { const by = (v as { created_by?: string | null }).created_by ?? null; return { id: v.id, version: v.version, status: v.status, by: by && by !== lead ? (leadNames.get(by) ?? null) : null }; })} selectedId={q.id} />
         </div>
       ) : null}
+      <HandbackBanner handback={handback} leadName={leadName} />
       {q.status === "cancelled" ? <Notice tone="info">Cancelled{q.cancel_reason ? `: ${q.cancel_reason}` : ""}. Kept because the customer saw it; their link says it was withdrawn.</Notice> : null}
       {accepted ? (
         <Card className="flex flex-col gap-2 border-green">

@@ -8,6 +8,7 @@ import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { notifyStaff } from "@/lib/notifications";
+import { quoteLeadIds } from "@/lib/quote-lead";
 import { loadQuotation } from "@/lib/quote-data";
 import { validUntilOf } from "@/lib/doc-totals";
 import { aed, discountLabelOf, hasPackageLine, isHidden, isUnchosen, lineDiscountAmount, linePrice, quoteTotals } from "@/lib/quotes";
@@ -81,7 +82,8 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   if (!bundle) return plain(<Notice tone="error">This quotation is no longer available.</Notice>);
   const { quotation: q, customer, vehicle, job } = bundle;
   if (row.status === "sent") {
-    const ids = [q.created_by, q.sent_by, job?.gated_in_by].filter((x): x is string => !!x);
+    // 1 November 2026: the advisor in charge (who started it) hears it, whoever made the newest version.
+    const ids = [...(await quoteLeadIds(q)), q.sent_by, job?.gated_in_by].filter((x): x is string => !!x);
     await notifyStaff(ids, { type: "quote_opened", title: `Customer opened ${isEstimate ? "the estimate" : "the quotation"} · ${q.number}`, body: vehicle ? formatPlate(vehicle) : "", jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}` : `/estimates/${q.id}` });
   }
   if (q.status === "cancelled" && q.cancelled_at) return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} has been withdrawn. Please contact OFJ Automotive for an updated one.</Notice>);

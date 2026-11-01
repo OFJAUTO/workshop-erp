@@ -17,6 +17,7 @@ import { blankToNull } from "@/lib/format";
 import { loadInspection } from "@/lib/inspection-data";
 import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
+import { handBack, quoteLeadIds } from "@/lib/quote-lead";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, packageCostingForQuote, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
@@ -414,19 +415,19 @@ export async function decideRevision(quotationId: string, formData: FormData) {
       const r = await createNextVersion(q.id, staff, { reason: "parts changed, allowed by the owner" });
       if (!("error" in r)) {
         await admin.from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, updated_by: staff.id }).eq("id", q.id);
-        const ids = Array.from(new Set([q.created_by, q.sent_by, ...requester].filter((x): x is string => !!x)));
+        const ids = Array.from(new Set([...(await quoteLeadIds(q)), q.sent_by, ...requester].filter((x): x is string => !!x)));
         await notifyStaff(ids, { type: "quote_revised_by_parts", title: `Owner allowed the revised ${q.number}: send it`, body: `Version ${r.version} is ready with the change from Parts.${note ? ` Owner: ${note}` : ""}`, jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${r.id}?send=1` });
         refresh(q.job_id, r.id);
         redirect(`/jobs/${q.job_id}/quote/${r.id}?message=${encodeURIComponent(`Allowed. Version ${r.version} is ready to send.`)}`);
       }
     }
-    await notifyStaff(requester.length ? requester : [q.created_by].filter((x): x is string => !!x), { type: "revision_request", title: `Owner allowed one revision of ${q.number}`, body: `Press Revise quotation on the quotation page.${note ? ` Owner: ${note}` : ""}`, jobId: q.job_id, href: back });
+    await notifyStaff(requester.length ? requester : await quoteLeadIds(q), { type: "revision_request", title: `Owner allowed one revision of ${q.number}`, body: `Press Revise quotation on the quotation page.${note ? ` Owner: ${note}` : ""}`, jobId: q.job_id, href: back });
     refresh(q.job_id, q.id);
     redirect(`${back}?message=${encodeURIComponent("Allowed: one revision can be made.")}`);
   }
   await admin.from("quotations").update({ revision_declined_at: now, revision_declined_by: staff.id, revision_decision_note: note, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "revision_declined", `${q.number}: the owner declined the revision${note ? `: ${note}` : ""}`);
-  await notifyStaff(requester.length ? requester : [q.created_by].filter((x): x is string => !!x), { type: "revision_request", title: `Owner declined the revision of ${q.number}`, body: note ?? "The approved quotation stands.", jobId: q.job_id, href: back });
+  await notifyStaff(requester.length ? requester : await quoteLeadIds(q), { type: "revision_request", title: `Owner declined the revision of ${q.number}`, body: note ?? "The approved quotation stands.", jobId: q.job_id, href: back });
   refresh(q.job_id, q.id);
   redirect(`${back}?message=${encodeURIComponent("Declined. The approved quotation stands.")}`);
 }
@@ -556,6 +557,10 @@ export async function markQuoteSent(quotationId: string, method: string): Promis
       // Sent by someone other than the car's advisor: the advisor is told.
       const advisors = await advisorsInCharge(q.job_id);
       if (advisors.length && !advisors.includes(staff.id)) await notifyStaff(advisors, { type: "quote_other_editor", title: `${staff.display_name} sent ${q.number} · ${bundle.job?.job_number ?? ""}`, body: "Your car's quotation went to the customer, sent by someone else.", jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${q.id}` });
+    } else {
+      // 1 November 2026: an estimate sent by someone other than the advisor who started it.
+      const leads = await quoteLeadIds(q);
+      if (leads.length && !leads.includes(staff.id)) await notifyStaff(leads, { type: "quote_other_editor", title: `${staff.display_name} sent ESTIMATE ${q.number}`, body: "Your estimate went to the customer, sent by someone else.", href: `/estimates/${q.id}` });
     }
     if (q.job_id && bundle.job && (bundle.job.status === "pending_quote" || bundle.job.status === "in_inspection")) {
       await admin.from("jobs").update({ status: "pending_customer_approval", stage: "approval", stage_entered_at: new Date().toISOString() }).eq("id", q.job_id);
@@ -592,7 +597,12 @@ export async function decideQuoteApproval(quotationId: string, formData: FormDat
     const c = await stampComp(bundle, settingsNow, staff.id, "rejected", note);
     if (c) await logQuoteEvent(q.id, q.job_id, staff.id, "comp_rejected", `Complimentary on ${q.number} rejected by the owner${note ? `: ${note}` : ""}`);
   }
-  if (q.created_by) await notifyStaff([q.created_by], { type: "quote_owner_approval", title: decision === "approve" ? `Owner approved ${q.number}: send it` : `Owner asked for changes on ${q.number}`, body: note ?? "", jobId: q.job_id, href: back });
+  // 1 November 2026: the advisor in charge hears it (the version's creator may be the owner himself).
+  const handed = decision === "approve" ? await handBack(q.id, "approved", staff) : null;
+  if (handed === null) {
+    const leads = (await quoteLeadIds(q)).filter((id) => id !== staff.id);
+    if (leads.length) await notifyStaff(leads, { type: "quote_owner_approval", title: decision === "approve" ? `Owner approved ${q.number}: send it` : `Owner asked for changes on ${q.number}`, body: note ?? "", jobId: q.job_id, href: back });
+  }
   refresh(q.job_id, q.id);
   redirect(`${back}?message=${encodeURIComponent(decision === "approve" ? "Approved. The advisor can send it now." : "Sent back to the advisor.")}`);
 }
@@ -764,6 +774,8 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
   }
   await admin.from("quotations").update({ completed_at: new Date().toISOString(), completed_by: staff.id, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name}`);
+  // 1 November 2026 (E-00055): the owner finished someone else's quotation: it goes back to the advisor in charge.
+  if (staff.role_id === "owner" && !staff.viewingAs) await handBack(q.id, "edited", staff);
   refresh(q.job_id, q.id);
   return { ok: true };
 }

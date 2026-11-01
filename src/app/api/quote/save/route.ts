@@ -1,4 +1,5 @@
 import { refuseIfLocked } from "@/lib/quote-lock-server";
+import { handBack, keepBaseline } from "@/lib/quote-lead";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
@@ -152,6 +153,8 @@ export async function POST(request: NextRequest) {
     if (refused) return NextResponse.json({ error: refused, locked: true }, { status: 423 });
     return NextResponse.json({ error: "This version has been sent. Revise it to make changes." }, { status: 423 });
   }
+  // 1 November 2026 (E-00055): the owner's first change on someone else's quotation keeps how it stood, for the handback.
+  if (isOwner) await keepBaseline(q.id, staff);
   const settings = await getSettings();
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
   const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;
@@ -648,14 +651,19 @@ export async function POST(request: NextRequest) {
       // The owner changed the discount on a quotation waiting for him: his discount is no longer a reason. Whatever
       // else is left (a large total, a line discount) stays in his box; with nothing left it goes back to the advisor.
       const b = await loadQuotation(q.id);
-      if (b) {
+      // refreshQuoteTotals may already have sent it back (and handed it back): never twice.
+      if (b && b.quotation.status === "pending_owner") {
         const left = approvalReasonsNow(b, settings, true);
         if (left.length) await admin.from("quotations").update({ owner_approval_reason: left.join("; "), updated_by: staff.id }).eq("id", q.id);
         else {
           await admin.from("quotations").update({ status: "draft", owner_approval_reason: null, updated_by: staff.id }).eq("id", q.id);
           await logQuoteEvent(q.id, b.quotation.job_id, staff.id, "quote_owner_approved", `${b.quotation.number} v${b.quotation.version}: the owner set the discount himself; nothing else needs his approval`);
-          const to = [...new Set([b.quotation.created_by, ...(b.quotation.job_id ? await advisorsInCharge(b.quotation.job_id) : [])].filter((x): x is string => !!x && x !== staff.id))];
-          if (to.length) await notifyStaff(to, { type: "quote_owner_approval", title: `Owner set the discount on ${b.quotation.number}: complete and send it`, body: "", jobId: b.quotation.job_id, href: b.quotation.job_id ? `/jobs/${b.quotation.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+          // Back to the advisor in charge with what changed (never to the version's creator, who may be the owner).
+          const handed = await handBack(q.id, "edited", staff);
+          if (handed === null) {
+            const to = [...new Set([b.quotation.created_by, ...(b.quotation.job_id ? await advisorsInCharge(b.quotation.job_id) : [])].filter((x): x is string => !!x && x !== staff.id))];
+            if (to.length) await notifyStaff(to, { type: "quote_owner_approval", title: `Owner set the discount on ${b.quotation.number}: complete and send it`, body: "", jobId: b.quotation.job_id, href: b.quotation.job_id ? `/jobs/${b.quotation.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+          }
         }
       }
     }

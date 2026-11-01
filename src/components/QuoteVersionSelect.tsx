@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 
 /** The versions of one quotation number ("v1 · v2 (current)"): picking one opens it; old versions open read-only. */
-export function QuoteVersionSelect({ jobId, base, versions, selectedId, label = "Version" }: { jobId?: string | null; /** Where a version opens (default the job's quotation page; estimates pass /estimates/). */ base?: string; versions: { id: string; version: number; status: string }[]; selectedId: string; label?: string }) {
+export function QuoteVersionSelect({ jobId, base, versions, selectedId, label = "Version" }: { jobId?: string | null; /** Where a version opens (default the job's quotation page; estimates pass /estimates/). */ base?: string; versions: { id: string; version: number; status: string; /** Who made this version when it was not the advisor in charge: "v2 · edited by Omar". */ by?: string | null }[]; selectedId: string; label?: string }) {
   const router = useRouter();
   const newest = Math.max(...versions.map((v) => v.version));
   if (versions.length < 2) return <span className="inline-flex min-h-11 items-center text-sm font-semibold text-muted" data-quote-versions={versions.length}>v{versions[0]?.version ?? 1}</span>;
@@ -19,6 +19,7 @@ export function QuoteVersionSelect({ jobId, base, versions, selectedId, label = 
         {[...versions].sort((a, b) => a.version - b.version).map((v) => (
           <option key={v.id} value={v.id}>
             v{v.version}
+            {v.by ? ` · edited by ${v.by}` : ""}
             {v.version === newest ? " (current)" : " (old, read-only)"}
           </option>
         ))}

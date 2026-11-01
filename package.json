@@ -93,6 +93,7 @@
     "test:nofee3": "node --env-file=.env.test.local tests/browser/test-nofee3.mjs",
     "test:jobs4": "node --env-file=.env.test.local tests/browser/test-jobs4.mjs",
     "test:payanytime": "node --env-file=.env.test.local tests/browser/test-payanytime.mjs",
+    "test:handback": "node --env-file=.env.test.local tests/browser/test-handback.mjs",
     "test:paymethods": "node --env-file=.env.test.local tests/browser/test-paymethods.mjs",
     "test:receipt": "node --env-file=.env.test.local tests/browser/test-receipt.mjs",
     "test:zoho0": "node --env-file=.env.test.local tests/browser/test-zoho0.mjs",

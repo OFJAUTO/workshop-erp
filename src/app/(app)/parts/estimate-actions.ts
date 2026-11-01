@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff } from "@/lib/auth";
+import { startersOf } from "@/lib/quote-lead";
 import { formValues, type FormState } from "@/lib/form-state";
 import { notifyStaff } from "@/lib/notifications";
 import { logQuoteEvent, refreshQuoteTotals } from "@/lib/quote-data";
@@ -37,9 +38,11 @@ async function estimateLine(quotationId: string, lineId: string) {
 }
 
 /** The advisors to tell: whoever made the estimate and whoever sent the parts to the desk. */
-async function advisorsOf(quotationId: string, createdBy: string | null): Promise<string[]> {
+async function advisorsOf(quotationId: string, createdBy: string | null, number?: string): Promise<string[]> {
   const { data } = await createAdminClient().from("quotation_lines").select("price_requested_by").eq("quotation_id", quotationId).not("price_requested_by", "is", null);
-  return Array.from(new Set([createdBy, ...(data ?? []).map((r) => r.price_requested_by as string)].filter((x): x is string => !!x)));
+  // 1 November 2026: the advisor who started the estimate stays in charge, whoever made the newest version.
+  const starter = number ? ((await startersOf([number])).get(number) ?? createdBy) : createdBy;
+  return Array.from(new Set([starter, ...(data ?? []).map((r) => r.price_requested_by as string)].filter((x): x is string => !!x)));
 }
 
 export async function priceEstimatePart(quotationId: string, lineId: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -73,7 +76,7 @@ export async function priceEstimatePart(quotationId: string, lineId: string, _st
   if (error) return { error: error.message, values };
   await refreshQuoteTotals(q.id, settings, staff.id, { reopen: true });
   await logQuoteEvent(q.id, null, staff.id, "part_priced", `${staff.display_name} priced ${l.title}: AED ${cost.toLocaleString("en-GB")} each from ${supplier}${wasAdvisor && previous !== null && Math.abs(previous - cost) > 0.005 ? ` (the advisor had AED ${previous.toLocaleString("en-GB")})` : ""}`);
-  const advisors = await advisorsOf(q.id, q.created_by);
+  const advisors = await advisorsOf(q.id, q.created_by, q.number);
   if (wasAdvisor && previous !== null && Math.abs(previous - cost) > 0.005) {
     await notifyStaff(advisors, { type: "estimate_parts_priced", title: `The parts desk changed your price · ESTIMATE ${q.number}`, body: `${l.title}: ${aed(previous)} → ${aed(cost)} each (${supplier}). Check the estimate before sending.`, href: `/estimates/${q.id}` });
   }
@@ -115,7 +118,7 @@ export async function tellAdvisorPrice(quotationId: string, lineId: string, _sta
   const { q, l } = found;
   const note = String(values.note ?? "").trim().slice(0, 500);
   if (note.length < 3) return { error: "Write the right price and supplier.", values };
-  await notifyStaff(await advisorsOf(q.id, q.created_by), { type: "estimate_parts_priced", title: `Price to correct · ESTIMATE ${q.number}`, body: `${l.title}: ${note} (from ${staff.display_name}). Revise the estimate.`, href: `/estimates/${q.id}` });
+  await notifyStaff(await advisorsOf(q.id, q.created_by, q.number), { type: "estimate_parts_priced", title: `Price to correct · ESTIMATE ${q.number}`, body: `${l.title}: ${note} (from ${staff.display_name}). Revise the estimate.`, href: `/estimates/${q.id}` });
   await logQuoteEvent(q.id, null, staff.id, "price_flagged", `${staff.display_name} told the advisor the price of ${l.title} is different: ${note}`);
   return { success: "The advisor was told.", values: {} };
 }

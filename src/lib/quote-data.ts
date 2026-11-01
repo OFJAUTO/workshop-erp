@@ -366,6 +366,19 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   }
   const { error } = await admin.from("quotations").update(patch).eq("id", quotationId);
   if (error) console.error("refreshQuoteTotals", error.message);
+  // 1 November 2026 (E-00055): the owner's change ended the wait for his approval: back to the advisor in charge.
+  if (!error && q.status === "pending_owner" && patch.status === "draft" && by) {
+    const { data: who } = await admin.from("staff").select("id, display_name, role_id").eq("id", by).maybeSingle();
+    if (who?.role_id === "owner") {
+      const lead = await import("./quote-lead");
+      const handed = await lead.handBack(quotationId, "edited", { id: who.id as string, display_name: who.display_name as string });
+      if (handed === null) {
+        const { data: row } = await admin.from("quotations").select("kind, number, job_id, created_by").eq("id", quotationId).maybeSingle();
+        const to = row ? (await lead.quoteLeadIds(row as { kind: string; number: string; job_id: string | null; created_by: string | null })).filter((id) => id !== who.id) : [];
+        if (row && to.length) await (await import("./notifications")).notifyStaff(to, { type: "quote_owner_approval", title: `Owner changed ${row.number}: complete and send it`, body: "", jobId: row.job_id as string | null, href: row.job_id ? `/jobs/${row.job_id}/quote/${quotationId}` : `/estimates/${quotationId}` });
+      }
+    }
+  }
 }
 
 export async function logQuoteEvent(quotationId: string, jobId: string | null, by: string | null, event_type: string, note: string) {

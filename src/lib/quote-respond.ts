@@ -1,4 +1,5 @@
 import { replaceProformaAfterRevision } from "./invoice-flow";
+import { startersOf } from "./quote-lead";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { createTrip, loadDrivers } from "./delivery";
 import { dropParts } from "@/lib/drop-parts";
@@ -16,9 +17,12 @@ import { releaseWords } from "./job-sides";
 import { extendBodyshopStages } from "./bodyshop";
 
 /** Everyone who should hear about a customer's answer: the advisor(s) of the job and the person who sent it. */
-export async function advisorsOf(q: Pick<QuoteRow, "job_id" | "created_by" | "sent_by">): Promise<string[]> {
+export async function advisorsOf(q: Pick<QuoteRow, "job_id" | "created_by" | "sent_by"> & { number?: string }): Promise<string[]> {
   const ids = new Set<string>();
-  if (q.created_by) ids.add(q.created_by);
+  // 1 November 2026: the advisor who started it stays in charge, whoever made the newest version.
+  const starter = q.number ? (await startersOf([q.number])).get(q.number) : null;
+  if (starter) ids.add(starter);
+  else if (q.created_by) ids.add(q.created_by);
   if (q.sent_by) ids.add(q.sent_by);
   if (q.job_id) {
     for (const id of await advisorsInCharge(q.job_id)) ids.add(id);

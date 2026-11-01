@@ -41,6 +41,8 @@ import { loadJobQuotes, staffNames } from "@/lib/quote-history-data";
 import { approvedFeeOf } from "@/lib/inspection-fee-server";
 import { inclusiveSplit } from "@/lib/inspection-fee";
 import { refuseRecord } from "@/lib/refusal";
+import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
+import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +59,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const [bundle, settings, site] = await Promise.all([loadQuotation(qid), getSettings(), getSiteUrl()]);
   if (!bundle || bundle.quotation.job_id !== id) return refuseRecord("quotation", qid);
   const { quotation: q, job, vehicle, customer } = bundle;
+  // 1 November 2026 (E-00055): who started it stays in charge; the owner's handback shows at the top while it stands.
+  const qLead = (await startersOf([q.number])).get(q.number) ?? q.created_by;
+  const [handback, qNames] = await Promise.all([handbackOf(q.id), staffNamesOf([qLead ?? "", ...bundle.versions.map((v) => v.created_by ?? "")])]);
 
   // Any advisor can open, edit and send any quotation; the car keeps its own advisor.
   const isAdvisor = role === "service_advisor";
@@ -236,6 +241,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
       {q.owner_approved_at && !approvalStands && q.status === "draft" ? <div data-owner-approval-stale><Notice tone="info">Changed since the owner approved it ({approvalNow.join("; ")}). Sending asks the owner again.</Notice></div> : null}
       {approvalStands && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
+      <HandbackBanner handback={handback} leadName={qLead ? (qNames.get(qLead) ?? null) : null} />
       {oldBanner && !lock.locked ? (
         <div className="rounded-card border border-line-strong bg-[#EDEDEF] px-4 py-3 text-sm font-bold text-[#3F3F46]" data-old-version-banner>
           {oldBanner}
@@ -244,7 +250,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {bundle.versions.length > 1 ? (
         <div className="flex flex-wrap items-center gap-2 text-sm" data-quote-version-bar>
           <span className="font-semibold text-muted">Versions of {q.number}:</span>
-          <QuoteVersionSelect jobId={id} versions={bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status }))} selectedId={q.id} />
+          <QuoteVersionSelect jobId={id} versions={bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status, by: v.created_by && v.created_by !== qLead ? (qNames.get(v.created_by) ?? null) : null }))} selectedId={q.id} />
           {newerVersion ? <Link href={`/jobs/${id}/quote/${bundle.versions[bundle.versions.length - 1].id}`} className="font-semibold underline underline-offset-4" data-open-newest>Open the newest (v{bundle.versions[bundle.versions.length - 1].version})</Link> : null}
         </div>
       ) : null}

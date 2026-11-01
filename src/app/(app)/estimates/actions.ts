@@ -1,6 +1,7 @@
 "use server";
 
 import { chooserValues, resolveCustomerCar } from "@/lib/customer-car";
+import { startersOf } from "@/lib/quote-lead";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
@@ -108,7 +109,9 @@ async function ownEstimate(id: string): Promise<{ staff: NonNullable<Awaited<Ret
   if (!staff || staff.viewingAs) return { error: "Not allowed." };
   const { data: q } = await createAdminClient().from("quotations").select("id, kind, number, version, status, created_by, sent_at, job_id, customer_id, vehicle_id, token, validity_days, opened_at, is_active").eq("id", id).maybeSingle();
   if (!q || q.kind !== "estimate" || !q.is_active) return { error: "Estimate not found." };
-  if (staff.role_id !== "owner" && q.created_by !== staff.id) return { error: "Only the advisor who made it, or the owner, can do this." };
+  // 1 November 2026: the advisor who STARTED it stays in charge, whoever made the newest version.
+  const starter = (await startersOf([q.number as string])).get(q.number as string) ?? q.created_by;
+  if (staff.role_id !== "owner" && starter !== staff.id) return { error: "Only the advisor in charge of it, or the owner, can do this." };
   return { staff, q };
 }
 
