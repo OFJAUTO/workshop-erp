@@ -21,7 +21,7 @@ export function MoneyTilesRow({ t }: { t: MoneyTiles }) {
     { label: "Collected today", value: money(t.collectedToday), sub: `this month ${money(t.collectedMonth)}`, href: "/invoices?show=paid" },
     { label: "Tax invoices today", value: String(t.taxInvoicesToday), sub: "issued today", href: "/invoices?show=tax" },
     { label: "LPOs waiting approval", value: String(t.lposWaiting), sub: "to approve", href: "/parts/orders", tone: t.lposWaiting ? "border-amber-bar" : "" },
-    { label: "Supplier invoices to check", value: String(t.supplierInvoicesToCheck), sub: "to follow or price differs", href: "/parts/orders?tab=invoices", tone: t.supplierInvoicesToCheck ? "border-amber-bar" : "" },
+    { label: "Supplier invoices to check", value: String(t.supplierInvoicesToCheck), sub: "new, waiting for invoice or price differs", href: "/supplier-invoices", tone: t.supplierInvoicesToCheck ? "border-amber-bar" : "" },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-money-tiles>

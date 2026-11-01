@@ -10,6 +10,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { loadJobLpos, refusalsReady } from "@/lib/lpo";
+import { invoiceHref } from "@/lib/supplier-invoices";
 import { realPartNumber } from "@/lib/parts-rows";
 import { PO_STATUS_LABELS, loadPurchaseOrder } from "@/lib/parts-data";
 import { partTypeText } from "@/lib/quotes";
@@ -109,6 +110,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
             {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
             {po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
+            {!isMain && (po.supplier_invoice_status === "received" || po.supplier_invoice_status === "to_follow") && ["owner", "accounts", "parts"].includes(role) ? <Link href={invoiceHref(po)} className="text-sm font-bold underline underline-offset-4" data-lpo-invoice-link>{po.supplier_invoice_number ? `INV ${po.supplier_invoice_number}` : "Invoice"} in Supplier invoices</Link> : null}
           </span>
         }
         actions={

@@ -1,4 +1,6 @@
 import "server-only";
+import { loadSupplierInvoices } from "./supplier-invoices";
+import { invWords } from "./supplier-invoice-rows";
 import { depositsWaiting } from "./deposits";
 import { payableCommissions, proofMissingPayments } from "./commissions";
 import { PAYMENT_SELECT, toPayment } from "./invoice-data";
@@ -103,6 +105,14 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     if (!po?.is_active || seenPo.has(l.po_id as string)) continue;
     seenPo.add(l.po_id as string);
     out.push({ jobId: `chk:${l.po_id}`, plate: po.number, car: po.supplier_name, what: "Invoice price differs from the LPO", amount: null, actionLabel: "Check", href: `/parts/orders/${l.po_id}`, always: true, urgency: "amber", hint: "Accept the new price or dispute it, line by line, on the LPO page." });
+  }
+
+  // 4a. Supplier invoices that arrived and are not checked yet (1 November 2026): one line each until accounts check them.
+  {
+    const { rows } = await loadSupplierInvoices();
+    for (const r of rows.filter((x) => x.status === "new")) {
+      out.push({ jobId: `si:${r.key}`, plate: r.number ? invWords(r.number) : "Supplier invoice", car: r.supplier, what: `Supplier invoice to check · ${r.shares.map((x) => x.poNumber).join(", ")}${r.duplicateOf ? " · possible duplicate" : ""}`, amount: aed(r.total), actionLabel: "Check", href: `/supplier-invoices?open=${encodeURIComponent(r.key)}`, always: true, urgency: r.duplicateOf ? "red" : "amber", since: r.at ?? undefined, hint: "Open it next to the parts it covers, then Mark checked (the bill goes to Zoho) or Query it with Parts." });
+    }
   }
 
   // 4b. Commissions approved by the owner whose customer invoice is settled: payable today.

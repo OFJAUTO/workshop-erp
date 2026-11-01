@@ -102,6 +102,8 @@ import { teamsReady } from "@/lib/line-teams-data";
 import { TEAM_LABELS, sideOfPerson, teamOf } from "@/lib/teams";
 import { setJobDepartment, setLineTeam } from "../team-actions";
 import { TeamsCard } from "./TeamsCard";
+import { loadSupplierInvoices } from "@/lib/supplier-invoices";
+import { STATUS_WORDS as SI_STATUS_WORDS, invWords } from "@/lib/supplier-invoice-rows";
 import { loadStages } from "@/lib/bodyshop";
 import { sidesOfDepartment } from "@/lib/job-sides";
 import { bodyshopScopeOf, maySignAftercare } from "@/lib/team-scope";
@@ -234,6 +236,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const mayChangeTeams = ["owner", "service_advisor", "workshop_manager"].includes(role) && !staff.viewingAs && job.is_open;
   const teamLines = job.is_open && ["owner", "service_advisor", "workshop_manager", "accounts"].includes(role) ? await lineTeamsOfJob(id, job.department) : [];
   const linesReady = await teamsReady();
+  // The car's supplier invoices (1 November 2026): number, its share, status, one tap to the Supplier invoices tab.
+  const jobSupplierInvoices = ["owner", "accounts", "parts", "service_advisor"].includes(role) ? (await loadSupplierInvoices({ jobId: id })).rows.filter((r) => r.shares.some((x) => x.jobId === id)) : [];
   const withCarTeam = teamLines.length && job.department !== "mechanical" ? teamWithCar(jobSides.includes("bodyshop") ? await loadStages(id) : [], job.status === "in_work" && !!job.plan_released_at) : null;
   const misfits: { name: string; why: string }[] = [];
   if (teamLines.length && (onCar.length || bodyOnCar.length)) {
@@ -667,6 +671,24 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
+      {jobSupplierInvoices.length ? (
+        <Card className="flex flex-col gap-2" data-job-supplier-invoices>
+          <SectionLabel right={`${jobSupplierInvoices.length}`}>Supplier invoices</SectionLabel>
+          <ul className="divide-y divide-line text-sm">
+            {jobSupplierInvoices.map((r) => {
+              const share = r.shares.filter((x) => x.jobId === id).reduce((acc, x) => acc + x.amount, 0);
+              return (
+                <li key={r.key} className="flex flex-wrap items-center gap-2 py-1.5" data-job-supplier-invoice>
+                  <Link href={`/supplier-invoices?open=${encodeURIComponent(r.key)}`} className="font-semibold underline underline-offset-4">{invWords(r.number)}</Link>
+                  <span className="text-muted">{r.supplier}</span>
+                  <Badge tone={r.status === "paid" ? "green" : r.status === "waiting" || r.status === "queried" ? "amber" : "outline"}>{SI_STATUS_WORDS[r.status]}</Badge>
+                  <span className="ml-auto font-semibold">AED {share.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{r.shares.length > 1 ? ` of ${r.beforeVat.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""} + VAT</span>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      ) : null}
       {teamLines.length || mayChangeTeams ? (
         <TeamsCard department={job.department ?? "mechanical"} canChange={mayChangeTeams} onDepartment={setJobDepartment.bind(null, id)} lines={teamLines.map((l) => ({ id: l.id, title: l.title, team: l.team!, chosen: !!l.chosen, onTeam: setLineTeam.bind(null, id, l.id) }))} linesReady={linesReady} misfits={misfits} workWords={teamsWords(jobTeams)} withCar={withCarTeam ? LINE_TEAM_LABELS[withCarTeam] : null} />
       ) : null}

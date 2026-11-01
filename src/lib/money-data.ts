@@ -1,4 +1,5 @@
 import "server-only";
+import { supplierInvoicesToCheckCount } from "./supplier-invoices";
 import { signCarPictures } from "./car-pictures";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { dubaiDate } from "./jobs";
@@ -177,7 +178,8 @@ export async function loadMoneyTiles(rows: MoneyRowData[]): Promise<MoneyTiles> 
     collectedMonth: round2(counted.reduce((a, p) => a + Number(p.amount_aed), 0)),
     taxInvoicesToday: taxToday ?? 0,
     lposWaiting: lpos ?? 0,
-    supplierInvoicesToCheck: (toFollow ?? 0) + (mismatches ?? 0),
+    // 1 November 2026: the Supplier invoices tab's own count (new, waiting for the invoice, queried, price differs).
+    supplierInvoicesToCheck: await supplierInvoicesToCheckCount().catch(() => (toFollow ?? 0) + (mismatches ?? 0)),
   };
 }
 

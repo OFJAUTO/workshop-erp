@@ -1,7 +1,7 @@
 "use server";
 
 import { isUuid } from "@/lib/uuid";
-import { tryEnqueueZoho } from "@/lib/zoho-sync";
+import { notifyInvoiceReceived } from "@/lib/supplier-invoices";
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
@@ -182,8 +182,8 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
       }
       // Files uploaded before the save carry the panel's key (a uuid); they re-point to the (first) LPO so the scan shows on its page.
       if (isUuid(clientKey)) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", clientKey).is("removed_at", null);
-      // Zoho Books phase 2: each LPO the invoice landed on becomes a bill.
-      for (const poId of poIds) await tryEnqueueZoho("bill", poId, jobId, staff.id);
+      // Accounts are told at once (Supplier invoices tab); the bill goes to Zoho when they mark it Checked.
+      await notifyInvoiceReceived(poIds);
       invoiceWord = " Supplier invoice saved.";
     }
   }

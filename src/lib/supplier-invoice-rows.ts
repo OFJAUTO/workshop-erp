@@ -1,0 +1,207 @@
+/**
+ * The Supplier invoices tab (1 November 2026): one row per supplier invoice, built from the LPOs it was entered on
+ * (purchase_orders carry the invoice number, date, amount and the scan). One invoice entered on several LPOs of the
+ * same supplier (one per car) is ONE row split across them; an LPO received with the invoice "to follow" is a row of
+ * its own waiting for it. Status, match and duplicate warnings are worked out here. Pure: no database.
+ */
+
+export type SiPo = {
+  id: string;
+  number: string;
+  job_id: string | null;
+  supplier_id: string | null;
+  supplier_name: string;
+  status: string;
+  total_cost_aed: number;
+  supplier_invoice_status: string;
+  supplier_invoice_number: string | null;
+  supplier_invoice_date: string | null;
+  supplier_invoice_amount: number | null;
+  supplier_invoice_at: string | null;
+  received_at: string | null;
+  checked_at: string | null;
+  zoho_bill_id: string | null;
+  paid_at: string | null;
+  query?: string | null;
+  query_at?: string | null;
+};
+export type SiLine = { po_id: string; description: string; quantity: number; received_qty: number; unit_cost: number; invoice_unit_cost: number | null; invoice_check: string | null };
+export type SiJob = { id: string; job_number: string; plate: string; car: string };
+export type SiSupplier = { id: string; name: string; trn: string | null; vat_registered: boolean | null };
+
+export type InvoiceStatus = "waiting" | "queried" | "new" | "checked" | "zoho" | "paid";
+export type InvoiceMatch = "matches" | "price_changed" | "quantity_different" | "not_linked";
+
+export const STATUS_WORDS: Record<InvoiceStatus, string> = {
+  waiting: "Waiting for invoice",
+  queried: "Queried with Parts",
+  new: "New",
+  checked: "Checked by accounts",
+  zoho: "Sent to Zoho (bill)",
+  paid: "Paid to supplier",
+};
+export const MATCH_WORDS: Record<InvoiceMatch, string> = {
+  matches: "Matches LPO ✓",
+  price_changed: "Price changed",
+  quantity_different: "Quantity different",
+  not_linked: "Not linked to an LPO",
+};
+
+export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; lpoTotal: number; parts: number };
+export type InvoiceRow = {
+  key: string;
+  supplier: string;
+  supplierId: string | null;
+  trn: string | null;
+  vatRegistered: boolean;
+  number: string | null;
+  date: string | null;
+  beforeVat: number;
+  vat: number;
+  total: number;
+  shares: InvoiceShare[];
+  parts: number;
+  match: InvoiceMatch[];
+  status: InvoiceStatus;
+  /** "Possible duplicate of …": the same invoice typed twice, or the same amount and date under another number. */
+  duplicateOf: string | null;
+  paid: boolean;
+  /** When it arrived (the invoice entered, else the parts received). */
+  at: string | null;
+  query: string | null;
+};
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+/** The invoice number as a key: no spaces, dashes or case ("INV-4512" = "inv 4512"). */
+export const invoiceKeyNumber = (n: string | null | undefined) => String(n ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** The rows, newest first. */
+export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppliers: SiSupplier[], vatPercent = 5): InvoiceRow[] {
+  const jobOf = new Map(jobs.map((j) => [j.id, j]));
+  const supOf = new Map(suppliers.map((s) => [s.id, s]));
+  const supByName = new Map(suppliers.map((s) => [s.name.trim().toLowerCase(), s]));
+  const groups = new Map<string, SiPo[]>();
+  for (const po of pos) {
+    if (po.status === "cancelled" || po.status === "pending_approval") continue;
+    const inv = po.supplier_invoice_status;
+    if (inv !== "received" && inv !== "to_follow") continue;
+    const supKey = po.supplier_id ?? po.supplier_name.trim().toLowerCase();
+    const key = inv === "to_follow" || !invoiceKeyNumber(po.supplier_invoice_number) ? `follow:${po.id}` : `${supKey}|${invoiceKeyNumber(po.supplier_invoice_number)}`;
+    groups.set(key, [...(groups.get(key) ?? []), po]);
+  }
+  const rows: InvoiceRow[] = [];
+  for (const [key, items] of groups) {
+    const first = items[0];
+    const sup = (first.supplier_id ? supOf.get(first.supplier_id) : null) ?? supByName.get(first.supplier_name.trim().toLowerCase()) ?? null;
+    const vatRegistered = sup?.vat_registered !== false;
+    const waiting = items.every((p) => p.supplier_invoice_status === "to_follow");
+    const shares: InvoiceShare[] = items.map((p) => {
+      const j = p.job_id ? jobOf.get(p.job_id) : null;
+      const mine = lines.filter((l) => l.po_id === p.id);
+      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount: r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed)), lpoTotal: p.total_cost_aed, parts: mine.length };
+    });
+    const beforeVat = r2(shares.reduce((a, s) => a + s.amount, 0));
+    const vat = vatRegistered ? r2((beforeVat * vatPercent) / 100) : 0;
+    const mine = lines.filter((l) => items.some((p) => p.id === l.po_id));
+    const match: InvoiceMatch[] = [];
+    if (!mine.length) match.push("not_linked");
+    else {
+      if (mine.some((l) => ["mismatch", "accepted", "disputed"].includes(l.invoice_check ?? "") || (l.invoice_unit_cost !== null && Math.abs(l.invoice_unit_cost - l.unit_cost) > 0.005))) match.push("price_changed");
+      if (mine.some((l) => l.received_qty + 0.001 < l.quantity)) match.push("quantity_different");
+      if (!match.length) match.push("matches");
+    }
+    const query = items.find((p) => p.query)?.query ?? null;
+    const status: InvoiceStatus = waiting
+      ? "waiting"
+      : query
+        ? "queried"
+        : items.some((p) => !p.checked_at)
+          ? "new"
+          : items.every((p) => p.paid_at)
+            ? "paid"
+            : items.every((p) => p.zoho_bill_id)
+              ? "zoho"
+              : "checked";
+    // The same invoice typed twice: two of its LPOs carry the same amount, and that amount is not their own LPO's share.
+    let duplicateOf: string | null = null;
+    if (items.length > 1) {
+      for (let i = 0; i < shares.length && !duplicateOf; i++)
+        for (let k = i + 1; k < shares.length; k++)
+          if (Math.abs(shares[i].amount - shares[k].amount) < 0.005 && (Math.abs(shares[i].amount - shares[i].lpoTotal) > 0.5 || Math.abs(shares[k].amount - shares[k].lpoTotal) > 0.5)) {
+            duplicateOf = `${shares[i].poNumber} (the same invoice entered on ${shares[k].poNumber} too)`;
+            break;
+          }
+    }
+    rows.push({
+      key,
+      supplier: sup?.name ?? first.supplier_name,
+      supplierId: first.supplier_id,
+      trn: sup?.trn ?? null,
+      vatRegistered,
+      number: waiting ? null : first.supplier_invoice_number,
+      date: waiting ? null : first.supplier_invoice_date,
+      beforeVat,
+      vat,
+      total: r2(beforeVat + vat),
+      shares,
+      parts: mine.length,
+      match,
+      status,
+      duplicateOf,
+      paid: items.every((p) => !!p.paid_at),
+      at: items.map((p) => p.supplier_invoice_at ?? p.received_at).filter((x): x is string => !!x).sort().at(-1) ?? null,
+      query,
+    });
+  }
+  // Another number, same supplier, same date and the same amount: possibly the same paper twice.
+  for (const a of rows) {
+    if (a.duplicateOf || a.status === "waiting" || !a.date) continue;
+    // The same amount as the other invoice, or as one car's share of it (one paper typed twice, once per LPO).
+    const b = rows.find((x) => x !== a && x.status !== "waiting" && x.supplier === a.supplier && x.date === a.date && invoiceKeyNumber(x.number) !== invoiceKeyNumber(a.number) && (Math.abs(x.beforeVat - a.beforeVat) < 0.005 || (a.shares.length === 1 && x.shares.some((s) => Math.abs(s.amount - a.beforeVat) < 0.005))));
+    if (b) a.duplicateOf = `${invWords(b.number)} (${b.supplier}, same date and amount)`;
+  }
+  return rows.sort((x, y) => String(y.at ?? "").localeCompare(String(x.at ?? "")));
+}
+
+export type InvoiceFilter = { supplier?: string; from?: string; to?: string; status?: string; unpaid?: boolean; problems?: boolean; q?: string; job?: string };
+
+/** The filters of the tab: supplier, date range, status, unpaid, match problems, a job, and the search box. */
+export function filterInvoices(rows: InvoiceRow[], f: InvoiceFilter, partNames: Map<string, string[]> = new Map()): InvoiceRow[] {
+  const needle = (f.q ?? "").trim().toLowerCase();
+  return rows.filter((r) => {
+    if (f.supplier && r.supplierId !== f.supplier && r.supplier !== f.supplier) return false;
+    const day = r.date ?? (r.at ? r.at.slice(0, 10) : "");
+    if (f.from && day && day < f.from) return false;
+    if (f.to && day && day > f.to) return false;
+    if (f.status && r.status !== f.status) return false;
+    if (f.unpaid && r.paid) return false;
+    if (f.problems && !(r.match.some((m) => m !== "matches") || r.duplicateOf)) return false;
+    if (f.job && !r.shares.some((s) => s.jobId === f.job)) return false;
+    if (needle) {
+      const hay = [r.number ?? "", r.supplier, ...r.shares.flatMap((s) => [s.poNumber, s.jobNumber ?? "", s.plate, s.car, ...(partNames.get(s.poId) ?? [])])].join(" ").toLowerCase();
+      if (!hay.includes(needle) && !invoiceKeyNumber(hay).includes(invoiceKeyNumber(needle))) return false;
+    }
+    return true;
+  });
+}
+
+/** "Unpaid per supplier": the open total of each supplier, biggest first. */
+export function unpaidBySupplier(rows: InvoiceRow[]): { supplier: string; count: number; total: number }[] {
+  const m = new Map<string, { supplier: string; count: number; total: number }>();
+  for (const r of rows) {
+    if (r.paid || r.status === "waiting") continue;
+    const cur = m.get(r.supplier) ?? { supplier: r.supplier, count: 0, total: 0 };
+    cur.count++;
+    cur.total = r2(cur.total + r.total);
+    m.set(r.supplier, cur);
+  }
+  return Array.from(m.values()).sort((a, b) => b.total - a.total);
+}
+
+/** "INV 4512": the number with INV in front, never twice ("INV-4512" stays as typed). */
+export const invWords = (number: string | null | undefined) => (!number ? "Invoice missing" : /^inv/i.test(number.trim()) ? number.trim() : `INV ${number.trim()}`);
+
+/** The words of the accounts' notification: "Supplier invoice · SPARE HUB · INV 4512 · AED 1,040.00 + VAT". */
+export function invoiceNoticeTitle(supplier: string, number: string, beforeVat: number, vatRegistered = true): string {
+  return `Supplier invoice · ${supplier.toUpperCase()} · ${invWords(number)} · AED ${beforeVat.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${vatRegistered ? " + VAT" : ""}`;
+}

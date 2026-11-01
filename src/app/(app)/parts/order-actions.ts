@@ -21,6 +21,7 @@ import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 import { SUPPLIER_PAY_METHODS, flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 import { JOB_FILES_BUCKET, ensureWorkLines } from "@/lib/work-data";
 import { checkPickable } from "@/lib/staff-picker";
+import { notifyInvoiceReceived, siQueryReady } from "@/lib/supplier-invoices";
 import { objectExists } from "@/lib/upload-targets/common";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -257,8 +258,12 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
  * later, but the LPO cannot be marked paid without it. A line whose invoice price differs from the order by more
  * than AED 1 is flagged for Accept new price or Dispute; the job's cost follows the invoice price meanwhile.
  */
-async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], formData: FormData, staff: { id: string; display_name: string }): Promise<{ error?: string; message?: string }> {
+async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], formData: FormData, staff: { id: string; display_name: string; role_id?: string }): Promise<{ error?: string; message?: string }> {
   const admin = createAdminClient();
+  // Checked by accounts: the parts desk no longer changes it (accounts query it back first). 1 November 2026.
+  const { data: chk } = await admin.from("purchase_orders").select("supplier_invoice_checked_at").eq("id", po.id).maybeSingle();
+  const wasChecked = !!chk?.supplier_invoice_checked_at;
+  if (wasChecked && staff.role_id === "parts") return { error: "Accounts already checked this invoice. Ask accounts to query it back if it needs a change." };
   const toFollow = formData.get("to_follow") === "on";
   const number = blankToNull(formData.get("invoice_number"));
   const path = blankToNull(formData.get("scan_path"));
@@ -290,7 +295,7 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     }
     if (mismatch) mismatches++;
   }
-  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...(mismatches ? {} : { supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id }), updated_by: staff.id }).eq("id", po.id);
+  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
   // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
@@ -312,9 +317,12 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
         : `The supplier invoice on ${po.number} was changed after its bill reached Zoho (now ${number}, ${invoiceDate}): fix the bill in Zoho by hand, then press "Done by hand".`,
       { handOnly: where === "opening" },
     );
-  } else if (where !== "opening") {
+  } else if (where !== "opening" && wasChecked) {
+    // Corrected after accounts checked it (and before its bill posted): the corrected bill goes. Otherwise the bill
+    // waits for accounts' Checked in the Supplier invoices tab.
     await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
   }
+  await notifyInvoiceReceived([po.id]);
   return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };
 }
 
@@ -350,7 +358,11 @@ export async function decideInvoiceCheck(lineId: string, formData: FormData) {
   if (decision === "accept" && l.part_item_id && l.invoice_unit_cost !== null) await admin.from("part_items").update({ final_cost_aed: l.invoice_unit_cost, updated_by: staff.id }).eq("id", l.part_item_id);
   if (decision === "dispute" && l.part_item_id) await admin.from("part_items").update({ final_cost_aed: l.unit_cost, updated_by: staff.id }).eq("id", l.part_item_id);
   const { data: left } = await admin.from("purchase_order_lines").select("id").eq("po_id", l.po_id).eq("invoice_check", "mismatch").eq("is_active", true);
-  if (!(left ?? []).length) await admin.from("purchase_orders").update({ supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id, updated_by: staff.id }).eq("id", l.po_id);
+  // Every price decided by accounts or the owner is their check of the invoice: checked, and the bill goes to Zoho.
+  if (!(left ?? []).length && (role === "owner" || role === "accounts")) {
+    await admin.from("purchase_orders").update({ supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id, updated_by: staff.id }).eq("id", l.po_id);
+    await tryEnqueueZoho("bill", l.po_id, po?.job_id ?? null, staff.id);
+  }
   if (po?.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: ${l.description} invoice price ${l.invoice_unit_cost?.toFixed(2) ?? "?"} against LPO ${l.unit_cost.toFixed(2)} ${decision === "accept" ? "accepted" : "disputed"} by ${staff.display_name}`, created_by: staff.id });
   if (decision === "dispute") await notifyRoles(["owner", "parts"], { type: "supplier_invoice_mismatch", title: `Invoice price disputed · ${po?.number ?? ""}`, body: `${l.description}: LPO ${l.unit_cost.toFixed(2)}, invoice ${l.invoice_unit_cost?.toFixed(2) ?? "?"}. ${staff.display_name} disputes it: chase ${po?.supplier_name ?? "the supplier"} for a credit note.`, jobId: po?.job_id ?? null, href: back });
   refresh(po?.job_id ?? null, l.po_id);
