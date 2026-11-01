@@ -46,6 +46,7 @@ type PanelData = {
   openBalance: number;
   /** 1 November 2026: money on the customer's account not allocated yet; canPay = this person records money. */
   credit?: number;
+  pendingCharges?: { id: string; words: string }[];
   canPay?: boolean;
   cars: { id: string; plate: string; car: string }[];
   declined: { id: string; title: string; date: string; severity?: string | null }[];
@@ -190,6 +191,7 @@ export function CustomerPanelHost() {
                 <span>Spent this year: <span className="font-semibold">{aed(data.spentThisYear)}</span></span>
                 {data.openBalance > 0 ? <span className="font-semibold text-red" data-panel-balance>Open balance: {aed(data.openBalance)}</span> : null}
                 {data.credit ? <span className="font-semibold" data-panel-credit>Credit {aed(data.credit)} (not allocated)</span> : null}
+                {(data.pendingCharges ?? []).map((p) => <a key={p.id} href={`/pending-charges?open=${p.id}`} className="font-bold text-amber underline underline-offset-4" data-panel-pending-charge>{p.words}</a>)}
               </span>
               {data.canPay ? (
                 <button type="button" onClick={() => { leave(); openRecordPayment({ customerId: data.customer.id, jobId: data.job?.id ?? null }); }} className="mt-1 min-h-11 self-start rounded-control bg-ink px-4 text-sm font-bold text-white" data-panel-pay>

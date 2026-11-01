@@ -1,4 +1,5 @@
 import "server-only";
+import { loadChargeEntries } from "./charges";
 import { customerName } from "./customer-view";
 import { INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
@@ -177,6 +178,11 @@ export async function paymentChoices(input: { customerId?: string | null; vehicl
     } else {
       targets.push({ key: `job:${m.jobId}`, kind: "job", jobId: m.jobId, invoiceId: null, vehicleId: m.vehicleId, title, detail: `${m.paid > 0 ? `Paid so far ${aed(m.paid)} · ` : ""}${owedWords} · recorded as an advance, it comes off the invoice by itself${m.isOpen ? "" : " · the car has left"}`, total: m.total, paid: m.paid, balance: m.balance, invoiceNumber: null, isProforma: false, gone: !m.isOpen });
     }
+  }
+  // 1 November 2026: a pending charge (no gate-in) with its own proforma is a place for the money too.
+  for (const e of await loadChargeEntries({ customerId, status: "pending" })) {
+    if (!e.proforma_id || e.tax_invoice_id || e.balance <= 0.005) continue;
+    targets.push({ key: `inv:${e.proforma_id}`, kind: "invoice", jobId: null, invoiceId: e.proforma_id, vehicleId: e.vehicle_id, title: `Pending charge · ${e.what}`, detail: `Proforma ${e.proformaNumber} · balance ${aed(e.balance)}${e.paid > 0 ? ` · AED ${e.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })} paid so far` : ""} · the tax invoice follows when it is paid in full`, total: e.total, paid: e.paid, balance: e.balance, invoiceNumber: e.proformaNumber, isProforma: true, gone: false });
   }
   // That car's jobs first, then the rest as they came (newest first).
   targets.sort((a, b) => Number(b.vehicleId === vehicleId) - Number(a.vehicleId === vehicleId));

@@ -1,5 +1,6 @@
 import "server-only";
 import { createChargeInvoice } from "./invoice-flow";
+import { chargesToInvoice } from "./charges";
 import { dropParts } from "./drop-parts";
 import { loadInspection } from "./inspection-data";
 import { loadJobCard } from "./job-data";
@@ -122,7 +123,9 @@ export async function declineAllWork(jobId: string, actor: Actor, settings: Sett
   let invoiceId: string | null = null;
   let invoiceNumber: string | null = null;
   let total: number | null = null;
-  if (amount > 0) {
+  // 1 November 2026 (B2): the charges agreed on the check-in (recovery, fuel) come on it too, even with no inspection fee.
+  const agreedCharges = await chargesToInvoice(jobId);
+  if (amount > 0 || agreedCharges.length) {
     const inv = await createChargeInvoice(jobId, actor, settings, { description: "INSPECTION CHARGES", amount });
     if ("error" in inv) return { error: inv.error };
     invoiceId = inv.id;

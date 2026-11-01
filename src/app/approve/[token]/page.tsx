@@ -19,6 +19,8 @@ import { DamageSection } from "@/components/DamageSection";
 import { DAMAGE_CONFIRM_EN, DAMAGE_WORDS_AR, damageCountWords } from "@/lib/damage";
 import { CHECK_IN, approvedLine, checkInFileName } from "@/lib/check-in";
 import { loadCarDamage } from "@/lib/damage-data";
+import { checkInCharges, chargesReady } from "@/lib/charges";
+import { CHARGES_AGREE_AR, CHARGES_AGREE_EN, chargeWordsAr, chargeWordsEn } from "@/lib/charge-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +85,11 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   const noFee = (req as { no_fee?: boolean }).no_fee === true;
   const feeNoticeEn = noFee ? null : (req.inspection_fee_notice ?? feeNotice(settings.inspection_fee_notice, settings.inspection_fee_aed));
   const feeNoticeAr = noFee ? null : (req.inspection_fee_notice_ar ?? feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed));
+  // 1 November 2026 (B2): charges already incurred before this approval (recovery, fuel, other), with the VAT the agreed way.
+  const vatPct = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
+  const incurred = approved
+    ? (((await chargesReady()) ? ((await createAdminClient().from("approval_requests").select("charges_snapshot").eq("id", req.id).maybeSingle()).data?.charges_snapshot ?? []) : []) as { description: string; charge_aed: number; free: boolean }[])
+    : (await checkInCharges(req.job_id)).map((l) => ({ description: l.description, charge_aed: l.charge_aed, free: l.free }));
   const details: [string, string | null][] = [
     ["Received at", location || null],
     ["Arrived by", labelOf(ARRIVED_BY, gateIn.arrived_by)],
@@ -111,6 +118,17 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
             <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Your approval</span>
             <form id="approval-form" method="post" action={`/api/approve/${token}`} className="flex flex-col gap-3 py-1">
               <p className="text-xs text-[#5F6368]">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
+              {incurred.length ? (
+                <div className="rounded-lg bg-white px-3 py-2.5 flex flex-col gap-1.5" data-charges-incurred>
+                  <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Charges already incurred · رسوم مستحقة</span>
+                  {incurred.map((c, i) => (
+                    <span key={i} className="flex flex-col gap-0.5" data-charge-incurred>
+                      <span className="text-sm font-bold">{chargeWordsEn(c.description, c, vatPct)}</span>
+                      <span className="text-sm font-bold" dir="rtl" lang="ar">{chargeWordsAr(c.description, c, vatPct)}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {feeNoticeEn ? (
                 <div className="rounded-lg bg-white px-3 py-2.5 flex flex-col gap-1.5" data-fee-notice>
                   <span className="text-sm font-bold">{feeNoticeEn}</span>
@@ -121,8 +139,10 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
                 <input type="checkbox" name="agree" required className="mt-1 h-5 w-5 accent-ink shrink-0" />
                 <span className="flex flex-col gap-2">
                   <span className="text-sm font-medium">{declaration}</span>
+                  {incurred.length ? <span className="text-sm font-medium" data-charges-agree>{CHARGES_AGREE_EN}</span> : null}
                   {hasDamage ? <span className="text-sm font-medium" data-damage-confirm>{DAMAGE_CONFIRM_EN}</span> : null}
                   <span className="text-sm font-medium" dir="rtl" lang="ar">{declarationAr}</span>
+                  {incurred.length ? <span className="text-sm font-medium" dir="rtl" lang="ar">{CHARGES_AGREE_AR}</span> : null}
                   {hasDamage ? <span className="text-sm font-medium" dir="rtl" lang="ar">{DAMAGE_WORDS_AR.confirm}</span> : null}
                   <Link href={`/terms?t=${encodeURIComponent(token)}`} className="text-xs font-bold underline underline-offset-4">Read the terms and conditions</Link>
                 </span>

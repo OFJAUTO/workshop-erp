@@ -1,3 +1,4 @@
+import { unbroken } from "@/lib/text-case";
 import type { ReactNode } from "react";
 import { Words } from "./Words";
 import { DocViewer } from "./DocViewer";
@@ -42,13 +43,14 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
           ) : (
             <header className="flex items-center justify-between gap-4 border-b-[3px] border-[#111113] pt-6 pb-4 sm:pt-[30px] sm:pb-[18px]">
               <Logo className="h-12 sm:h-16 w-auto" alt={company.tradingName} />
-              <div className="flex items-stretch gap-3 text-[10px] sm:text-[10.5px] leading-[1.6]">
+              {/* The legal name is never broken over two lines: on a phone the tax number moves under it instead. */}
+              <div className="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-stretch sm:gap-3 text-[10px] sm:text-[10.5px] leading-[1.6]">
                 <div className="flex flex-col">
-                  <span className="whitespace-nowrap text-[11px] sm:text-xs font-bold tracking-[0.02em]">{company.legalName}</span>
+                  <span className="text-[11px] sm:text-xs font-bold tracking-[0.02em]">{unbroken(company.legalName)}</span>
                   {company.address.map((a) => <Words key={a} text={a} className="text-[#5F6368]" />)}
                 </div>
                 {company.trn ? (
-                  <div className="border-l border-[#D4D4D8] pl-3 flex flex-col justify-center gap-0.5">
+                  <div className="sm:border-l sm:border-[#D4D4D8] sm:pl-3 flex flex-col justify-center gap-0.5">
                     <span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Tax registration no.</span>
                     <span className="text-sm font-extrabold tracking-[0.03em] leading-[1.2]">{company.trn}</span>
                   </div>

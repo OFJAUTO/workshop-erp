@@ -18,5 +18,6 @@ The backup taken before tonight's work is `backups/2026-11-01T19-33-29` (107 tab
 | 3 | `20261202120000_line_teams.sql` | Departments per line (J-00969) | Choosing a team per line by hand (the default teams already work without it), and J-00969's lines set: paint → Paint, remove and refit → Dismantle & refit, coding → Electrical, PDR → Outside work. | `backups/2026-11-01T19-33-29` |
 | 4 | `20261202130000_supplier_invoice_query.sql` | Supplier invoices tab | "Query with Parts" on a supplier invoice (everything else in the tab already works). | `backups/2026-11-01T19-33-29` |
 | 5 | `20261202140000_capitals.sql` | CAPITALS (B1) | The capitals trigger on every line table and the conversion of existing text (266 quotation and estimate lines including Q-00039, 34 proforma lines, 196 services, 166 parts list names, 15 work lines, 38 requests; tax invoices untouched). | `backups/2026-11-01T19-33-29` |
+| 6 | `20261202150000_charges.sql` | Early charges + Pending charges (B2) | The charge lines (job card Charges card, CHARGES ALREADY INCURRED on the check-in, the invoice and declined-work invoice lines) and the Pending charges page with its proformas. | `backups/2026-11-01T19-33-29` |
 
 Already applied: `20261202090000_payments_anytime.sql` (1 November 2026, backup `backups/2026-11-01T16-47-48`).

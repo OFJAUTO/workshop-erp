@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PendingChargeNote } from "@/components/PendingChargeNote";
 import { feeBoundsFor } from "@/lib/inspection-fee-server";
 import { ppfJobsOfCar } from "@/lib/recheck";
 import { CustomerName } from "@/components/CustomerPanel";
@@ -132,6 +133,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
               <CustomerName name={v.customer?.company_name ?? v.customer?.full_name ?? "Customer"} customerId={v.customer?.id} className="font-bold" />
             )}
             <span className="text-sm text-muted">{v.customer?.phone}</span>
+            {!gateInOnly ? <PendingChargeNote customerId={v.customer?.id} /> : null}
             {v.customer?.is_vip && v.customer.vip_note ? (
               <div className="rounded-control border border-ink p-3 text-sm font-medium whitespace-pre-wrap">{v.customer.vip_note}</div>
             ) : null}

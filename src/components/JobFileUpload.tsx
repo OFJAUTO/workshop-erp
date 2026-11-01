@@ -227,6 +227,19 @@ export function useFormKey(tag: string, jobId: string | null): { key: string | n
   return { key, renew };
 }
 
+/**
+ * A form's key spent from outside the form (1 November 2026): the payment window shows its "recorded" screen in place
+ * of the form, so the form is gone before it can renew its own key. The next payment to the same place - in the same
+ * tab, even after a reload - then starts with a new key instead of being taken for the one already recorded.
+ */
+export function spendFormKey(tag: string, spent: string) {
+  const storeKey = KEY_PREFIX + tag;
+  const cur = readKey(storeKey);
+  if (cur && cur !== spent) return;
+  markUsed(spent);
+  writeKey(storeKey, newUuid());
+}
+
 /*
  * A form that saves through a server action and comes back with ?message= or ?error= (the payment form, the problem
  * window): the key it was submitted with is kept in the tab until the answer is on screen. A "message" means the save

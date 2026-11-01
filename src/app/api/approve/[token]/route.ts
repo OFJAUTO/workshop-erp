@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isQuickJob } from "@/lib/inspection-fee";
 import { jobAdvisorIds, notifyManagers, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { agreeChargesOnApproval } from "@/lib/charges";
+import { getSettings } from "@/lib/settings";
 import { damageSnapshot } from "@/lib/damage";
 import { damageSnapshotReady, loadCarDamage } from "@/lib/damage-data";
 
@@ -52,6 +54,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     update.stage_entered_at = now;
   }
   await admin.from("jobs").update(update).eq("id", req.job_id);
+  // 1 November 2026 (B2): the charges listed on the check-in (recovery, fuel, other) are agreed with it, kept in its snapshot.
+  await agreeChargesOnApproval(req.job_id, req.id, await getSettings()).catch(() => 0);
   await admin.from("job_events").insert({
     job_id: req.job_id,
     event_type: "approved",

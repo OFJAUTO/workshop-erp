@@ -53,7 +53,8 @@ import { moneyState, type MoneyInvoice } from "@/lib/money-steps";
 import { ngeniusConfigured } from "@/lib/ngenius";
 import { currentPaymentLink, paymentLinksOf } from "@/lib/payment-links";
 import { jobPartsState } from "@/lib/parts-data";
-import { latestQc, loadWash, loadWork } from "@/lib/work-data";
+import { latestQc, loadWash, loadWork, signJobFiles } from "@/lib/work-data";
+import type { JobFile } from "@/components/JobFileUpload";
 import { markReadyToInvoice } from "../../invoices/actions";
 import { followUpDone } from "../gate-out-actions";
 import { ReadySendControl } from "./ReadySendControl";
@@ -102,6 +103,9 @@ import { teamsReady } from "@/lib/line-teams-data";
 import { TEAM_LABELS, sideOfPerson, teamOf } from "@/lib/teams";
 import { setJobDepartment, setLineTeam } from "../team-actions";
 import { TeamsCard } from "./TeamsCard";
+import { ChargesCard } from "./ChargesCard";
+import { addJobChargesAction, decideFreeChargeAction } from "../charge-actions";
+import { chargesReady, loadCharges } from "@/lib/charges";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
 import { STATUS_WORDS as SI_STATUS_WORDS, invWords } from "@/lib/supplier-invoice-rows";
 import { loadStages } from "@/lib/bodyshop";
@@ -236,6 +240,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const mayChangeTeams = ["owner", "service_advisor", "workshop_manager"].includes(role) && !staff.viewingAs && job.is_open;
   const teamLines = job.is_open && ["owner", "service_advisor", "workshop_manager", "accounts"].includes(role) ? await lineTeamsOfJob(id, job.department) : [];
   const linesReady = await teamsReady();
+  // Early charges (1 November 2026, B2): recovery, fuel and other costs/charges before or after the check-in approval.
+  const chargesOn = ["owner", "service_advisor", "accounts"].includes(role) && (await chargesReady());
+  const mayAddCharges = chargesOn && !staff.viewingAs && job.is_open;
+  const chargeLines = chargesOn ? await loadCharges({ jobId: id }) : [];
+  const chargeFiles: Record<string, JobFile[]> = {};
+  if (chargeLines.length) {
+    const { data: cf } = await admin.from("job_files").select("id, storage_path, content_type, caption, ref_id").eq("job_id", id).eq("kind", "supplier_invoice").in("ref_id", chargeLines.map((l) => l.id)).is("removed_at", null);
+    const cfUrls = await signJobFiles(((cf ?? []) as { storage_path: string }[]).map((x) => x.storage_path));
+    for (const x of (cf ?? []) as { id: string; storage_path: string; content_type: string | null; caption: string | null; ref_id: string }[]) (chargeFiles[x.ref_id] ??= []).push({ id: x.id, path: x.storage_path, url: cfUrls[x.storage_path] ?? null, caption: x.caption, contentType: x.content_type, refId: x.ref_id });
+  }
   // The car's supplier invoices (1 November 2026): number, its share, status, one tap to the Supplier invoices tab.
   const jobSupplierInvoices = ["owner", "accounts", "parts", "service_advisor"].includes(role) ? (await loadSupplierInvoices({ jobId: id })).rows.filter((r) => r.shares.some((x) => x.jobId === id)) : [];
   const withCarTeam = teamLines.length && job.department !== "mechanical" ? teamWithCar(jobSides.includes("bodyshop") ? await loadStages(id) : [], job.status === "in_work" && !!job.plan_released_at) : null;
@@ -671,6 +685,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
+      {chargesOn && (chargeLines.length || mayAddCharges) ? (
+        <ChargesCard lines={chargeLines} canAdd={mayAddCharges} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} />
+      ) : null}
       {jobSupplierInvoices.length ? (
         <Card className="flex flex-col gap-2" data-job-supplier-invoices>
           <SectionLabel right={`${jobSupplierInvoices.length}`}>Supplier invoices</SectionLabel>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Textarea } from "@/components/ui";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
+import { spendFormKey } from "@/components/JobFileUpload";
 import { loadPaymentChoices, recordPaymentAnywhere, searchPayers, type ChoicesAnswer, type PayerHit } from "@/app/(app)/invoices/payment-anywhere-actions";
 import { reloadIfStale } from "@/lib/app-version";
 
@@ -147,6 +148,12 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
 
   const choices = answer?.choices ?? null;
   const target = choices?.targets.find((t) => t.key === targetKey) ?? null;
+  // The form is replaced by the "recorded" screen: its key is spent here, so the next payment (same place, same tab,
+  // even after a reload) gets a new one instead of "already used" (1 November 2026).
+  const spendTag = target ? (target.kind === "unallocated" ? `payment:credit:${choices?.customer.id ?? ""}` : `payment:${target.key}`) : null;
+  useEffect(() => {
+    if (state?.ok && state.clientKey && spendTag) spendFormKey(spendTag, state.clientKey as string);
+  }, [state, spendTag]);
   const another = () => {
     setDismissedAt(state?.at ?? 0);
     setNote("");

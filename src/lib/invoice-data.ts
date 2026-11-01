@@ -1,5 +1,7 @@
 import "server-only";
 import { capsText } from "./text-case";
+import { chargesToInvoice } from "./charges";
+import { chargeNet } from "./charge-rules";
 import { packageDetailsText } from "./packages";
 import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
@@ -216,7 +218,7 @@ async function invoiceMileage(jobId: string): Promise<{ in: string | null; out: 
   return m ? customerMileage(m.io) : null;
 }
 
-export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; positions?: string[] | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number; /** Section 9: the package snapshot, so the invoice shows the PROTECTION PACKAGE section too. */ package_items?: unknown; /** Section 10: the PPF cutting method. */ cut_method?: string | null; cut_note?: string | null };
+export type DraftLine = { section: "services" | "parts" | "fees"; description: string; details: string | null; positions?: string[] | null; part_number: string | null; quantity: number; hours: number | null; unit_price: number; amount_aed: number; cost_aed: number; quotation_line_id: string | null; part_item_id: string | null; takesDiscount: boolean; /** Complimentary/Included word and the line's own discount, straight from the quotation line. */ price_display?: string; discount_percent?: number; /** Section 9: the package snapshot, so the invoice shows the PROTECTION PACKAGE section too. */ package_items?: unknown; /** Section 10: the PPF cutting method. */ cut_method?: string | null; cut_note?: string | null; /** An early charge agreed on the check-in (charge_lines): marked invoiced with the invoice. */ charge_line_id?: string | null };
 export type DraftTotals = {
   gross: number;
   services: number;
@@ -292,6 +294,13 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
       out.push({ section: "fees", description: "Inspection fee", details: "No work was approved after the inspection", part_number: null, quantity: 1, hours: null, unit_price: fee, amount_aed: fee, cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: false });
       quotedTotal += round2(fee + round2(fee * (vatPercent / 100)));
     }
+  }
+  // 1 November 2026 (B2): every charge agreed on the vehicle check-in, exactly once (a charge added after the approval
+  // is a quotation line already). The provider and the cost stay internal.
+  for (const c of await chargesToInvoice(jobId)) {
+    const net = chargeNet(c);
+    out.push({ section: "services", description: capsText(c.description), details: null, part_number: null, quantity: 1, hours: null, unit_price: net, amount_aed: net, cost_aed: c.cost_aed, quotation_line_id: null, part_item_id: null, takesDiscount: false, price_display: c.free ? "complimentary" : "normal", charge_line_id: c.id });
+    quotedTotal += round2(net + round2(net * (vatPercent / 100)));
   }
   const gross = round2(out.reduce((a, l) => a + l.amount_aed, 0));
   const services = round2(out.filter((l) => l.section === "services").reduce((a, l) => a + l.amount_aed, 0));

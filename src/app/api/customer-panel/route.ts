@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { pendingChargesFor } from "@/lib/charges";
+import { pendingChargeNote } from "@/lib/charge-rules";
 import { getCurrentStaff } from "@/lib/auth";
 import { seesCustomers } from "@/lib/customer-data";
 import { arrivedWords, customerName } from "@/lib/customer-view";
@@ -90,6 +92,7 @@ export async function GET(request: NextRequest) {
     spentThisYear: Math.round(spentThisYear * 100) / 100,
     openBalance: Math.round(openBalance * 100) / 100,
     credit: await customerCredit(String(c.id)),
+    pendingCharges: (await pendingChargesFor(String(c.id))).map((p) => ({ id: p.id, words: pendingChargeNote(p) })),
     canPay: can(role as RoleId, "recordPayments") && !staff.viewingAs,
     cars: ((cars ?? []) as unknown as Vehicle[]).filter((v) => v.id !== job?.vehicle_id).map((v) => ({ id: v.id, plate: formatPlate(v), car: carWords(v) })),
     declined: (declined ?? []).map((d) => ({ id: d.id, title: d.title, date: d.declined_at })),

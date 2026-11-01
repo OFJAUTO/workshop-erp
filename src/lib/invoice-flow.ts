@@ -1,4 +1,6 @@
 import { noChargeJob } from "./comp-data";
+import { chargesToInvoice, markChargesInvoiced } from "./charges";
+import { chargeNet } from "./charge-rules";
 import "server-only";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type InvoiceRow } from "./invoice-data";
@@ -86,6 +88,8 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   await admin.from("invoice_lines").insert(
     draft.lines.map((l, i) => ({ invoice_id: inv.id, position: i, section: l.section, description: l.description, details: l.details, positions: l.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_price: l.unit_price, amount_aed: l.amount_aed, vat_aed: round2(l.amount_aed * (draft.vatPercent / 100)), total_aed: round2(l.amount_aed * (1 + draft.vatPercent / 100)), cost_aed: l.cost_aed, quotation_line_id: l.quotation_line_id, part_item_id: l.part_item_id, price_display: l.price_display ?? "normal", discount_percent: l.discount_percent ?? 0, package_items: l.package_items ?? null, cut_method: l.cut_method ?? null, cut_note: l.cut_note ?? null, created_by: by, updated_by: by })),
   );
+  // The early charges on it are invoiced: locked from here (corrections by credit note).
+  await markChargesInvoiced(draft.lines.map((l) => l.charge_line_id).filter((x): x is string => !!x), String(inv.id));
   // Deposits recorded before the proforma count against it.
   await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);
   // A bodyshop deposit proforma folds into this one: its payments move across and it drops out of the balance.
@@ -228,8 +232,11 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
   if (!job) return { error: "Job not found." };
   const description = charge.description.trim();
   if (description.length > LINE_TEXT_MAX) return { error: tooLongWords(description.length) };
-  const amount = round2(charge.amount);
-  if (!description || !(amount > 0)) return { error: "Give the charge a name and an amount." };
+  const main = round2(charge.amount);
+  // 1 November 2026 (B2): every charge the customer agreed on the vehicle check-in comes on this invoice too.
+  const agreed = await chargesToInvoice(jobId);
+  if (!description || !(main > 0 || agreed.length)) return { error: "Give the charge a name and an amount." };
+  const amount = round2(main + agreed.reduce((a, c) => a + chargeNet(c), 0));
   const vatPercent = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
   const vat = round2(amount * (vatPercent / 100));
   const total = round2(amount + vat);
@@ -253,11 +260,16 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
     .select("id, number, token")
     .single();
   if (error || !inv) return { error: error?.message ?? "Could not make the invoice." };
-  const { error: lineErr } = await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: amount, amount_aed: amount, vat_aed: vat, total_aed: total, cost_aed: 0, quotation_line_id: null, part_item_id: null, created_by: by, updated_by: by });
+  const lineRows = [
+    ...(main > 0 ? [{ description, net: main, cost: 0, free: false }] : []),
+    ...agreed.map((c) => ({ description: c.description, net: chargeNet(c), cost: c.cost_aed, free: c.free })),
+  ];
+  const { error: lineErr } = await admin.from("invoice_lines").insert(lineRows.map((l, i) => ({ invoice_id: inv.id, position: i, section: "services", description: l.description, details: null, part_number: null, quantity: 1, unit_price: l.net, amount_aed: l.net, vat_aed: round2(l.net * (vatPercent / 100)), total_aed: round2(l.net * (1 + vatPercent / 100)), cost_aed: l.cost, quotation_line_id: null, part_item_id: null, price_display: l.free ? "complimentary" : "normal", created_by: by, updated_by: by })));
   if (lineErr) {
     await admin.from("invoices").update({ is_active: false, status: "cancelled", updated_by: by }).eq("id", inv.id);
     return { error: `Could not add the line to the invoice: ${lineErr.message}` };
   }
+  await markChargesInvoiced(agreed.map((c) => c.id), String(inv.id));
   // 1 November 2026: an advance already paid on this job comes off this invoice by itself (as it would off the proforma).
   await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for ${description} (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });

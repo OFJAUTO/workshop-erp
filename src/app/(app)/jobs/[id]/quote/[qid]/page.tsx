@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { PendingChargeNote } from "@/components/PendingChargeNote";
 import { damagedPanelsOf } from "@/lib/damage-data";
 import { invoicesForLock } from "@/lib/quote-lock-server";
 import { DeclinedAllButton } from "@/components/DeclinedAllButton";
@@ -53,7 +54,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
   const { message, error, send, approve } = await searchParams;
-  const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open, inspection_fee_aed").eq("id", id).maybeSingle();
+  const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open, inspection_fee_aed, inspection_fee_choice").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
   const [bundle, settings, site] = await Promise.all([loadQuotation(qid), getSettings(), getSiteUrl()]);
@@ -160,7 +161,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
     markupWarn: Number(settings.markup_warn_percent) || 50,
     markupConfirm: Number(settings.markup_confirm_percent) || 100,
-    inspectionFee: Number((job as { inspection_fee_aed?: number | string | null } | null)?.inspection_fee_aed ?? settings.inspection_fee_aed) || 0,
+    // 1 November 2026 (B2): the button follows THIS job's fee choice: none for a no-fee job ("Free full inspection"), else its own amount.
+    inspectionFee: declinedRow?.inspection_fee_choice === "none" ? 0 : Number(declinedRow?.inspection_fee_aed ?? (job as { inspection_fee_aed?: number | string | null } | null)?.inspection_fee_aed ?? settings.inspection_fee_aed) || 0,
     consumablesDefault: Number(settings.consumables_default_aed) || 0,
     discountLimit: Number(settings.discount_limit_percent) || 0,
     approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,
@@ -208,6 +210,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
 
   return (
     <>
+      <PendingChargeNote customerId={q.customer_id} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={q.vehicle_id} />}
         title={`${q.number} · version ${q.version}`}

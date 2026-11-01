@@ -1,4 +1,6 @@
 import type { CurrentStaff } from "@/lib/auth";
+import { loadChargeEntries } from "@/lib/charges";
+import { pendingDays } from "@/lib/charge-rules";
 import { setChequeStatus, verifyPaymentAction } from "@/app/(app)/invoices/actions";
 import { getSettings, bankFeesOf } from "@/lib/settings";
 import { formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
@@ -86,7 +88,12 @@ export async function WaitingPanel({ staff, extra: given = [] }: { staff: Curren
   const followUps = (await declinedFollowUps(staff)).map((d): ExtraWaiting => ({ jobId: d.jobId, plate: d.plate, car: d.car, what: d.what, amount: null, actionLabel: "Called ✓", href: d.href, always: true, urgency: "amber", since: d.since, inline: { kind: "declined_called", ids: d.ids } }));
   // 1 November 2026 (E-00055): estimates and quotations the owner approved or edited, back with their advisor.
   const handbacks = (await handbacksFor(staff)).map((h): ExtraWaiting => ({ jobId: `quote:${h.id}`, plate: h.plate, car: h.car, what: `${h.kind === "estimate" ? "ESTIMATE" : "QUOTATION"} ${h.number} · ${h.words}${h.summary ? ` · ${h.summary}` : ""}`, amount: null, actionLabel: "Open", href: h.href, always: true, urgency: "amber", since: h.since, hint: h.summary }));
-  const extra = [...given, ...followUps, ...handbacks];
+  // Pending charges (1 November 2026): unpaid after the set days, the advisor who added them (the owner sees all) is reminded.
+  const remindDays = Number((settings as unknown as Record<string, unknown>).pending_charges_reminder_days) || 7;
+  const pendingCharges = ["owner", "service_advisor", "accounts"].includes(staff.role_id)
+    ? (await loadChargeEntries({ status: "pending" })).filter((e) => pendingDays(e.created_at) >= remindDays && (staff.role_id !== "service_advisor" || e.created_by === staff.id)).map((e): ExtraWaiting => ({ jobId: `pc:${e.id}`, plate: e.plate ?? e.customer, car: e.car, what: `Pending charge ${pendingDays(e.created_at)} days · ${e.what}`, amount: `AED ${e.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, actionLabel: "Open", href: `/pending-charges?open=${e.id}`, always: true, urgency: "amber", since: e.created_at, hint: "Not in the workshop: collect it (send the proforma again, or at the next visit)." }))
+    : [];
+  const extra = [...given, ...followUps, ...handbacks, ...pendingCharges];
   const items = await loadWaitingOnYou(staff, settings);
   const owner = staff.role_id === "owner";
   const charges = bankFeesOf(settings);

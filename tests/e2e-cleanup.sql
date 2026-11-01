@@ -14,9 +14,19 @@ declare
   veh_ids uuid[];
   t text;
 begin
-  select coalesce(array_agg(id), '{}') into cust_ids from public.customers where id::text like '22222222-0000-4000-8000-00000000e%';
+  select coalesce(array_agg(id), '{}') into cust_ids from public.customers where id::text like '22222222-0000-4000-8000-00000000e%' or full_name ilike 'E2E PENDING%';
   select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids);
   select coalesce(array_agg(id), '{}') into job_ids from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids) or vehicle_id = any(veh_ids);
+  -- Pending charges and early charges (1 November 2026): the lines, the entries, their job-less proformas and tax invoices.
+  if to_regclass('public.charge_lines') is not null then
+    delete from public.charge_lines where job_id = any(job_ids) or entry_id in (select id from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids));
+    delete from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids);
+  end if;
+  delete from public.payments where invoice_id in (select id from public.invoices where job_id is null and customer_id = any(cust_ids));
+  delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id is null and customer_id = any(cust_ids));
+  update public.invoices set converted_to = null, converted_from = null where job_id is null and customer_id = any(cust_ids);
+  delete from public.zoho_outbox where record_id in (select id from public.invoices where job_id is null and customer_id = any(cust_ids));
+  delete from public.invoices where job_id is null and customer_id = any(cust_ids);
   delete from public.bodyshop_problems where job_id = any(job_ids);
   delete from public.ceramic_usage where job_id = any(job_ids);
   delete from public.bodyshop_clockings where job_id = any(job_ids);

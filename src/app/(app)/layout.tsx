@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { chargesReady } from "@/lib/charges";
 import type { Metadata } from "next";
 import { Shell } from "@/components/Shell";
 import type { NavItem } from "@/components/SidebarNav";
@@ -47,6 +48,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     partsPending = (toPrice ?? 0) + (toOrder ?? 0);
   }
 
+  // Pending charges (1 November 2026): the count next to the menu entry, never on the dashboard.
+  let pendingCharges = 0;
+  if (["owner", "service_advisor", "accounts"].includes(role) && (await chargesReady())) {
+    const { count } = await createAdminClient().from("charge_entries").select("id", { count: "exact", head: true }).eq("status", "pending").eq("is_active", true);
+    pendingCharges = count ?? 0;
+  }
+
   const entries: (NavItem & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
@@ -73,6 +81,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/comebacks", label: "Comebacks", show: can(role, "manageWork") },
     { href: "/invoices", label: "Invoices and payments", show: can(role, "viewInvoices") },
     { href: "/supplier-invoices", label: "Supplier invoices", show: ["owner", "accounts", "parts"].includes(role) },
+    { href: "/pending-charges", label: "Pending charges", show: ["owner", "service_advisor", "accounts"].includes(role), badge: pendingCharges || undefined },
     { href: "/recovery", label: "Recovery", show: role === "owner" || role === "service_advisor" || role === "accounts" },
     { href: "/commissions", label: "Commissions", show: role === "owner" || role === "accounts" },
     { href: "/card-settlements", label: "Card settlements", show: can(role, "cardSettlements") },

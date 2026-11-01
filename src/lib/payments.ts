@@ -1,4 +1,5 @@
 import "server-only";
+import { afterPendingChargePayment } from "./charges";
 import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
@@ -172,6 +173,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     // Money arrived: "Customer says paid" is answered.
     if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
     if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
+    if (input.invoiceId && !jobId) await afterPendingChargePayment(input.invoiceId, actor.id ? { id: actor.id, display_name: actor.display_name, role_id: actor.role_id } : null, settings);
     if (!input.invoiceId && jobId) await afterDepositRecorded(jobId, String(created.id), amount, actor, settings);
     // Zoho Books (one-way): the recorded money joins the outbox; a cheque waits until it clears.
     if (method !== "cheque") await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);
