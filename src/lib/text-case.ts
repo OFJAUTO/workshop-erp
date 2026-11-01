@@ -58,3 +58,18 @@ export function knownWordsUp(text: string, known: string[]): string {
   }
   return out;
 }
+
+/**
+ * CAPITALS, saved (1 November 2026, B1): every line staff type for the customer (labour, services, parts, other
+ * charges, packages, the notes on them) is STORED in capitals, so the screen, the PDF, the customer pages, WhatsApp and
+ * Zoho carry the same words. Never a screen-only style for this text.
+ */
+export function capsText(text: string): string;
+export function capsText(text: string | null): string | null;
+export function capsText(text: string | null | undefined): string | null | undefined;
+export function capsText(text: string | null | undefined): string | null | undefined {
+  return typeof text === "string" ? text.toUpperCase() : text;
+}
+
+/** The company's one legal name, glued with no-break spaces so it never breaks over two lines (PDFs and pages). */
+export const unbroken = (name: string) => name.replace(/ /g, "\u00A0");

@@ -1069,6 +1069,17 @@ export function withPositions(title: string, positions?: string[] | null): strin
   return `${title} · ${positionsWords(positions)}`;
 }
 export const lineTitleText = (l: Pick<QuoteLine, "title" | "positions">) => withPositions(l.title, l.positions);
+
+/** A name that already says its side ("FRONT LH LIGHT", "HEADLIGHT – FRONT LEFT"): the side is never added twice. */
+const SIDE_WORDS = /\b(front|rear|left|right|lh|rh|fl|fr|rl|rr|all\s*4|all four|pair|both)\b/i;
+/**
+ * A part's ONE name on every document and customer page (1 November 2026, B1): "HEADLIGHT – FRONT LEFT · GENUINE".
+ * The side is added only when the name does not already say it, the part type after a dot, all in capitals.
+ */
+export function partLineName(title: string, positions?: string[] | null, typeText?: string | null): string {
+  const side = positions?.length && !SIDE_WORDS.test(title) ? ` – ${positionsWords(positions).toUpperCase()}` : "";
+  return `${title.toUpperCase()}${side}${typeText ? ` · ${typeText.toUpperCase()}` : ""}`;
+}
 /** The positions a job can take on the quotation. */
 export const JOB_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right", "Front", "Rear", "Left", "Right"] as const;
 

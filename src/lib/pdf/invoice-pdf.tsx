@@ -1,4 +1,5 @@
 import { isPickupShownByPackage, packagesGivePickup } from "../packages";
+import { partLineName } from "../quotes";
 import { realPartNumber } from "../parts-rows";
 import { customerCompWord } from "../complimentary";
 import { compReasonForJob } from "../quote-data";
@@ -40,8 +41,9 @@ function docLineOf(l: InvoiceLineRow, compReason: string | null = null): Section
   const disc = Number(l.discount_percent) || 0;
   return {
     quantity,
-    description: l.description,
-    positions: positionsWords(l.positions) || null,
+    // A spare part: its one name with the side ("HEADLIGHT – FRONT LEFT"); the type stays in the small grey line.
+    description: l.section === "parts" ? partLineName(l.description, l.positions, null) : l.description,
+    positions: l.section === "parts" ? null : positionsWords(l.positions)?.toUpperCase() || null,
     details: l.hours !== null ? detailsWithoutHours(l.details) : l.details,
     qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
     rate: l.unit_price,

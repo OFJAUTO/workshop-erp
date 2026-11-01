@@ -8,6 +8,7 @@ import { Document, Font, Image, Link, Page, Path, Polygon, StyleSheet, Svg, Text
 import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
 import { hoursQty } from "@/lib/format";
 import { cleanDocTitle } from "@/lib/quotes";
+import { unbroken } from "@/lib/text-case";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 
@@ -149,7 +150,7 @@ export function companyOf(s: Settings): Company {
     email: String(s.company_email ?? ""),
     website: String(s.company_website ?? ""),
     trn: String(s.company_trn ?? ""),
-    bank: { name: String(s.bank_name ?? ""), accountName: String(s.bank_account_name ?? ""), accountNumber: String(s.bank_account_number ?? ""), iban: String(s.bank_iban ?? ""), swift: String(s.bank_swift ?? "") },
+    bank: { name: String(s.bank_name ?? ""), accountName: String(s.company_legal_name || s.bank_account_name || ""), accountNumber: String(s.bank_account_number ?? ""), iban: String(s.bank_iban ?? ""), swift: String(s.bank_swift ?? "") },
   };
 }
 
@@ -203,7 +204,7 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
                 {logo ? <Image src={{ data: logo, format: "png" }} style={[styles.logo, tight ? { height: px(64) } : {}]} /> : <Text style={styles.legalName}>{company.tradingName}</Text>}
                 <View style={styles.headerRight}>
                   <View style={styles.headerCol}>
-                    <Text style={styles.legalName}>{company.legalName}</Text>
+                    <Text style={styles.legalName}>{unbroken(company.legalName)}</Text>
                     {company.address.map((l, i) => (
                       <Text key={i} style={styles.addressLine}>{l}</Text>
                     ))}
@@ -501,7 +502,8 @@ export function WordsAndPayments({ words, payments, bank, currency, showBank = t
       {showBank && (bank.iban || bank.accountNumber) ? (
         <View style={styles.bank}>
           <Text style={styles.smallTitle}>Bank details</Text>
-          <Text style={styles.bankLine}>{[bank.name, bank.accountName].filter(Boolean).join(" · ")}</Text>
+          {bank.name ? <Text style={styles.bankLine}>{bank.name}</Text> : null}
+          {bank.accountName ? <Text style={styles.bankLine}>{unbroken(bank.accountName)}</Text> : null}
           <Text style={styles.bankLine}>{[bank.accountNumber ? `Account ${bank.accountNumber}` : "", bank.swift ? `SWIFT ${bank.swift}` : ""].filter(Boolean).join(" · ")}</Text>
           {bank.iban ? <Text style={styles.bankLine}>IBAN {bank.iban}</Text> : null}
         </View>
@@ -538,7 +540,8 @@ export function DocumentTail({ rows, words, bank = null, note = null, before = n
               {hasBank ? (
                 <>
                   <Text style={styles.smallTitle}>Bank details</Text>
-                  <Text style={styles.bankLine}>{[bank!.name, bank!.accountName].filter(Boolean).join(" · ")}</Text>
+                  {bank!.name ? <Text style={styles.bankLine}>{bank!.name}</Text> : null}
+                  {bank!.accountName ? <Text style={styles.bankLine}>{unbroken(bank!.accountName)}</Text> : null}
                   <Text style={styles.bankLine}>{[bank!.accountNumber ? `Account ${bank!.accountNumber}` : "", bank!.swift ? `SWIFT ${bank!.swift}` : ""].filter(Boolean).join(" · ")}</Text>
                   {bank!.iban ? <Text style={styles.bankLine}>IBAN {bank!.iban}</Text> : null}
                 </>

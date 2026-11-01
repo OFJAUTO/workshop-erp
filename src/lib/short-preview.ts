@@ -9,7 +9,7 @@ import { urlOfCode } from "./short-links";
  * exception: a target outside our own site (a map pin) stays a plain 302, with no preview of ours.
  */
 
-const DESCRIPTION = "O F J Automotive Works L.L.C · Al Quoz, Dubai";
+const DESCRIPTION = "O F J AUTOMOTIVE WORKS L.L.C · Al Quoz, Dubai";
 const IMAGE = `${PRODUCTION_SITE_URL}/og/ofj-square-600.png`;
 
 function titleFor(prefix: string, url: string): string {

@@ -104,7 +104,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
                 <summary className="cursor-pointer min-h-12 flex items-center px-4 text-sm font-bold">Bank details</summary>
                 <div className="px-4 pb-4 text-sm grid grid-cols-[6rem_1fr] gap-y-0.5">
                   <span className="text-[#5F6368]">Bank</span><span>{company.bank.name}</span>
-                  <span className="text-[#5F6368]">Account</span><span>{company.bank.accountName}</span>
+                  <span className="text-[#5F6368]">Account</span><span className="whitespace-nowrap">{company.bank.accountName}</span>
                   <span className="text-[#5F6368]">Number</span><span>{company.bank.accountNumber}</span>
                   <span className="text-[#5F6368]">IBAN</span><span>{company.bank.iban}</span>
                   <span className="text-[#5F6368]">SWIFT</span><span>{company.bank.swift}</span>

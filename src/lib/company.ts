@@ -13,6 +13,6 @@ export function companyFromSettings(s: Settings): CompanyDetails {
     email: String(s.company_email ?? ""),
     website: String(s.company_website ?? ""),
     trn: String(s.company_trn ?? ""),
-    bank: { name: String(s.bank_name ?? ""), accountName: String(s.bank_account_name ?? ""), accountNumber: String(s.bank_account_number ?? ""), iban: String(s.bank_iban ?? ""), swift: String(s.bank_swift ?? "") },
+    bank: { name: String(s.bank_name ?? ""), accountName: String(s.company_legal_name || s.bank_account_name || ""), accountNumber: String(s.bank_account_number ?? ""), iban: String(s.bank_iban ?? ""), swift: String(s.bank_swift ?? "") },
   };
 }

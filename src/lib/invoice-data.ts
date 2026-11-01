@@ -1,4 +1,5 @@
 import "server-only";
+import { capsText } from "./text-case";
 import { packageDetailsText } from "./packages";
 import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
@@ -323,7 +324,8 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   const cost = l.line_type === "part" ? round2((part?.final_cost_aed ?? part?.cost_aed ?? l.unit_cost ?? 0) * (l.quantity || 1)) : lineCost(l);
   return {
     section: isPart ? "parts" : "services",
-    description: title,
+    // Capitals, as saved on the quotation (1 November 2026, B1): an older line in small letters is raised, letter case only.
+    description: capsText(title),
     // The positions travel on their own (printed on their own small line); the details carry the rest.
     positions: l.positions?.length ? l.positions : null,
     // Labour with no hours (complimentary lathe work) prints nothing rather than "0.0 h".

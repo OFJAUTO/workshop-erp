@@ -1,3 +1,4 @@
+import { capsText } from "@/lib/text-case";
 import { refuseIfLocked } from "@/lib/quote-lock-server";
 import { handBack, keepBaseline } from "@/lib/quote-lead";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -483,6 +484,8 @@ export async function POST(request: NextRequest) {
     if (wantId) row.id = wantId;
     const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", q.id).eq("is_active", true).neq("line_type", "fee").order("position", { ascending: false }).limit(1).maybeSingle();
     row.position = (Number(last?.position) || 0) + 1;
+    if (typeof row.title === "string") row.title = capsText(row.title);
+    if (typeof row.details === "string") row.details = capsText(row.details);
     const { data: created, error } = await admin.from("quotation_lines").insert(row).select("id").single();
     if (error || !created) return NextResponse.json({ error: error?.message ?? "Could not add the line." }, { status: 500 });
     if (linked) {
@@ -524,6 +527,8 @@ export async function POST(request: NextRequest) {
     if ("dangerous" in patch && !patch.dangerous && cur.dangerous) {
       await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "danger_off", note: `${staff.display_name} switched the safety warning off on ${cur.title}`, created_by: staff.id });
     }
+    if (typeof patch.title === "string") patch.title = capsText(patch.title);
+    if (typeof patch.details === "string") patch.details = capsText(patch.details);
     const { error } = await admin.from("quotation_lines").update({ ...patch, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     // One option used per group: choosing this one puts the others aside.
@@ -619,7 +624,7 @@ export async function POST(request: NextRequest) {
     if (h.customer_note !== undefined) {
       const note = h.customer_note ? String(h.customer_note).trim() : "";
       if (note.length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(note.length) }, { status: 400 });
-      patch.customer_note = note || null;
+      patch.customer_note = capsText(note) || null;
     }
     if (h.validity_days !== undefined) patch.validity_days = Math.max(1, Math.round(n(h.validity_days) ?? 7));
     if (h.payment_by_card !== undefined) patch.payment_by_card = !!h.payment_by_card;

@@ -44,7 +44,7 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
               <Logo className="h-12 sm:h-16 w-auto" alt={company.tradingName} />
               <div className="flex items-stretch gap-3 text-[10px] sm:text-[10.5px] leading-[1.6]">
                 <div className="flex flex-col">
-                  <span className="text-[11px] sm:text-xs font-bold tracking-[0.02em]">{company.legalName}</span>
+                  <span className="whitespace-nowrap text-[11px] sm:text-xs font-bold tracking-[0.02em]">{company.legalName}</span>
                   {company.address.map((a) => <Words key={a} text={a} className="text-[#5F6368]" />)}
                 </div>
                 {company.trn ? (

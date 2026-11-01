@@ -155,7 +155,7 @@ export async function payPageData(token: string): Promise<PayPageData | null> {
     gatewayUrl: r.gateway_url,
     paid,
     receiptHref,
-    bank: { name: String(settings.bank_name ?? ""), accountName: String(settings.bank_account_name ?? ""), accountNumber: String(settings.bank_account_number ?? ""), iban: String(settings.bank_iban ?? ""), swift: String(settings.bank_swift ?? "") },
+    bank: { name: String(settings.bank_name ?? ""), accountName: String(settings.company_legal_name || settings.bank_account_name || ""), accountNumber: String(settings.bank_account_number ?? ""), iban: String(settings.bank_iban ?? ""), swift: String(settings.bank_swift ?? "") },
     address: String(settings.company_address ?? ""),
     hoursText: String(settings.workshop_hours_text ?? "Monday to Saturday, 8:00–17:00"),
     mapUrl: pin && /^https?:\/\//.test(pin) ? pin : null,
