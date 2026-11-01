@@ -7,7 +7,7 @@ import { loadDrivers } from "@/lib/delivery";
 import { removeRecoveryDriver, saveRecoveryDriver, saveRecoveryRates } from "@/app/(app)/jobs/delivery-actions";
 import { RATE_KIND_LABELS, recoveryRatesOf, type RateKind } from "@/lib/recovery";
 import { jobLate, jobTime, lateWords, loadBackgroundJobs } from "@/lib/background-jobs";
-import { saveSettings } from "./actions";
+import { saveMoneyLimits, saveSettings } from "./actions";
 import { clearTestDataAction } from "./clear-actions";
 import { ClearTestData } from "./ClearTestData";
 import { SettingsForm } from "./SettingsForm";
@@ -42,7 +42,7 @@ export default async function SettingsPage() {
   let docLimits: Record<string, { amber: number; red: number | string }> = {};
   let reasonPresets: Record<string, string[]> = {};
   let breakTimes: Record<string, Record<string, string>> = {};
-  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: true, advisor_labour_discount: false, comp_tax_invoice: false, customer_documents_uppercase: false };
+  const flags: Record<string, boolean> = { wash_board_show_times: false, wash_board_done_button: false, test_mode_enabled: false, advisor_labour_discount: false, comp_tax_invoice: false, customer_documents_uppercase: false };
   for (const row of data ?? []) {
     if (row.key === "parts_min_markup_by_make") makeOverrides = (row.value as Record<string, number>) ?? {};
     else if (row.key === "technician_cost_rate_by_department") departmentOverrides = (row.value as Record<string, number>) ?? {};
@@ -64,7 +64,7 @@ export default async function SettingsPage() {
     else if (row.key === "wash_board_show_times" || row.key === "wash_board_done_button" || row.key === "test_mode_enabled" || row.key === "advisor_labour_discount" || row.key === "comp_tax_invoice" || row.key === "customer_documents_uppercase") flags[row.key] = row.value === true;
     else if (row.key === "labour_jobs") labourJobsText = Object.entries((row.value as Record<string, string[]>) ?? {}).map(([g, list]) => `${g}:\n${(list ?? []).join("\n")}`).join("\n\n");
     else if (row.key === "labour_job_candidates") candidates = (row.value as Record<string, number>) ?? {};
-    else if (row.key === "recovery_providers" || row.key === "labour_hours_memory" || row.key === "recovery_rates" || row.key === "recovery_flag_percent") continue;
+    else if (row.key === "recovery_providers" || row.key === "labour_hours_memory" || row.key === "recovery_rates" || row.key === "recovery_flag_percent" || row.key === "money_undo_minutes" || row.key === "supplier_price_auto_percent" || row.key === "supplier_price_auto_aed") continue;
     else if (row.key === "zoho_org_real" || row.key === "zoho_org_test" || row.key === "zoho_live_enabled" || row.key === "zoho_account_map" || row.key === "zoho_golive_reviewed" || row.key === "zoho_golive_start_date" || row.key === "zoho_golive_log" || row.key === "zoho_went_live_at" || row.key === "zoho_golive_followup" || row.key === "zoho_last_live_test_at") continue;
     else if (row.key === "inbound_scan_token" || row.key === "scans_mailbox_last_check" || row.key === "break_mechanical" || row.key === "break_bodyshop") continue;
     else if (row.key === "break_times") breakTimes = (row.value as Record<string, Record<string, string>>) ?? {};
@@ -75,6 +75,7 @@ export default async function SettingsPage() {
   const recoveryDrivers = await loadDrivers();
   const recoveryRates = recoveryRatesOf({ recovery_rates: (data ?? []).find((r) => r.key === "recovery_rates")?.value });
   const recoveryFlag = Number((data ?? []).find((r) => r.key === "recovery_flag_percent")?.value ?? 25);
+  const settingNum = (key: string, fallback: number) => { const v = (data ?? []).find((r) => r.key === key)?.value; const n = v === undefined || v === null ? NaN : Number(v); return Number.isFinite(n) ? n : fallback; };
   const pendingReview = (reviewMakes ?? 0) + (reviewModels ?? 0);
   const totalBytes = usage.reduce((a, b) => a + b.bytes, 0);
   // The scheduled jobs and when each last ran (23 October 2026).
@@ -213,6 +214,16 @@ export default async function SettingsPage() {
               ))}
               <label className="flex items-center gap-2 text-sm font-semibold">Flag a trip above expected by <Input name="flag_percent" defaultValue={String(recoveryFlag)} inputMode="decimal" style={{ width: "4.5rem" }} aria-label="Flag percent" data-rate-flag /> %</label>
               <div><Button type="submit" tone="secondary" size="md" data-rates-save>Save rates</Button></div>
+            </form>
+          </Card>
+          <Card id="money-limits" className="flex flex-col gap-3" data-money-limits>
+            <SectionLabel>Money</SectionLabel>
+            <p className="text-xs text-muted">After a payment, a deposit or &quot;paid to supplier&quot; is confirmed, the one who did it (or the owner) can undo it for this long; nothing goes to Zoho Books before the time is over. After it, the owner or accounts reverse it with a reason. A supplier invoice above the approved LPO is accepted at once up to the higher of the two limits; above them it waits for the owner.</p>
+            <form action={saveMoneyLimits} className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm font-semibold">Undo within <Input name="money_undo_minutes" defaultValue={String(settingNum("money_undo_minutes", 10))} inputMode="numeric" style={{ width: "4.5rem" }} aria-label="Undo minutes" data-undo-minutes /> minutes</label>
+              <label className="flex items-center gap-2 text-sm font-semibold">Supplier price up accepted to <Input name="supplier_price_auto_percent" defaultValue={String(settingNum("supplier_price_auto_percent", 5))} inputMode="decimal" style={{ width: "4.5rem" }} aria-label="Percent of the LPO" /> % of the LPO</label>
+              <label className="flex items-center gap-2 text-sm font-semibold">or AED <Input name="supplier_price_auto_aed" defaultValue={String(settingNum("supplier_price_auto_aed", 100))} inputMode="decimal" style={{ width: "6rem" }} aria-label="AED per LPO" /> per LPO, whichever is higher</label>
+              <div><Button type="submit" tone="secondary" size="md" data-money-limits-save>Save</Button></div>
             </form>
           </Card>
           <Card className="flex flex-col gap-3">

@@ -3,7 +3,7 @@
 // Run: node --env-file=.env.test.local tests/browser/test-import-lock.mjs   (dev server on :3100)
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql, confirmMoney } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shot = (name) => path.join(here, "shots", name);
@@ -94,7 +94,7 @@ if (main) {
   await go(op, `${base}/parts/orders/${main.id}`);
   const why = op.locator("textarea[name=override_reason]");
   if (await why.count()) await why.fill("E2e test approval without deposit");
-  await op.locator('button[name="decision"][value="approve"]').click();
+  await confirmMoney(op, "lpo-approve");
   await op.waitForURL(/message=|error=/, { timeout: 60000 });
   const sup = (await sql("select id, number, total_cost_aed::float8 as t from public.purchase_orders where parent_id = $1 and is_active", [main.id]))[0];
   const onSup = (await sql("select po_id from public.supplier_charges where job_id = $1 and is_active", [jobId]))[0];

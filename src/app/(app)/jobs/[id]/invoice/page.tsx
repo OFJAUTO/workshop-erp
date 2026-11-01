@@ -21,7 +21,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
-import { addPayNow, customerSaysPaid, issueInvoice, markReadyToInvoice, recordPayment, setPaymentLink, verifyPaymentAction } from "@/app/(app)/invoices/actions";
+import { addPayNow, customerSaysPaid, issueInvoice, markReadyToInvoice, recordPayment, setPaymentLink, undoPaymentAction, verifyPaymentAction } from "@/app/(app)/invoices/actions";
+import { UndoButton } from "@/components/UndoButton";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
 import { ReadySendControl } from "../ReadySendControl";
 import { DepositReceiptSend } from "@/components/DepositReceiptSend";
 import { RecordDeposit } from "@/components/RecordDeposit";
@@ -54,6 +57,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const supabase = await createClient();
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) notFound();
+  const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   const { job, vehicle, customer } = card;
   const admin = createAdminClient();
   const [draft, { data: existing }, { data: deposits }, { data: creditCust }, { data: stepJob }] = await Promise.all([
@@ -187,6 +191,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {needsBank ? <Badge tone="amber">{p.method === "cash" ? "Cash: to confirm & bank" : "Recorded by advisor, to confirm"}</Badge> : null}
         {needsBank && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" {...(isDeposit ? { "data-confirm-deposit": "" } : { "data-confirm-counter": "" })}>Confirmed &amp; banked</Button></form> : null}
         {p.status === "pending_owner" ? <Badge tone="amber">Waiting for the owner</Badge> : null}
+        {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, here)} /> : null}
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
         {p.proof_path && proofUrls[p.proof_path] ? (
           <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="inline-flex" data-proof-link aria-label={p.method === "card" ? "Card slip" : "Proof"}>
@@ -315,7 +320,18 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 <summary className="cursor-pointer min-h-11 flex items-center font-semibold text-muted underline underline-offset-4">Issue the tax invoice early (owner only, with a reason)</summary>
                 <form action={issueInvoice.bind(null, id)} className="mt-2 flex flex-col gap-2 max-w-md">
                   <Textarea name="reason" rows={2} required placeholder="Reason for issuing before full payment (accounts are told)" />
-                  <div><Button type="submit" size="md" tone="secondary">Issue the tax invoice now</Button></div>
+                  <div>
+                    <ConfirmSubmit
+                      label="Issue the tax invoice now"
+                      tone="secondary"
+                      size="md"
+                      title="Issue the tax invoice before full payment?"
+                      lines={[`The tax invoice for ${job.job_number} is numbered now, in place of the proforma`, `balance still to pay AED ${m(bal?.balance ?? 0)}`, "accounts are told and it goes to Zoho Books"]}
+                      live={[{ label: "Reason:", field: "reason" }]}
+                      confirmLabel="Yes, issue the tax invoice"
+                      hook="issue-tax"
+                    />
+                  </div>
                 </form>
               </details>
             ) : null}

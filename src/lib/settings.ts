@@ -187,6 +187,8 @@ const DEFAULTS = {
   /** A supplier invoice price above the approved LPO is accepted at once up to the higher of these per LPO (1 November 2026). */
   supplier_price_auto_percent: 5,
   supplier_price_auto_aed: 100,
+  /** A money action may be undone for this long by the one who did it or the owner; nothing goes to Zoho before it is over (1 November 2026, B3). */
+  money_undo_minutes: 10,
   pending_charges_reminder_days: 7,
   /** The workshop dictionary for the pre-send spelling check (car words the owner adds; see src/lib/spell.ts). */
   spell_words: [] as string[],
@@ -213,7 +215,8 @@ const DEFAULTS = {
   markup_confirm_percent: 100,
   pin_needed_above_aed: 100,
   wash_board_show_times: false,
-  test_mode_enabled: true,
+  /** The Testing phase (Clear test data): off unless the owner switched it on - a missing row is OFF (1 November 2026, C2). */
+  test_mode_enabled: false,
   wash_board_done_button: false,
   comeback_window_days: 90,
   recovery_providers: [] as string[],

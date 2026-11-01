@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { Button, Input, Notice } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { feesFor, type FeeRule } from "@/lib/bank-fees";
 import { checkFigures, CLEARING_LABEL, preTicked, receivedAfter, splitFigures, vatOnFees, type ClearingMethod } from "@/lib/card-settlement-rules";
 import { initialFormState, type FormState } from "@/lib/form-state";
@@ -151,9 +152,21 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
               <span className="text-xs font-semibold uppercase text-muted">Note</span>
               <Input name="note" value={note} onChange={(e) => setNote(e.target.value)} data-settle-note />
             </label>
-            <Button type="submit" size="lg" disabled={!canRecord} data-settle-save>
-              {pending ? "Saving…" : ask ? "Yes, the figures are right – record it" : differs && override ? "Save anyway" : "Record the settlement"}
-            </Button>
+            <ConfirmSubmit
+              label={pending ? "Saving…" : ask ? "Yes, the figures are right – record it" : differs && override ? "Save anyway" : "Record the settlement"}
+              disabled={!canRecord || pending}
+              title="Record the bank settlement?"
+              lines={[
+                `${tickedRows.length} ${CLEARING_LABEL[method].toLowerCase()} payment${tickedRows.length === 1 ? "" : "s"} settled on ${settledOn}: ${aed(gross)}`,
+                `net ${fig(netNum ?? 0)} into the bank, MSF ${fig(msfNum)} + fee ${fig(txnNum)} + VAT ${fig(vatNum)}`,
+                ...(differs && override ? [`a difference of AED ${Math.abs(check.difference).toFixed(2)} is saved with the note`] : []),
+                "the jobs' bank fees become the actual ones and it goes to Zoho Books",
+              ]}
+              live={[{ label: "statement ref", field: "statement_ref", empty: "no statement reference" }]}
+              confirmLabel="Yes, record the settlement"
+              hook="settlement"
+              attrs={{ "data-settle-save": "" }}
+            />
           </div>
           {check.ok ? (
             <p className={`text-sm font-semibold ${check.askAgain ? "text-amber" : "text-green"}`} data-settle-adds>

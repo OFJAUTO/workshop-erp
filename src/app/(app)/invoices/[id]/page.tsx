@@ -14,7 +14,10 @@ import { ReasonChips } from "@/components/ReasonChips";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { decideOverpaymentAction, issueCreditNote, recordCnRefund, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, verifyPaymentAction, voidPaymentAction } from "../actions";
+import { decideOverpaymentAction, issueCreditNote, recordCnRefund, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, undoPaymentAction, verifyPaymentAction, voidPaymentAction } from "../actions";
+import { UndoButton } from "@/components/UndoButton";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
 import { ChoiceButtons } from "@/components/ui";
 import { PaymentForm } from "./PaymentForm";
 import { refuseRecord } from "@/lib/refusal";
@@ -40,6 +43,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const bal = invoiceBalance(invoice, live);
   const canPay = can(role, "recordPayments") && !staff.viewingAs && invoice.kind === "tax_invoice" && invoice.status === "issued";
   const canVoid = (role === "owner" || (role === "accounts" && staff.is_head_accountant)) && !staff.viewingAs;
+  const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   const canVerify = can(role, "verifyPayments") && !staff.viewingAs;
   const seesCost = role === "owner" || role === "accounts";
   const cost = lines.reduce((a, l) => a + l.cost_aed, 0);
@@ -113,6 +117,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs">
+                      {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, `/invoices/${invoice.id}`)} /> : null}
                       {p.status === "voided" ? <span className="text-red font-semibold">Voided by {nameOf.get(p.voided_by ?? "") ?? "the owner"} {formatDateTime(p.voided_at)}: {p.void_reason}</span> : null}
                       {p.status === "reversed" ? <span className="text-red font-semibold">Reversed: {p.reversed_reason}</span> : null}
                       {p.status === "recorded" ? (p.verified_at ? <span className="text-green font-semibold">Verified by {nameOf.get(p.verified_by ?? "") ?? "accounts"} {formatDate(p.verified_at)}</span> : <span className="text-amber font-semibold">Not verified by accounts yet</span>) : null}
@@ -225,7 +230,16 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                         <Input name="amount" inputMode="decimal" defaultValue={m(invoice.total_aed)} aria-label="Amount refunded with VAT" />
                         <ChoiceButtons name="method" options={[{ value: "cash", label: "Cash" }, { value: "transfer", label: "Bank transfer" }]} columns={2} />
                         <Input name="reference" placeholder="Transfer reference (needed for a transfer)" />
-                        <Button type="submit" size="md" data-cn-refund-save>Record the refund</Button>
+                        <ConfirmSubmit
+                          label="Record the refund"
+                          size="md"
+                          title="Record the refund to the customer?"
+                          lines={[`Money paid BACK to ${customer?.company_name ?? customer?.full_name ?? "the customer"} against credit note ${invoice.number}`, "written on the credit note and sent to Zoho Books"]}
+                          live={[{ label: "AED", field: "amount" }, { field: "method", empty: "choose Cash or Bank transfer" }, { label: "ref", field: "reference" }]}
+                          confirmLabel="Yes, record the refund"
+                          hook="cn-refund"
+                          attrs={{ "data-cn-refund-save": "" }}
+                        />
                       </form>
                     ) : (
                       <p className="text-sm text-muted">Accounts record the refund once it is paid.</p>
@@ -268,7 +282,16 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 <form action={issueCreditNote.bind(null, invoice.id)} className="flex flex-col gap-2 border-t border-line pt-2">
                   <Input name="amount" inputMode="decimal" placeholder="Amount before VAT" required />
                   <Textarea name="description" rows={2} placeholder="What is corrected (shown on the credit note)" required />
-                  <Button type="submit" tone="secondary" size="md">Issue a credit note</Button>
+                  <ConfirmSubmit
+                    label="Issue a credit note"
+                    tone="secondary"
+                    size="md"
+                    title="Issue a credit note?"
+                    lines={[`A credit note against ${invoice.number}`, "the amount plus VAT comes off what the customer owes", "it is numbered now and sent to Zoho Books"]}
+                    live={[{ label: "AED (before VAT)", field: "amount" }, { field: "description" }]}
+                    confirmLabel="Yes, issue the credit note"
+                    hook="credit-note"
+                  />
                 </form>
               ) : can(role, "issueInvoices") && !staff.viewingAs ? (
                 <form action={requestCreditNote.bind(null, invoice.id)} className="flex flex-col gap-2 border-t border-line pt-2">

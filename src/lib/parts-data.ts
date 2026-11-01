@@ -146,7 +146,7 @@ export const toPartFull = (r: Record<string, unknown>) => num({ ...toPart(r), ..
 export type JobBrief = { id: string; job_number: string; status: string; is_open: boolean; customer_id: string; gated_in_by: string; assigned_to: string | null; department: string | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; model_year?: number | null; make: { name: string } | null; model: { name: string } | null } | null };
 export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, gated_in_by, assigned_to, department, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))";
 
-export type SupplierRow = { id: string; name: string; trn: string | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null };
+export type SupplierRow = { id: string; name: string; trn: string | null; vat_registered: boolean | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null };
 export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[]; supplier: SupplierRow | null; /** Courier, freight: "Other charges" on this LPO, already in its total. */ charges: SupplierCharge[] };
 
 export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
@@ -158,7 +158,7 @@ export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
     admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", id).eq("is_active", true).order("position"),
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", po.job_id).maybeSingle(),
     admin.from("part_items").select(PART_FULL_SELECT).eq("po_id", id).eq("is_active", true),
-    po.supplier_id ? admin.from("suppliers").select("id, name, trn, phone, email, address, payment_terms").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
+    po.supplier_id ? admin.from("suppliers").select("id, name, trn, vat_registered, phone, email, address, payment_terms").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
     poCharges(id),
   ]);
   const ids = [po.created_by, po.approved_by, po.ordered_by, po.supplier_invoice_by, po.deposit_override_by, po.sent_by].filter((x): x is string => !!x);

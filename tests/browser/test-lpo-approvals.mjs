@@ -8,7 +8,7 @@
 // Run: node --env-file=.env.test.local tests/browser/test-lpo-approvals.mjs   (test server on 3102)
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, confirmMoney } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const dir = path.join(here, "shots", "lpo-approvals");
@@ -135,7 +135,7 @@ try {
   await own.page.screenshot({ path: shot("c2-lpo-with-added-supplier.png"), fullPage: true });
 
   /* ---------- D. Approved LPO: a part added later gets its own approval request ---------- */
-  await own.page.locator("button[name='decision'][value='approve']").first().click();
+  await confirmMoney(own.page, "lpo-approve");
   await until(async () => (await sql("select 1 from public.purchase_orders where id = $1 and status = 'approved'", [lpo.id]))[0]);
   // A part to order that was marked not needed before it was ordered, then replaced.
   const extra = (await sql("insert into public.part_items (job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, confirm_status, part_type, order_status, not_needed_at, not_needed_by, not_needed_reason, created_by, updated_by) values ($1, 'E2E ENGINE BOLT', 'E2E-BOLT-1', 2, 2, 15, 'E2E SUPPLIER A', 'to_order', 'confirmed', 'genuine', 'to_order', now(), $2, 'Wrong size', $2, $2) returning id", [jobId, partsUser.id]))[0];

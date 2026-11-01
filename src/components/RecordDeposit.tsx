@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { recordDepositPanel, type RecordDepositResult } from "@/app/(app)/dashboard/record-deposit-actions";
 import { JobFileUpload, useFormKey, type FilesWaiting, type JobFile } from "./JobFileUpload";
 import { SendLinkDialog } from "./SendLinkDialog";
+import { UndoButton } from "./UndoButton";
+import { undoPaymentFromWindow } from "@/app/(app)/invoices/payment-anywhere-actions";
 import { Button, Input } from "./ui";
 import { reloadIfStale } from "@/lib/app-version";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
@@ -58,6 +60,9 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Extract<RecordDepositResult, { ok: true }> | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
+  const [undone, setUndone] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
   // A real uuid: the proof files are tied to it in job_files.ref_id (a uuid column) until the save re-points them. It
   // stays the same for this job's deposit across a reload or a new version (a proof still waiting on the device stays
   // with it) and is renewed once the deposit is recorded.
@@ -107,6 +112,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
       return;
     }
     setDone(r);
+    setUndone(false);
     // Recorded: the next deposit on this job gets a key of its own (a proof still sending under this one joins this receipt).
     renew(usedKey);
     router.refresh();
@@ -130,11 +136,44 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
               {d.customer ? <span className="text-muted"> · {d.customer}</span> : null}
               <span className="text-muted"> · {d.quote}</span>
             </p>
-            {done ? (
+            {done && undone ? (
+              <div className="flex flex-col gap-3" data-deposit-undone>
+                <p className="rounded-control border-2 border-ink px-3 py-2 text-sm font-bold">↩ {done.number} undone – the receipt is voided (kept, struck through) and nothing went to Zoho Books.</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" tone="ghost" size="md" onClick={close}>Done</Button>
+                </div>
+              </div>
+            ) : done ? (
               <div className="flex flex-col gap-3" data-deposit-done>
                 <p className="rounded-control bg-green-soft border border-green px-3 py-2 text-sm font-bold text-green">
                   {done.number} recorded ✓ — {aed(value)} received.
                 </p>
+                {done.recordedAt ? (
+                  <UndoButton
+                    at={done.recordedAt}
+                    minutes={done.undoMinutes ?? 10}
+                    done="Deposit recorded"
+                    busy={undoing}
+                    onUndo={() => {
+                      setUndoing(true);
+                      setUndoError(null);
+                      void undoPaymentFromWindow(done.paymentId)
+                        .then((u) => {
+                          setUndoing(false);
+                          if (u.error) setUndoError(u.error);
+                          else {
+                            setUndone(true);
+                            router.refresh();
+                          }
+                        })
+                        .catch((e) => {
+                          setUndoing(false);
+                          if (!reloadIfStale(e)) setUndoError("No connection – try again.");
+                        });
+                    }}
+                  />
+                ) : null}
+                {undoError ? <p className="text-sm font-semibold text-red" data-undo-error>{undoError}</p> : null}
                 {done.overBy > 0 ? <p className="text-sm font-semibold" data-deposit-over>{aed(done.overBy)} more than requested – kept as an advance on the job.</p> : null}
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="md" onClick={() => setSendOpen(true)} data-send-deposit-receipt>Send receipt</Button>

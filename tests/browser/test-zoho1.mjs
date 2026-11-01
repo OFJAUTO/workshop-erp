@@ -3,7 +3,7 @@
 // mapping screen and the accounts' Waiting on you. Everything here runs WITHOUT Zoho: the dev machine has no Zoho
 // secret, so the worker is exercised live (test-zoho1-live.mjs) and this file proves the local half.
 //   node --env-file=.env.test.local tests/browser/test-zoho1.mjs   (dev server on 3100/3101 WITHOUT ZOHO_* env values)
-import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 15 * 60 * 1000).unref();
@@ -45,7 +45,7 @@ await section("2 enqueue hooks", async () => {
     await page.locator("[data-amount-partial]").click();
     await page.locator("[data-amount-input]").fill("100");
     await page.locator('[data-method="cash"]').click();
-    await page.locator("[data-record-payment]").click();
+    await pressRecord(page);
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const pay1 = await until(async () => (await sql("select id from public.payments where invoice_id = $1 and method = 'cash' and status = 'recorded'", [proformaId]))[0], 40);
     check("2: the cash payment is recorded", !!pay1, JSON.stringify(pay1));
@@ -59,7 +59,7 @@ await section("2 enqueue hooks", async () => {
     await page.locator('[data-method="cheque"]').click();
     await page.locator('[name="cheque_number"]').fill("123456");
     await page.locator('[name="cheque_date"]').fill("2026-10-26");
-    await page.locator("[data-record-payment]").click();
+    await pressRecord(page);
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const cheque = await until(async () => (await sql("select id, number from public.payments where invoice_id = $1 and method = 'cheque'", [proformaId]))[0], 40);
     check("2: the cheque is recorded (pending clearance)", !!cheque, JSON.stringify(cheque));

@@ -8,7 +8,7 @@
 //   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees5.mjs
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "fees");
@@ -71,7 +71,7 @@ try {
     check(`C ${method}: the CSV copy matches the test payment ${pay.number} ✓`, (await line.match.locator("[data-report-matched]").count()) === 1 && new RegExp(pay.number).test((await line.match.locator("[data-report-matched]").textContent()) ?? ""));
     await page.locator("[data-report-ref]").fill(`E2E NI ${method}`);
     await page.locator("[data-report-date]").fill("2026-10-25");
-    await page.locator("[data-report-record]").click();
+    await page.locator("[data-report-record]").click(); await pressYes(page);
     const done = await until(async () => ((await page.locator("[data-report-done]").count()) ? (await page.locator("[data-report-done]").textContent()) : null));
     check(`C ${method}: recorded from the report (the answer under the button)`, !!done && /STL-\d{5} recorded from the bank's report/.test(done), done ?? ((await page.locator("[data-report-review]").textContent()) ?? "").slice(-300));
     const [p] = await sql("select actual_msf_aed::text m, actual_txn_fee_aed::text t, actual_vat_aed::text v, actual_fee_aed::text c, settlement_id from public.payments where id = $1", [pay.id]);

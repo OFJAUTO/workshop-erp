@@ -2,6 +2,7 @@
 
 import { Fragment, useActionState, useState } from "react";
 import { Button, Input, Notice } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { initialFormState, type FormState } from "@/lib/form-state";
 import type { LineMatch, ParsedReport } from "@/lib/settlement-report";
 
@@ -153,7 +154,16 @@ export function ReportReview({ report, matches, payments, today, recorded, canSa
               I have checked the red items above with the bank
             </label>
           ) : null}
-          <Button type="submit" size="lg" disabled={!canSave || pending || open > 0 || (red.length > 0 && !seen)} data-report-record>{pending ? "Recording…" : open ? `${open} line${open === 1 ? "" : "s"} still to match` : "Record the settlement"}</Button>
+          <ConfirmSubmit
+            label={pending ? "Recording…" : open ? `${open} line${open === 1 ? "" : "s"} still to match` : "Record the settlement"}
+            disabled={!canSave || pending || open > 0 || (red.length > 0 && !seen)}
+            title="Record the settlement from the bank report?"
+            lines={[`The report's figures: AED ${fig(report.totals.gross)} − MSF ${fig(report.totals.msf)} − fee ${fig(report.totals.txn)} − VAT ${fig(report.totals.vat)} = net AED ${fig(report.totals.net)}`, "each matched payment gets its actual bank fee and it goes to Zoho Books"]}
+            live={[{ label: "settled on", field: "settled_on" }, { label: "statement ref", field: "statement_ref", empty: "no statement reference" }]}
+            confirmLabel="Yes, record the settlement"
+            hook="report-settlement"
+            attrs={{ "data-report-record": "" }}
+          />
           {state.error ? <div className="w-full"><Notice tone="error">{state.error}</Notice></div> : null}
         </div>
       )}

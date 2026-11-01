@@ -3,7 +3,7 @@
 //       Parts only mark "Ready for handover" (instant notification, 2-hour reminder), nothing blocks
 //       starting work, receiving is required before "Job finished".
 //   node --env-file=.env.test.local tests/browser/test-z.mjs
-import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
@@ -173,13 +173,13 @@ if (want("S2")) {
   await page.locator("[data-amount-input]").first().fill("100");
   check("S2: the card slip photo box is there and required", (await page.locator("[data-proof-input]").count()) >= 1 && (await page.locator("[data-proof-input]").first().getAttribute("required")) !== null);
   await shot(page, "s2-payment-form");
-  await page.locator("[data-record-payment]").first().click();
+  await pressRecord(page);
   await sleep(1500);
   const after1 = (await sql("select count(*)::int as n from public.payments where invoice_id = $1 and is_active", [pro.id]))[0]?.n ?? 0;
   check("S2: without the photo nothing is recorded", after1 === before, String(after1));
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
   await page.locator("[data-proof-input]").first().setInputFiles({ name: "slip.png", mimeType: "image/png", buffer: png });
-  await page.locator("[data-record-payment]").first().click();
+  await pressRecord(page);
   const pay = await until(async () => { const r = (await sql("select id, proof_path from public.payments where invoice_id = $1 and is_active and method = 'card' order by created_at desc limit 1", [pro.id]))[0]; return r?.proof_path ? r : null; }, 30, 500);
   check("S2: with the photo the payment records and keeps the slip", !!pay?.proof_path && String(pay.proof_path).startsWith("payments/"), JSON.stringify(pay));
   await go(page, `${base}/jobs/${jobId}/invoice`);

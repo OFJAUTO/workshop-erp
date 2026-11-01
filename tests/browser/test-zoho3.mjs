@@ -7,7 +7,7 @@
 // never REAL, nothing kept).
 //   node --env-file=.env.test.local tests/browser/test-zoho3.mjs   (dev server, no ZOHO_* values)
 import pg from "pg";
-import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, confirmMoney, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 15 * 60 * 1000).unref();
@@ -142,7 +142,7 @@ await section("3 customer refund", async () => {
     await page.locator('[data-cn-refund] input[name="amount"]').fill("210");
     await page.locator('[data-cn-refund] label', { hasText: "Bank transfer" }).click();
     await page.locator('[data-cn-refund] input[name="reference"]').fill("TT-99");
-    await page.locator("[data-cn-refund-save]").click();
+    await page.locator("[data-cn-refund-save]").click(); await pressYes(page);
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const row = await until(async () => (await sql("select refund_paid_at, refund_method, refund_amount_aed::float as amount from public.invoices where id = $1", [cn.id]))[0]?.refund_paid_at ? (await sql("select refund_paid_at, refund_method, refund_amount_aed::float as amount from public.invoices where id = $1", [cn.id]))[0] : null);
     check("3: the refund is recorded (210, transfer)", !!row && row.refund_method === "transfer" && row.amount === 210, JSON.stringify(row));
@@ -295,7 +295,7 @@ await section("7e supplier payment method and proof", async () => {
     await page.locator("[data-pay-method] label", { hasText: "Cash" }).click();
     await page.locator('[data-pay-form] input[name="reference"]').fill("Receipt 77");
     await page.locator("[data-pay-proof]").setInputFiles({ name: "receipt.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
-    await page.locator("[data-mark-supplier-paid]").click();
+    await confirmMoney(page, "supplier-paid");
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const row = await until(async () => { const r = (await sql("select supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path from public.purchase_orders where id = $1", [po.id]))[0]; return r?.supplier_paid_method === "cash" && r?.supplier_paid_proof_path ? r : null; });
     // 31 October 2026: the proof goes by the send queue and lands on the LPO a moment after "Paid" (waited for above).

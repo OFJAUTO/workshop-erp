@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { notFound } from "next/navigation";
 import { ChargeLinesEditor } from "@/components/ChargeLinesEditor";
 import { CopyText } from "@/components/CopyText";
@@ -128,7 +129,17 @@ async function OpenEntry({ e, staffRole, viewingAs, remindDays }: { e: EntryView
       {e.status === "pending" && accounts ? (
         <form action={issueEntryTaxInvoiceAction.bind(null, e.id)} className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <Input name="reason" required minLength={5} placeholder="Why before full payment?" className="w-72" textCase="sentence" aria-label="Why issue the tax invoice now" />
-          <Button type="submit" size="md" tone="secondary" data-pc-issue>Issue tax invoice</Button>
+          <ConfirmSubmit
+            label="Issue tax invoice"
+            size="md"
+            tone="secondary"
+            title="Issue the tax invoice now?"
+            lines={[`A tax invoice for these charges (AED ${money(e.total)} with VAT, AED ${money(e.balance)} still to pay) is numbered now, before full payment`, "it goes to Zoho Books"]}
+            live={[{ label: "Reason:", field: "reason" }]}
+            confirmLabel="Yes, issue the tax invoice"
+            hook="pc-issue"
+            attrs={{ "data-pc-issue": "" }}
+          />
         </form>
       ) : null}
       {e.status === "pending" && !viewingAs ? (

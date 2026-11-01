@@ -11,7 +11,8 @@ const money = (n: number) => `AED ${(Math.round(n * 100) / 100).toLocaleString("
 /** The automatic limit from Settings: the higher of the percent of the LPO and the fixed amount (5% / AED 100). */
 export function priceLimits(settings: Settings): { percent: number; aed: number } {
   const s = settings as unknown as Record<string, unknown>;
-  return { percent: Number(s.supplier_price_auto_percent ?? 5) || 5, aed: Number(s.supplier_price_auto_aed ?? 100) || 100 };
+  const num = (v: unknown, fallback: number) => { const n = v === undefined || v === null || v === "" ? NaN : Number(v); return Number.isFinite(n) && n >= 0 ? n : fallback; };
+  return { percent: num(s.supplier_price_auto_percent, 5), aed: num(s.supplier_price_auto_aed, 100) };
 }
 
 /**

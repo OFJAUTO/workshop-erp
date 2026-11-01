@@ -9,7 +9,7 @@ import { PAYMENT_SELECT, loadInvoice, nextDocumentNumber, toPayment } from "@/li
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { decideOverpayment, settleJob, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
+import { decideOverpayment, settleJob, undoPayment, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
@@ -148,6 +148,17 @@ export async function voidPaymentAction(paymentId: string, formData: FormData) {
   refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
   const back = p?.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
   redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Voided.")}`);
+}
+
+/** Undo a receipt inside the undo window (1 November 2026, B3): the one who recorded it, or the owner. */
+export async function undoPaymentAction(paymentId: string, back: string) {
+  const staff = await requireStaff();
+  const to = back.startsWith("/") ? back.split("?")[0] : "/invoices";
+  if (staff.viewingAs) redirect(`${to}?error=${encodeURIComponent("Switch off View as to undo.")}`);
+  const r = await undoPayment(paymentId, actorOf(staff), await getSettings());
+  const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
+  refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
+  redirect(`${to}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? `${r.message} Nothing went to Zoho Books.`)}`);
 }
 
 /** Accounts tick a payment once the money is confirmed. */

@@ -3,7 +3,7 @@
 // The test writes public/version.json as "e2e-v2" (the "newer deploy") and removes it at the end.
 //   node --env-file=.env.test.local tests/browser/test-version.mjs
 import fs from "node:fs";
-import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const VERSION_FILE = "public/version.json";
@@ -78,7 +78,7 @@ try {
     await sleep(800);
     await ab.page.evaluate(() => { try { sessionStorage.removeItem("erp-version-reload-at"); } catch {} window.__oldTab = true; });
     await ab.page.route("**/*", (r) => (r.request().method() === "POST" && r.request().headers()["next-action"] ? r.fulfill({ status: 404, headers: { "x-nextjs-action-not-found": "1", "content-type": "text/plain" }, body: "Server action not found." }) : r.continue()));
-    await ab.page.locator("[data-settle-save]").click();
+    await ab.page.locator("[data-settle-save]").click(); await pressYes(ab.page);
     const ok3b = await ab.page.waitForFunction(() => !window.__oldTab, null, { timeout: 20000 }).then(() => true).catch(() => false);
     await ab.page.unroute("**/*");
     if (!ok3b) await ab.page.screenshot({ path: "tests/browser/shots/version-action-debug.png" });

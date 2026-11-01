@@ -5,7 +5,7 @@
 //   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees3.mjs
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "fees");
@@ -82,16 +82,14 @@ try {
   await form.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: "slip.png", mimeType: "image/png", buffer: png });
   await until(async () => (await form.locator("[data-proof-missing]").count()) === 0);
   // Without the code the browser stops the form at the box (Record opens the full-payment question first).
-  await form.locator("[data-record-payment]").click();
-  if (await page.locator("[data-confirm-yes]").count()) await page.locator("[data-confirm-yes]").click();
+  await pressRecord(form);
   await sleep(1500);
   if (await page.locator("[data-confirm-full]").count()) await page.keyboard.press("Escape");
   if (await page.locator("[data-confirm-full]").count()) await page.locator("[data-confirm-full] button", { hasText: /No|Cancel|Back/ }).first().click().catch(() => null);
   check("C2 without the code nothing is sent", (await sql("select count(*)::int n from public.payments where job_id = $1", [s3.jobId]))[0].n === 0);
   await form.locator("[data-auth-code]").fill("ab12cd");
   check("C3 the code is typed in capitals", (await form.locator("[data-auth-code]").inputValue()) === "AB12CD");
-  await form.locator("[data-record-payment]").click();
-  if (await page.locator("[data-confirm-yes]").count()) await page.locator("[data-confirm-yes]").click();
+  await pressRecord(form);
   await page.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
   await settle(page);
   const pay = (await sql("select id, number, auth_code from public.payments where job_id = $1 and is_active", [s3.jobId]))[0];

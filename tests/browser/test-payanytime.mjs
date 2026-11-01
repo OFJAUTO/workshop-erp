@@ -8,7 +8,7 @@
 //   npm run test:payanytime   (test server on :3102, E2E_BASE for another port)
 import fs from "node:fs";
 import path from "node:path";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "payanytime");
@@ -63,8 +63,7 @@ async function pay(page, { method = "cash", amount, auth = null, proof = false, 
     } else await d.locator("[data-proof-input]").setInputFiles({ name: `${method}-proof.png`, mimeType: "image/png", buffer: png });
   }
   if (over) await d.locator("[data-over-note]").fill(over);
-  await d.locator("[data-record-payment]").click();
-  if (await d.locator("[data-confirm-full]").count()) await d.locator("[data-confirm-yes]").click();
+  await pressRecord(d);
   const done = await until(async () => (await d.locator("[data-record-payment-done]").count()) ? await d.locator("[data-record-payment-done]").getAttribute("data-record-payment-done") : null, 50, 500);
   if (!done) console.log("   window says:", (await text(d)).slice(-400));
   return done;
@@ -210,11 +209,11 @@ try {
   await d.locator("[data-amount-input]").pressSequentially(String(totalF + 500));
   check("F: paying more than the approved total shows the warning", !!(await until(async () => (await d.locator("[data-over-warning]").count()) === 1, 20, 250)), await text(d.locator("[data-over-warning]")));
   await d.locator("[data-over-warning]").screenshot({ path: shot("F-over-warning.png") });
-  await d.locator("[data-record-payment]").click();
+  await pressRecord(d);
   await sleep(1500);
   check("F: without a note nothing is recorded", (await sql("select count(*)::int as n from public.payments where job_id = $1", [seedF.jobId]))[0].n === 0);
   await d.locator("[data-over-note]").fill("Customer paid extra, refund AED 500 by transfer");
-  await d.locator("[data-record-payment]").click();
+  await pressRecord(d);
   const overNo = await until(async () => (await d.locator("[data-record-payment-done]").count()) ? await d.locator("[data-record-payment-done]").getAttribute("data-record-payment-done") : null, 40, 500);
   const ev = (await sql("select note from public.job_events where job_id = $1 and note like '%above the balance%' limit 1", [seedF.jobId]))[0];
   const told = (await sql("select count(*)::int as n from public.notifications where job_id = $1 and title like 'Payment above the balance recorded%'", [seedF.jobId]))[0].n;

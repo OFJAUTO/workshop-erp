@@ -18,11 +18,12 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseCharges } from "@/lib/supplier-charges";
 import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
-import { SUPPLIER_PAY_METHODS, flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
+import { SUPPLIER_PAY_METHODS, flagZohoAttention, reopenZoho, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 import { JOB_FILES_BUCKET, ensureWorkLines } from "@/lib/work-data";
 import { checkPickable } from "@/lib/staff-picker";
 import { notifyInvoiceReceived, siQueryReady } from "@/lib/supplier-invoices";
 import { applyInvoicePrices } from "@/lib/price-change-server";
+import { DEFAULT_UNDO_MINUTES, mayUndo } from "@/lib/money-undo";
 import { objectExists } from "@/lib/upload-targets/common";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -567,4 +568,46 @@ export async function issueStock(formData: FormData) {
 export async function canSeeOrders() {
   const staff = await getCurrentStaff();
   return !!staff && can(staff.role_id as RoleId, "viewPurchaseOrders");
+}
+
+/**
+ * UNDO "Paid to supplier" inside the undo window (1 November 2026, B3): the person who marked it, or the owner. The
+ * paid stamp comes off (logged) and the Zoho supplier payment - held back during the window - is dropped before it posts.
+ */
+export async function undoSupplierPaid(poId: string) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const back = `/parts/orders/${poId}`;
+  const admin = createAdminClient();
+  const { data: po } = await admin.from("purchase_orders").select("id, number, job_id, supplier_name, supplier_paid_at, supplier_paid_by").eq("id", poId).maybeSingle();
+  if (!po?.supplier_paid_at) redirect(back);
+  const minutes = Number((await getSettings() as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
+  if (staff.viewingAs || !mayUndo(po.supplier_paid_by as string | null, staff, po.supplier_paid_at as string, minutes)) redirect(`${back}?error=${encodeURIComponent(`The ${minutes} minutes to undo are over: the owner or accounts reverse it with a reason.`)}`);
+  await admin.from("purchase_orders").update({ supplier_paid_at: null, supplier_paid_by: null, supplier_paid_reference: null, updated_by: staff.id }).eq("id", poId);
+  await admin.from("zoho_outbox").delete().eq("kind", "billpayment").eq("record_id", poId).eq("status", "pending").is("zoho_id", null);
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: "paid to ${po.supplier_name}" undone by ${staff.display_name} within ${minutes} minutes`, created_by: staff.id });
+  refresh(po.job_id as string | null, poId);
+  redirect(`${back}?message=${encodeURIComponent("Undone: the LPO is not paid. Nothing went to Zoho.")}`);
+}
+
+/** After the undo window: the owner or accounts reverse "Paid to supplier" with a reason (logged; taken back in Zoho by the worker if it posted). */
+export async function reverseSupplierPaid(poId: string, formData: FormData) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const back = `/parts/orders/${poId}`;
+  if (!["owner", "accounts"].includes(staff.role_id) || staff.viewingAs) redirect(`${back}?error=${encodeURIComponent("Only the owner or accounts reverse a supplier payment.")}`);
+  const reason = String(formData.get("reason") ?? "").trim().slice(0, 300);
+  if (reason.length < 5) redirect(`${back}?error=${encodeURIComponent("Write why the payment is reversed.")}`);
+  const admin = createAdminClient();
+  const { data: po } = await admin.from("purchase_orders").select("id, number, job_id, supplier_name, supplier_paid_at, zoho_billpayment_id").eq("id", poId).maybeSingle();
+  if (!po?.supplier_paid_at) redirect(back);
+  await admin.from("purchase_orders").update({ supplier_paid_at: null, supplier_paid_by: null, supplier_paid_reference: null, updated_by: staff.id }).eq("id", poId);
+  await admin.from("zoho_outbox").delete().eq("kind", "billpayment").eq("record_id", poId).eq("status", "pending").is("zoho_id", null);
+  // Posted in the current book: the worker deletes the vendor payment there (syncBillPaymentRow). In the REAL
+  // book's opening balances (go-live): by hand.
+  const where = po.zoho_billpayment_id ? "current" : await zohoPostedSomewhere(["billpayment"], poId, po.supplier_paid_at as string);
+  if (where === "opening") await flagZohoAttention("billpayment", poId, `"Paid to ${po.supplier_name}" on ${po.number} was reversed after go-live; it sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand". Reason: ${reason}`, { handOnly: true });
+  else if (where) await reopenZoho("billpayment", poId);
+  if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: "paid to ${po.supplier_name}" reversed by ${staff.display_name}: ${reason}`, created_by: staff.id });
+  await notifyRoles(["owner"], { type: "payment_void", title: `Supplier payment reversed · ${po.number}`, body: `${staff.display_name}: ${reason}`, jobId: po.job_id as string | null, href: back });
+  refresh(po.job_id as string | null, poId);
+  redirect(`${back}?message=${encodeURIComponent("Reversed (logged with your reason).")}`);
 }

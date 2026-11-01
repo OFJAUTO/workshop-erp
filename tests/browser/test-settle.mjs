@@ -7,7 +7,7 @@
 //   node --env-file=.env.test.local tests/browser/test-settle.mjs   (dev server)
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 12 * 60 * 1000).unref();
@@ -89,7 +89,7 @@ try {
   check("3: each ticked payment shows its share (MSF 21.50 + VAT 1.08, MSF 53.75 + VAT 2.69)", /MSF 21\.50 \+ fee 0\.00 \+ VAT 1\.08/.test((await page.locator(`[data-settle-row="${p1.number}"] [data-settle-share]`).textContent()) ?? "") && /MSF 53\.75 \+ fee 0\.00 \+ VAT 2\.69/.test((await page.locator(`[data-settle-row="${p2.number}"] [data-settle-share]`).textContent()) ?? ""));
   await page.locator("[data-settle-ref]").fill("E2E statement 4471");
   await page.screenshot({ path: "tests/browser/shots/settle-before.png" });
-  await page.locator("[data-settle-save]").click();
+  await page.locator("[data-settle-save]").click(); await pressYes(page);
   await page.waitForSelector("[data-settle-done]", { timeout: 30000 }).catch(() => null);
   const done = (await page.locator("[data-settle-done]").first().textContent().catch(() => "")) ?? "";
   check("3: the result shows under the button", /STL-\d{5} recorded: 2 payments, the bank kept AED 79\.02 \(MSF \+ fee AED 75\.25 on the jobs/.test(done), done);

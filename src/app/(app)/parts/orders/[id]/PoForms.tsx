@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ReasonChips } from "@/components/ReasonChips";
 
 import { useState } from "react";
@@ -102,7 +103,7 @@ export function OrderedForm({ lines, action }: { lines: Line[]; action: (formDat
 }
 
 /** The owner's approval with the deposit override box when needed. */
-export function DecideForm({ action, depositShort, isOwner, reasons = [] }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean; /** One-tap reasons to approve without the deposit (Settings). */ reasons?: string[] }) {
+export function DecideForm({ action, depositShort, isOwner, reasons = [], summary = [] }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean; /** One-tap reasons to approve without the deposit (Settings). */ reasons?: string[]; /** What the approval commits to ("LPO-00038 · 2 suppliers · AED 5,651.00"), shown in the confirmation (B3). */ summary?: string[] }) {
   return (
     <form action={action} className="flex flex-col gap-2">
       {depositShort ? <p className="text-sm font-semibold text-red" data-deposit-short>{depositShort}</p> : null}
@@ -111,7 +112,7 @@ export function DecideForm({ action, depositShort, isOwner, reasons = [] }: { ac
       {depositShort && isOwner ? <ReasonChips name="override_reason" rows={2} options={reasons} placeholder="Reason to approve without the deposit (logged)" /> : null}
       <Textarea name="note" rows={2} placeholder="Note to Parts (optional)" />
       <div className="flex gap-2">
-        <Button type="submit" name="decision" value="approve" size="md" disabled={!!depositShort && !isOwner}>Approve</Button>
+        <ConfirmSubmit label="Approve" title="Approve this LPO?" lines={["Approve", ...summary, depositShort && isOwner ? "without the deposit (override)" : ""].filter(Boolean)} live={depositShort && isOwner ? [{ label: "reason:", field: "override_reason" }] : []} confirmLabel="Yes, approve the LPO" name="decision" value="approve" size="md" disabled={!!depositShort && !isOwner} hook="lpo-approve" />
         <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Refuse</Button>
       </div>
     </form>

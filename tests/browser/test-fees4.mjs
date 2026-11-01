@@ -5,7 +5,7 @@
 //   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-fees4.mjs
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "fees");
@@ -41,7 +41,7 @@ try {
   await page.locator("[data-settle-note]").fill("E2E the bank held 7.42 back, asked on the phone");
   await sleep(400);
   check("2 'Save anyway' with the reason in the note", (await page.locator("[data-settle-save]").textContent())?.includes("Save anyway") && !(await page.locator("[data-settle-save]").isDisabled()));
-  await page.locator("[data-settle-save]").click();
+  await page.locator("[data-settle-save]").click(); await pressYes(page);
   await page.waitForSelector("[data-settle-done]", { timeout: 30000 }).catch(() => null);
   const done = (await page.locator("[data-settle-done]").first().textContent().catch(() => "")) ?? "";
   if (!done) console.log("BOX:", ((await page.locator("[data-settle-box]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").slice(0, 600));

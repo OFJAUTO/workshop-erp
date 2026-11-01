@@ -7,7 +7,7 @@
 // Omar, 11:45"; the services list (wheels as services, Outside work with "our cost"); Required jobs on the report
 // become service lines; a typed job saved to the list with one tap; long part names wrap in the Parts table.
 //   node --env-file=.env.test.local tests/browser/test-t.mjs
-import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted, confirmMoney, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 16 * 60 * 1000).unref();
@@ -150,7 +150,7 @@ await section("2 deposit gate", async () => {
   await op.locator("[data-method='cash']").click();
   await op.locator("[data-amount-partial]").click();
   await op.locator("[data-amount-input]").fill("500");
-  await op.locator("[data-record-payment]").click();
+  await pressRecord(op);
   const pay = await until(async () => (await sql("select id, number, is_deposit, deposit_quotation_id, invoice_id from public.payments where job_id = $1 and status = 'recorded' order by created_at desc limit 1", [jobId]))[0] ?? null, 30, 500);
   check("2: the deposit is recorded as a deposit pointing at the quotation", !!pay && pay.is_deposit === true && pay.deposit_quotation_id === quotationId && !pay.invoice_id, JSON.stringify(pay));
   const told = await until(async () => (await sql("select title, href from public.notifications where job_id = $1 and type = 'deposit_received' limit 1", [jobId]))[0] ?? null, 30, 500);
@@ -183,7 +183,7 @@ await section("2 deposit gate", async () => {
   // The LPO can be approved now, no override.
   await go(op, `${base}/parts/orders/${po.id}`);
   check("2: the LPO page no longer asks for the deposit", (await op.locator("[data-deposit-short]").count()) === 0);
-  await op.locator("button[name='decision'][value='approve']").click();
+  await confirmMoney(op, "lpo-approve");
   await submitted(op);
   const approved = (await sql("select status, deposit_override_reason from public.purchase_orders where id = $1", [po.id]))[0];
   check("2: approved without an override", approved?.status === "approved" && !approved?.deposit_override_reason, JSON.stringify(approved));

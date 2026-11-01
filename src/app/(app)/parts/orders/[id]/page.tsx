@@ -21,7 +21,10 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
-import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction } from "../../order-actions";
+import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction, reverseSupplierPaid, undoSupplierPaid } from "../../order-actions";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { UndoButton } from "@/components/UndoButton";
+import { DEFAULT_UNDO_MINUTES, undoSecondsLeft } from "@/lib/money-undo";
 import { InvoiceFiles } from "./InvoiceFiles";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "../../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
@@ -94,6 +97,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
     return Array.from(m.entries()).map(([supplier, ls]) => ({ supplier, lines: ls, charges: chargesOf(supplier), subtotal: ls.reduce((a, l) => a + l.quantity * l.unit_cost, 0) + chargesOf(supplier).reduce((a, c) => a + c.amount_aed, 0) }));
   })();
   const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
+  // B3: what "Paid to supplier" pays ("AED 1,092.00 (1,040.00 + VAT 52.00)") and the undo window.
+  const payNet = Number(po.supplier_invoice_amount ?? po.total_cost_aed) || 0;
+  const payVat = Math.round(payNet * 5) / 100;
+  const payWords = `${money(payNet + payVat)} (${payNet.toLocaleString("en-GB", { minimumFractionDigits: 2 })} + VAT ${payVat.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`;
+  const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   // 1 November 2026 (LPO-00038): one line can be refused on its own; refused lines stay listed, greyed, with the reason.
   const refusalsOn = await refusalsReady();
   const canRefuseLine = canApprove && refusalsOn && po.status === "pending_approval" && lines.length > 0;
@@ -129,6 +137,12 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {/* C1, 1 November 2026: a VAT-registered supplier without a TRN - its bill cannot go to Zoho until it is typed. */}
+      {!isMain && bundle.supplier && bundle.supplier.vat_registered !== false && !bundle.supplier.trn && !/^our stock$/i.test(po.supplier_name.trim()) ? (
+        <div data-no-trn>
+          <Notice tone="error">{po.supplier_name} is ticked VAT registered but has no TRN: its bill cannot go to Zoho Books. Type the 15-digit TRN on <Link href="/parts/suppliers" className="font-bold underline underline-offset-4">Parts &gt; Suppliers</Link> (or untick VAT registered); the bill then tries again by itself.</Notice>
+        </div>
+      ) : null}
       {po.status === "pending_approval" ? <Notice tone="info">{isMain ? "Waiting for the owner or the head accountant. One Approve covers every supplier; one LPO per supplier is made at approval." : "Waiting for the owner or the head accountant. The PDF cannot be downloaded or sent before approval."}</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -242,7 +256,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Approve this LPO</SectionLabel>
-              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} />
+              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, `${money(po.total_cost_aed)} before VAT`, `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
             </Card>
           ) : null}
           {!isMain && po.status === "approved" ? (
@@ -290,6 +304,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               <SectionLabel>Invoice files &amp; payment</SectionLabel>
               <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canManage || canPay} />
               {po.supplier_paid_at ? (
+                <div className="flex flex-col gap-2">
+                {!staff.viewingAs && (role === "owner" || po.supplier_paid_by === staff.id) ? <UndoButton at={po.supplier_paid_at} minutes={undoMinutes} done="Payment to the supplier recorded" action={undoSupplierPaid.bind(null, po.id)} /> : null}
                 <div className="flex flex-wrap items-center gap-2" data-paid-line>
                   <p className="text-sm font-semibold">Paid to {po.supplier_name} · {paidMethodLabel} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}</p>
                   {proofUrl ? (
@@ -301,6 +317,16 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                     </span>
                   )}
                 </div>
+                {canPay && undoSecondsLeft(po.supplier_paid_at, undoMinutes) <= 0 ? (
+                  <details data-reverse-paid>
+                    <summary className="inline-flex min-h-11 cursor-pointer list-none items-center text-sm font-bold text-red underline underline-offset-4 [&::-webkit-details-marker]:hidden">Reverse this payment</summary>
+                    <form action={reverseSupplierPaid.bind(null, po.id)} className="mt-2 flex flex-wrap items-center gap-2">
+                      <Input name="reason" required minLength={5} placeholder="Why? (logged)" className="w-72" textCase="sentence" aria-label="Why reverse the payment" />
+                      <ConfirmSubmit label="Reverse" title="Reverse the payment to the supplier?" lines={[`${po.supplier_name} · ${po.number}`, "the LPO goes back to unpaid (logged with the reason); if it already reached Zoho Books, the payment is taken back there too"]} live={[{ label: "reason:", field: "reason" }]} confirmLabel="Yes, reverse it" tone="danger" size="md" hook="supplier-reverse" />
+                    </form>
+                  </details>
+                ) : null}
+                </div>
               ) : canPay ? (
                 payMissing.length ? (
                   <p className="text-sm font-semibold text-amber-bar" data-pay-blocked>Cannot be marked paid yet: {payMissing.join(", ")} first. No payment without the full invoice on file.</p>
@@ -311,10 +337,14 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       <ChoiceButtons name="method" defaultValue="transfer" columns={4} options={SUPPLIER_PAY_METHODS.map((m) => ({ value: m.key, label: m.label }))} />
                       <p className="text-xs text-muted pt-1">Paid from in Zoho — {paidFromWords}</p>
                     </div>
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
+                    <label className="flex flex-col gap-1 max-w-md"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
+                    {/* The proof sits apart from the money button, so a tap on one is never a tap on the other (B3). */}
+                    <div className="flex flex-col gap-1 rounded-control border border-dashed border-line-strong p-3" data-pay-proof-area>
+                      <span className="text-xs font-semibold text-muted">Proof (bank slip, card slip, receipt) – optional now, or add it later</span>
                       <SupplierProofUpload poId={po.id} inForm />
-                      <Button type="submit" size="md" data-mark-supplier-paid>Paid to supplier</Button>
+                    </div>
+                    <div className="border-t border-line pt-3">
+                      <ConfirmSubmit label="Paid to supplier" title="Record the payment to the supplier?" lines={[`Record payment to ${po.supplier_name}`, `invoice ${po.supplier_invoice_number ?? ""}`, payWords]} live={[{ field: "method" }, { label: "ref", field: "reference" }, { field: "proof_path", proof: true }]} confirmLabel="Yes, record payment" hook="supplier-paid" />
                     </div>
                   </form>
                 )

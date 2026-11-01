@@ -1,4 +1,5 @@
 import "server-only";
+import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
 import { afterPendingChargePayment } from "./charges";
 import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -12,7 +13,7 @@ import { depositState } from "./deposits";
 import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 import { createAdminClient } from "./supabase/admin";
-import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "./zoho-sync";
+import { flagZohoAttention, reopenZoho, tryEnqueueZoho, zohoPostedSomewhere } from "./zoho-sync";
 import { AUTH_CODE_RE, authCodeProblem, cleanAuthCode, needsAuthCode } from "./auth-code";
 import { jobMoneyOf } from "./customer-money";
 import { newToken } from "./media";
@@ -231,16 +232,16 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   // A receipt that already reached a Zoho book cannot be unposted from here: the row turns red for accounts to fix
   // by hand — including, after go-live, one that sits in the REAL book's opening balances.
   const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId, p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at);
-  if (where) {
+  // In the current book the worker takes it back itself (reverseZohoPayment deletes it there, 1 November 2026, B3);
+  // one in the REAL book's opening balances is reversed by hand.
+  if (where === "opening") {
     await flagZohoAttention(
       p.is_deposit ? "deposit" : "payment",
       paymentId,
-      where === "opening"
-        ? `${p.number} was voided after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand". Reason: ${clean}`
-        : `${p.number} was voided in the ERP after it reached Zoho: remove the payment in Zoho by hand, then press "Done by hand". Reason: ${clean}`,
-      { handOnly: where === "opening" },
+      `${p.number} was voided after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand". Reason: ${clean}`,
+      { handOnly: true },
     );
-  }
+  } else if (where) await reopenZoho(p.is_deposit ? "deposit" : "payment", paymentId);
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) voided by ${actor.display_name}: ${clean}`, created_by: actor.id });
   if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
   await notifyRoles(["owner"], { type: "payment_void", title: `Receipt voided · ${p.number}`, body: `${money(p.amount_aed)} voided by ${actor.display_name}: ${clean}`, jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });
@@ -276,4 +277,32 @@ export async function decideOverpayment(paymentId: string, actor: Actor, approve
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number}: ${money(p.amount_aed)} above the balance refused by ${actor.display_name}${note ? `: ${note}` : ""}`, created_by: actor.id });
   if (p.approval_requested_by) await notifyStaff([p.approval_requested_by], { type: "payment_void", title: `Payment not approved · ${p.number}`, body: note ?? "The owner did not approve the amount above the balance.", jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });
   return { ok: true, message: `${p.number} refused and voided.` };
+}
+
+/**
+ * UNDO a receipt inside the undo window (1 November 2026, B3): the person who recorded it, or the owner. It is voided
+ * with "Undone" as the reason (logged), and its Zoho row - held back during the window - is dropped before it posts.
+ * A payment that completed the bill and made the tax invoice is not undone here: reverse it with a reason instead.
+ */
+export async function undoPayment(paymentId: string, actor: Actor, settings: Settings): Promise<PaymentResult> {
+  const admin = createAdminClient();
+  if (!actor.id) return { error: "Please sign in again." };
+  const { data: raw } = await admin.from("payments").select(`${PAYMENT_SELECT}, created_at, created_by`).eq("id", paymentId).maybeSingle();
+  if (!raw) return { error: "Receipt not found." };
+  const p = toPayment(raw as Record<string, unknown>);
+  const minutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
+  const createdAt = String((raw as Record<string, unknown>).created_at ?? p.received_at);
+  const doneBy = ((raw as Record<string, unknown>).created_by as string | null) ?? null;
+  if (p.status === "voided") return { error: "Already undone." };
+  if (!mayUndo(doneBy, { id: actor.id, role_id: actor.role_id }, createdAt, minutes)) return { error: `The ${minutes} minutes to undo are over (or it was recorded by someone else): the owner or the head accountant reverse it with a reason.` };
+  if (p.invoice_id) {
+    const { data: inv } = await admin.from("invoices").select("kind, number, converted_from, created_at").eq("id", p.invoice_id).maybeSingle();
+    if (inv?.kind === "tax_invoice" && inv.converted_from && String(inv.created_at) >= createdAt) return { error: `${p.number} completed the payment and made tax invoice ${inv.number}: it cannot be undone. The owner or the head accountant reverse it with a reason.` };
+  }
+  await admin.from("payments").update({ status: "voided", void_reason: `Undone within ${minutes} minutes by ${actor.display_name}`, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
+  // Held back during the window: the Zoho row never left, so it is simply dropped.
+  await admin.from("zoho_outbox").delete().in("kind", ["payment", "deposit"]).eq("record_id", paymentId).eq("status", "pending").is("zoho_id", null);
+  if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) undone by ${actor.display_name} within ${minutes} minutes`, created_by: actor.id });
+  if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
+  return { ok: true, number: p.number, message: `${p.number} undone.` };
 }

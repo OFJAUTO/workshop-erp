@@ -9,6 +9,8 @@ import { formatPlate } from "@/lib/types";
 import { greetingNameOf } from "@/lib/messages";
 import { round2 } from "@/lib/money";
 import { methodsFor } from "@/lib/money-steps";
+import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
+import { undoPayment } from "@/lib/payments";
 import { paymentFromForm } from "@/lib/payment-form";
 import { can, type RoleId } from "@/lib/roles";
 import { bankFeesOf, getSettings } from "@/lib/settings";
@@ -90,6 +92,9 @@ export type RecordAnywhereState = {
   receiptMessage?: string;
   phoneDigits?: string;
   where?: string;
+  /** The undo window (1 November 2026, B3): when it was recorded and how long it may be undone. */
+  recordedAt?: string;
+  undoMinutes?: number;
   at?: number;
 } | null;
 
@@ -114,7 +119,7 @@ export async function recordPaymentAnywhere(_prev: RecordAnywhereState, formData
   if (r.error || !r.paymentId) return { error: r.error ?? "Couldn't record it – nothing was saved. Try again.", needsOverNote: r.needsOverNote, at: Date.now() };
   const admin = createAdminClient();
   const { data: p } = await admin.from("payments").select("id, number, amount_aed, token, job_id, invoice_id, customer_id, vehicle_id, deposit_quotation_id").eq("id", r.paymentId).maybeSingle();
-  if (!p) return { ok: true, number: r.number, paymentId: r.paymentId, clientKey, at: Date.now() };
+  if (!p) return { ok: true, number: r.number, paymentId: r.paymentId, clientKey, recordedAt: new Date().toISOString(), undoMinutes: Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES, at: Date.now() };
   const [{ data: cust }, { data: car }, { data: job }, { data: inv }, { data: q }] = await Promise.all([
     admin.from("customers").select("full_name, company_name, phone").eq("id", p.customer_id).maybeSingle(),
     p.vehicle_id ? admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", p.vehicle_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -136,7 +141,8 @@ export async function recordPaymentAnywhere(_prev: RecordAnywhereState, formData
     .replaceAll("[link]", receiptShort);
   const where = inv?.number ? `on ${inv.kind === "proforma" ? "proforma" : "tax invoice"} ${inv.number}${job?.job_number ? ` (${job.job_number})` : ""}` : job?.job_number ? `as an advance on ${job.job_number} – it comes off the invoice by itself` : "on the customer's account (not allocated)";
   refreshMoney((p.job_id as string | null) ?? null, String(p.customer_id), (p.vehicle_id as string | null) ?? null);
-  return { ok: true, number: String(p.number), paymentId: String(p.id), clientKey, receiptUrl: path, receiptShort, receiptMessage: message, phoneDigits: String(cust?.phone ?? "").replace(/[^\d]/g, ""), where, at: Date.now() };
+  const undo = { recordedAt: new Date().toISOString(), undoMinutes: Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES };
+  return { ok: true, ...undo, number: String(p.number), paymentId: String(p.id), clientKey, receiptUrl: path, receiptShort, receiptMessage: message, phoneDigits: String(cust?.phone ?? "").replace(/[^\d]/g, ""), where, at: Date.now() };
 }
 
 export type AllocateState = (AllocateResult & { at?: number }) | null;
@@ -155,4 +161,17 @@ export async function allocatePaymentAction(_prev: AllocateState, formData: Form
   const { data: p } = await createAdminClient().from("payments").select("job_id, customer_id, vehicle_id").eq("id", paymentId).maybeSingle();
   refreshMoney((p?.job_id as string | null) ?? null, (p?.customer_id as string | null) ?? null, (p?.vehicle_id as string | null) ?? null);
   return { ...r, at: Date.now() };
+}
+
+/** Undo from the window's "recorded" screen inside the undo window (1 November 2026, B3): the receipt is voided as
+ * "Undone" and its Zoho row, held back during the window, is dropped before it posts. */
+export async function undoPaymentFromWindow(paymentId: string): Promise<{ error?: string; ok?: boolean; message?: string }> {
+  const staff = await requireStaff();
+  if (!mayRecord(staff)) return { error: "Payments are recorded by accounts or the owner." };
+  if (staff.viewingAs) return { error: "Switch off View as to undo." };
+  if (!isUuid(paymentId)) return { error: "Payment not found." };
+  const r = await undoPayment(paymentId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id, is_head_accountant: staff.is_head_accountant }, await getSettings());
+  const { data: p } = await createAdminClient().from("payments").select("job_id, customer_id, vehicle_id").eq("id", paymentId).maybeSingle();
+  refreshMoney((p?.job_id as string | null) ?? null, (p?.customer_id as string | null) ?? null, (p?.vehicle_id as string | null) ?? null);
+  return r.error ? { error: r.error } : { ok: true, message: r.message };
 }

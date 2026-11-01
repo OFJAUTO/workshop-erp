@@ -1,4 +1,5 @@
 import "server-only";
+import { DEFAULT_UNDO_MINUTES, heldForUndo } from "./money-undo";
 import { logAppError } from "@/lib/app-errors";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, toInvoice, toInvoiceLine, toPayment, type InvoiceLineRow, type InvoiceRow, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
@@ -848,6 +849,22 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
 
 type ZohoPayment = { payment_id: string; reference_number?: string; amount: number; bank_charges?: number };
 
+/**
+ * THE reversal of a receipt in Zoho (1 November 2026, B3): a receipt voided or reversed in the ERP after it posted
+ * is deleted from Zoho by the worker (Zoho Books has no void for a customer payment; deleting it is how a wrong
+ * receipt is taken back there, and the invoice's balance opens again as it does in the ERP). Already gone = done.
+ */
+async function reverseZohoPayment(org: string, zohoId: string, receipt: string, reason: string | null): Promise<HandlerOut> {
+  try {
+    await zohoFetch(`/customerpayments/${encodeURIComponent(zohoId)}`, { org });
+  } catch (e) {
+    if (e instanceof ZohoError && /not exist|not found|invalid.*payment/i.test(e.message)) return { zohoId, result: { receipt, reversed: "already removed in Zoho", reason } };
+    throw e;
+  }
+  await zohoFetch(`/customerpayments/${encodeURIComponent(zohoId)}`, { org, method: "DELETE", write: true });
+  return { zohoId, result: { receipt, reversed: "removed from Zoho", reason, reversed_at: new Date().toISOString() } };
+}
+
 async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const { data: raw } = await admin.from("payments").select(`${PAYMENT_SELECT}, zoho_payment_id`).eq("id", paymentId).maybeSingle();
@@ -855,7 +872,7 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   const p = toPayment(raw as Record<string, unknown>) as PaymentRow & { zoho_payment_id: string | null };
   if (p.status === "pending_owner") return { wait: "Waiting for the owner to approve the over-balance payment." };
   if ((p.status === "voided" || p.status === "reversed") && !p.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it was posted. Nothing went to Zoho." } };
-  if (p.status === "voided" || p.status === "reversed") throw new ZohoError(`${p.number} was ${p.status} in the ERP after it reached Zoho: the accountant removes it in Zoho by hand.`);
+  if (p.status === "voided" || p.status === "reversed") return reverseZohoPayment(org, p.zoho_payment_id!, p.number, p.void_reason ?? p.reversed_reason);
   if (p.method === "cheque" && p.cheque_status !== "cleared") return { wait: "Waiting for the cheque to clear." };
   const payGate = await startDateSkip(dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at), ["deposit", "payment"], p.id);
   if (payGate) return payGate;
@@ -921,9 +938,7 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   await admin.from("payments").update({ zoho_payment_id: zid }).eq("id", p.id);
   // A void that landed while the worker was posting must not end green: the row turns red for the accountant.
   const { data: fresh } = await admin.from("payments").select("status").eq("id", p.id).maybeSingle();
-  if (fresh && (fresh.status === "voided" || fresh.status === "reversed")) {
-    throw new ZohoError(`${p.number} was ${fresh.status} in the ERP while it was being posted: remove the payment in Zoho by hand.`);
-  }
+  if (fresh && (fresh.status === "voided" || fresh.status === "reversed")) return reverseZohoPayment(org, zid, p.number, `${fresh.status} while it was being posted`);
   let applied = 0;
   if (zohoInvoiceId) applied = (await applyToZohoInvoice(org, zohoInvoiceId, [{ zohoId: zid, amount: p.amount_aed, receipt: p.number }])).applied;
   return {
@@ -1394,6 +1409,21 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
   const admin = createAdminClient();
   const po = await poForZoho(poId);
   if (/^our stock$/i.test(po.supplier_name.trim())) return { result: { skipped: "An Our-stock LPO is internal (our own shelf): no supplier payment." } };
+  if (!po.supplier_paid_at && po.zoho_billpayment_id) {
+    // "Paid to supplier" reversed in the ERP after it posted (1 November 2026, B3): the vendor payment is deleted
+    // from Zoho (no void exists for it there) and the bill's balance opens again, as in the ERP.
+    const old = po.zoho_billpayment_id;
+    let gone = false;
+    try {
+      await zohoFetch(`/vendorpayments/${encodeURIComponent(old)}`, { org });
+    } catch (e) {
+      if (e instanceof ZohoError && /not exist|not found|invalid.*payment/i.test(e.message)) gone = true;
+      else throw e;
+    }
+    if (!gone) await zohoFetch(`/vendorpayments/${encodeURIComponent(old)}`, { org, method: "DELETE" });
+    await admin.from("purchase_orders").update({ zoho_billpayment_id: null }).eq("id", po.id);
+    return { zohoId: old, result: { lpo: po.number, reversed: gone ? "already removed in Zoho" : "removed from Zoho", reversed_at: new Date().toISOString() } };
+  }
   if (!po.supplier_paid_at) return { wait: "Waiting for the LPO to be marked paid." };
   const bpGate = await startDateSkip(dubaiDate(po.supplier_paid_at), "billpayment", po.id);
   if (bpGate) return bpGate;
@@ -1974,7 +2004,13 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
   let accounts: Resolved | null = null;
   let accountsError: string | null = null;
   let accountsFatal = false;
+  // 1 November 2026 (B3): a payment, deposit or supplier payment waits out the undo window before it posts.
+  const undoMinutes = Number(((await getSettings()) as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   for (const row of rows) {
+    if (heldForUndo(row.kind, row.enqueued_at, undoMinutes)) {
+      report.waiting++;
+      continue;
+    }
     // The claim: two drains at once (the cron next to a Sync now) never run the same row twice — the row is
     // marked in flight, not just version-checked, so a drain that STARTS mid-handler cannot take it either.
     const now = new Date().toISOString();
@@ -2203,3 +2239,28 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
 }
 
 const cut100 = (s: string) => (s.length > 100 ? `${s.slice(0, 99)}…` : s);
+
+/**
+ * A supplier's TRN was entered or corrected, or its VAT switch moved (1 November 2026, C1): the supplier's red Zoho
+ * rows that were waiting on it (the vendor, its LPOs' bills and supplier payments) go back in the queue by
+ * themselves. Rows only a human can settle, and rows closed by hand, are left alone. Returns how many went back.
+ */
+export async function retrySupplierRows(supplierId: string): Promise<number> {
+  try {
+    const admin = createAdminClient();
+    // The red rows are few: read them first, then keep the ones of this supplier (its vendor row, its LPOs).
+    const { data: rows } = await admin.from("zoho_outbox").select("id, kind, record_id, zoho_result").eq("status", "failed").in("kind", ["vendor", "bill", "billpayment"]);
+    const red = ((rows ?? []) as { id: string; kind: string; record_id: string; zoho_result: { hand_only?: boolean; manual?: boolean } | null }[]).filter((r) => r.zoho_result?.hand_only !== true && r.zoho_result?.manual !== true);
+    const poIds = red.filter((r) => r.kind !== "vendor").map((r) => r.record_id);
+    const { data: pos } = poIds.length ? await admin.from("purchase_orders").select("id").in("id", poIds).eq("supplier_id", supplierId) : { data: [] };
+    const mine = new Set(((pos ?? []) as { id: string }[]).map((p) => p.id));
+    const ids = red.filter((r) => (r.kind === "vendor" ? r.record_id === supplierId : mine.has(r.record_id))).map((r) => r.id);
+    if (!ids.length) return 0;
+    const { error } = await admin.from("zoho_outbox").update({ status: "pending", last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).in("id", ids);
+    if (error) throw new Error(error.message);
+    return ids.length;
+  } catch (e) {
+    await logAppError("zoho_supplier_retry", e, { detail: { supplierId } });
+    return 0;
+  }
+}

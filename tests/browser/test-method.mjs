@@ -4,7 +4,7 @@
 // disagrees with its actual method (cash and transfer 0, card and link at the Settings rates).
 // Run: node --env-file=.env.test.local tests/browser/test-method.mjs   (dev server on :3100)
 import path from "node:path";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shot = (name) => path.join(here, "shots", name);
@@ -33,7 +33,7 @@ await win.locator("[data-pay-targets]").waitFor({ timeout: 20000 });
 await win.locator('[data-method="cash"]').click();
 await win.locator("[data-amount-partial]").click();
 await win.locator("[data-amount-input]").pressSequentially("500");
-await win.locator("[data-record-payment]").click();
+await pressRecord(win);
 await until(async () => (await win.locator("[data-record-payment-done]").count()) > 0, 50, 500);
 await win.locator("[data-record-payment-finish]").click();
 await go(page, `${base}/jobs/${jobId}/invoice`);

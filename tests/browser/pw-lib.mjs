@@ -144,3 +144,21 @@ export async function pickPerson(scope, id) {
   const yes = scope.locator("[data-pick-busy] button").first();
   if (await yes.count()) await yes.click();
 }
+
+/** A money action behind THE confirmation window (ConfirmSubmit, 1 November 2026): open it, then press the named button. */
+/** Record a payment (B3, 1 November 2026): the Record button always opens the question now; this presses its Yes. */
+export async function pressRecord(scope) {
+  const page = typeof scope.page === "function" ? scope.page() : scope;
+  await scope.locator("[data-record-payment]").first().click();
+  await page.locator("[data-confirm-yes]").click({ timeout: 8000 }).catch(() => {});
+}
+
+/** Press Yes in an open money question (ConfirmSubmit). */
+export async function pressYes(page) {
+  await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
+}
+
+export async function confirmMoney(page, hook) {
+  await page.locator(`[data-confirm-open="${hook}"]`).first().click();
+  await page.locator(`[data-confirm-yes-money="${hook}"]`).click();
+}

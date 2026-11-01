@@ -14,6 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { isUuid } from "@/lib/uuid";
+import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
 
 export type RecordDepositResult =
   | { error: string; renewKey?: boolean }
@@ -26,6 +27,9 @@ export type RecordDepositResult =
       receiptMessage: string;
       phoneDigits: string;
       pdfHref: string;
+      /** The undo window (1 November 2026, B3). */
+      recordedAt?: string;
+      undoMinutes?: number;
     };
 
 /**
@@ -40,7 +44,9 @@ export type RecordDepositResult =
 export async function recordDepositPanel(formData: FormData): Promise<RecordDepositResult> {
   const staff = await requirePermission("recordPayments");
   try {
-    return await recordDeposit(staff, formData);
+    const r = await recordDeposit(staff, formData);
+    if ("ok" in r) return { ...r, recordedAt: new Date().toISOString(), undoMinutes: Number(((await getSettings()) as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES };
+    return r;
   } catch (err) {
     await logAppError("record deposit", err, { staffId: staff.id, jobId: String(formData.get("job_id") ?? ""), detail: { method: String(formData.get("method") ?? "") } });
     return { error: SAVE_FAILED };

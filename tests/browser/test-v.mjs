@@ -5,7 +5,7 @@
 // seeing "OFJ Automotive: genuine part"; the oil service and battery stickers in portrait with the WhatsApp booking
 // QR and the warranty months chosen on the battery line; Settings > Stickers with sizes and printers.
 //   node --env-file=.env.test.local tests/browser/test-v.mjs
-import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted, confirmMoney } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 12 * 60 * 1000).unref();
@@ -52,7 +52,7 @@ await section("1 workshop order", async () => {
   // The owner approves; accounts hear again.
   const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
   await go(op, `${base}/parts/orders/${po.id}`);
-  await op.locator("button[name='decision'][value='approve']").click();
+  await confirmMoney(op, "lpo-approve");
   await submitted(op);
   const approved = (await sql("select status from public.purchase_orders where id = $1", [po.id]))[0];
   const told2 = await sql("select title from public.notifications where type = 'fixed_asset' and title like 'Fixed asset approved%' and href = $1", [`/parts/orders/${po.id}`]);

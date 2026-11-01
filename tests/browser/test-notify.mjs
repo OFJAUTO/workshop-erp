@@ -3,7 +3,7 @@
 // quotation sent and approved → planning → parts handover → work finished → work confirmed → QC →
 // wash → proforma → payment and tax invoice → gate-out. Run against `npx next dev -p 3100`:
 //   node --env-file=.env.test.local tests/browser/test-notify.mjs
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, pressRecord } from "./pw-lib.mjs";
 
 /** Ticks a technician; one already on a car asks "Assign anyway?" first (depends on the live workshop). */
 async function tickTech(page, box) {
@@ -390,9 +390,7 @@ try {
     if (await folded.count()) await folded.click();
     const full = page.locator("[data-amount-full]").first();
     if (await full.count()) await full.click();
-    await page.locator("[data-record-payment]").first().click();
-    const yes = page.locator("[data-confirm-yes]");
-    if (await yes.count()) await yes.click();
+    await pressRecord(page);
     await submitted(page);
     const inv = await sql("select kind, number from public.invoices where job_id = $1 and is_active order by created_at", [jobId]);
     check("tax invoice generated at zero balance", inv.some((i) => i.kind === "tax_invoice"), JSON.stringify(inv));

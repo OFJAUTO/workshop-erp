@@ -6,7 +6,8 @@ import { Button, Input, Textarea } from "@/components/ui";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
 import { spendFormKey } from "@/components/JobFileUpload";
-import { loadPaymentChoices, recordPaymentAnywhere, searchPayers, type ChoicesAnswer, type PayerHit } from "@/app/(app)/invoices/payment-anywhere-actions";
+import { loadPaymentChoices, recordPaymentAnywhere, searchPayers, undoPaymentFromWindow, type ChoicesAnswer, type PayerHit } from "@/app/(app)/invoices/payment-anywhere-actions";
+import { UndoButton } from "@/components/UndoButton";
 import { reloadIfStale } from "@/lib/app-version";
 
 /**
@@ -123,6 +124,9 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
     if (state?.ok) router.refresh();
   }, [state, router]);
   const done = state?.ok && state.at !== dismissedAt ? state : null;
+  const [undone, setUndone] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
 
   const search = (text: string) => {
     setQ(text);
@@ -184,10 +188,46 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
           </button>
         </div>
 
-        {done ? (
+        {done && undone === done.paymentId ? (
+          <div className="flex flex-col gap-3 rounded-control border-2 border-ink bg-white p-4" data-payment-undone={done.number}>
+            <p className="text-lg font-extrabold">↩ {done.number} undone</p>
+            <p className="text-sm">The receipt is voided (kept, struck through) and nothing went to Zoho Books.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="md" tone="secondary" onClick={another} data-record-another>Record another payment</Button>
+              <Button type="button" size="md" tone="ghost" onClick={onClose} data-record-payment-finish>Done</Button>
+            </div>
+          </div>
+        ) : done ? (
           <div className="flex flex-col gap-3 rounded-control border-2 border-green bg-green-soft p-4" data-record-payment-done={done.number}>
             <p className="text-lg font-extrabold text-green">✓ {done.number} recorded</p>
             <p className="text-sm">{done.where}</p>
+            {done.recordedAt && done.paymentId ? (
+              <UndoButton
+                at={done.recordedAt}
+                minutes={done.undoMinutes ?? 10}
+                done="Payment recorded"
+                busy={undoing}
+                onUndo={() => {
+                  const id = done.paymentId as string;
+                  setUndoing(true);
+                  setUndoError(null);
+                  void undoPaymentFromWindow(id)
+                    .then((r) => {
+                      setUndoing(false);
+                      if (r.error) setUndoError(r.error);
+                      else {
+                        setUndone(id);
+                        router.refresh();
+                      }
+                    })
+                    .catch((e) => {
+                      setUndoing(false);
+                      if (!reloadIfStale(e)) setUndoError("No connection – try again.");
+                    });
+                }}
+              />
+            ) : null}
+            {undoError ? <p className="text-sm font-semibold text-red" data-undo-error>{undoError}</p> : null}
             <div className="flex flex-wrap items-center gap-2">
               {done.receiptUrl ? <a href={done.receiptUrl} target="_blank" rel="noreferrer" className="min-h-11 inline-flex items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-receipt-link>Receipt (PDF)</a> : null}
               {done.receiptMessage ? <Button type="button" size="md" onClick={() => setSending(true)} data-send-receipt>Send the receipt</Button> : null}
@@ -294,7 +334,6 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
           title={`Send the receipt ${done.number}`}
           message={done.receiptMessage}
           phoneDigits={done.phoneDigits ?? ""}
-          checkSpelling={false}
           pdf={done.receiptUrl ? { href: done.receiptUrl, fileName: `OFJ Receipt ${done.number}.pdf` } : null}
           onClose={() => setSending(false)}
           onSent={() => setSending(false)}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useFormStatus } from "react-dom";
 import { Button, Input } from "@/components/ui";
 import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
 import { JobFileUpload, markFormSent, useFormKey, useRenewAfterAnswer, type FilesWaiting, type JobFile } from "@/components/JobFileUpload";
@@ -10,11 +9,6 @@ import { AuthCodeInput } from "@/components/AuthCodeInput";
 import { needsAuthCode } from "@/lib/auth-code";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-function RecordButton({ label, disabled = false }: { label: string; disabled?: boolean }) {
-  const { pending } = useFormStatus();
-  return <Button type="submit" size="lg" disabled={pending || disabled} data-record-payment>{pending ? "Recording…" : label}</Button>;
-}
 
 /**
  * Recording a payment in three taps: the method (only the ones this person may record; the expected one is
@@ -105,6 +99,11 @@ export function PaymentForm({
   const blocked = !clientKey || proofBlocked;
   if (!methods.length) return <p className="text-sm text-muted">Payments are recorded by accounts (bank side) or the advisor at the counter.</p>;
 
+  // A box still missing (the note on an over-payment, a cheque number) is pointed at before the question opens.
+  const openConfirm = () => {
+    if (formRef.current && !formRef.current.reportValidity()) return;
+    setConfirming(true);
+  };
   return (
     <>
       <form ref={formRef} action={action} onSubmit={() => markFormSent(formTag, clientKey)} className="flex flex-col gap-3" data-payment-form>
@@ -195,15 +194,15 @@ export function PaymentForm({
             <Input name="over_note" required minLength={3} placeholder="e.g. customer paid extra, refund AED 500 by transfer" data-over-note />
           </label>
         ) : null}
-        {/* A full payment is confirmed in words first: it creates the tax invoice, which can never be undone. */}
-        <div>{settles && invoiceId ? <Button type="button" size="lg" disabled={blocked} onClick={() => setConfirming(true)} data-record-payment>Record full payment</Button> : <RecordButton label="Record" disabled={blocked} />}</div>
+        {/* Every payment is confirmed in words first (B3, 1 November 2026); a full payment also says it makes the tax invoice. */}
+        <div>{settles && invoiceId ? <Button type="button" size="lg" disabled={blocked} onClick={openConfirm} data-record-payment>Record full payment</Button> : <Button type="button" size="lg" disabled={blocked || !(value > 0)} onClick={openConfirm} data-record-payment>Record</Button>}</div>
       </form>
 
       {confirming ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label="Confirm full payment" data-confirm-full>
-          <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
-            <h2 className="text-lg font-extrabold">Confirm full payment</h2>
-            <p className="text-sm leading-relaxed">{confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (authCode ? `auth ${authCode}` : null) : reference || null, invoiceNumber, isProforma, nextTaxNumber })}</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={settles && invoiceId ? "Confirm full payment" : "Confirm the payment"} data-confirm-full>
+          <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
+            <h2 className="text-lg font-extrabold">{settles && invoiceId ? "Confirm full payment" : "Confirm the payment"}</h2>
+            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (authCode ? `auth ${authCode}` : null) : reference || null, invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, needsAuthCode(method) ? (authCode ? `auth ${authCode}` : "") : reference ? `ref ${reference}` : "", method === "card" || method === "transfer" ? "proof attached ✓" : ""].filter(Boolean).join(" · ")}</p>
             <Button
               type="button"
               size="lg"
@@ -214,7 +213,7 @@ export function PaymentForm({
                 formRef.current?.requestSubmit();
               }}
             >
-              {isProforma ? "Yes, record and create tax invoice" : "Yes, record the payment"}
+              {settles && invoiceId && isProforma ? "Yes, record and create tax invoice" : "Yes, record payment"}
             </Button>
             <button type="button" onClick={() => setConfirming(false)} className="min-h-11 w-full rounded-control border border-line-strong bg-white text-sm font-bold" data-confirm-back>Go back</button>
           </div>

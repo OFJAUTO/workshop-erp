@@ -5,7 +5,7 @@
 // row, and clearing it ends the task. A bad file reference gets a plain sentence and lands in app_errors.
 //   node --env-file=.env.test.local tests/browser/test-paymethods.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
-import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shot = (name) => path.join(here, "shots", name);
@@ -104,8 +104,7 @@ try {
       await form.locator('input[name="cheque_number"]').fill("200567");
       await form.locator('input[name="cheque_date"]').fill("2026-10-26");
     }
-    await form.locator("[data-record-payment]").click();
-    if (await page.locator("[data-confirm-yes]").count()) await page.locator("[data-confirm-yes]").click();
+    await pressRecord(form);
     if (inWindow) await until(async () => (await page.locator("[data-record-payment-done], [data-record-payment-error]").count()) > 0, 60, 500);
     else await page.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
     await settle(page);

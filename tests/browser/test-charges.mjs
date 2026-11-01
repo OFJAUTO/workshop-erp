@@ -12,7 +12,7 @@
 import path from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const dir = path.join(here, "shots", "charges");
@@ -180,7 +180,7 @@ try {
   check("E: its proforma is its own bill, never on the job's", e2inv && e2inv.job_id === null);
   await page.waitForURL(/open=/, { timeout: 20000 }).catch(() => {});
   await page.locator("form:has([data-pc-issue]) input[name='reason']").fill("Customer asked for the tax invoice now");
-  await page.locator("[data-pc-issue]").click();
+  await page.locator("[data-pc-issue]").click(); await pressYes(page);
   const manual = await until(async () => (await sql("select tax_invoice_id, status from public.charge_entries where id = $1 and tax_invoice_id is not null", [e2.id]))[0]);
   check("E: \"Issue tax invoice\" by hand (logged with the reason), still pending until paid", !!manual && manual.status === "pending");
   // The list, totals and filters.

@@ -565,3 +565,30 @@ async function dropCustom(name: string) {
   delete pool[name];
   await createAdminClient().from("settings").upsert({ key: "part_pool_custom", value: pool, label: "Custom parts used", description: "Custom part names typed by staff, with counts, offered to the owner to add to the pool." }, { onConflict: "key" });
 }
+
+/**
+ * Settings > Money (1 November 2026): how long a money action can be undone, and how far a supplier invoice may go
+ * above the approved LPO before it waits for the owner. Upserted with their labels, so they save before their rows
+ * are seeded by a migration.
+ */
+export async function saveMoneyLimits(formData: FormData) {
+  const staff = await requirePermission("manageSettings");
+  const num = (k: string, min: number, max: number) => {
+    const raw = String(formData.get(k) ?? "").replace(",", ".").trim();
+    const n = Number(raw);
+    return raw && Number.isFinite(n) && n >= min && n <= max ? Math.round(n * 100) / 100 : null;
+  };
+  const minutes = num("money_undo_minutes", 1, 60);
+  const percent = num("supplier_price_auto_percent", 0, 100);
+  const aed = num("supplier_price_auto_aed", 0, 100000);
+  if (minutes === null || percent === null || aed === null) redirect(`/settings?error=${encodeURIComponent("Undo: 1 to 60 minutes; the supplier price limits: 0 to 100 % and 0 to 100,000 AED.")}#money-limits`);
+  const admin = createAdminClient();
+  const rows = [
+    { key: "money_undo_minutes", label: "Money actions: undo within (minutes)", value: Math.round(minutes) },
+    { key: "supplier_price_auto_percent", label: "Supplier price above the LPO accepted up to (%)", value: percent },
+    { key: "supplier_price_auto_aed", label: "Supplier price above the LPO accepted up to (AED per LPO)", value: aed },
+  ];
+  for (const r of rows) await admin.from("settings").upsert({ ...r, updated_by: staff.id }, { onConflict: "key" });
+  revalidatePath("/settings");
+  redirect(`/settings?message=${encodeURIComponent("Money limits saved.")}#money-limits`);
+}

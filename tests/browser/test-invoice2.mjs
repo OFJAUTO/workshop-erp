@@ -3,7 +3,7 @@
 // paid without number + date + file, and the invoice takes several files with thumbnails and an X.
 //   node --env-file=.env.test.local tests/browser/test-invoice2.mjs
 import { Buffer } from "node:buffer";
-import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, makeChecks, sql, confirmMoney } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots";
@@ -72,7 +72,7 @@ await p2.reload({ waitUntil: "load" });
 await p2.waitForTimeout(1500);
 check("the pay form appears", (await p2.locator("[data-pay-form]").count()) === 1);
 await p2.fill("[data-pay-form] input[name=reference]", "TRF 4411");
-await p2.locator("[data-mark-supplier-paid]").click();
+await confirmMoney(p2, "supplier-paid");
 await p2.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 });
 const paid = (await sql("select supplier_paid_at is not null as p, supplier_paid_reference as r from public.purchase_orders where id = $1", [po.id]))[0];
 check("marked paid with the reference", paid?.p === true && paid?.r === "TRF 4411", JSON.stringify(paid));
