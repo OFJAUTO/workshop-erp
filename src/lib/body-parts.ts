@@ -15,9 +15,12 @@ const REAR2 = ["Rear left", "Rear right"];
 const LR = ["Left", "Right"];
 const FR = ["Front", "Rear"];
 
-type BuiltIn = { category: "Body" | "Glass" | "Interior"; name: string; sides?: string[] };
+type BuiltIn = { category: "Body" | "Glass" | "Interior" | "Engine"; name: string; sides?: string[] };
 
 export const BUILT_IN_PARTS: BuiltIn[] = [
+  // ENGINE (1 November 2026: always in "Add a part", whether or not the parts list has them)
+  { category: "Engine", name: "Intake manifold" },
+  { category: "Engine", name: "Intake manifold gasket" },
   // BODY
   { category: "Body", name: "Bumper", sides: FR },
   { category: "Body", name: "Bumper grille", sides: FR },

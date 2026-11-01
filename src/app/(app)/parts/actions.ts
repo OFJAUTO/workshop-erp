@@ -12,7 +12,8 @@ import { blankToNull } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPricingRows } from "@/lib/parts-pricing";
-import { dateFromDays, daysComplete, rowMissing, rowState } from "@/lib/parts-rows";
+import { dateFromDays, daysComplete, isLineNumber, rowMissing, rowState } from "@/lib/parts-rows";
+import { addPartsToOpenLpo, refreshPendingLpoLine, refusalsReady } from "@/lib/lpo";
 import { PARTS_BUCKET, PART_SELECT, toPart } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -370,6 +371,13 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: same } = await admin.from("part_items").select("id").eq("job_id", jobId).eq("client_key", clientKey).eq("is_active", true).order("created_at").limit(1).maybeSingle();
     if (same) partId = same.id;
   }
+  // 1 November 2026: "1", "13" are line numbers, not part numbers (they went onto the supplier's LPO). A number already
+  // stored stays as it was; a new one is refused with words, and "No number" is the honest answer when there is none.
+  const pnTyped = (row.part_number ?? "").trim();
+  if (isLineNumber(pnTyped)) {
+    const { data: stored } = partId ? await admin.from("part_items").select("part_number").eq("id", partId).maybeSingle() : { data: null };
+    if (String(stored?.part_number ?? "").trim() !== pnTyped) return { error: `"${pnTyped}" looks like a line number. Type the supplier's part number, or tap None when there is no number.` };
+  }
   // A supplier discount above the owner's limit waits for his one-tap approval; until then the part is not priced.
   const approvalLimit = Number(settings.supplier_discount_approval_above_percent ?? 70);
   const needsApproval = discount !== null && discount > approvalLimit;
@@ -460,8 +468,19 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   }
   if (requestId) await admin.from("part_requests").update({ status: completeNow ? "done" : "listed", updated_by: staff.id }).eq("id", requestId).in("status", ["open", "listed", "done"]);
   if (completeNow && partId) {
-    await syncLineForPart(jobId, partId, staff.id);
+    // A replacement for a part the customer approved (another supplier after a refusal, or for a part marked not
+    // needed) takes over its approval: To order at once, covered by the line of the part it replaces.
+    const replaces = await approvedOriginalOf(partId);
+    if (replaces) {
+      await admin.from("part_items").update({ order_status: "to_order", updated_by: staff.id }).eq("id", partId).eq("order_status", "none");
+      await admin.from("part_items").update({ order_status: "none", updated_by: staff.id }).eq("id", replaces).eq("order_status", "to_order").is("po_id", null);
+    } else await syncLineForPart(jobId, partId, staff.id);
     await tellAdvisorIfComplete(jobId);
+  }
+  if (partId) {
+    // On an LPO still waiting for approval, the line follows; a part to order and on no LPO joins the one that waits.
+    await refreshPendingLpoLine(partId, staff);
+    if (completeNow) await addPartsToOpenLpo(jobId, staff);
   }
   // The tyre details: stored with the part; a new brand or model is remembered for next time.
   if (row.tyre && partId) {
@@ -627,4 +646,50 @@ async function learnTyre(t: TyreSpec, settings: Awaited<ReturnType<typeof getSet
     if (!list.some((m) => m.toLowerCase() === model.toLowerCase())) models[key] = [...list, model].slice(0, 60);
     await admin.from("settings").upsert({ key: "tyre_models", value: models, label: "Tyre models", description: "Tyre models per brand, offered as one-tap choices in the tyre details window; a model typed there is added by itself." }, { onConflict: "key" });
   }
+}
+
+/** The part a replacement takes over, when the customer had approved it (refused on an LPO, or to order and marked not needed). */
+async function approvedOriginalOf(partId: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("replaced_part_id").eq("id", partId).maybeSingle();
+  if (!p?.replaced_part_id) return null;
+  const refusedCol = (await refusalsReady()) ? ", refused_at" : "";
+  const { data: o } = await admin.from("part_items").select(`id, order_status, not_needed_at${refusedCol}`).eq("id", p.replaced_part_id).maybeSingle();
+  const orig = o as unknown as { id: string; order_status: string; not_needed_at: string | null; refused_at?: string | null } | null;
+  if (!orig) return null;
+  return orig.refused_at || orig.order_status !== "none" ? orig.id : null;
+}
+
+/**
+ * "Replace": a refused line (or one marked not needed) gets a new row with the same name, quantity and positions, to
+ * be priced with another supplier. Once priced it is To order by itself and joins the LPO waiting for approval; the
+ * row says "Replaces the refused line (<old supplier>)".
+ */
+export async function replaceRefusedPart(jobId: string, partId: string): Promise<{ error?: string; newId?: string }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  if (!can(staff.role_id as RoleId, "priceParts")) return { error: "Not allowed." };
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  const admin = createAdminClient();
+  const refusedCol = (await refusalsReady()) ? ", refused_at" : "";
+  const { data: raw } = await admin.from("part_items").select(`id, part_request_id, description, quantity, confirmed_quantity, positions, part_type, brand, supplier, replacement_part_id, not_needed_at${refusedCol}`).eq("id", partId).eq("job_id", jobId).maybeSingle();
+  const p = raw as unknown as { id: string; part_request_id: string | null; description: string; quantity: number; confirmed_quantity: number | null; positions: string[] | null; part_type: string | null; brand: string | null; supplier: string | null; replacement_part_id: string | null; not_needed_at: string | null; refused_at?: string | null } | null;
+  if (!p) return { error: "Part not found." };
+  if (!p.refused_at && !p.not_needed_at) return { error: "Only a refused part, or one marked not needed, can be replaced." };
+  if (p.replacement_part_id) {
+    const { data: r } = await admin.from("part_items").select("id").eq("id", p.replacement_part_id).eq("is_active", true).maybeSingle();
+    if (r) return { error: "This part already has a replacement on the list." };
+  }
+  const now = new Date().toISOString();
+  const { data: made, error } = await admin
+    .from("part_items")
+    .insert({ job_id: jobId, client_key: `replace:${p.id}`, part_request_id: p.part_request_id, description: p.description, quantity: p.quantity, confirmed_quantity: p.confirmed_quantity ?? p.quantity, positions: p.positions ?? [], part_type: p.part_type, brand: p.brand, confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, replaced_part_id: p.id, added_by_role: staff.role_id, created_by: staff.id, updated_by: staff.id })
+    .select("id")
+    .single();
+  if (error || !made) return { error: error?.message ?? "Could not add the replacement." };
+  await admin.from("part_items").update({ replacement_part_id: made.id, updated_by: staff.id }).eq("id", p.id);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "part_replacement", note: `${p.description.toUpperCase()}: replacement row added by ${staff.display_name} (replaces the ${p.refused_at ? "refused" : "not needed"} line${p.supplier ? `, ${p.supplier}` : ""})`, created_by: staff.id });
+  refresh(jobId);
+  return { newId: made.id };
 }

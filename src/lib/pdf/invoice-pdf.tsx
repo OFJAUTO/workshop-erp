@@ -1,4 +1,5 @@
 import { isPickupShownByPackage, packagesGivePickup } from "../packages";
+import { realPartNumber } from "../parts-rows";
 import { customerCompWord } from "../complimentary";
 import { compReasonForJob } from "../quote-data";
 import "server-only";
@@ -373,7 +374,7 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
     const net = round2(l.quantity * l.unit_cost);
     const vat = round2(net * (vatPercent / 100));
     const positions = l.part_item_id ? (bundle.parts ?? []).find((p) => p.id === l.part_item_id)?.positions : null;
-    return { partNumber: l.part_number, name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
+    return { partNumber: realPartNumber(l.part_number), name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
   });
   // The supplier's own charges on this order (courier, freight): one row each, after the parts.
   for (const c of bundle.charges ?? []) {

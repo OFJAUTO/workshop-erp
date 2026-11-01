@@ -6,7 +6,7 @@ import { flushTimers, onPageLeave } from "@/lib/app-version";
 import { PARTS_LIST_CHANGED_EVENT } from "@/components/PartsListTick";
 import { InspectionMedia, fileOfSent, thisDevice, useFilesOnDevice, useSendGuard, whereMatch, whereOf, type InspectionFile, type InspectionWhere } from "@/components/InspectionMedia";
 import type { PendingFile } from "@/lib/use-send-queue";
-import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, acPartFor, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
+import { AC_GASES, AC_GRAM_CHIPS, AC_LEAKS, AC_REPAIRS, LABOUR_HOUR_CHIPS, PAD_AUTO_REMARK_RE, PAD_MM_CHIPS, acPartFor, hintOf, isPadItem, padMeasureKey, padStatusForMm, padWords } from "@/lib/inspection";
 import { PartPicker } from "@/components/PartPicker";
 import { BodyshopFindings, type BodyStateProps } from "./BodyshopFindings";
 import { panelLabel } from "@/lib/car-outline";
@@ -777,6 +777,7 @@ export function InspectionForm({
                     {it.dangerous ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}
                     {it.editedBy ? <span className="text-xs font-medium text-muted">edited by {it.editedBy}</span> : null}
                   </p>
+                  {hintOf(it) ? <p className="-mt-2 text-xs text-muted" data-item-hint={it.key}>{hintOf(it)}</p> : null}
                   {/wheel condition/i.test(it.label) && wheelConditions.length ? <p className="text-xs text-muted">At gate-in: {wheelConditions.map((w) => `${w.label} ${w.text}`).join(" · ")}</p> : null}
                   <StatusButtons value={it.status} onPick={(s) => setItemStatus(it.key, s)} disabled={locked} statuses={itemStatusesFor(it.style)} style={it.style} />
                   {disc ? (

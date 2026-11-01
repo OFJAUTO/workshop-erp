@@ -6,12 +6,12 @@ import { useRouter } from "next/navigation";
 import { Button, Input } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
 import { PART_TYPE_LABELS } from "@/lib/quotes";
-import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, availabilityChoice, availabilityFromChoice, availabilityWords, daysComplete, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
+import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, availabilityChoice, availabilityFromChoice, availabilityWords, daysComplete, NO_PART_NUMBER, realPartNumber, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
 import { type CatalogueRow } from "@/lib/parts-list";
-import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, splitPart } from "../actions";
+import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
 import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 import { bulkDeleteParts, undoBulkDelete } from "../bulk-actions";
 import { FloatingMenu } from "@/components/FloatingMenu";
@@ -46,6 +46,14 @@ export type TableRow = {
   perSet: boolean;
   /** "Remove: not needed": greyed with the reason, Put back possible. */
   removed: { by: string; reason: string } | null;
+  /** Refused on an LPO by the owner or the head accountant: greyed, never To order, never on an LPO again. */
+  refused?: { by: string; reason: string; supplier: string | null } | null;
+  /** "Replaces the refused line (Al Tayer Motors LLC)": this row is the replacement. */
+  replaces?: string | null;
+  /** Refused or not needed, with no replacement yet: the menu offers Replace. */
+  replaceable?: boolean;
+  /** Marked not needed before it was ordered. */
+  notNeeded?: boolean;
   /** A supplier discount above the owner's limit, waiting for his approval. */
   waitingApproval: boolean;
   /** A new row from the picker: its positions go to the server with the first save. */
@@ -365,7 +373,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           <span className="flex items-center gap-1.5">
             {canPrice && !pricingLocked ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
             Part
-          </span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right">Disc %</span><span className="text-right">Net each</span><span>Supplier</span><span>Availability</span><span className="text-right">Line total</span><span />
+          </span><span>Qty</span><span className={ONE_LINE_ONLY}>Part number</span><span className={ONE_LINE_ONLY}>Type</span><span className="text-right">List</span><span className="text-right" title="The supplier's discount off the list price (not our markup: the advisor's markup is on the quotation)">Disc %</span><span className="text-right">Net each</span><span>Supplier</span><span>Availability</span><span className="text-right">Line total</span><span />
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
@@ -462,6 +470,8 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const [undo, setUndo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Typed but not sent yet (the save waits a moment for the typing to stop): "Not saved yet" on the status line.
+  const [unsaved, setUnsaved] = useState(false);
   const [, start] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ v, name });
@@ -500,7 +510,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const complete = state === "priced";
   const partial = state === "not_finished" && Object.entries(v).some(([k, x]) => k !== "qty" && !k.startsWith("tyre_") && String(x ?? "").trim() !== "" && !(k === "part_type" && x === (types[0] ?? "")));
   const red = attempted && state === "not_finished";
-  const tone = row.removed ? "border-line bg-canvas opacity-60" : red ? "border-red-bar bg-white" : focused ? `border-ink ${complete ? "bg-green-soft" : "bg-chip"}` : row.waitingApproval ? "border-amber-bar bg-amber-soft/40" : row.unavailable ? "border-line bg-amber-soft/60" : complete ? "border-green bg-green-soft" : "border-line bg-white";
+  const tone = row.removed || row.refused ? "border-line bg-canvas opacity-60" : red ? "border-red-bar bg-white" : focused ? `border-ink ${complete ? "bg-green-soft" : "bg-chip"}` : row.waitingApproval ? "border-amber-bar bg-amber-soft/40" : row.unavailable ? "border-line bg-amber-soft/60" : complete ? "border-green bg-green-soft" : "border-line bg-white";
   const supplier = suppliers.find((s) => s.name.toLowerCase() === v.supplier.toLowerCase());
   const standard = supplier ? supplierDiscount(supplier, v.part_type) : null;
   const standardNote = standard !== null && v.discount.trim() !== "" && Math.abs(Number(v.discount.replace(",", ".")) - standard) > 0.001 ? `Standard ${standard}%, changed to ${v.discount}%` : "";
@@ -520,6 +530,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
     setName(nextName);
     onValues(nextName, nextV);
     if (timer.current) clearTimeout(timer.current);
+    setUnsaved(true);
     timer.current = setTimeout(() => void persist(nextV, nextName), 900);
   }
   const change = (patch: Partial<RowValues>) => queue({ ...latest.current.v, ...patch }, latest.current.name);
@@ -565,6 +576,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   };
   async function persist(next: RowValues, nextName: string) {
     const run = chain.current.then(async () => {
+      setUnsaved(false);
       setSaving(true);
       const tyre = tyreRef.current;
       tyreRef.current = null;
@@ -608,7 +620,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       setTimeout(() => setCopied(false), 1500);
     } catch {}
   };
-  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || pricingLocked;
+  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || !!row.refused || pricingLocked;
   const removeTarget = partId ? { partId } : { requestId: row.requestId };
   const doRemove = (kind: "part" | "request" | "ordered", reason: string, disposition?: "returned" | "stock") => {
     const fd = new FormData();
@@ -629,7 +641,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const wrote = row.original ?? (row.requestId ? origin : null);
   const notes = [row.removed ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, wrote && wrote !== name ? `Technician wrote: ${wrote}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
   const detailsInPartNumber = isGenericTyreName(name) && /\s/.test(v.part_number.trim());
-  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : detailsInPartNumber ? { text: "Add the details to the name (tap Tyre details). Part numbers aren't shown to customers.", cls: "font-semibold text-amber" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
+  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : unsaved ? { text: "Not saved yet", cls: "font-semibold text-amber" } : detailsInPartNumber ? { text: "Add the details to the name (tap Tyre details). Part numbers aren't shown to customers.", cls: "font-semibold text-amber" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
 
   return (
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
@@ -637,7 +649,7 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       <div className="col-span-2 md:col-span-1 min-h-9 flex items-center gap-1.5 min-w-0">
         {canPrice && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
-        <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
+        <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed || row.refused ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
           <span className="block break-words text-[13px] uppercase leading-[1.15]">{name}</span>
           <PositionsLine positions={row.shownPositions ?? row.positions} className="leading-tight" />
         </button>
@@ -675,7 +687,8 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
         {readOnly ? textCell(v.part_number || "No part number", "flex-1 font-semibold") : (
           <Input value={v.part_number} onChange={(e) => change({ part_number: e.target.value })} onBlur={() => void lookupMemory()} placeholder="Part number" textCase="upper" className={box("part_number", "w-full min-w-0 flex-1 px-2")} aria-label="Part number" />
         )}
-        <button type="button" onClick={copyPn} disabled={!v.part_number} className={`shrink-0 h-9 w-12 rounded-control border border-line text-[11px] font-bold ${v.part_number ? "" : "invisible"}`} aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button>
+        {/* No part number from the supplier: "None" says so honestly (1 November 2026: the box used to get line numbers) */}
+        {!v.part_number && !readOnly ? <button type="button" onClick={() => change({ part_number: NO_PART_NUMBER })} className="shrink-0 h-9 w-12 rounded-control border border-line-strong bg-white text-[11px] font-bold" title="The supplier gave no part number" data-no-part-number>None</button> : <button type="button" onClick={copyPn} disabled={!realPartNumber(v.part_number)} className={`shrink-0 h-9 w-12 rounded-control border border-line text-[11px] font-bold ${realPartNumber(v.part_number) ? "" : "invisible"}`} aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button>}
       </span>
       {/* Type and brand on one line; the brand box keeps its place when it does not apply */}
       <span className={`${SECOND_LINE} h-9 flex items-center gap-1 min-w-0`}>
@@ -773,6 +786,10 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       {/* The status line: always there, always one line high, so the row never grows or shrinks */}
       <div className={`${STATUS_LINE} min-h-5 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-[11px] leading-tight`} data-status-line>
         {row.removed ? <Chip tone="outline">Removed</Chip> : null}
+        {row.refused ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-red-bar bg-white px-2 text-[10px] font-bold text-red" data-refused-chip>Refused by {row.refused.by}{row.refused.reason ? ` – ${row.refused.reason}` : ""}</span> : null}
+        {row.notNeeded && !row.removed ? <Chip tone="outline">Not needed</Chip> : null}
+        {row.replaces ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-ink px-2 text-[10px] font-bold" data-replaces-chip>{row.replaces}</span> : null}
+        {row.replaceable && canPrice && partId ? <button type="button" onClick={() => run(() => replaceRefusedPart(jobId, partId))} className="shrink-0 h-5 rounded-control border border-ink bg-white px-2 text-[10px] font-bold" data-replace-part>Replace (another supplier)</button> : null}
         {row.waitingApproval && !row.removed ? <Chip tone="amber">Waiting for owner approval</Chip> : null}
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
@@ -858,7 +875,7 @@ function SplitDialog({ name, qty, onClose, onSplit }: { name: string; qty: numbe
 function SupplierList({ rows, car, vin, openingLine, onClose }: { rows: TableRow[]; car: string; vin: string | null; openingLine: string; onClose: () => void }) {
   const [ticked, setTicked] = useState<Set<string>>(() => new Set(rows.filter((r) => !r.unavailable && !r.optionGroup).map((r) => r.key)));
   const [copied, setCopied] = useState(false);
-  const lines = rows.filter((r) => ticked.has(r.key)).map((r) => `• ${r.name}${r.info && !/Added by Parts|Option:/.test(r.info) ? ` · ${r.info}` : ""} × ${r.values.qty || 1}${r.values.part_number ? ` · ${r.values.part_number}` : ""}`);
+  const lines = rows.filter((r) => ticked.has(r.key)).map((r) => `• ${r.name}${r.info && !/Added by Parts|Option:/.test(r.info) ? ` · ${r.info}` : ""} × ${r.values.qty || 1}${realPartNumber(r.values.part_number) ? ` · ${realPartNumber(r.values.part_number)}` : ""}`);
   const text = [car, vin ? `VIN: ${vin}` : "", "", openingLine, ...lines].join("\n");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={onClose}>

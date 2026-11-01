@@ -10,7 +10,7 @@ import { blankToNull } from "@/lib/format";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief, type PoLineRow, type PurchaseOrderRow } from "@/lib/parts-data";
 import { recordStockMovement } from "@/lib/stock";
-import { splitMainLpo } from "@/lib/lpo";
+import { refusePoLine, splitMainLpo } from "@/lib/lpo";
 import { verifyPin } from "@/lib/pin";
 import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
@@ -96,6 +96,21 @@ export async function markLpoSent(poId: string, method: string): Promise<{ ok?: 
   await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_sent", note: `${po.number} sent to the supplier by ${staff.display_name} (${method})`, created_by: staff.id });
   refresh(po.job_id, poId);
   return { ok: true };
+}
+
+/** The owner or the head accountant refuses ONE line of an LPO waiting for approval, with a reason (1 November 2026). */
+export async function refusePoLineAction(poId: string, lineId: string, formData: FormData) {
+  const staff = await requirePermission("approvePurchaseOrders");
+  const back = `/parts/orders/${poId}`;
+  if (staff.viewingAs) redirect(back);
+  if (staff.role_id === "accounts" && !staff.is_head_accountant) redirect(`${back}?error=${encodeURIComponent("Only the owner or the head accountant can refuse an LPO line.")}`);
+  const reason = String(formData.get("reason") ?? "").trim().slice(0, 300);
+  if (reason.length < 3) redirect(`${back}?error=${encodeURIComponent("Write why the line is refused.")}`);
+  const { data: po } = await createAdminClient().from("purchase_orders").select("job_id").eq("id", poId).maybeSingle();
+  const r = await refusePoLine(poId, lineId, reason, staff);
+  refresh(po?.job_id ?? null, poId);
+  if (r.error) redirect(`${back}?error=${encodeURIComponent(r.error)}`);
+  redirect(`${back}?message=${encodeURIComponent(`${r.part} refused \u2713 \u2014 Parts have been told to add a replacement.${r.cancelled ? ` Every line refused: ${r.number} is cancelled.` : " The rest of the LPO still waits for your approval."}`)}`);
 }
 
 /** The owner or the head accountant approves or refuses an LPO. A required deposit must be recorded first, unless the owner overrides. */

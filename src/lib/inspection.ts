@@ -102,7 +102,13 @@ export const INSPECTION_STATUS_LABELS: Record<InspectionStatus, string> = {
 };
 
 /** due: the item also asks "Service due?" (a fluid with its own change interval: engine oil, brake fluid, coolant, transmission). */
-export type ChecklistItem = { key: string; label: string; style?: ItemStyle; due?: boolean };
+export type ChecklistItem = { key: string; label: string; style?: ItemStyle; due?: boolean; hint?: string };
+
+/** What to look at, under the item's name on the tablet (1 November 2026). The checklist in Settings may carry its own. */
+export const ITEM_HINTS: Record<string, string> = {
+  "engine_bay.intake_manifold": "cracks, leaks, gasket, flaps / runner actuator",
+};
+export const hintOf = (it: { key: string; hint?: string | null }) => it.hint || ITEM_HINTS[it.key] || null;
 export type ChecklistSection = { key: string; title: string; items: ChecklistItem[] };
 
 /** The road test used to be a checklist section; it now belongs to the QC inspector. Old reports hide it. */
@@ -172,6 +178,7 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Spark plugs",
     "Ignition coil + wiring",
     "Valve cover",
+    "Intake manifold",
     "Wiper tank + pipes/connector/hoses + wiper blades",
     "Brake fluid",
     "Supercharger / turbo system + brake vacuum pump",

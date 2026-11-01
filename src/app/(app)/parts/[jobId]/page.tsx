@@ -6,7 +6,7 @@ import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
@@ -16,7 +16,7 @@ import { SupplierChargesStrip } from "./SupplierChargesStrip";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { dubaiDate } from "@/lib/jobs";
 import { valuesOfPart, valuesOfRequest } from "@/lib/parts-pricing";
-import { type SupplierOption } from "@/lib/parts-rows";
+import { rowState, type SupplierOption } from "@/lib/parts-rows";
 import { reasonsFor } from "@/lib/reasons";
 import { PARTS_BUCKET, PART_SELECT, REQUEST_SELECT, signPaths, toPart } from "@/lib/quote-data";
 import { type PartItem, type PartRequest } from "@/lib/quotes";
@@ -31,6 +31,8 @@ import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
 import { depositState, depositShortText } from "@/lib/deposits";
 import { PartsTable, type TableRow } from "./PartsTable";
+import { SendLpoButton } from "./SendLpoButton";
+import { refusalsReady } from "@/lib/lpo";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +55,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, tyre_size_front, tyre_size_rear, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
-    admin.from("part_items").select(PART_SELECT + ", po_id, expected_date, received_qty, issue_status, return_status").eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
+    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
     admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name").eq("is_active", true),
     loadInspection(jobId),
@@ -82,7 +84,17 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const suppliers: SupplierOption[] = (supplierRows ?? []).map((s) => ({ id: s.id as string, name: s.name as string, discount: Number(s.default_discount_percent) || 0, byType: (s.discount_by_type as Record<string, number> | null) ?? {} }));
   // A server page: rendered once per request, today's date (Dubai) is read once.
   const today = dubaiDate();
-  const orderLabel = (p: PartItem) => (p.order_status === "none" ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
+  // A part refused on an LPO, or marked not needed before it was ordered, is never "To order" (1 November 2026).
+  const orderLabel = (p: PartItem) => (p.order_status === "none" || rawById.get(p.id)?.refused_at || (p.order_status === "to_order" && rawById.get(p.id)?.not_needed_at) ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
+  const refusedOf = (p: PartItem) => {
+    const raw = rawById.get(p.id);
+    return raw?.refused_at ? { by: nameOf.get(String(raw.refused_by ?? "")) ?? "the owner", reason: String(raw.refused_reason ?? ""), supplier: p.supplier ?? null } : null;
+  };
+  const replacesOf = (p: PartItem) => {
+    const orig = rawById.get(p.id)?.replaced_part_id ? parts.find((x) => x.id === rawById.get(p.id)?.replaced_part_id) : null;
+    if (!orig) return null;
+    return `Replaces the ${rawById.get(orig.id)?.refused_at ? "refused" : "not needed"} line${orig.supplier ? ` (${orig.supplier})` : ""}`;
+  };
   // The request's note (the positions have their own line under the name); a part added by Parts says so.
   const infoOf = (r: PartRequest | null, p?: PartItem) => [r ? (r.note ?? "") : p ? "Added by Parts" : "", p?.availability_note ?? ""].filter(Boolean).join(" · ") || null;
   const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
@@ -97,6 +109,11 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
     values: valuesOfPart(p, today),
     removed: p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
+    refused: refusedOf(p),
+    replaces: replacesOf(p),
+    // Refused, or not needed and never ordered: Replace adds a row for another supplier (once).
+    replaceable: (!!rawById.get(p.id)?.refused_at || (!!rawById.get(p.id)?.not_needed_at && ["none", "to_order"].includes(String(p.order_status)))) && !parts.some((x) => x.id === rawById.get(p.id)?.replacement_part_id && x.is_active !== false),
+    notNeeded: !!rawById.get(p.id)?.not_needed_at && ["none", "to_order"].includes(String(p.order_status)) && !rawById.get(p.id)?.refused_at,
     waitingApproval: p.discount_approval_status === "pending",
     optionGroup: p.option_group,
     unavailable: false,
@@ -133,6 +150,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
   const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [] });
+  // Lines still being priced (not removed, refused or unavailable): "Send LPO for approval" names them first.
+  const unfinishedNames = rows.filter((r) => !r.removed && !r.refused && !r.unavailable && rowState(r.values, { waitingApproval: r.waitingApproval }) === "not_finished").map((r) => r.name.toUpperCase());
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
@@ -180,9 +199,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <p className="text-sm" data-lpo-summary>{summaryText}</p>
           {lpos.toOrder.length && !pendingMain ? (
             canOrder ? (
-              <form action={sendLpoForApproval.bind(null, jobId)}>
-                <Button type="submit" size="lg" data-send-lpo>Send LPO for approval</Button>
-              </form>
+              <SendLpoButton action={sendLpoForApproval.bind(null, jobId)} unfinished={unfinishedNames} />
             ) : <p className="text-xs text-muted">Parts send the LPO for approval.</p>
           ) : null}
           {pendingMain ? (

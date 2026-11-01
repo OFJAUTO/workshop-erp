@@ -32,6 +32,8 @@ check("a part with no sides is left as picked", split.some((e) => e.name === "Br
 
 const sug = damagePartSuggestions(["headlight_r", "front_bumper", "door_rl", "chassis", "headlight_r"]);
 check("the damage list offers the parts with their side", sug.map((s) => s.name).join(" | ") === "Headlight – front right | Bumper – front | Door – rear left", sug.map((s) => s.name).join(" | "));
-check("every built-in part has a category the picker knows", BUILT_IN_PARTS.every((p) => ["Body", "Glass", "Interior"].includes(p.category)));
+check("every built-in part has a category the picker knows", BUILT_IN_PARTS.every((p) => ["Body", "Glass", "Interior", "Engine"].includes(p.category)));
+// 1 November 2026: the intake manifold and its gasket are always in "Add a part", under Engine.
+check("Intake manifold and its gasket are under Engine", ["Intake manifold", "Intake manifold gasket"].every((n) => BUILT_IN_PARTS.some((p) => p.name === n && p.category === "Engine")));
 console.log(failed ? `FAILED (${failed})` : "All passed");
 process.exit(failed ? 1 : 0);

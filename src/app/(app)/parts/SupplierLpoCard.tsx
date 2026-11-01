@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { positionsWords } from "@/lib/parts-list";
+import { realPartNumber } from "@/lib/parts-rows";
 import { PositionsLine } from "@/components/PositionsLine";
 import { SharePdfButton } from "@/components/SharePdfButton";
 import { Button } from "@/components/ui";
@@ -27,7 +28,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
     `${po.number} · OFJ Automotive`,
     vin ? `VIN: ${vin}` : "",
     "",
-    ...po.lines.map((l) => `• ${l.part_number ? `${l.part_number} · ` : ""}${l.description}${positionsWords(l.positions) ? ` · ${positionsWords(l.positions)}` : ""} × ${l.quantity}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}` : ""}`),
+    ...po.lines.map((l) => `• ${realPartNumber(l.part_number) ? `${realPartNumber(l.part_number)} · ` : ""}${l.description}${positionsWords(l.positions) ? ` · ${positionsWords(l.positions)}` : ""} × ${l.quantity}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}` : ""}`),
     ...(po.charges ?? []).map((c) => `• ${c.description} · AED ${c.amount_aed.toFixed(2)}`),
     "",
     `Total before VAT: AED ${po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`,
@@ -48,7 +49,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
       <ul className="divide-y divide-line text-sm">
         {po.lines.map((l) => (
           <li key={l.id} className={`py-1.5 flex flex-wrap items-center gap-2 ${l.received_qty >= l.quantity ? "rounded-control bg-green-soft px-2 text-green" : ""}`} data-lpo-line data-line-received={l.received_qty >= l.quantity ? "1" : "0"}>
-            {l.part_number ? <span className="font-mono text-xs font-semibold">{l.part_number}</span> : null}
+            {realPartNumber(l.part_number) ? <span className="font-mono text-xs font-semibold">{realPartNumber(l.part_number)}</span> : null}
             <span className="flex flex-col"><span className="font-semibold">{l.description}</span><PositionsLine positions={l.positions} /></span>
             <span className="text-muted">× {l.quantity} · AED {l.unit_cost.toFixed(2)}</span>
             {ordered ? (

@@ -4,7 +4,7 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { createTrip, loadDrivers } from "./delivery";
 import { dropParts } from "@/lib/drop-parts";
 import "server-only";
-import { finishPartsPlanning } from "./lpo";
+import { addPartsToOpenLpo, finishPartsPlanning } from "./lpo";
 import { createAdminClient } from "./supabase/admin";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { newLabelCode } from "./parts-data";
@@ -182,6 +182,8 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   }
   else if (!extra) await notifyRoles(["parts"], { type: "planning", title: `Send the LPO for approval · ${job.job_number}`, body: `The customer approved ${q.number}. The approved parts are on the Parts list: open the car and press Send LPO for approval.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
   else if (needsOrder) await notifyRoles(["parts"], { type: "parts_to_order", title: `Parts to order · ${job.job_number}`, body: `The customer approved additional work. Open the car and press Send LPO for approval.`, jobId: job.id, href: `/parts/${job.id}#lpo` });
+  // 1 November 2026 (LPO-00038): nothing priced and to order is left out of an LPO silently once the job has one.
+  if (extra && needsOrder && q.created_by) await addPartsToOpenLpo(job.id, { id: answer.by ?? q.created_by, display_name: "the customer's approval" });
   if (job.assigned_to && extra) await notifyStaff([job.assigned_to], { type: "quote_approved", title: `Additional work approved · ${job.job_number}`, body: "The customer approved the additional work. The new lines are on your work order.", jobId: job.id, href: `/my-jobs/${job.id}` });
   // A deposit was asked for on the quotation: the advisor and accounts collect it; the LPO waits for it.
   const { data: dq } = await admin.from("quotations").select("deposit_aed").eq("id", quotationId).maybeSingle();

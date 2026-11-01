@@ -9,7 +9,8 @@ import { SupplierProofUpload } from "./SupplierProofUpload";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
-import { loadJobLpos } from "@/lib/lpo";
+import { loadJobLpos, refusalsReady } from "@/lib/lpo";
+import { realPartNumber } from "@/lib/parts-rows";
 import { PO_STATUS_LABELS, loadPurchaseOrder } from "@/lib/parts-data";
 import { partTypeText } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -18,7 +19,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
-import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid } from "../../order-actions";
+import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction } from "../../order-actions";
 import { InvoiceFiles } from "./InvoiceFiles";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "../../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
@@ -91,6 +92,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
     return Array.from(m.entries()).map(([supplier, ls]) => ({ supplier, lines: ls, charges: chargesOf(supplier), subtotal: ls.reduce((a, l) => a + l.quantity * l.unit_cost, 0) + chargesOf(supplier).reduce((a, c) => a + c.amount_aed, 0) }));
   })();
   const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
+  // 1 November 2026 (LPO-00038): one line can be refused on its own; refused lines stay listed, greyed, with the reason.
+  const refusalsOn = await refusalsReady();
+  const canRefuseLine = canApprove && refusalsOn && po.status === "pending_approval" && lines.length > 0;
+  const { data: refusedRows } = refusalsOn ? await admin.from("part_items").select("id, description, supplier, quantity, confirmed_quantity, cost_aed, refused_at, refused_by, refused_reason, replacement_part_id").eq("refused_po_id", po.id).order("refused_at") : { data: [] };
+  const refusedBy = new Map(((refusedRows ?? []).length ? (await admin.from("staff").select("id, display_name").in("id", (refusedRows ?? []).map((r) => r.refused_by as string).filter(Boolean))).data ?? [] : []).map((s) => [s.id as string, s.display_name as string]));
 
   return (
     <>
@@ -144,9 +150,18 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-2">
                         <span className="flex flex-col"><span className="font-semibold uppercase">{l.description}</span><PositionsLine positions={bundle.parts.find((x) => x.id === l.part_item_id)?.positions} /></span>
                         {typeOf(l.part_item_id) ? <Badge tone="outline">{typeOf(l.part_item_id)}</Badge> : null}
-                        {l.part_number ? <span className="text-muted">{l.part_number}</span> : null}
+                        {realPartNumber(l.part_number) ? <span className="text-muted">{realPartNumber(l.part_number)}</span> : null}
                         <span className="text-muted">× {l.quantity} at {money(l.unit_cost)}</span>
                         <span className="ml-auto font-semibold">{money(l.quantity * l.unit_cost)}</span>
+                        {canRefuseLine ? (
+                          <details className="basis-full" data-refuse-line={l.id}>
+                            <summary className="inline-flex min-h-9 cursor-pointer list-none items-center text-xs font-bold text-red underline underline-offset-4 [&::-webkit-details-marker]:hidden">Refuse this line</summary>
+                            <form action={refusePoLineAction.bind(null, po.id, l.id)} className="mt-1 flex flex-wrap items-center gap-2">
+                              <Input name="reason" required minLength={3} placeholder="Why? e.g. wrong supplier for this car" className="min-w-[14rem] flex-1" textCase="sentence" aria-label="Why the line is refused" data-refuse-reason />
+                              <Button type="submit" size="md" tone="danger" data-refuse-send>Refuse line</Button>
+                            </form>
+                          </details>
+                        ) : null}
                       </li>
                     ))}
                     {g.charges.map((c) => (
@@ -161,6 +176,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 </div>
               ))}
               <div className="flex items-center justify-between border-t border-line pt-2 text-base"><span className="font-bold">Grand total before VAT</span><span className="font-extrabold" data-lpo-grand-total>{money(po.total_cost_aed)}</span></div>
+              {canRefuseLine ? <p className="text-xs text-muted">One wrong line? Refuse just that line with its reason: Parts are told to replace it, and the replacement joins this LPO by itself.</p> : null}
               {po.notes ? <p className="text-sm whitespace-pre-wrap text-muted">{po.notes}</p> : null}
             </Card>
           ) : null}
@@ -176,7 +192,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                     <li key={l.id} className="py-2 flex flex-wrap items-center gap-2">
                       <span className="flex flex-col"><span className="font-semibold uppercase">{l.description}</span><PositionsLine positions={part?.positions} /></span>
                       {typeOf(l.part_item_id) ? <Badge tone="outline">{typeOf(l.part_item_id)}</Badge> : null}
-                      {l.part_number ? <span className="text-muted">{l.part_number}</span> : null}
+                      {realPartNumber(l.part_number) ? <span className="text-muted">{realPartNumber(l.part_number)}</span> : null}
                       <span className="text-muted">× {l.quantity} at AED {l.unit_cost.toFixed(2)}</span>
                       {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}
                       {l.received_qty > 0 ? <Badge tone={l.received_qty >= l.quantity ? "green" : "amber"}>received {l.received_qty}</Badge> : null}
@@ -205,6 +221,21 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             </Card>
           ) : null}
 
+          {(refusedRows ?? []).length ? (
+            <Card className="flex flex-col gap-2" data-refused-lines>
+              <SectionLabel right={`${(refusedRows ?? []).length}`}>Refused lines</SectionLabel>
+              <ul className="divide-y divide-line text-sm">
+                {(refusedRows ?? []).map((r) => (
+                  <li key={r.id as string} className="py-1.5 flex flex-wrap items-center gap-2 opacity-70" data-refused-line>
+                    <span className="font-semibold uppercase line-through">{r.description as string}</span>
+                    {r.supplier ? <span className="text-muted">{r.supplier as string}</span> : null}
+                    <span className="rounded-full border border-red-bar px-2 py-0.5 text-[11px] font-bold text-red">Refused by {refusedBy.get(r.refused_by as string) ?? "the owner"}{r.refused_reason ? ` – ${r.refused_reason}` : ""}</span>
+                    <span className="ml-auto text-xs text-muted">{r.replacement_part_id ? "Replacement added" : "Waiting for a replacement from Parts"}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Approve this LPO</SectionLabel>

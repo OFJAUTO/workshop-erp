@@ -88,23 +88,8 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     });
   }
 
-  // 3. LPOs waiting for the one-tap approval.
-  const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_name, total_cost_aed, kind, created_at").eq("status", "pending_approval").eq("is_active", true);
-  for (const po of lpos ?? []) {
-    out.push({
-      jobId: `lpo:${po.id}`,
-      plate: po.number as string,
-      car: po.kind === "main" ? "every supplier" : (po.supplier_name as string),
-      what: "LPO waiting for approval",
-      amount: aed(Number(po.total_cost_aed) || 0),
-      actionLabel: "Approve",
-      href: `/parts/orders/${po.id}`,
-      always: true,
-      urgency: "amber",
-      since: po.created_at as string,
-      hint: "One tap approves it on the LPO page; Parts then order from each supplier.",
-    });
-  }
+  // 3. LPOs waiting for the one-tap approval (the same lines as the owner sees).
+  out.push(...(await lpoApprovalsWaiting()));
 
   // 4. Supplier invoices: still to follow, or prices to check against the LPO.
   const { data: toFollow } = await admin.from("purchase_orders").select("id, number, supplier_name, received_at, created_at").eq("supplier_invoice_status", "to_follow").eq("is_active", true).neq("status", "cancelled");
@@ -211,4 +196,30 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     });
   }
   return out;
+}
+
+/**
+ * Every LPO waiting for approval, one line each, for the owner and accounts (1 November 2026: additions to an LPO that
+ * waits, and the new approval request for parts added after an approval, included). A job LPO names the job.
+ */
+export async function lpoApprovalsWaiting(): Promise<ExtraWaiting[]> {
+  const admin = createAdminClient();
+  // The job number is read on its own: an unhinted purchase_orders → jobs embed is ambiguous and fails silently.
+  const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_name, total_cost_aed, kind, created_at, job_id").eq("status", "pending_approval").eq("is_active", true).order("created_at");
+  const jobIds = Array.from(new Set((lpos ?? []).map((p) => p.job_id as string | null).filter((x): x is string => !!x)));
+  const { data: jobs } = jobIds.length ? await admin.from("jobs").select("id, job_number").in("id", jobIds) : { data: [] };
+  const numberOf = new Map((jobs ?? []).map((j) => [j.id as string, j.job_number as string]));
+  return ((lpos ?? []) as { id: string; number: string; supplier_name: string; total_cost_aed: number | string; kind: string; created_at: string; job_id: string | null }[]).map((po) => ({
+    jobId: `lpo:${po.id}`,
+    plate: po.number,
+    car: [po.job_id ? numberOf.get(po.job_id) : null, po.supplier_name].filter(Boolean).join(" · "),
+    what: "LPO waiting for approval",
+    amount: aed(Number(po.total_cost_aed) || 0),
+    actionLabel: "Approve",
+    href: `/parts/orders/${po.id}`,
+    always: true,
+    urgency: "amber" as const,
+    since: po.created_at,
+    hint: "One tap approves it on the LPO page (or refuse one line with its reason); Parts then order from each supplier.",
+  }));
 }

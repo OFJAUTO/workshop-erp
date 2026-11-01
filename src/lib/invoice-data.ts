@@ -252,11 +252,16 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
   const vatPercent = qs.length ? Number(qs[0].vat_percent) || 5 : 5;
   const [{ data: lineRows }, { data: partRows }, { data: quoteRows }] = await Promise.all([
     qs.length ? admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qs.map((q) => q.id)).eq("is_active", true).order("position") : Promise.resolve({ data: [] }),
-    admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status").eq("job_id", jobId).eq("is_active", true),
+    admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status, replacement_part_id").eq("job_id", jobId).eq("is_active", true),
     qs.length ? admin.from("quotations").select("id, rounded_total_aed, total_aed").in("id", qs.map((q) => q.id)) : Promise.resolve({ data: [] }),
   ]);
-  const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPart(r), final_cost_aed: r.final_cost_aed === null || r.final_cost_aed === undefined ? null : Number(r.final_cost_aed), return_status: String(r.return_status ?? "none") }));
-  const partOf = (id: string | null) => (id ? parts.find((p) => p.id === id) : undefined);
+  const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPart(r), final_cost_aed: r.final_cost_aed === null || r.final_cost_aed === undefined ? null : Number(r.final_cost_aed), return_status: String(r.return_status ?? "none"), replacement_part_id: (r.replacement_part_id as string | null | undefined) ?? null }));
+  // A refused or exchanged part hands its line to its replacement (1 November 2026): the cost is the part ordered.
+  const partOf = (id: string | null) => {
+    const p = id ? parts.find((x) => x.id === id) : undefined;
+    const r = p?.replacement_part_id ? parts.find((x) => x.id === p.replacement_part_id) : undefined;
+    return r ?? p;
+  };
   const roundedOf = new Map(((quoteRows ?? []) as { id: string; rounded_total_aed: number | string | null; total_aed: number | string }[]).map((q) => [q.id, q.rounded_total_aed === null ? null : Number(q.rounded_total_aed)]));
   const lines: DraftLine[] = [];
   let discount = 0;

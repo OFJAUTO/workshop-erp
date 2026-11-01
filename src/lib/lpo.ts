@@ -6,8 +6,10 @@ import { round2 } from "./money";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, toPartFull, toPo, toPoLine, type PartFull, type PoLineRow, type PurchaseOrderRow } from "./parts-data";
 import { createAdminClient } from "./supabase/admin";
-import { attachChargesToPo, chargesByPo, moveChargesToSupplierPo, type SupplierCharge } from "./supplier-charges";
+import { attachChargesToPo, chargesByPo, moveChargesToSupplierPo, releaseCharges, type SupplierCharge } from "./supplier-charges";
 import { releaseWords } from "./job-sides";
+import { realPartNumber } from "./parts-rows";
+import { schemaReady } from "./schema-ready";
 
 type Actor = { id: string; display_name: string };
 
@@ -45,7 +47,8 @@ export async function loadJobLpos(jobId: string): Promise<JobLpos> {
     mainLines: main ? lines.filter((l) => l.po_id === main.id) : [],
     mainCharges: main ? charges.get(main.id) ?? [] : [],
     suppliers,
-    toOrder: parts.filter((p) => p.order_status === "to_order" && !p.po_id),
+    // Never a part marked not needed, or one refused on an LPO (its order status went back to none).
+    toOrder: parts.filter((p) => p.order_status === "to_order" && !p.po_id && !p.not_needed_at),
     fromStock: parts.filter((p) => p.availability === "in_stock"),
   };
 }
@@ -66,7 +69,7 @@ export function expectedDateFor(p: { delivery_date: string | null; priced_at: st
   return new Date(Date.parse(orderDay) + days * 86400000).toISOString().slice(0, 10);
 }
 
-const lineOf = (p: PartFull, i: number) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: p.part_number, quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, unit_cost: p.cost_aed ?? 0, list_price: p.list_price_aed ?? null, discount_percent: p.discount_percent ?? null });
+const lineOf = (p: PartFull, i: number) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: realPartNumber(p.part_number), quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, unit_cost: p.cost_aed ?? 0, list_price: p.list_price_aed ?? null, discount_percent: p.discount_percent ?? null });
 
 /**
  * "Send LPO for approval": the one main LPO for the job with every approved part still to order, whatever the
@@ -247,4 +250,137 @@ export async function receivePartInFull(partId: string, by: Actor): Promise<{ er
     if (job?.gated_in_by) await notifyStaff([job.gated_in_by], n);
   }
   return { complete };
+}
+
+/** Migration 20261202110000_lpo_refusals_intake: a part line refused on its own on an LPO waiting for approval. */
+export const refusalsReady = () => schemaReady("part_items", "refused_at, refused_by, refused_reason, refused_po_id");
+
+/** "1 part added", "2 parts added". */
+const partsWord = (n: number) => `${n} part${n === 1 ? "" : "s"}`;
+
+/** The owner and the head accountants: who approve LPOs. */
+async function approverIds(): Promise<string[]> {
+  const { data } = await createAdminClient().from("staff").select("id, role_id, is_head_accountant").eq("is_active", true).in("role_id", ["owner", "accounts"]);
+  return (data ?? []).filter((s) => s.role_id === "owner" || s.is_head_accountant).map((s) => s.id as string);
+}
+
+/** A main LPO's total and its supplier words, after lines came or went. */
+async function retotalPo(poId: string, by: string): Promise<{ total: number; lines: number; suppliers: string[] }> {
+  const admin = createAdminClient();
+  const { data: lines } = await admin.from("purchase_order_lines").select("quantity, unit_cost, part_item_id").eq("po_id", poId).eq("is_active", true);
+  const partIds = (lines ?? []).map((l) => l.part_item_id).filter((x): x is string => !!x);
+  const { data: parts } = partIds.length ? await admin.from("part_items").select("supplier").in("id", partIds) : { data: [] };
+  const suppliers = Array.from(new Set((parts ?? []).map((p) => String(p.supplier ?? "").trim()).filter(Boolean)));
+  const charges = (await chargesByPo([poId])).get(poId) ?? [];
+  const total = round2((lines ?? []).reduce((a, l) => a + Number(l.quantity) * Number(l.unit_cost), 0) + charges.reduce((a, c) => a + c.amount_aed, 0));
+  await admin.from("purchase_orders").update({ total_cost_aed: total, supplier_name: suppliers.length === 1 ? suppliers[0] : `${suppliers.length} suppliers`, updated_by: by }).eq("id", poId);
+  return { total, lines: (lines ?? []).length, suppliers };
+}
+
+const aedText = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Nothing priced and marked To order is ever left out of an LPO silently (1 November 2026, LPO-00038). Once a job has
+ * a main LPO, every approved part that is priced, to order from a supplier and on no LPO yet goes:
+ *   - onto the main LPO while it still waits for approval (its supplier gets its own section, the total moves, and the
+ *     owner and the head accountant hear "1 part added to LPO-00038");
+ *   - onto a NEW LPO for approval when the main one was already approved.
+ * Before the first LPO, the desk's "Send LPO for approval" stays the step.
+ */
+export async function addPartsToOpenLpo(jobId: string, by: Actor): Promise<{ added: number; number?: string; created?: boolean }> {
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, job_number, is_open").eq("id", jobId).maybeSingle();
+  if (!job?.is_open) return { added: 0 };
+  const { toOrder, main } = await loadJobLpos(jobId);
+  if (!main) return { added: 0 };
+  const open = toOrder.filter((p) => p.availability !== "in_stock" && !p.not_needed_at);
+  const ready = open.filter((p) => p.cost_aed !== null && (p.supplier ?? "").trim() !== "");
+  if (!ready.length) return { added: 0 };
+  if (main.status !== "pending_approval") {
+    // Already approved: the added parts get their own approval request (once every one of them is priced).
+    if (ready.length !== open.length) return { added: 0 };
+    const r = await createMainLpo(jobId, by);
+    if (r.error || !r.number) return { added: 0 };
+    return { added: ready.length, number: r.number, created: true };
+  }
+  const { data: last } = await admin.from("purchase_order_lines").select("position").eq("po_id", main.id).order("position", { ascending: false }).limit(1).maybeSingle();
+  const start = Number(last?.position) || 0;
+  const rows = ready.map((p, i) => ({ ...lineOf(p, start + i), part_number: realPartNumber(p.part_number) }));
+  const { data: made } = await admin.from("purchase_order_lines").insert(rows.map((l) => ({ ...l, po_id: main.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
+  for (const l of made ?? []) await admin.from("part_items").update({ po_id: main.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);
+  const newSuppliers = Array.from(new Set(ready.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
+  await attachChargesToPo(jobId, main.id, newSuppliers, by.id);
+  const t = await retotalPo(main.id, by.id);
+  const what = ready.map((p) => `${p.description.toUpperCase()} (${(p.supplier ?? "").trim()}, ${aedText(round2((p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1)))})`).join(", ");
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "po_part_added", note: `${main.number}: ${partsWord(ready.length)} added while it waits for approval (${by.display_name}): ${what}. New total ${aedText(t.total)}.`, created_by: by.id });
+  await notifyStaff(await approverIds(), { type: "po_approval", title: `${partsWord(ready.length)} added to ${main.number}`, body: `${job.job_number} · ${what}. New total ${aedText(t.total)}. One tap to approve.`, jobId, href: `/parts/orders/${main.id}` });
+  return { added: ready.length, number: main.number };
+}
+
+/**
+ * A part whose price, quantity or supplier changed while it sits on a main LPO still waiting for approval: its line
+ * follows, the total moves, and the approvers are told. Approved LPOs are never touched here.
+ */
+export async function refreshPendingLpoLine(partId: string, by: Actor): Promise<void> {
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, job_id, po_id, po_line_id, description, part_number, quantity, confirmed_quantity, cost_aed, list_price_aed, discount_percent, supplier").eq("id", partId).maybeSingle();
+  if (!p?.po_id || !p.po_line_id) return;
+  const { data: po } = await admin.from("purchase_orders").select("id, number, status, kind").eq("id", p.po_id).maybeSingle();
+  if (!po || po.status !== "pending_approval" || po.kind !== "main") return;
+  const { data: line } = await admin.from("purchase_order_lines").select("quantity, unit_cost, description, part_number").eq("id", p.po_line_id).maybeSingle();
+  if (!line) return;
+  const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
+  const cost = Number(p.cost_aed ?? 0);
+  const pn = realPartNumber(p.part_number);
+  if (Math.abs(Number(line.quantity) - qty) < 0.001 && Math.abs(Number(line.unit_cost) - cost) < 0.005 && line.description === p.description && (line.part_number ?? null) === pn) return;
+  await admin.from("purchase_order_lines").update({ quantity: qty, unit_cost: cost, list_price: p.list_price_aed, discount_percent: p.discount_percent, description: p.description, part_number: pn, updated_by: by.id }).eq("id", p.po_line_id);
+  const t = await retotalPo(po.id, by.id);
+  const { data: job } = await admin.from("jobs").select("job_number").eq("id", p.job_id).maybeSingle();
+  const part = String(p.description).toUpperCase();
+  await admin.from("job_events").insert({ job_id: p.job_id, event_type: "po_part_changed", note: `${po.number}: ${part} changed (${by.display_name}): × ${qty} at AED ${cost.toFixed(2)}, ${p.supplier ?? ""}. New total ${aedText(t.total)}.`, created_by: by.id });
+  await notifyStaff(await approverIds(), { type: "po_approval", title: `${po.number} changed: ${part}`, body: `${job?.job_number ?? ""} · × ${qty} at AED ${cost.toFixed(2)} from ${p.supplier ?? "?"}. New total ${aedText(t.total)}.`, jobId: p.job_id, href: `/parts/orders/${po.id}` });
+}
+
+/**
+ * The owner or the head accountant refuses ONE line of an LPO waiting for approval: the part is greyed "Refused by
+ * <name> – <reason>", never To order and never on an LPO again; Parts are told to add a replacement. The rest of the
+ * LPO keeps waiting; refusing the last line cancels it.
+ */
+export async function refusePoLine(poId: string, lineId: string, reason: string, by: Actor): Promise<{ error?: string; number?: string; cancelled?: boolean; part?: string }> {
+  if (!(await refusalsReady())) return { error: "Refusing one line needs the database update first (waiting for apply). Refuse the whole LPO for now." };
+  const admin = createAdminClient();
+  const { data: po } = await admin.from("purchase_orders").select("id, number, status, job_id, notes").eq("id", poId).maybeSingle();
+  if (!po) return { error: "LPO not found." };
+  if (po.status !== "pending_approval") return { error: `${po.number} is no longer waiting for approval.` };
+  const { data: line } = await admin.from("purchase_order_lines").select("id, part_item_id, description").eq("id", lineId).eq("po_id", poId).eq("is_active", true).maybeSingle();
+  if (!line) return { error: "That line is no longer on the LPO." };
+  const now = new Date().toISOString();
+  await admin.from("purchase_order_lines").update({ is_active: false, updated_by: by.id }).eq("id", lineId);
+  let supplier = "";
+  if (line.part_item_id) {
+    const { data: part } = await admin.from("part_items").select("supplier").eq("id", line.part_item_id).maybeSingle();
+    supplier = String(part?.supplier ?? "").trim();
+    await admin.from("part_items").update({ po_id: null, po_line_id: null, order_status: "none", refused_at: now, refused_by: by.id, refused_reason: reason, refused_po_id: poId, updated_by: by.id }).eq("id", line.part_item_id);
+  }
+  let t = await retotalPo(poId, by.id);
+  let cancelled = false;
+  if (!t.lines) {
+    cancelled = true;
+    await admin.from("purchase_orders").update({ status: "cancelled", notes: [po.notes, "Every line refused"].filter(Boolean).join("\n"), updated_by: by.id }).eq("id", poId);
+    await releaseCharges(poId, by.id);
+  } else if (supplier && !t.suppliers.some((s) => s.toLowerCase() === supplier.toLowerCase())) {
+    // That supplier has no line left here: its courier or freight charge leaves with it.
+    const { data: ch } = await admin.from("supplier_charges").select("id, supplier_name").eq("po_id", poId).eq("is_active", true);
+    const gone = (ch ?? []).filter((c) => String(c.supplier_name ?? "").trim().toLowerCase() === supplier.toLowerCase()).map((c) => c.id as string);
+    if (gone.length) {
+      await admin.from("supplier_charges").update({ po_id: null, updated_by: by.id }).in("id", gone);
+      t = await retotalPo(poId, by.id);
+    }
+  }
+  const part = String(line.description).toUpperCase();
+  if (po.job_id) {
+    await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_line_refused", note: `${po.number}: ${part}${supplier ? ` (${supplier})` : ""} refused by ${by.display_name}: ${reason}${cancelled ? `. Every line refused: ${po.number} cancelled.` : `. New total ${aedText(t.total)}.`}`, created_by: by.id });
+    await notifyRoles(["parts"], { type: "po_decided", title: `Refused on ${po.number}: ${part}`, body: `${by.display_name}: ${reason}. ${supplier ? `${supplier} is off the LPO. ` : ""}Tap Replace on the line to add a replacement${cancelled ? "" : "; it joins the LPO waiting for approval by itself"}.`, jobId: po.job_id, href: `/parts/${po.job_id}` });
+  }
+  return { number: po.number, cancelled, part };
 }

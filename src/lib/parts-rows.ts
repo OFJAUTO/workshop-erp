@@ -75,6 +75,17 @@ export const ROW_STATE_WORDS: Record<RowState, string> = {
 export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days" | "tyre";
 export type Missing = { field: MissingField; short: string; long: string };
 
+/** What Parts store when the supplier gives no part number (1 November 2026: the box used to get line numbers). */
+export const NO_PART_NUMBER = "NO NUMBER";
+/** A line number typed into the part number box ("1", "13"), not a supplier part number. */
+export const isLineNumber = (pn: string | null | undefined) => /^[0-9]{1,3}$/.test(String(pn ?? "").trim());
+/** The part number to print or send (LPOs, the supplier copy, the supplier list): never a line number or "no number". */
+export function realPartNumber(pn: string | null | undefined): string | null {
+  const t = String(pn ?? "").trim();
+  if (!t || isLineNumber(t) || t.toUpperCase() === NO_PART_NUMBER) return null;
+  return t;
+}
+
 /** Whole days typed: "0", "1", "12". Anything else means the days are still missing. */
 export const daysComplete = (days: string | null | undefined) => /^\d+$/.test(String(days ?? "").trim());
 

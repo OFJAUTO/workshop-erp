@@ -96,7 +96,8 @@ export async function WaitingPanel({ staff, extra: given = [] }: { staff: Curren
   const have = new Set(items.map((i) => i.jobId));
   const escalate = (u: Urgency, since: string | null | undefined): Urgency => (u === "amber" && since && now.getTime() - Date.parse(since) > 24 * 3600000 ? "red" : u);
   const all: RowItem[] = [
-    ...items.filter((i) => !replaced.has(i.jobId)).map((i) => ({ ...i, urgency: escalate(i.urgency, i.since) })),
+    // An LPO line from the extras names the LPO itself: the job line saying the same is left out.
+    ...items.filter((i) => !replaced.has(i.jobId) && !(i.what === "LPO waiting for approval" && extra.some((e) => e.jobId.startsWith("lpo:")))).map((i) => ({ ...i, urgency: escalate(i.urgency, i.since) })),
     ...extra
       .filter((e) => e.always || !have.has(e.jobId))
       .map((e) => {

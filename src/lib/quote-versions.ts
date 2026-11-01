@@ -6,6 +6,7 @@ import { blockOf, isHidden, type QuoteLine } from "@/lib/quotes";
 import { newToken } from "@/lib/media";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { schemaReady } from "@/lib/schema-ready";
 
 export type VersionActor = { id: string; display_name: string };
 
@@ -164,11 +165,14 @@ export async function missingPricedParts(jobId: string, quotationId: string): Pr
   }
   const others = Array.from(newest.entries()).filter(([n]) => n !== me?.number).map(([, v]) => v.id);
   const [{ data: parts }, { data: lines }] = await Promise.all([
-    admin.from("part_items").select("id, description, cost_aed, confirm_status, is_active, removed_at, not_needed_at").eq("job_id", jobId).eq("is_active", true).not("cost_aed", "is", null),
+    admin.from("part_items").select(`id, description, cost_aed, confirm_status, is_active, removed_at, not_needed_at, replaced_part_id${(await schemaReady("part_items", "refused_at")) ? ", refused_at" : ""}`).eq("job_id", jobId).eq("is_active", true).not("cost_aed", "is", null),
     admin.from("quotation_lines").select("part_item_id").in("quotation_id", [quotationId, ...others]).eq("is_active", true).not("part_item_id", "is", null),
   ]);
   const have = new Set((lines ?? []).map((l) => String(l.part_item_id)));
-  return (parts ?? []).filter((p) => p.confirm_status !== "rejected" && !p.removed_at && !p.not_needed_at && !have.has(p.id)).map((p) => ({ id: p.id, description: p.description }));
+  type P = { id: string; description: string; confirm_status: string; removed_at: string | null; not_needed_at: string | null; replaced_part_id: string | null; refused_at?: string | null };
+  // A refused part never comes back; a replacement (another supplier for a part the customer approved) is covered by
+  // the line of the part it replaces (1 November 2026, LPO-00038).
+  return ((parts ?? []) as unknown as P[]).filter((p) => p.confirm_status !== "rejected" && !p.removed_at && !p.not_needed_at && !p.refused_at && !have.has(p.id) && !(p.replaced_part_id && have.has(p.replaced_part_id))).map((p) => ({ id: p.id, description: p.description }));
 }
 
 /** Adds the missing priced parts to the quotation, one line each. */
