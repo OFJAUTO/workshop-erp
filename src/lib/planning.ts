@@ -7,7 +7,8 @@ import { createAdminClient } from "./supabase/admin";
 import type { JobRow } from "./types";
 import type { WorkingTime } from "./working-time";
 import { SIDE_LABEL, sideReleased, type Side } from "./job-sides";
-import { workSidesOf } from "./staff-picker";
+import { workTeamsOf } from "./staff-picker";
+import { LINE_TEAM_LABELS, type LineTeam } from "./line-teams";
 import { approvedKinds } from "./bodyshop";
 import { STAGE_DEFS, stageKeysFor } from "./bodyshop-kinds";
 
@@ -20,6 +21,8 @@ export type Planning = {
   waitingOn: PlanningOn | null;
   /** The car's sides (job-sides.ts): Workshop, Bodyshop, or both on a mixed car. */
   sides: Side[];
+  /** Every team on the car (line-teams.ts), in the order of work, with its manager or team leader. */
+  teams: { key: LineTeam; label: string; leader: string | null }[];
   /** The sides whose manager may release now (parts sorted, not released yet). */
   releaseNow: Side[];
   /** Hours per side for the start-day hint and the finish date. */
@@ -72,13 +75,13 @@ export function suggestFinishDate(startDate: string, hours: number, wt: WorkingT
 export async function loadPlanning(job: JobRow, settings: Settings): Promise<Planning> {
   const admin = createAdminClient();
   const wt = { openHour: Number(settings.opening_hour) || 8, closeHour: Number(settings.closing_hour) || 17, workingDays: (settings.working_days ?? []) as string[] };
-  const [{ data: partRows }, { data: techRows }, { data: lineRows }, { data: insp }, { data: bodyRows }, sides] = await Promise.all([
+  const [{ data: partRows }, { data: techRows }, { data: lineRows }, { data: insp }, { data: bodyRows }, { sides, teams: lineTeams }] = await Promise.all([
     admin.from("part_items").select(PART_FULL_SELECT).eq("job_id", job.id).eq("is_active", true).neq("order_status", "none").neq("return_status", "returned"),
     admin.from("job_technicians").select("id, staff_id, left_at, done_at, staff:staff!job_technicians_staff_id_fkey(display_name, photo_path)").eq("job_id", job.id).eq("is_active", true).order("added_at"),
     admin.from("work_lines").select("hours_quoted").eq("job_id", job.id).eq("is_active", true),
     admin.from("inspections").select("estimated_hours, estimated_hours_manager").eq("job_id", job.id).eq("is_active", true).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     admin.from("bodyshop_assignments").select("staff_id, assigned_at, staff:staff!bodyshop_assignments_staff_id_fkey(display_name, photo_path)").eq("job_id", job.id).eq("is_active", true).is("removed_at", null).order("assigned_at"),
-    workSidesOf(job.id, job.department),
+    workTeamsOf(job.id, job.department),
   ]);
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull);
   const unplanned = parts.filter((p) => !p.availability || (p.availability === "to_order" && !p.delivery_date && p.order_status !== "received"));
@@ -104,13 +107,27 @@ export async function loadPlanning(job: JobRow, settings: Settings): Promise<Pla
   const anyReleased = sides.some((s) => sideReleased(job, s));
   const active = ["approved", "waiting_parts"].includes(job.status) || (job.is_open && anyReleased && (!allReleased || !job.plan_date_confirmed_at));
 
+  // The advisor in charge (1 November 2026): read from the job itself, the caller's row may not carry it.
+  const advisorInCharge = job.advisor_id !== undefined ? job.advisor_id : (((await admin.from("jobs").select("advisor_id").eq("id", job.id).maybeSingle()).data?.advisor_id as string | null | undefined) ?? null);
   // The faces: the Parts person who planned (or the Parts role), each side's manager (who released it, else the
   // workshop manager of that side), the advisor.
   const [{ data: partsPeople }, { data: managers }, { data: advisor }] = await Promise.all([
     job.plan_parts_by ? admin.from("staff").select("id, display_name, photo_path").eq("id", job.plan_parts_by) : admin.from("staff").select("id, display_name, photo_path").eq("role_id", "parts").eq("is_active", true).order("display_name").limit(1),
     admin.from("staff").select("id, display_name, photo_path, department_id, role_id").or(`role_id.eq.workshop_manager${[job.plan_released_by, job.plan_bodyshop_released_by].filter(Boolean).map((id) => `,id.eq.${id}`).join("")}`).eq("is_active", true).order("display_name"),
-    admin.from("staff").select("id, display_name, photo_path").eq("id", job.plan_date_confirmed_by ?? job.gated_in_by).maybeSingle(),
+    admin.from("staff").select("id, display_name, photo_path").eq("id", advisorInCharge ?? job.plan_date_confirmed_by ?? job.gated_in_by).maybeSingle(),
   ]);
+  // Each team's manager or team leader: the workshop manager for mechanical and electrical work, the bodyshop manager
+  // for dismantle and refit, the team leaders for paint, PPF and detailing; outside work is another company.
+  const { data: leadRows } = lineTeams.length ? await admin.from("staff").select("display_name, role_id, team, department_id").eq("is_active", true).in("role_id", ["workshop_manager", "team_leader"]).order("display_name") : { data: [] };
+  const leads = (leadRows ?? []) as { display_name: string; role_id: string; team: string | null; department_id: string | null }[];
+  const leaderOf = (t: LineTeam): string | null => {
+    if (t === "outside") return "another company";
+    if (t === "mechanical" || t === "electrical") return leads.find((l) => l.role_id === "workshop_manager" && l.department_id === "mechanical")?.display_name ?? null;
+    if (t === "dismantle_refit") return leads.find((l) => l.role_id === "workshop_manager" && (l.team === "dismantle_refit" || l.department_id === "bodyshop"))?.display_name ?? null;
+    const staffTeam = t === "paint" ? "painting" : t === "detailing" ? "detailing_cleaning" : "ppf";
+    return leads.find((l) => l.role_id === "team_leader" && l.team === staffTeam)?.display_name ?? null;
+  };
+  const teams = lineTeams.map((t) => ({ key: t, label: LINE_TEAM_LABELS[t], leader: leaderOf(t) }));
   type Mgr = { id: string; display_name: string; photo_path: string | null; department_id: string | null; role_id: string };
   const mgrs = (managers ?? []) as Mgr[];
   const sideOfDept = (d: string | null) => (d === "mechanical" ? "mechanical" : d && ["bodyshop", "paint", "ppf_tint", "detailing"].includes(d) ? "bodyshop" : null);
@@ -156,6 +173,7 @@ export async function loadPlanning(job: JobRow, settings: Settings): Promise<Pla
     circles,
     waitingOn,
     sides,
+    teams,
     releaseNow,
     hoursBySide,
     parts,

@@ -56,6 +56,14 @@ export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs
           </li>
         ))}
       </ol>
+      {plan.teams.length ? (
+        <p className="flex flex-wrap items-center gap-1.5 text-xs" data-planning-teams>
+          <span className="font-bold uppercase tracking-[0.08em] text-muted">Teams</span>
+          {plan.teams.map((t) => (
+            <span key={t.key} className="rounded-full border border-line-strong px-2 py-0.5 font-semibold" data-planning-team={t.key}>{t.label}{t.leader ? ` · ${t.leader}` : ""}</span>
+          ))}
+        </p>
+      ) : null}
 
       {turn === "parts" && canParts && ["approved", "waiting_parts"].includes(status) ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">

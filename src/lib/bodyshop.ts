@@ -18,6 +18,8 @@ import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { rowMissing, stageAsks, warrantyCardOf } from "./warranty-data";
 import { kindsOfLine, type SideLine } from "./job-sides";
+import { teamOfLine, teamsOf, type TeamLine } from "./line-teams";
+import { attachTeams, servicesFor, teamsReady } from "./line-teams-data";
 import { workSidesOf } from "./staff-picker";
 import { SECTION_OF_TEAM, teamOf } from "./teams";
 
@@ -76,6 +78,17 @@ export async function approvedKinds(jobId: string): Promise<{ kinds: string[]; l
   const { data: svcs } = serviceIds.length ? await admin.from("services").select("id, bodyshop_kind, department").in("id", serviceIds) : { data: [] as { id: string; bodyshop_kind: string | null; department: string | null }[] };
   const svcOf = new Map((svcs ?? []).map((s) => [s.id as string, s]));
   let kinds = Array.from(new Set(lines.flatMap((l) => kindsOfLine(l as unknown as SideLine, l.service_id ? svcOf.get(l.service_id) : null))));
+  // The lines' teams (1 November 2026): on a bodyshop or mixed car each bodyshop team (and the electricians) brings its stages.
+  {
+    const { data: j } = await admin.from("jobs").select("department").eq("id", jobId).maybeSingle();
+    const dept = (j?.department as string | null) ?? null;
+    if (dept === "bodyshop" || dept === "both") {
+      const withTeams = await attachTeams(lines.map((l) => ({ ...l, quotation_id: l.quotation_id })));
+      const svcs2 = await servicesFor(lines.map((l) => l.service_id ?? ""));
+      const teams = teamsOf(withTeams.map((l) => ({ line: l as unknown as TeamLine, svc: l.service_id ? svcs2.get(l.service_id) : null })), dept);
+      kinds = Array.from(new Set([...kinds, ...teams.filter((t) => t !== "mechanical" && t !== "outside").map((t) => `team:${t}`)]));
+    }
+  }
   // A bodyshop job's own work (labour or a service with no package kind behind it) still runs through stages.
   if (!kinds.length && lines.some((l) => l.line_type === "labour" || l.line_type === "package" || l.line_type === "other")) {
     const { data: j } = await admin.from("jobs").select("department").eq("id", jobId).maybeSingle();
@@ -759,18 +772,28 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
   if (stagelessIds.length) {
     const { data: lineRows } = await admin
       .from("quotation_lines")
-      .select("id, line_type, side, title, package_key, package_items, film_colour, film_code, tint_percent, quotation:quotations!inner(job_id, status, is_active, version), service:services(bodyshop_kind, department)")
+      .select("id, line_type, side, title, package_key, package_items, film_colour, film_code, tint_percent, outside_work, quotation:quotations!inner(job_id, status, is_active, version), service:services(name, bodyshop_kind, department, outside_work)")
       .in("quotation.job_id", stagelessIds)
       .eq("is_active", true)
       .eq("quotation.is_active", true)
       .neq("quotation.status", "cancelled");
     const kindsOf = new Map<string, Set<string>>();
+    const lineIds = ((lineRows ?? []) as unknown as { id: string }[]).map((l) => l.id);
+    const { data: teamRows } = lineIds.length && (await teamsReady()) ? await admin.from("quotation_lines").select("id, team").in("id", lineIds).not("team", "is", null) : { data: [] };
+    const chosenTeams = new Map(((teamRows ?? []) as { id: string; team: string }[]).map((r) => [r.id, r.team]));
     for (const l of (lineRows ?? []) as unknown as (SideLine & { quotation: { job_id: string } | null; service: { bodyshop_kind: string | null; department: string | null } | null })[]) {
       const jid = l.quotation?.job_id;
       if (!jid) continue;
       for (const kind of kindsOfLine(l, l.service)) {
         if (!kindsOf.has(jid)) kindsOf.set(jid, new Set());
         kindsOf.get(jid)!.add(kind);
+      }
+      // 1 November 2026: each line's team (chosen, else the default) brings its stages too (paint, refit, coding ...).
+      const dept = rows.find((r) => r.id === jid)?.department ?? null;
+      const team = teamOfLine({ ...l, team: chosenTeams.get((l as unknown as { id: string }).id) ?? null } as TeamLine, l.service, dept);
+      if (team && team !== "mechanical" && team !== "outside") {
+        if (!kindsOf.has(jid)) kindsOf.set(jid, new Set());
+        kindsOf.get(jid)!.add(`team:${team}`);
       }
     }
     for (const [jid, kinds] of kindsOf) {

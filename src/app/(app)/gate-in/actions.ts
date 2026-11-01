@@ -1,5 +1,6 @@
 "use server";
 
+import { realRequests } from "@/lib/line-teams";
 import { bookedJobOf } from "@/lib/bodyshop";
 
 import { randomBytes } from "node:crypto";
@@ -92,7 +93,8 @@ export async function requestLines(formData: FormData): Promise<string[]> {
   return formData
     .getAll("requests")
     .map((r) => knownWordsUp(String(r).trim(), known))
-    .filter((r) => r.length > 0)
+    // 1 November 2026 (J-00969 came in with "."): a request needs real words, three letters or more.
+    .filter((r) => realRequests([r]).length > 0)
     .slice(0, 50);
 }
 
@@ -143,7 +145,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     recheckOf = { id: hit.id, number: hit.number };
     if (!requests.length) requests.push(`PPF RECHECK (FREE): 10-day final check of ${hit.number}`);
   }
-  if (requests.length === 0) return { error: "Add at least one customer request.", values };
+  if (requests.length === 0) return { error: "Add at least one real customer request: a few words, three letters or more (\".\" is not a request).", values };
   const vipOn = formData.get("vip") === "on";
   const vipNote = blankToNull(formData.get("vip_note"));
 

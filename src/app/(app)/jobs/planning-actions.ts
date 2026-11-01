@@ -120,7 +120,8 @@ async function releaseChecks(jobId: string, formData: FormData, side: Side, staf
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return fail("Pick the start day.");
   if (!job.plan_parts_done_at && staff.role_id !== "owner") return fail("Parts have not planned the parts yet. Remind Parts, or the owner can release anyway.");
   if (plan.missing.length && !force) return fail(`${plan.missing.length} part${plan.missing.length === 1 ? " is" : "s are"} not here yet (${plan.missing.map((p) => `${p.description}${p.expected_date ?? p.delivery_date ? ` · ${p.expected_date ?? p.delivery_date}` : ""}`).join(", ")}). Tick "Start with available parts" to release anyway.`);
-  const picked = await checkPickable(formData.getAll("technician").map(String), [side]);
+  // Each line only by its own team (1 November 2026): a coding line by the electricians, paint by the painters.
+  const picked = await checkPickable(formData.getAll("technician").map(String), [side], plan.teams.map((t) => t.key));
   if (picked.error) return fail(picked.error);
   return { job, plan, settings, start, force, people: picked.people, fail };
 }

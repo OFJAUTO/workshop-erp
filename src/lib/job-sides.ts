@@ -6,10 +6,14 @@ import { packageParts } from "./packages";
 import { isPpfFilmItem, isPpfText } from "./ppf-cut";
 import { isTintText } from "./tint";
 import type { Side } from "./teams";
+import { sidesOfTeams, teamsOf } from "./line-teams";
 export type { Side };
 
 export type SideLine = {
   line_type: string;
+  /** The team chosen on the line (line-teams.ts); null = the default from the service and the words. */
+  team?: string | null;
+  outside_work?: boolean | null;
   side?: string | null;
   title?: string | null;
   service_id?: string | null;
@@ -19,7 +23,7 @@ export type SideLine = {
   film_code?: string | null;
   tint_percent?: number | null;
 };
-export type SideService = { department?: string | null; bodyshop_kind?: string | null } | null | undefined;
+export type SideService = { name?: string | null; department?: string | null; bodyshop_kind?: string | null; outside_work?: boolean | null } | null | undefined;
 
 const NO_SIDE = new Set(["recovery", "fee", "part", "consumables", "discount"]);
 
@@ -64,6 +68,10 @@ export function sidesOfJob(department: string | null | undefined, lines: { line:
   const hasMech = sides.some((s) => s.side === "mechanical" || (s.side === null && s.labour));
   if (department === "bodyshop") return ["bodyshop"];
   if (department === "both") {
+    // 1 November 2026 (J-00969): the lines' teams decide - paint and refit are the bodyshop's, coding the electricians'
+    // (the mechanical side), outside work neither. Nothing known yet: both sides.
+    const byTeams = sidesOfTeams(teamsOf(lines.map((x) => ({ line: x.line, svc: x.svc })), "both"));
+    if (byTeams.length) return byTeams;
     if (hasBody && !hasMech) return ["bodyshop"];
     if (hasMech && !hasBody) return ["mechanical"];
     return ["mechanical", "bodyshop"];

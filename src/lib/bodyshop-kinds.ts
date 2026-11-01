@@ -94,6 +94,11 @@ export function stageKeysFor(kinds: string[]): string[] {
   if (k.has("ppf_removal") && !ppf) want.add("removal").add("detail").add("qc").add("handover");
   if (k.has("wash") && want.size === 0) want.add("clean").add("handover");
   if (k.has("other") && want.size === 0) want.add("detail").add("qc").add("handover");
+  // 1 November 2026: lines with a team (line-teams.ts) bring that team's stages, in the order of work.
+  const TEAM_STAGES: Record<string, string[]> = { dismantle_refit: ["strip", "refit"], paint: ["paint"], ppf: ["ppf"], detailing: ["detail"], electrical: ["electrical"] };
+  const teamKinds = kinds.filter((x) => x.startsWith("team:")).map((x) => x.slice(5));
+  for (const t of teamKinds) for (const key of TEAM_STAGES[t] ?? []) if (!(key === "strip" && (want.has("repair") || want.has("removal")))) want.add(key);
+  if (teamKinds.some((t) => TEAM_STAGES[t])) want.add("qc").add("handover");
   if (want.has("paint_full")) want.delete("paint");
   // "PPF install" reads "PPF install and tint" when both are on the car: the tint stage merges into it.
   if (want.has("ppf") && want.has("tint")) want.delete("tint");

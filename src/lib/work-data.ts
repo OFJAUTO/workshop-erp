@@ -1,4 +1,6 @@
 import { jobHasOilChange } from "./stickers";
+import { lineTeamDef, teamOfLine, type TeamLine } from "./line-teams";
+import { attachTeams, servicesFor } from "./line-teams-data";
 import { countedMinutes, type WorkingTime,breakMinutesBetween, type BreakLike } from "./working-time";
 import { positionsWords } from "./parts-list";
 import "server-only";
@@ -147,7 +149,15 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
   ]);
   const svcOf = new Map((svcRows ?? []).map((s) => [s.id as string, s]));
   const dept = (jobDept?.department as string | null) ?? null;
+  // A mixed car (1 November 2026, J-00969): only the lines whose team is on the mechanical side (mechanical work,
+  // electrical coding) go on the workshop's work order; paint, refit, PPF and outside work never do.
+  const teamOf = dept === "both" ? new Map((await attachTeams(((lines ?? []) as Record<string, unknown>[]).map(toLine))).map((l) => [l.id, l.team])) : new Map<string, string | null>();
+  const svcFull = dept === "both" ? await servicesFor(serviceIds) : new Map();
   const onWorkOrder = (l: QuoteLine) => {
+    if (dept === "both") {
+      const t = teamOfLine({ ...l, team: teamOf.get(l.id) ?? null } as unknown as TeamLine, l.service_id ? svcFull.get(l.service_id) ?? null : null, "both");
+      return !t || lineTeamDef(t)?.side === "mechanical";
+    }
     const side = lineSideOf(l as unknown as SideLine, l.service_id ? svcOf.get(l.service_id) : null);
     return dept === "bodyshop" ? side === "mechanical" : dept === "both" ? side !== "bodyshop" : true;
   };

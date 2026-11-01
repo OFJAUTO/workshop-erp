@@ -96,7 +96,13 @@ import { LOOSE_SKIP_STAGES, loadJobItems } from "@/lib/loose-items";
 import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
 import { StaffPicker } from "@/components/StaffPicker";
-import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
+import { bodyshopOnCar, fitsTeams, lineTeamsOfJob, pickablePeople, presentTeams, workTeamsOf } from "@/lib/staff-picker";
+import { LINE_TEAM_LABELS, lineTeamDef, teamWithCar, teamsWords } from "@/lib/line-teams";
+import { teamsReady } from "@/lib/line-teams-data";
+import { TEAM_LABELS, sideOfPerson, teamOf } from "@/lib/teams";
+import { setJobDepartment, setLineTeam } from "../team-actions";
+import { TeamsCard } from "./TeamsCard";
+import { loadStages } from "@/lib/bodyshop";
 import { sidesOfDepartment } from "@/lib/job-sides";
 import { bodyshopScopeOf, maySignAftercare } from "@/lib/team-scope";
 import { QuotationList } from "@/components/QuotationList";
@@ -219,11 +225,26 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const damageAfterOn = await damageAfterReady();
 
   // The car's sides (job-sides.ts) and THE people source for every picker on this page.
-  const jobSides = await workSidesOf(id, job.department);
-  const people = canAssign && !staff.viewingAs ? await pickablePeople(settings, jobSides) : [];
+  const { sides: jobSides, teams: jobTeams } = await workTeamsOf(id, job.department);
+  const people = canAssign && !staff.viewingAs ? await pickablePeople(settings, jobSides, jobTeams) : [];
   const onCar = canAssign || job.assigned_to ? await loadJobTechnicians(id) : [];
   const bodyOnCar = canAssign && jobSides.includes("bodyshop") ? await bodyshopOnCar(id) : [];
   const mechOnCar = onCar.filter((t) => !bodyOnCar.some((b) => b.staff_id === t.staff_id));
+  // Department and teams (1 November 2026, J-00969): each line's team, and the people on the car who no longer fit.
+  const mayChangeTeams = ["owner", "service_advisor", "workshop_manager"].includes(role) && !staff.viewingAs && job.is_open;
+  const teamLines = job.is_open && ["owner", "service_advisor", "workshop_manager", "accounts"].includes(role) ? await lineTeamsOfJob(id, job.department) : [];
+  const linesReady = await teamsReady();
+  const withCarTeam = teamLines.length && job.department !== "mechanical" ? teamWithCar(jobSides.includes("bodyshop") ? await loadStages(id) : [], job.status === "in_work" && !!job.plan_released_at) : null;
+  const misfits: { name: string; why: string }[] = [];
+  if (teamLines.length && (onCar.length || bodyOnCar.length)) {
+    const { data: who } = await admin.from("staff").select("id, display_name, team, department_id").in("id", [...onCar.map((t) => t.staff_id), ...bodyOnCar.map((b) => b.staff_id)]);
+    const present = await presentTeams();
+    for (const p of (who ?? []) as { id: string; display_name: string; team: string | null; department_id: string | null }[]) {
+      const side = sideOfPerson(p) ?? "mechanical";
+      if (!jobSides.includes(side)) misfits.push({ name: p.display_name, why: `works in the ${side === "bodyshop" ? "bodyshop" : "mechanical workshop"}; this car has no ${side === "bodyshop" ? "bodyshop" : "mechanical"} work now` });
+      else if (!fitsTeams(p, side, jobTeams, present)) misfits.push({ name: p.display_name, why: `${TEAM_LABELS[teamOf(p)]}: this car's lines need ${jobTeams.filter((t) => lineTeamDef(t)?.side === side).map((t) => LINE_TEAM_LABELS[t]).join(", ")}` });
+    }
+  }
   const viewerSide = role === "owner" ? null : sideOfDepartment(staff.department_id);
   // The Assign card: who does the first look at the car. A car with a mechanical side needs a mechanic (and the
   // road test choice); a bodyshop-only car its team.
@@ -569,7 +590,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {docAlerts.map((a) => <Badge key={a.key} tone={a.tone === "muted" ? "neutral" : a.tone}>{a.text}</Badge>)}
               </div>
             ) : null}
-            <StageTrack stage={job.stage} timing={timing} skip={skipStages.length ? skipStages : undefined} states={barStates} extra={hasDeposit ? [{ after: "approval" as Stage, key: "advance", label: "Advance payment", state: barStates.advance ?? "later" }] : []} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
+            <StageTrack stage={job.stage} timing={timing} workLabel={teamsWords(jobTeams).includes("+") ? teamsWords(jobTeams) : undefined} skip={skipStages.length ? skipStages : undefined} states={barStates} extra={hasDeposit ? [{ after: "approval" as Stage, key: "advance", label: "Advance payment", state: barStates.advance ?? "later" }] : []} roadTest={roadTest?.decision === "needed" ? (roadTest.status === "done" || roadTest.status === "not_possible" ? "done" : "waiting") : null} />
           </Card>
           <section className="rounded-card bg-chip border border-line p-5 flex flex-col gap-2">
             <SectionLabel right={`${requests.length}`}>Customer requests</SectionLabel>
@@ -646,6 +667,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
+      {teamLines.length || mayChangeTeams ? (
+        <TeamsCard department={job.department ?? "mechanical"} canChange={mayChangeTeams} onDepartment={setJobDepartment.bind(null, id)} lines={teamLines.map((l) => ({ id: l.id, title: l.title, team: l.team!, chosen: !!l.chosen, onTeam: setLineTeam.bind(null, id, l.id) }))} linesReady={linesReady} misfits={misfits} workWords={teamsWords(jobTeams)} withCar={withCarTeam ? LINE_TEAM_LABELS[withCarTeam] : null} />
+      ) : null}
       {plan && (plan.active || ["approved", "waiting_parts"].includes(job.status)) ? (
         <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} job={job} mySide={role === "owner" ? null : sideOfDepartment(staff.department_id)} people={people} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} />
       ) : null}

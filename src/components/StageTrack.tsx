@@ -12,7 +12,7 @@ const BAR: Record<Timing["tone"], string> = {
  * The nine-step track from the dashboard design. Done steps are black, the current step takes the timing colour.
  * When a road test comes before the inspection, the Inspection step shows two halves: the road test, then the inspection.
  */
-export function StageTrack({ stage, timing, compact = false, skip, roadTest = null, partly = false, states = null, extra = [] }: { stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null; /** Kept for callers that still pass it; the states map is the source of truth now. */ partly?: boolean; /** The fact-driven state per stage (stageStates); without it the position decides. */ states?: Partial<Record<Stage, StageBoxState>> | null; /** Steps this job alone takes, slotted in after a stage (the advance payment between Approval and Parts). */ extra?: { after: Stage; key: string; label: string; state: StageBoxState }[] }) {
+export function StageTrack({ stage, timing, compact = false, skip, roadTest = null, partly = false, states = null, extra = [], workLabel }: { /** "Bodyshop + Electrical": who does the work on a mixed car (line-teams.ts). */ workLabel?: string; stage: Stage; timing: Timing; compact?: boolean; /** Steps this job never takes (loose items: inspection and wash). */ skip?: Stage[]; roadTest?: "waiting" | "done" | null; /** Kept for callers that still pass it; the states map is the source of truth now. */ partly?: boolean; /** The fact-driven state per stage (stageStates); without it the position decides. */ states?: Partial<Record<Stage, StageBoxState>> | null; /** Steps this job alone takes, slotted in after a stage (the advance payment between Approval and Parts). */ extra?: { after: Stage; key: string; label: string; state: StageBoxState }[] }) {
   const stages = skip?.length ? STAGES.filter((s) => !skip.includes(s)) : STAGES;
   const current = stages.indexOf(stage);
   if (compact) {
@@ -34,7 +34,7 @@ export function StageTrack({ stage, timing, compact = false, skip, roadTest = nu
     const done = i < current;
     const now = i === current;
     const state: StageBoxState = states?.[s] ?? (done ? "done" : now ? "current" : "later");
-    const own = { key: s as string, label: STAGE_LABELS[s], state, title: s === "inspection" && roadTest ? `Road test ${roadTest === "done" ? "done" : "waiting"} · inspection` : undefined };
+    const own = { key: s as string, label: s === "work" && workLabel ? workLabel : STAGE_LABELS[s], state, title: s === "inspection" && roadTest ? `Road test ${roadTest === "done" ? "done" : "waiting"} · inspection` : undefined };
     return [own, ...extra.filter((e) => e.after === s).map((e) => ({ key: e.key, label: e.label, state: e.state, title: undefined as string | undefined }))];
   });
   void partly; // in progress is always amber now; the shared classes carry the whole look

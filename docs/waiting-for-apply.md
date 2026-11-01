@@ -15,5 +15,6 @@ The backup taken before tonight's work is `backups/2026-11-01T19-33-29` (107 tab
 |---|---|---|---|---|
 | 1 | `20261202100000_quote_handback.sql` | Estimate back to the advisor (E-00055) | The hand-back ("Edited by Omar – check and send" + what changed), the banner, the advisor's Waiting on you line. It also puts E-00055 back with Anas. | `backups/2026-11-01T19-33-29` |
 | 2 | `20261202110000_lpo_refusals_intake.sql` | LPO approvals + intake manifold | Refusing one LPO line ("Refused by Omar – reason"), the refused list on the LPO, and "Intake manifold" in the live checklist. It also fixes J-00317: the Al Tayer mount is marked refused, the Al Futtaim mount is added to LPO-00038 (you are told "1 part added to LPO-00038"), and Peter's revision request is closed. | `backups/2026-11-01T19-33-29` |
+| 3 | `20261202120000_line_teams.sql` | Departments per line (J-00969) | Choosing a team per line by hand (the default teams already work without it), and J-00969's lines set: paint → Paint, remove and refit → Dismantle & refit, coding → Electrical, PDR → Outside work. | `backups/2026-11-01T19-33-29` |
 
 Already applied: `20261202090000_payments_anytime.sql` (1 November 2026, backup `backups/2026-11-01T16-47-48`).
