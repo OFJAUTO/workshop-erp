@@ -38,14 +38,14 @@ const visual = async () => page.$$eval('[id^="item-line-"] textarea[id^="name-"]
 
 /* ---------------- 1. The controls and the spell check ---------------- */
 check("1: every job line carries the ⋮⋮ handle and the ↑↓", (await page.locator("[data-drag-handle]").count()) === 3 && (await page.locator("[data-move-up]").count()) === 3);
-const sc = await page.locator('textarea[id^="name-"]').first().evaluate((el) => ({ spell: el.spellcheck, lang: el.lang }));
-check("1: the typed name box has spell check on, in English", sc.spell === true && sc.lang === "en", JSON.stringify(sc));
+const sc = await page.locator('textarea[id^="name-"]').first().evaluate((el) => ({ spell: el.hasAttribute("data-spell"), lang: el.lang }));
+check("1: the typed name box is spell checked while typing, in English", sc.spell === true && sc.lang === "en", JSON.stringify(sc));
 await page.locator(`#item-line-${PADS} [aria-label="More for this line"]`).click();
 await sleep(300);
 const noteItem = page.getByText("Add a note for the customer", { exact: true });
 await noteItem.click();
 await sleep(400);
-const noteSc = await page.locator(`#item-line-${PADS} textarea`).last().evaluate((el) => ({ spell: el.spellcheck, lang: el.lang }));
+const noteSc = await page.locator(`#item-line-${PADS} textarea`).last().evaluate((el) => ({ spell: el.hasAttribute("data-spell"), lang: el.lang }));
 check("1: the customer-note box has spell check on too", noteSc.spell === true && noteSc.lang === "en", JSON.stringify(noteSc));
 await page.getByText("Done", { exact: true }).first().click();
 check("1: the order starts as quoted", JSON.stringify(await visual()) === JSON.stringify(["REPLACE FRONT BRAKE PADS", "FLUSH BRAKE FLUID", "WHEEL ALIGNMENT"]), JSON.stringify(await visual()));

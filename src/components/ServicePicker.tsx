@@ -84,7 +84,7 @@ export function ServicePicker({
           <h2 className="text-lg font-extrabold">{heading}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button>
         </div>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={kind === "service" ? "Type to find a service…" : "Type to find a job…"} autoFocus spellCheck lang="en" aria-label="Search" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={kind === "service" ? "Type to find a service…" : "Type to find a job…"} autoFocus spellCheck={false} lang="en" aria-label="Search" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" />
         <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-3 min-h-0 flex-1">
           <div className="flex flex-wrap sm:flex-col gap-1 sm:overflow-y-auto sm:max-h-[60vh]">
             {suggestedHere.length ? tabBtn("suggested", `Suggested (${suggestedHere.length})`, true) : null}

@@ -2,8 +2,6 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { SharePdfButton } from "./SharePdfButton";
-import { SpellCheckPanel } from "@/components/SpellCheckPanel";
-import type { SpellSource } from "@/lib/spell-docs";
 
 /**
  * The centre window that opens where a "send to customer" button was clicked: the written message
@@ -20,13 +18,7 @@ export function SendLinkDialog({
   pdf = null,
   note = null,
   above = null,
-  spell = null,
-  checkSpelling = true,
 }: {
-  /** The document behind the link, read by the spelling check together with the message (section 5, 23 October 2026). */
-  spell?: SpellSource | null;
-  /** The quick spelling check before sending (a reminder, never a block); off only for messages that are not words. */
-  checkSpelling?: boolean;
   /** Extra controls shown above the message while keeping it (for example an optional payment-link box). */
   above?: ReactNode;
   /** The document as a PDF: "Share PDF" hands the file to the share sheet (or downloads it on a PC). */
@@ -44,10 +36,8 @@ export function SendLinkDialog({
   children?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
-  // The message as shown and sent: the spelling check's one-tap fixes change it here.
-  const [edited, setEdited] = useState<{ from: string | null; text: string | null }>({ from: message, text: message });
-  if (edited.from !== message) setEdited({ from: message, text: message });
-  const shown = edited.text;
+  // Spelling is checked while typing (SpellHost, 1 November 2026): sending never asks about it.
+  const shown = message;
   const [copyError, setCopyError] = useState<string | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -84,7 +74,6 @@ export function SendLinkDialog({
           <>
             {note ? <p className="text-sm font-semibold text-amber" data-pay-note>{note}</p> : null}
             {above}
-            {checkSpelling ? <SpellCheckPanel message={shown} source={spell} onMessage={(text) => setEdited({ from: message, text })} /> : null}
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Message to the customer</p>
             <textarea readOnly value={shown} rows={6} className="w-full rounded-control border border-line bg-canvas p-3 text-sm" onFocus={(e) => e.currentTarget.select()} data-send-message />
             {phoneDigits ? (

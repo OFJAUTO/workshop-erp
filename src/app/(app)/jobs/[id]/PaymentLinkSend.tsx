@@ -44,7 +44,7 @@ export function PaymentLinkSend({ jobId, balance, message, phoneDigits }: { jobI
         Send payment link
       </Button>
       {open ? (
-        <SendLinkDialog title="Send a payment link" message={full} phoneDigits={phoneDigits} onClose={close} onSent={() => { if (ready) void markPaymentLinkSent(jobId, ready.amount); close(); }} checkSpelling={false}>
+        <SendLinkDialog title="Send a payment link" message={full} phoneDigits={phoneDigits} onClose={close} onSent={() => { if (ready) void markPaymentLinkSent(jobId, ready.amount); close(); }}>
           {!ready ? (
             <div className="flex flex-col gap-3" data-payment-link-amount>
               <div className="grid grid-cols-2 gap-2">

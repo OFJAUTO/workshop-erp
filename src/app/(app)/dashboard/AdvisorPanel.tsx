@@ -7,7 +7,7 @@ import type { AdvisorDay, AdvisorMonth } from "@/lib/profit";
  * approve, never sales value, never a ranking); "My month" stays the small private link underneath.
  */
 export function AdvisorPanel({ day, month }: { day: AdvisorDay; month: AdvisorMonth }) {
-  const fmt = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
+  const fmt = (n: number) => `AED ${(Math.round(n) || 0).toLocaleString("en-GB")}`;
   const monthName = new Date(`${day.date}T12:00:00Z`).toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
   const pct = Math.max(0, Math.min(100, day.percent));
   const barTone = day.percent >= 100 ? "bg-green" : "bg-amber-bar";

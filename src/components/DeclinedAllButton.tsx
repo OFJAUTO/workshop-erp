@@ -83,7 +83,7 @@ export function DeclinedAllButton({ jobId, fee, isOwner, oldWording = null }: { 
                     {!isOwner && value !== agreed ? (
                       <label className="flex flex-col gap-1 text-sm font-semibold">
                         Why a different amount? (kept in the job&apos;s history)
-                        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} spellCheck lang="en" className="rounded-control border border-line-strong px-3 py-2 text-base" data-declined-reason />
+                        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} spellCheck={false} data-spell="" lang="en" className="rounded-control border border-line-strong px-3 py-2 text-base" data-declined-reason />
                       </label>
                     ) : null}
                     <button type="button" disabled={pending} onClick={() => send(value)} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-50" data-declined-confirm>

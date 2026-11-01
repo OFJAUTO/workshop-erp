@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { NumericInput } from "./NumericInput";
 import { CasedInput, CasedTextarea } from "./CasedInput";
+import { noSpellName } from "@/lib/spell-rules";
 import { KeptSelect } from "./KeptSelect";
 import type { TextCase } from "@/lib/text-case";
 import type { ReactNode } from "react";
@@ -159,20 +160,29 @@ const controlClass =
 
 const WORDY_TYPES = new Set([undefined, "text", "search", "url"]);
 
-/** Text boxes get English spell check by default (a standing rule); numbers, emails, dates and codes do not. */
-export function Input({ className = "", textCase, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { textCase?: TextCase }) {
+/**
+ * Text boxes are spell checked in English while typing (a standing rule): our own dotted underline from the shared
+ * workshop dictionary (SpellHost, data-spell), so names and car words are never flagged. Names, phones, plates, VINs,
+ * part numbers, addresses, amounts and codes are never checked (noSpellName). The browser's own red underline is off
+ * (it does not know the workshop's words); the phone keyboard's autocorrect and sentence capitals stay on.
+ * `spell` forces it on or off for one box.
+ */
+export function Input({ className = "", textCase, spell, spellCheck, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { textCase?: TextCase; spell?: boolean }) {
   const wordy = WORDY_TYPES.has(props.type) && props.inputMode !== "numeric" && props.inputMode !== "decimal" && props.inputMode !== "tel";
   // Money and number boxes take digits only (and one dot for decimals): letters typed by mistake disappear as you type.
   if (props.inputMode === "numeric" || props.inputMode === "decimal") return <NumericInput className={`${controlClass} ${className}`} {...props} />;
+  const ours = spell ?? (wordy && textCase !== "upper" && props.type !== "search" && spellCheck !== false && !noSpellName(props.name));
+  const mark = ours ? { "data-spell": "" } : {};
   // Names, codes and descriptions tidy their own case when the person leaves the box (the database does it again on save).
-  if (textCase) return <CasedInput textCase={textCase} spellCheck={wordy && textCase !== "upper" ? true : false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
-  // Words get the browser's and the phone keyboard's spell check, autocorrect and sentence capitals (never switched off).
-  return <input spellCheck={wordy ? true : false} autoCorrect={wordy ? "on" : undefined} autoCapitalize={wordy ? "sentences" : undefined} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...props} />;
+  if (textCase) return <CasedInput textCase={textCase} spellCheck={false} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...mark} {...props} />;
+  return <input spellCheck={false} autoCorrect={wordy ? "on" : undefined} autoCapitalize={wordy ? "sentences" : undefined} lang={wordy ? "en" : undefined} className={`${controlClass} ${className}`} {...mark} {...props} />;
 }
 
-export function Textarea({ className = "", textCase, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { textCase?: TextCase }) {
-  if (textCase) return <CasedTextarea textCase={textCase} spellCheck autoCorrect="on" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
-  return <textarea spellCheck autoCorrect="on" autoCapitalize="sentences" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...props} />;
+export function Textarea({ className = "", textCase, spell, spellCheck, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { textCase?: TextCase; spell?: boolean }) {
+  const ours = spell ?? (spellCheck !== false && !props.readOnly && !noSpellName(props.name) && props.lang !== "ar" && props.dir !== "rtl");
+  const mark = ours ? { "data-spell": "" } : {};
+  if (textCase) return <CasedTextarea textCase={textCase} spellCheck={false} autoCorrect="on" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...mark} {...props} />;
+  return <textarea spellCheck={false} autoCorrect="on" autoCapitalize="sentences" lang={props.lang ?? "en"} className={`${controlClass} py-2.5 min-h-24 ${className}`} {...mark} {...props} />;
 }
 
 export function Select({ className = "", children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {

@@ -399,7 +399,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>
               <form action={noteInspectionEdit.bind(null, id)} className="flex flex-col gap-2">
-                <textarea name="note" rows={2} required spellCheck lang="en" className="w-full rounded-control border border-line-strong px-3 py-2 text-sm" placeholder="Describe the change for the record" />
+                <textarea name="note" rows={2} required spellCheck={false} data-spell="" lang="en" className="w-full rounded-control border border-line-strong px-3 py-2 text-sm" placeholder="Describe the change for the record" />
                 <Button type="submit" size="md">Record the change</Button>
               </form>
             </Card>

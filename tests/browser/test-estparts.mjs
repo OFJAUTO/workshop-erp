@@ -73,7 +73,7 @@ try {
   const pads = await lineOf("Front brake pads e2e");
   const padsRow = ap.locator(`[data-est-part="${pads.id}"]`);
   await padsRow.waitFor({ timeout: 15000 });
-  check("A the name is an editable box (spell check on), with quantity and a note for the parts desk", (await padsRow.locator("[data-est-part-name]").getAttribute("spellcheck")) === "true" && (await padsRow.locator("[data-est-part-qty]").count()) === 1 && (await padsRow.locator("[data-est-part-note]").count()) === 1);
+  check("A the name is an editable box (spell check on), with quantity and a note for the parts desk", (await padsRow.locator("[data-est-part-name]").getAttribute("data-spell")) === "" && (await padsRow.locator("[data-est-part-qty]").count()) === 1 && (await padsRow.locator("[data-est-part-note]").count()) === 1);
   await padsRow.locator("[data-est-part-qty]").fill("2");
   await padsRow.locator("[data-est-part-note]").pressSequentially("OEM only, front axle", { delay: 10 });
   await sleep(1500);

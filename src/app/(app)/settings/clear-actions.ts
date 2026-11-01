@@ -4,16 +4,17 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { clearTestData } from "@/lib/clear-test-data";
 import type { FormState } from "@/lib/form-state";
-import { getSettings } from "@/lib/settings";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-/** Owner only, while the testing-phase setting is on, with the phrase typed exactly. */
+/** Owner only, while the Testing phase is on in Settings, with DELETE typed. */
 export async function clearTestDataAction(_state: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePermission("manageSettings");
   const confirm = String(formData.get("confirm") ?? "").trim();
   if (staff.role_id !== "owner" || staff.viewingAs || staff.actingAs) return { error: "Only the owner, from his own login.", values: { confirm } };
-  const settings = await getSettings();
-  if (settings.test_mode_enabled !== true) return { error: "The testing phase is switched off in Settings; the button does nothing now.", values: { confirm } };
-  if (confirm !== "CLEAR TEST DATA") return { error: "Type CLEAR TEST DATA exactly to confirm.", values: { confirm } };
+  // The switch itself, read fresh: a missing row is OFF (C2, 1 November 2026) - never a default that lets it through.
+  const { data: mode } = await createAdminClient().from("settings").select("value").eq("key", "test_mode_enabled").maybeSingle();
+  if ((mode as { value?: unknown } | null)?.value !== true) return { error: "Clear test data is switched off: the Testing phase is off in Settings.", values: { confirm } };
+  if (confirm !== "DELETE") return { error: "Type DELETE to confirm.", values: { confirm } };
   try {
     const r = await clearTestData({ id: staff.id, display_name: staff.display_name });
     const rows = Object.values(r.deleted).reduce((a, b) => a + b, 0);

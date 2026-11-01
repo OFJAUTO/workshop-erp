@@ -232,7 +232,7 @@ if (CLEAR) {
     await go(page, `${base}/settings`);
     const box = page.locator("input[name=confirm]");
     check("A: the Clear test data card is on Settings (testing phase on)", (await box.count()) === 1);
-    await box.fill("CLEAR TEST DATA");
+    await box.fill("DELETE");
     await page.getByRole("button", { name: "Clear test data" }).click();
     const report = await until(async () => { const t = (await page.locator("pre").first().textContent().catch(() => "")) ?? ""; return /Deleted \d+ rows/.test(t) ? t : null; }, 240, 1000);
     check("A1: the clear ran through with a report and no error", !!report && !/Could not/.test((await page.textContent("body")) ?? ""), (report ?? ((await page.textContent("body")) ?? "")).slice(0, 400));

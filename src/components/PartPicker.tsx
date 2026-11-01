@@ -197,7 +197,7 @@ export function PartPicker({
           <h2 className="text-lg font-extrabold">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button>
         </div>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && q && !exact) { e.preventDefault(); addCustom(query); } }} placeholder="Type to find a part…" autoFocus spellCheck lang="en" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" aria-label="Find a part" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && q && !exact) { e.preventDefault(); addCustom(query); } }} placeholder="Type to find a part…" autoFocus spellCheck={false} lang="en" className="min-h-12 w-full rounded-control border border-line-strong px-3.5 text-base outline-none focus:border-ink" aria-label="Find a part" />
         <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[180px_minmax(0,1fr)] gap-3 min-h-0 flex-1">
           <div className="flex sm:flex-col gap-1 overflow-auto" data-categories>
             {suggested.length ? tabBtn("suggested", suggestedLabel) : null}
@@ -226,7 +226,7 @@ export function PartPicker({
         <div className="flex flex-col gap-2 border-t border-line pt-3">
           {customOpen ? (
             <div className="flex flex-wrap items-center gap-2" data-custom-part>
-              <input value={customText} onChange={(e) => setCustomText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(customText); } }} placeholder="Part name, in your own words" autoFocus spellCheck lang="en" className="min-h-11 flex-1 min-w-[12rem] rounded-control border border-line-strong px-3 text-sm outline-none focus:border-ink" aria-label="Custom part name" />
+              <input value={customText} onChange={(e) => setCustomText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(customText); } }} placeholder="Part name, in your own words" autoFocus spellCheck={false} data-spell="" lang="en" className="min-h-11 flex-1 min-w-[12rem] rounded-control border border-line-strong px-3 text-sm outline-none focus:border-ink" aria-label="Custom part name" />
               <button type="button" onClick={() => addCustom(customText)} disabled={!customText.trim()} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-40">{renaming ? "Use this name" : "Add"}</button>
               <button type="button" onClick={() => setCustomOpen(false)} className="min-h-11 rounded-control px-3 text-sm font-semibold text-muted">Cancel</button>
             </div>

@@ -78,6 +78,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
               <summary className="list-none cursor-pointer min-h-11 flex flex-wrap items-center gap-3">
                 <span className="font-extrabold">{s.name}</span>
                 {!s.is_active ? <Badge tone="neutral">Inactive</Badge> : null}
+                {s.vat_registered !== false && !s.trn && !/^our stock$/i.test(s.name.trim()) ? <span data-no-trn><Badge tone="red">VAT registered but no TRN: its bills cannot go to Zoho</Badge></span> : null}
                 <span className="text-sm text-muted">{[s.trn ? `TRN ${s.trn}` : null, s.phone, s.payment_terms, s.default_discount_percent ? `${s.default_discount_percent}% discount` : null].filter(Boolean).join(" · ") || "No details yet"}</span>
                 <span className="ml-auto text-xs font-bold text-muted underline underline-offset-4">Edit</span>
               </summary>

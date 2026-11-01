@@ -58,7 +58,7 @@ await section("1 road test chips", async () => {
   await noises.getByRole("button", { name: "✓ Clunk" }).click();
   await sleep(150);
   check("1: tapping again takes the chip out and rewrites the sentence", (await noises.locator("textarea").inputValue()) === "From the front left over bumps.", await noises.locator("textarea").inputValue());
-  check("1: the remark box has spell check on", (await noises.locator("textarea").getAttribute("spellcheck")) === "true");
+  check("1: the remark box is spell checked while typing (data-spell)", (await noises.locator("textarea").getAttribute("data-spell")) === "");
   await browser.close();
   // Settings: the lists are editable, most used first.
   const own = await browserFor("owner", { viewport: { width: 1366, height: 900 } });

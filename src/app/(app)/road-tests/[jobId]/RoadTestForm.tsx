@@ -183,7 +183,7 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
                     ) : null}
                     <label className="flex flex-col gap-1">
                       <span className="text-xs font-semibold text-muted">Remarks{needs ? " (required: tap the chips or type)" : ""}</span>
-                      <Textarea name={`remarks__${it.key}`} value={v.remarks ?? ""} onChange={(e) => setRemarks(it.key, e.target.value)} rows={2} disabled={readOnly} spellCheck lang="en" />
+                      <Textarea name={`remarks__${it.key}`} value={v.remarks ?? ""} onChange={(e) => setRemarks(it.key, e.target.value)} rows={2} disabled={readOnly} lang="en" />
                     </label>
                     {inspectionId ? (
                       <InspectionMedia inspectionId={inspectionId} files={files.filter((f) => f.itemKey === `road.${it.key}`)} where={{ itemKey: `road.${it.key}` }} disabled={readOnly} onAdded={addFile(`road.${it.key}`)} onRemoved={removeFile} />

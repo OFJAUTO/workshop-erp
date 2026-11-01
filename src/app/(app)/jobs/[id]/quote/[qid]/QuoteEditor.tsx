@@ -2228,7 +2228,8 @@ function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, on
           disabled={disabled}
           placeholder={kind === "labour" ? "Labour job: type, or tap the arrow" : "Service: type, or tap the arrow"}
           aria-label={kind === "labour" ? "Labour job" : "Service"}
-          spellCheck
+          spellCheck={false}
+          data-spell=""
           lang="en"
           autoComplete="off"
           className="min-h-10 min-w-0 flex-1 resize-none overflow-hidden uppercase bg-transparent px-2.5 py-2 text-sm font-semibold outline-none disabled:text-muted"

@@ -46,7 +46,7 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
             ) : null}
             <label className="flex flex-col gap-1">
               <span className="text-sm font-semibold">Your full name</span>
-              <input name="approver_name" defaultValue={customerName} required minLength={2} spellCheck lang="en" autoCapitalize="words" className="min-h-12 rounded-lg border border-[#D4D4D8] px-3.5 text-base" autoComplete="name" />
+              <input name="approver_name" defaultValue={customerName} required minLength={2} spellCheck={false} lang="en" autoCapitalize="words" className="min-h-12 rounded-lg border border-[#D4D4D8] px-3.5 text-base" autoComplete="name" />
             </label>
             <input type="hidden" name="approved_amount" value={total.toFixed(2)} />
             <button type="submit" name="action" value="approve" className="min-h-14 w-full rounded-lg bg-[#111113] text-base font-extrabold text-white">Yes, {isEstimate ? "accept" : "approve"} · {aed(total)}</button>

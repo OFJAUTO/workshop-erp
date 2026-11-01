@@ -1,87 +1,127 @@
-// Overnight 22-23 October 2026, section 5: spell check everywhere. Text boxes carry the browser and phone keyboard
-// spell check (spellcheck, autocorrect, sentence capitals); before a report, quotation, estimate or invoice goes to a
-// customer, the send window lists suspicious words (misspellings with suggestions, keyboard mash such as "afqghjk")
-// with one-tap fix / Keep as is - never a block; the workshop dictionary (built in + Settings + makes and models)
-// is never flagged; the owner adds words.
-// Run: node --env-file=.env.test.local tests/browser/test-spell5.mjs   (dev server; E2E_BASE for another port)
+// Spell check WHILE TYPING (1 November 2026; replaces the pre-send check of 23 October 2026). Every word box is
+// checked a moment after typing stops: a dotted underline under a word the dictionary does not know, a tap shows
+// the suggestions ("ADN" -> "AND"), Ignore, and "Add to dictionary" for the owner and the advisors (for everyone).
+// The shared dictionary holds customer, contact, staff and supplier names, makes and models, the parts list, the
+// services, tyre brands and abbreviations, so the names line has nothing underlined. Names, phones, plates, VINs,
+// part numbers, addresses, amounts and codes are never checked. Sending never asks about spelling.
+//   npm run test:spell5   (test server on :3102, E2E_BASE for another port)
+import fs from "node:fs";
 import path from "node:path";
 import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
-const shot = (name) => path.join(here, "shots", name);
-const text = async (loc) => ((await loc.first().textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+const SHOTS = path.join(here, "shots", "spell");
+fs.mkdirSync(SHOTS, { recursive: true });
+const shot = (name) => path.join(SHOTS, name);
 const until = async (fn, tries = 40, gap = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(gap); } return null; };
-const spell = async (body, role = "service_advisor") => (await fetch(`${base}/api/spell`, { method: "POST", headers: { "content-type": "application/json", cookie: await cookieHeader(role) }, body: JSON.stringify(body) })).json();
+const spell = async (text, role = "service_advisor") => (await fetch(`${base}/api/spell`, { method: "POST", headers: { "content-type": "application/json", cookie: await cookieHeader(role) }, body: JSON.stringify({ text }) })).json();
+setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 12 * 60 * 1000).unref();
 
-cleanupDb();
+await cleanupDb();
 const wordsBefore = (await sql("select value::text as v from public.settings where key = 'spell_words'"))[0]?.v ?? "[]";
-const seed = await api("/api/e2e/stage", { stage: "quote" });
-const jobId = seed.json.jobId;
-const qid = seed.json.quotationId;
+const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+const jobId = seed.jobId;
+const qid = seed.quotationId;
 
-/* 1. The check itself */
-const r1 = await spell({ message: "Dear customer, your car is ready to recieve. The Urus PPF, stabiliser, wishbone, R1234yf, TPMS, ODIS and PIWIS work on the Cullinan and Brabus is done. wdwdwdw" });
-const words = (r1.issues ?? []).map((i) => i.word);
-check("1: 'recieve' is flagged with 'receive' suggested", (r1.issues ?? []).some((i) => i.word === "recieve" && i.suggestions.includes("receive")), JSON.stringify(r1.issues));
-check("1: keyboard mash 'wdwdwdw' is flagged as random typing", (r1.issues ?? []).some((i) => i.word === "wdwdwdw" && i.kind === "mash"));
-check("1: workshop words are never flagged (Urus, PPF, stabiliser, wishbone, R1234yf, TPMS, ODIS, PIWIS, Cullinan, Brabus)", !words.some((w) => /urus|ppf|stabiliser|wishbone|r1234yf|tpms|odis|piwis|cullinan|brabus/i.test(w)), words.join(", "));
-const caps = await spell({ message: "REPLACE DUE TO EXCESSIVE TEMPERATURE AFQGHJK" });
-check("1: text typed in capitals is checked too (AFQGHJK flagged, the rest fine)", (caps.issues ?? []).length === 1 && caps.issues[0].word === "AFQGHJK", JSON.stringify(caps.issues));
+// Real names from the test database, read now (never written into the repository).
+const firstWord = (s) => String(s ?? "").trim().split(/\s+/).find((w) => /^[A-Za-z]{4,}$/.test(w)) ?? null;
+const cust = (await sql("select full_name from public.customers where full_name ~ '^[A-Za-z ]+$' and length(full_name) > 8 order by created_at limit 30")).map((r) => r.full_name).find((n) => n.split(/\s+/).some((w) => w.length >= 5)) ?? null;
+const staffName = (await sql("select display_name from public.staff where is_active and display_name ~ '^[A-Za-z]{5,}' order by created_at limit 1"))[0]?.display_name ?? null;
+const supplier = firstWord((await sql("select name from public.suppliers where is_active and name ~ '^[A-Za-z]{5,}' order by created_at limit 1"))[0]?.name);
+const model = (await sql("select m.name as make, d.name as model from public.vehicle_models d join public.vehicle_makes m on m.id = d.make_id where d.is_active and d.name ~ '^[A-Za-z]{4,}$' order by d.created_at limit 1"))[0] ?? null;
+const namesLine = `${cust} AND ${staffName} CHECKED THE ${model?.make ?? ""} ${model?.model ?? ""} WITH ${supplier} PARTS, TPMS AND ECU`.replace(/\s+/g, " ");
+check(`seed: a names line from the database (${namesLine.length} letters)`, !!cust && !!staffName && !!supplier && !!model, JSON.stringify({ cust: !!cust, staffName: !!staffName, supplier: !!supplier, model: !!model }));
 
-/* 2. The inspection report: the remark the example quoted */
-const item = (await sql("select i.id, i.item_label from public.inspection_items i join public.inspections n on n.id = i.inspection_id where n.job_id = $1 and i.status = 'bad' limit 1", [jobId]))[0];
-await sql("update public.inspection_items set remarks = 'replace due to excessive temperature afqghjk' where id = $1", [item.id]);
-await sql("update public.inspections set status = 'approved', approved_at = coalesce(approved_at, now()) where job_id = $1", [jobId]);
-const r2 = await spell({ message: "Your report: link", source: { kind: "report", jobId } });
-check(`2: the report's remark is read: 'afqghjk' found under '${item.item_label}'`, (r2.issues ?? []).some((i) => i.word === "afqghjk" && i.kind === "mash" && i.label === item.item_label), JSON.stringify(r2.issues));
+/* 1. The server's answer */
+const r1 = await spell("BRAKE PADS ADN DISCS, WDWDWDW");
+const f1 = new Map((r1.flagged ?? []).map((f) => [f.word, f]));
+check(`1: "ADN" is flagged with "AND" suggested (${f1.get("ADN")?.suggestions?.join(", ")})`, !!f1.get("ADN")?.suggestions?.includes("AND"));
+check("1: keyboard mash is flagged as random typing", f1.get("WDWDWDW")?.kind === "mash");
+const r2 = await spell(namesLine);
+check(`1: the names line comes back clean (${(r2.flagged ?? []).map((f) => f.word).join(", ") || "nothing"})`, (r2.flagged ?? []).length === 0);
+check("1: an advisor may add words", r2.canAdd === true);
+check("1: a technician may not", (await spell("test", "technician")).canAdd === false);
 
-const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1366, height: 1000 } });
-await go(page, `${base}/jobs/${jobId}`);
-const sendBtn = page.getByRole("button", { name: "Send to customer" }).first();
-await sendBtn.click();
-const panel = page.locator("[data-spell-panel]");
-await panel.waitFor({ timeout: 30000 });
-check("2: the link in the message and real words like 'slight' are never flagged", !(await page.locator("[data-spell-issue=https], [data-spell-issue=erp], [data-spell-issue=ofjauto], [data-spell-issue=slight]").count()));
-check("2: the send window lists the word before sending", /afqghjk/.test(await text(panel)) && /looks like random typing/.test(await text(panel)));
-check("2: never a block: WhatsApp and Copy are still there", (await page.getByText("Open WhatsApp").count()) + (await page.getByText("Copy message and link").count()) >= 1);
-await page.screenshot({ path: shot("spell5-1-report-check.png") });
-await page.locator('[data-spell-issue="afqghjk"] [data-spell-remove]').click();
-const fixed = await until(async () => { const r = (await sql("select remarks from public.inspection_items where id = $1", [item.id]))[0]; return r && !/afqghjk/.test(r.remarks) ? r.remarks : null; });
-check("2: one tap removes it from the stored remark ('replace due to excessive temperature')", fixed === "replace due to excessive temperature", fixed ?? "");
-await browser.close();
+/* 2. Typing in the quotation: the dotted underline, the tap, the suggestion */
+const adv = await browserFor("service_advisor", { viewport: { width: 1366, height: 1000 } });
+const page = adv.page;
+await go(page, `${base}/jobs/${jobId}/quote/${qid}`);
+const box = page.locator('textarea[id^="name-"]').first();
+check("2: the line name box is checked by us (data-spell), the browser's red underline off", (await box.getAttribute("data-spell")) === "" && (await box.getAttribute("spellcheck")) === "false");
+await box.click();
+await box.fill("");
+await box.pressSequentially("BRAKE PADS ADN DISCS", { delay: 30 });
+const under = await until(async () => (await page.locator('[data-spell-overlay] [data-spell-word="ADN"]').count()) > 0, 30, 300);
+check("2: a moment after typing, ADN has the dotted underline", !!under);
+check("2: nothing else is underlined", (await page.locator("[data-spell-overlay] [data-spell-word]").count()) === 1);
+const deco = await page.locator('[data-spell-word="ADN"]').evaluate((el) => getComputedStyle(el).textDecorationStyle).catch(() => "");
+check(`2: the underline is dotted (${deco})`, deco === "dotted");
+await page.screenshot({ path: shot("2-underline.png") });
+// The caret into the word (as a tap does).
+await box.evaluate((el) => { const i = el.value.indexOf("ADN") + 2; el.setSelectionRange(i, i); });
+await box.press("ArrowRight");
+const menu = page.locator('[data-spell-menu="ADN"]');
+await menu.waitFor({ timeout: 5000 }).catch(() => {});
+check("2: the tap shows the suggestions", (await menu.count()) === 1 && (await menu.locator('[data-spell-suggest="AND"]').count()) === 1);
+check("2: an advisor sees Add to dictionary", (await menu.locator("[data-spell-add]").count()) === 1);
+await page.screenshot({ path: shot("2-suggestions.png") });
+await menu.locator('[data-spell-suggest="AND"]').click();
+const fixed = await box.inputValue();
+check(`2: "ADN" becomes "AND" (${fixed})`, /^BRAKE PADS AND DISCS$/i.test(fixed));
+check("2: the underline is gone", !!(await until(async () => (await page.locator("[data-spell-overlay] [data-spell-word]").count()) === 0, 10, 200)));
 
-/* 3. The quotation: a misspelt line fixed in one tap where it is stored */
-const line = (await sql("select id from public.quotation_lines where quotation_id = $1 and is_active order by position limit 1", [qid]))[0];
-await sql("update public.quotation_lines set title = 'Brake pad replacment' where id = $1", [line.id]);
-const r3 = await spell({ message: "Here is your quotation", source: { kind: "quotation", id: qid } });
-const iss = (r3.issues ?? []).find((i) => i.word === "replacment");
-check("3: the quotation line 'replacment' is flagged with 'replacement' suggested", !!iss && iss.suggestions.includes("replacement"), JSON.stringify(r3.issues));
-const fx = await (await fetch(`${base}/api/spell/fix`, { method: "POST", headers: { "content-type": "application/json", cookie: await cookieHeader("service_advisor") }, body: JSON.stringify({ key: iss?.key, word: "replacment", replacement: "replacement" }) })).json();
-check("3: the one-tap fix writes 'Brake pad replacement' on the line", fx.ok && (await sql("select title from public.quotation_lines where id = $1", [line.id]))[0].title === "Brake pad replacement", JSON.stringify(fx));
+/* 3. The names line: nothing underlined */
+await box.fill("");
+const answered = page.waitForResponse((r) => r.url().endsWith("/api/spell") && r.request().method() === "POST", { timeout: 15000 }).catch(() => null);
+await box.pressSequentially(namesLine, { delay: 10 });
+await answered;
+await sleep(1500);
+check("3: the names line (customer, staff, supplier, make, model, TPMS, ECU) has nothing underlined", (await page.locator("[data-spell-overlay] [data-spell-word]").count()) === 0);
+await page.screenshot({ path: shot("3-names-line.png") });
 
-/* 4. The owner's dictionary */
-const before = await spell({ message: "Ziebart treatment" }, "owner");
-check("4: an unknown word is flagged before it is added ('Ziebart')", (before.issues ?? []).some((i) => i.word === "Ziebart") && before.canAddWords === true);
-const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
-await go(op, `${base}/settings`);
-const box = op.locator("[data-spell-words]");
-await box.fill("Ziebart, Xpel");
-await box.scrollIntoViewIfNeeded();
-await op.screenshot({ path: shot("spell5-2-dictionary.png") });
-await op.getByRole("button", { name: /^Save/ }).first().click();
-await until(async () => /Ziebart/.test((await sql("select value::text as v from public.settings where key = 'spell_words'"))[0]?.v ?? ""));
-const after = await spell({ message: "Ziebart treatment" }, "owner");
-check("4: after Settings > Workshop dictionary, 'Ziebart' is never flagged", !(after.issues ?? []).some((i) => i.word === "Ziebart"), JSON.stringify(after.issues));
+/* 4. Add to dictionary: for everyone */
+const WORD = `Zentrofix${String(Date.now()).slice(-3).replace(/\d/g, (d) => "abcdefghij"[Number(d)])}`;
+await box.fill("");
+await box.pressSequentially(`FIT THE ${WORD.toUpperCase()} BRACKET`, { delay: 20 });
+await until(async () => (await page.locator(`[data-spell-overlay] [data-spell-word="${WORD.toUpperCase()}"]`).count()) > 0, 30, 300);
+check(`4: a new word (${WORD.toUpperCase()}) is underlined`, (await page.locator(`[data-spell-word="${WORD.toUpperCase()}"]`).count()) === 1);
+await box.evaluate((el, w) => { const i = el.value.indexOf(w) + 2; el.setSelectionRange(i, i); }, WORD.toUpperCase());
+await box.press("ArrowRight");
+await page.locator(`[data-spell-menu="${WORD.toUpperCase()}"] [data-spell-add]`).click();
+check("4: Add to dictionary takes the underline away", !!(await until(async () => (await page.locator("[data-spell-overlay] [data-spell-word]").count()) === 0, 20, 300)));
+const stored = (await sql("select value::text as v from public.settings where key = 'spell_words'"))[0]?.v ?? "";
+check("4: the word is in the workshop dictionary", stored.toLowerCase().includes(WORD.toLowerCase()));
+const own = await spell(`FIT THE ${WORD.toUpperCase()} BRACKET`, "owner");
+check("4: the owner's check no longer flags it (everyone)", (own.flagged ?? []).length === 0, JSON.stringify(own.flagged));
 
-/* 5. The text boxes: browser and keyboard spell check on */
-const { browser: tb, page: tp } = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });
-await go(tp, `${base}/my-jobs/${jobId}`);
-const area = tp.locator("textarea").first();
-const attrs = await area.evaluate((el) => ({ spell: el.getAttribute("spellcheck"), cap: el.getAttribute("autocapitalize"), correct: el.getAttribute("autocorrect"), lang: el.getAttribute("lang") })).catch(() => null);
-check("5: a remark box has spellcheck, autocorrect and sentence capitals on (English)", !!attrs && attrs.spell === "true" && attrs.cap === "sentences" && attrs.correct === "on" && attrs.lang === "en", JSON.stringify(attrs));
-await tb.close();
-await ob.close();
+/* 5. Boxes never checked: names, phones, plates, VINs, part numbers, addresses, amounts */
+await go(page, `${base}/customers/new`);
+const marks = await page.evaluate(() => Array.from(document.querySelectorAll("input[name], textarea[name]")).map((el) => ({ name: el.getAttribute("name"), spell: el.hasAttribute("data-spell"), native: el.getAttribute("spellcheck") })));
+const wrong = marks.filter((m) => /name|phone|mobile|email|trn|address|plate|vin/i.test(m.name ?? "") && (m.spell || m.native === "true"));
+check(`5: on the new customer form no name, phone, email, TRN, address, plate or VIN box is checked (${marks.length} boxes looked at)`, marks.length > 0 && wrong.length === 0, JSON.stringify(wrong));
 
-await sql("update public.settings set value = $1::jsonb where key = 'spell_words'", [wordsBefore]);
-cleanupDb();
-process.exit(summary() ? 1 : 0);
+/* 6. Sending never asks about spelling */
+await sql("insert into public.settings (key, label, value) values ('spell_words', 'Workshop dictionary (spell check)', $1::jsonb) on conflict (key) do update set value = excluded.value", [wordsBefore]);
+const acc = await browserFor("accounts", { viewport: { width: 1366, height: 1000 } });
+await go(acc.page, `${base}/jobs/${jobId}`);
+await acc.page.locator("[data-record-payment-open]").first().click();
+const d = acc.page.locator("[data-record-payment-dialog]");
+await until(async () => (await d.locator("[data-pay-targets]").count()) > 0, 40, 300);
+const target = d.locator("[data-pay-target]").first();
+if (await target.count()) await target.click();
+await d.locator('[data-method="cash"]').click();
+if (await d.locator("[data-amount-partial]").count()) await d.locator("[data-amount-partial]").click();
+await d.locator("[data-amount-input]").pressSequentially("50");
+if (await d.locator("[data-pay-for]").count()) await d.locator("[data-pay-for]").fill("Spelling test advance");
+await d.locator("[data-record-payment]").click();
+await acc.page.locator("[data-confirm-yes]").click();
+await until(async () => (await d.locator("[data-send-receipt]").count()) > 0, 50, 500);
+await d.locator("[data-send-receipt]").click();
+await sleep(800);
+check("6: the send window opens straight to Open WhatsApp / Copy, with no spelling question", (await acc.page.getByText("Open WhatsApp").count()) + (await acc.page.getByText("No phone number on file").count()) >= 1 && (await acc.page.locator("[data-spell-panel], [data-spell-state]").count()) === 0);
+await acc.page.screenshot({ path: shot("6-send-no-question.png") });
+
+await adv.browser.close();
+await acc.browser.close();
+await cleanupDb();
+summary();

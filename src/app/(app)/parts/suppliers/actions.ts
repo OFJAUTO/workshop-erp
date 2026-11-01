@@ -7,7 +7,7 @@ import { blankToNull } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { supplierDiscount, type SupplierOption } from "@/lib/parts-rows";
 import { syncLineForPart } from "../actions";
-import { flagZohoAttention } from "@/lib/zoho-sync";
+import { flagZohoAttention, retrySupplierRows } from "@/lib/zoho-sync";
 
 const back = (msg: string, ok: boolean) => redirect(`/parts/suppliers?${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
 
@@ -88,13 +88,16 @@ export async function updateSupplier(id: string, formData: FormData) {
   const staff = await requirePermission("manageSuppliers");
   const row = read(formData);
   const admin = createAdminClient();
-  const { data: before } = await admin.from("suppliers").select("name, default_discount_percent, discount_by_type, vat_registered").eq("id", id).maybeSingle();
+  const { data: before } = await admin.from("suppliers").select("name, trn, default_discount_percent, discount_by_type, vat_registered").eq("id", id).maybeSingle();
   const discounts = readDiscounts(formData);
   const { error } = await admin.from("suppliers").update({ ...row, ...(discounts ?? {}), updated_by: staff.id }).eq("id", id);
   if (error) back(error.message, false);
   // Bills already in Zoho carry the VAT standing they were posted with: a change now makes each of them wrong,
   // so each turns red on the Zoho page for the accountant to correct (never silently re-figured).
   if (before && (before.vat_registered !== false) !== row.vat_registered) await flagBillsAfterVatChange(id, row.name, row.vat_registered);
+  // A TRN entered or corrected (or the VAT switch moved): the bills that waited on it try Zoho again by themselves.
+  const retried = before && ((before.trn ?? null) !== row.trn || (before.vat_registered !== false) !== row.vat_registered) ? await retrySupplierRows(id) : 0;
+  const retriedWords = retried ? ` ${retried} Zoho ${retried === 1 ? "item tries" : "items try"} again now.` : "";
   // LPOs carry the supplier's name at the time; the ones not yet sent follow a rename.
   await admin.from("purchase_orders").update({ supplier_name: row.name, updated_by: staff.id }).eq("supplier_id", id).in("status", ["pending_approval", "approved"]);
   revalidatePath("/parts/suppliers");
@@ -111,10 +114,10 @@ export async function updateSupplier(id: string, formData: FormData) {
     if (changes.length) {
       await admin.from("supplier_discount_changes").insert(changes.map((c) => ({ supplier_id: id, part_type: c.part_type, from_percent: c.from, to_percent: c.to, created_by: staff.id })));
       const open = await openPricedLines(row.name);
-      if (open.length) redirect(`/parts/suppliers?message=${encodeURIComponent(`${row.name} saved.`)}&apply=${id}&count=${open.length}`);
+      if (open.length) redirect(`/parts/suppliers?message=${encodeURIComponent(`${row.name} saved.${retriedWords}`)}&apply=${id}&count=${open.length}`);
     }
   }
-  back(`${row.name} saved.`, true);
+  back(`${row.name} saved.${retriedWords}`, true);
 }
 
 /** The priced lines of this supplier on open jobs that are not ordered yet. */

@@ -74,3 +74,32 @@ export function replaceWord(text: string, word: string, replacement: string): st
   const re = new RegExp(`(^|[^A-Za-zÀ-ÿ])${esc}(?=$|[^A-Za-zÀ-ÿ])`);
   return text.replace(re, (_m, pre: string) => `${pre}${replacement}`);
 }
+
+/**
+ * Boxes never checked while typing (1 November 2026): names, phones, plates, VINs, part numbers, addresses, amounts,
+ * references and codes - by the box's field name. Arabic is never checked (the words are Latin letters only).
+ */
+const NO_SPELL_NAME = /(^|_)(name|names|company|contact|collector|driver|person|phone|mobile|tel|whatsapp|plate|vin|chassis|part_number|part_no|pn|oem|address|location|pin_url|map|email|trn|amount|price|cost|aed|qty|quantity|ref|reference|code|auth|cheque|account|iban|bank|number|no|km|mileage|pin|password|url|link|search|q|token|tyre_size|size)$/i;
+export function noSpellName(name: string | null | undefined): boolean {
+  return !!name && NO_SPELL_NAME.test(name);
+}
+
+/** Where the flagged words sit in a text (every occurrence), for the dotted underline and the tap. */
+export function flaggedRanges(text: string, flagged: Set<string>): { start: number; end: number; word: string }[] {
+  if (!flagged.size) return [];
+  return tokens(text)
+    .filter((t) => flagged.has(t.word.toLowerCase()))
+    .map((t) => ({ start: t.index, end: t.index + t.word.length, word: t.word }));
+}
+
+/** The flagged word under the caret (or just before it), if any. */
+export function rangeAt(ranges: { start: number; end: number; word: string }[], caret: number): { start: number; end: number; word: string } | null {
+  return ranges.find((r) => caret >= r.start && caret <= r.end) ?? null;
+}
+
+/** A suggestion keeps the typed word's case: "ADN" -> "AND", "Adn" -> "And", "adn" -> "and". */
+export function matchCase(typed: string, suggestion: string): string {
+  if (typed.length > 1 && typed === typed.toUpperCase()) return suggestion.toUpperCase();
+  if (typed[0] && typed[0] === typed[0].toUpperCase()) return suggestion[0].toUpperCase() + suggestion.slice(1);
+  return suggestion;
+}

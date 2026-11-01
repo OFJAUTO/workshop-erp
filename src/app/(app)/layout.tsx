@@ -13,6 +13,7 @@ import { IdleLock } from "./IdleLock";
 import { ModeGuard, type TabMode } from "./ModeGuard";
 import { CustomerPanelHost } from "@/components/CustomerPanel";
 import { RecordPaymentHost } from "@/components/RecordPaymentHost";
+import { SpellHost } from "@/components/SpellHost";
 import { getCurrentDevice } from "@/lib/devices";
 
 /** The browser tab says whose screens these are while the owner views or acts as someone. */
@@ -115,6 +116,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {/* Who is signed in, for the send queue: a sending permit is only ever kept and used for this person. */}
       <meta name="erp-staff-id" content={staff.id} />
+      {/* 1 November 2026: the spell check while typing (dotted underline, tap for suggestions), every word box. */}
+      <SpellHost />
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         searchCustomers={can(role, "viewCustomers")}
