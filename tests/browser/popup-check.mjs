@@ -217,6 +217,13 @@ export async function runPopups() {
   else notReached.push("Record the deposit: no deposit to record on the seeded car");
   await goto(p, `/jobs/${dep.jobId}`);
   if (await p.locator("[data-send-deposit-request]").count()) await check(p, "Send the deposit request", "[role=dialog]", () => click(p, "[data-send-deposit-request]"), findings, shots);
+  // 1 November 2026: THE Record payment window and the advisor's payment link for any amount (the job card).
+  await goto(p, `/jobs/${dep.jobId}`);
+  if (await p.locator("[data-record-payment-open]").count()) await check(p, "Record payment window", "[data-record-payment-dialog]", async () => { await click(p, "[data-record-payment-open]"); await p.locator("[data-record-payment-dialog] [data-pay-targets]").waitFor({ timeout: 15000 }).catch(() => null); }, findings, shots);
+  else notReached.push("Record payment window: the button did not show");
+  await goto(p, `/jobs/${dep.jobId}`);
+  if (await p.locator("[data-send-payment-link]").count()) await check(p, "Send payment link", "[role=dialog]", () => click(p, "[data-send-payment-link]"), findings, shots);
+  else notReached.push("Send payment link: the button did not show");
 
   const ready = (await api("/api/e2e/stage", { stage: "ready" })).json;
   const iUrl = `/jobs/${ready.jobId}/invoice`;

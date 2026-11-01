@@ -11,6 +11,9 @@ import { CounterPaymentsCard, MoneyTilesRow } from "@/app/(app)/dashboard/Accoun
 import { saveBankFeesAction } from "../card-settlements/actions";
 import { BankFeeSettings } from "../card-settlements/BankFeeSettings";
 import { feeRuleWords } from "@/lib/bank-fees";
+import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { UnallocatedList } from "@/components/UnallocatedList";
+import { unallocatedOf } from "@/lib/customer-money";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +41,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const rows = await loadMoneyRows(settings, ranged ? { scope: "range", from: from || "2020-01-01", to: to || dubaiDate() } : { scope: "range", from: "2020-01-01", to: dubaiDate() });
   const openRows = await loadMoneyRows(settings, { scope: "open" });
   const tiles = await loadMoneyTiles(openRows);
+  // 1 November 2026: money on customers' accounts, not allocated yet (with its age), and Record payment for anyone.
+  const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const unallocated = await unallocatedOf();
   // Open cars without an invoice yet sit at the top of "All" and "Awaiting": they come from the open scope.
   const all = [...openRows.filter((r) => !rows.some((x) => x.jobId === r.jobId)), ...rows];
   const needle = q.trim().toLowerCase();
@@ -69,7 +75,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       <PageHeader
         title="Invoices and payments"
         subtitle={`${counts[""]} car${counts[""] === 1 ? "" : "s"}${ranged ? ` · invoices from ${from || "the start"} to ${to || "today"}` : ""}`}
-        actions={can(role, "exportAccounts") ? <a href="/api/export/accounts" className="inline-flex items-center justify-center rounded-control font-bold bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Export for the accountant</a> : undefined}
+        actions={can(role, "exportAccounts") || mayPay ? <>{mayPay ? <RecordPaymentButton size="lg" /> : null}{can(role, "exportAccounts") ? <a href="/api/export/accounts" className="inline-flex items-center justify-center rounded-control font-bold bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Export for the accountant</a> : null}</> : undefined}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -92,6 +98,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         </div>
       </Card>
 
+      {unallocated.length ? (
+        <Card id="unallocated" className="flex flex-col gap-2 border-amber-bar" data-unallocated-section>
+          <SectionLabel right={`${unallocated.length} · AED ${unallocated.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`}>Unallocated payments</SectionLabel>
+          <p className="text-xs text-muted">Money on customers&apos; accounts that is not on a job or invoice yet. Allocate each one when you know what it is for.</p>
+          <UnallocatedList rows={unallocated} canAllocate={mayPay} showCustomer />
+        </Card>
+      ) : null}
       <section className="flex flex-col gap-3" data-money-list>
         <SectionLabel right={`${filtered.length}`}>{FILTERS.find((f) => f.key === show)?.label ?? "All"}</SectionLabel>
         {filtered.length === 0 ? <Empty title="Nothing here" /> : filtered.map((r) => <MoneyRow key={r.jobId} r={r} />)}

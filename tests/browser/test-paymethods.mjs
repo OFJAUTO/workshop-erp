@@ -83,11 +83,14 @@ try {
     check(`B ${m}: "Awaiting payment" is on Mathew's Waiting on you`, (await line.count()) === 1);
     await line.first().locator("a").last().click();
     await settle(page);
+    let inWindow = false;
     if (!/\/invoice/.test(page.url())) {
-      await page.locator(`a[href="/jobs/${jobId}/invoice"]`, { hasText: /Record payment/i }).first().click();
-      await settle(page);
+      // 1 November 2026: the job card's Record payment opens THE Record payment window.
+      await page.locator("[data-record-payment-open]").first().click();
+      await page.locator("[data-record-payment-dialog] [data-payment-form]").waitFor({ timeout: 20000 });
+      inWindow = true;
     }
-    const form = page.locator("[data-payment-form]");
+    const form = page.locator(inWindow ? "[data-record-payment-dialog] [data-payment-form]" : "[data-payment-form]").first();
     await form.waitFor({ timeout: 20000 });
     await form.locator(`[data-method="${m}"]`).click();
     if (m === "card" || m === "link") await form.locator("[data-auth-code]").fill(`P${m === "card" ? "C" : "L"}${String(Date.now()).slice(-4)}`);
@@ -103,7 +106,8 @@ try {
     }
     await form.locator("[data-record-payment]").click();
     if (await page.locator("[data-confirm-yes]").count()) await page.locator("[data-confirm-yes]").click();
-    await page.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+    if (inWindow) await until(async () => (await page.locator("[data-record-payment-done], [data-record-payment-error]").count()) > 0, 60, 500);
+    else await page.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
     await settle(page);
     const pays = await sql("select number, method, amount_aed::float8 as a, proof_path from public.payments where job_id = $1 and is_active", [jobId]);
     check(`B ${m}: one receipt, ${m}, the full balance`, pays.length === 1 && pays[0].method === m && /^RCT-\d{5}$/.test(pays[0].number) && pays[0].a === Number(seed.invoice.total), JSON.stringify(pays) + " " + page.url().slice(-90));

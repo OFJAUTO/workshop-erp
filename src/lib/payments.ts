@@ -13,11 +13,31 @@ import { formatPlate } from "./types";
 import { createAdminClient } from "./supabase/admin";
 import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "./zoho-sync";
 import { AUTH_CODE_RE, authCodeProblem, cleanAuthCode, needsAuthCode } from "./auth-code";
+import { jobMoneyOf } from "./customer-money";
+import { newToken } from "./media";
+import { paymentsAnytimeReady } from "./schema-ready";
 
 /** Who records: a staff member, or the payment gateway (no id). */
 export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
-export type PaymentInput = { invoiceId: string | null; jobId: string | null; method: string; amount: number; reference?: string | null; /** The bank's 6-character auth code (card machine and payment link): required when staff record one. */ authCode?: string | null; cheque?: { number: string | null; bank: string | null; date: string | null } | null; notes?: string | null; clientKey?: string | null };
-export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string } };
+export type PaymentInput = {
+  invoiceId: string | null;
+  jobId: string | null;
+  method: string;
+  amount: number;
+  reference?: string | null;
+  /** The bank's 6-character auth code (card machine and payment link): required when staff record one. */
+  authCode?: string | null;
+  cheque?: { number: string | null; bank: string | null; date: string | null } | null;
+  notes?: string | null;
+  clientKey?: string | null;
+  /** 1 November 2026: no job and no invoice - an UNALLOCATED ADVANCE on this customer's account (`notes` says what it is for). */
+  unallocated?: { customerId: string; vehicleId?: string | null } | null;
+  /** Why the payment is more than what is left (refund or credit). Required above the balance; logged. */
+  overNote?: string | null;
+  /** Measure an advance on a job against the approved total (the Record payment forms). The deposit panel keeps its own rule. */
+  overCheck?: boolean;
+};
+export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null };
 
 const money = (n: number) => `AED ${round2(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
@@ -77,6 +97,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   let jobId = input.jobId;
   let customerId: string | null = null;
   let balance: number | null = null;
+  let vehicleId: string | null = null;
+  const anytime = await paymentsAnytimeReady();
   if (input.invoiceId) {
     const { data: inv } = await admin.from("invoices").select(INVOICE_SELECT).eq("id", input.invoiceId).maybeSingle();
     if (!inv || inv.status !== "issued" || !["tax_invoice", "proforma"].includes(String(inv.kind))) return { error: "Invoice not found." };
@@ -90,15 +112,32 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     // Recorded twice: same amount and method on this invoice within a minute.
     const dup = rows.find((p) => p.status === "recorded" && p.method === method && Math.abs(p.amount_aed - amount) < 0.005 && Date.now() - Date.parse(p.received_at) < 60000);
     if (dup) return { error: `${dup.number} for ${money(amount)} by ${method} was recorded a moment ago. Not recorded twice.` };
-    if (balance <= 0.005) return { error: "This invoice is paid in full." };
   } else if (jobId) {
-    const { data: job } = await admin.from("jobs").select("customer_id").eq("id", jobId).maybeSingle();
+    const { data: job } = await admin.from("jobs").select("customer_id, vehicle_id").eq("id", jobId).maybeSingle();
     customerId = job?.customer_id ?? null;
+    vehicleId = (job?.vehicle_id as string | null) ?? null;
     const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);
     const dup = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).find((p) => p.status === "recorded" && p.method === method && Math.abs(p.amount_aed - amount) < 0.005 && Date.now() - Date.parse(p.received_at) < 60000);
     if (dup) return { error: `${dup.number} for ${money(amount)} by ${method} was recorded a moment ago. Not recorded twice.` };
+    // Before the proforma: what is left is the approved total less every advance already in (null while nothing is approved).
+    if (input.overCheck) balance = (await jobMoneyOf(jobId, settings))?.balance ?? null;
+  } else if (input.unallocated?.customerId) {
+    // 1 November 2026: no job to attach it to - saved on the customer's account with a note of what it is for.
+    if (!anytime) return { error: "Saving a payment on the customer's account needs the database update of 1 November. Ask the owner to apply it." };
+    const { data: cust } = await admin.from("customers").select("id").eq("id", input.unallocated.customerId).maybeSingle();
+    if (!cust) return { error: "Customer not found." };
+    customerId = String(cust.id);
+    if (input.unallocated.vehicleId) {
+      const { data: car } = await admin.from("vehicles").select("id, customer_id").eq("id", input.unallocated.vehicleId).maybeSingle();
+      if (!car || car.customer_id !== customerId) return { error: "That car is not this customer's." };
+      vehicleId = String(car.id);
+    }
+    if (!input.notes || input.notes.trim().length < 3) return { error: "Write what the payment is for (it is kept with the payment until it is allocated)." };
+    const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("customer_id", customerId).is("job_id", null).is("invoice_id", null).eq("is_active", true);
+    const dup = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).find((p) => p.status === "recorded" && p.method === method && Math.abs(p.amount_aed - amount) < 0.005 && Date.now() - Date.parse(p.received_at) < 60000);
+    if (dup) return { error: `${dup.number} for ${money(amount)} by ${method} was recorded a moment ago. Not recorded twice.` };
   }
-  if (!customerId) return { error: "Choose the invoice or the job." };
+  if (!customerId) return { error: "Choose where the payment goes: a job, its invoice, or the customer's account." };
   // One transaction, one auth code: the same code on another live receipt of this method (last 60 days) is a slip.
   if (authCode && needsAuthCode(method) && !input.clientKey?.startsWith("ngenius:")) {
     const since = new Date(Date.now() - 60 * 86400000).toISOString();
@@ -111,30 +150,25 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const depositQuoteId = input.invoiceId || !jobId ? null : ((await approvedQuotations(jobId))[0]?.id ?? null);
   const over = balance !== null && amount > balance + 0.005;
   const isOwner = actor.role_id === "owner";
-  if (over && !isOwner) {
-    // Staff cannot record more than the balance: it waits for the owner.
-    const fees = feesFor(amount, bankFeesOf(settings)[method]);
-    const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "pending_owner", approval_requested_by: actor.id, client_key: input.clientKey ?? null, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
-    if (error || !created) {
-      await logAppError("record payment: insert (above balance)", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
-      return { error: SAVE_FAILED };
-    }
-    await notifyRoles(["owner"], { type: "overpayment_approval", title: `Payment above the balance needs your approval · ${created.number}`, body: `${actor.display_name} wants to record ${money(amount)} by ${method}; the balance is ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
-    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method} is above the balance of ${money(balance ?? 0)}; waiting for the owner's approval (asked by ${actor.display_name})`, created_by: actor.id });
-    return { ok: true, pendingOwner: true, number: created.number, paymentId: created.id, message: `${created.number} is above the balance. The owner has been asked to approve it.` };
-  }
+  // More than what is left (1.7, 1 November 2026): allowed with a note of why (a refund to make, credit to keep), logged
+  // and told to the owner. The gateway (no person) never waits: its money is real.
+  const overNote = input.overNote?.trim().slice(0, 500) || (over && !actor.id ? "Paid online above the balance" : null);
+  if (over && !overNote) return { error: `More than what is left (${money(balance ?? 0)}). Write why – a refund to make or credit to keep. It is logged.`, needsOverNote: { balance: balance ?? 0 } };
+  const notes = [input.notes?.trim() || null, over ? `Above the balance of ${money(balance ?? 0)}: ${overNote}` : null].filter(Boolean).join(" · ") || null;
   // The bank's fee as estimated at recording (bank-fees.ts): MSF, fee per transaction and VAT apart; the job's cost is MSF + fee.
   const fees = feesFor(amount, bankFeesOf(settings)[method]);
   const verifies = actor.role_id === "owner" || actor.role_id === "accounts";
   const now = new Date().toISOString();
-  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes: input.notes ?? null, status: "recorded", client_key: input.clientKey ?? null, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
+  // Every receipt carries its own link token, so a receipt with no invoice or quotation still reaches the customer.
+  const token = newToken();
+  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes, status: "recorded", client_key: input.clientKey ?? null, token, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), ...(anytime ? { vehicle_id: vehicleId } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (error || !created) {
     await logAppError("record payment: insert", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
     return { error: SAVE_FAILED };
   }
   // The receipt is written: what follows never turns it into a "failed" save for staff (logged instead).
   try {
-    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as a deposit"} received by ${actor.display_name}${over ? " (above the balance, owner)" : ""}`, created_by: actor.id });
+    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as an advance"} received by ${actor.display_name}${over ? ` (above the balance of ${money(balance ?? 0)}: ${overNote})` : ""}`, created_by: actor.id });
     // Money arrived: "Customer says paid" is answered.
     if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
     if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
@@ -143,11 +177,11 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (method !== "cheque") await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);
     if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
     if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
-    if (over) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
+    if (over && !isOwner) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}, by ${actor.display_name}: ${overNote}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
   } catch (err) {
     await logAppError(`record payment: after ${created.number}`, err, { staffId: actor.id, jobId, detail: { paymentId: created.id } });
   }
-  return { ok: true, number: created.number, paymentId: created.id, message: `${created.number} recorded.${method === "cheque" ? " The cheque counts as unpaid until it clears." : ""}` };
+  return { ok: true, number: created.number, paymentId: created.id, token, message: `${created.number} recorded${jobId ? "" : " on the customer's account (not allocated)"}.${method === "cheque" ? " The cheque counts as unpaid until it clears." : ""}` };
 }
 
 /**

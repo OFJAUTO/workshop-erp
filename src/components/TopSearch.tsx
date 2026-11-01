@@ -1,6 +1,7 @@
 "use client";
 
 import { openCustomerPanel } from "./CustomerPanel";
+import { openRecordPayment } from "./RecordPaymentHost";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -19,6 +20,8 @@ export function TopSearch({ customers = true }: { customers?: boolean }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
+  // 1 November 2026: the people who record money get "Pay" on every car result (the Record payment window).
+  const [canPay] = useState(() => typeof document !== "undefined" && !!document.querySelector('meta[name="erp-can-pay"]'));
   useEffect(() => {
     const term = q.trim();
     const mine = ++seq.current;
@@ -69,8 +72,8 @@ export function TopSearch({ customers = true }: { customers?: boolean }) {
           ) : (
             <ul className="divide-y divide-line">
               {hits.map((h) => (
-                <li key={h.href} className="flex items-center">
-                  <button type="button" onClick={() => { setOpen(false); setQ(""); router.push(h.href); }} className="flex min-w-0 flex-1 items-center gap-3 p-2.5 text-left hover:bg-canvas" data-search-hit>
+                <li key={h.href} className="flex flex-wrap items-center justify-end">
+                  <button type="button" onClick={() => { setOpen(false); setQ(""); router.push(h.href); }} className={`flex min-w-0 flex-1 items-center gap-3 p-2.5 text-left hover:bg-canvas ${canPay && h.jobId ? "basis-full sm:basis-0" : ""}`} data-search-hit>
                     {h.pictureUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={h.pictureUrl} alt="" className="h-10 w-16 shrink-0 rounded-control object-cover bg-chip" />
@@ -81,6 +84,11 @@ export function TopSearch({ customers = true }: { customers?: boolean }) {
                     </span>
                     {!h.open ? <span className="shrink-0 rounded-full bg-chip px-2 py-0.5 text-[11px] font-bold text-muted">Gone</span> : null}
                   </button>
+                  {canPay && h.jobId ? (
+                    <button type="button" onClick={() => { setOpen(false); openRecordPayment({ jobId: h.jobId }); }} className="min-h-11 shrink-0 px-3 text-xs font-bold underline decoration-dotted underline-offset-4" data-search-pay>
+                      Pay
+                    </button>
+                  ) : null}
                   {h.customer && h.jobId ? (
                     <button type="button" onClick={() => { setOpen(false); openCustomerPanel({ jobId: h.jobId }); }} className="min-h-11 shrink-0 px-3 text-xs font-bold underline decoration-dotted underline-offset-4" data-search-customer>
                       Customer

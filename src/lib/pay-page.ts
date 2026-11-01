@@ -43,7 +43,7 @@ export type PaymentRequestRow = {
   job_id: string;
   quotation_id: string | null;
   invoice_id: string | null;
-  kind: "deposit" | "proforma" | "invoice";
+  kind: "deposit" | "proforma" | "invoice" | "advance";
   amount_aed: number;
   purpose: string | null;
   gateway_url: string | null;
@@ -51,7 +51,7 @@ export type PaymentRequestRow = {
 };
 
 /** One live request per job and kind: made on first send, updated (amount, link) on every send after. The /p/ link never changes. */
-export async function ensurePaymentRequest(input: { jobId: string; kind: "deposit" | "proforma" | "invoice"; amount: number; quotationId?: string | null; invoiceId?: string | null; purpose?: string | null; gatewayUrl?: string | null; by: string | null }): Promise<{ row: PaymentRequestRow; shortLink: string }> {
+export async function ensurePaymentRequest(input: { jobId: string; kind: "deposit" | "proforma" | "invoice" | "advance"; amount: number; quotationId?: string | null; invoiceId?: string | null; purpose?: string | null; gatewayUrl?: string | null; by: string | null }): Promise<{ row: PaymentRequestRow; shortLink: string }> {
   const admin = createAdminClient();
   const { data: existing } = await admin.from("payment_requests").select("*").eq("job_id", input.jobId).eq("kind", input.kind).eq("is_active", true).order("created_at", { ascending: false }).limit(1).maybeSingle();
   let row = existing as PaymentRequestRow | null;
@@ -122,6 +122,14 @@ export async function payPageData(token: string): Promise<PayPageData | null> {
         if (pay) receiptHref = `/api/pdf/receipt/${pay.id}${q?.token ? `?q=${q.token}` : ""}`;
       }
     } else paid = st.received + 0.005 >= amount;
+  } else if (r.kind === "advance") {
+    // 1 November 2026: the advisor's link for any amount - paid once that much has come in on the job since it was sent.
+    const since = String((raw as { updated_at?: string }).updated_at ?? (raw as { created_at?: string }).created_at ?? "");
+    const { data: pays } = await admin.from("payments").select("id, amount_aed, token, received_at").eq("job_id", r.job_id).eq("is_active", true).eq("status", "recorded").gte("received_at", since).order("received_at", { ascending: false });
+    const got = round2((pays ?? []).reduce((a, p) => a + (Number(p.amount_aed) || 0), 0));
+    paid = got + 0.005 >= amount;
+    const last = (pays ?? [])[0] as { id: string; token: string | null } | undefined;
+    if (paid && last) receiptHref = `/api/pdf/receipt/${last.id}${last.token ? `?p=${last.token}` : ""}`;
   } else if (r.invoice_id) {
     const { data: invRaw } = await admin.from("invoices").select("*").eq("id", r.invoice_id).maybeSingle();
     if (invRaw) {
@@ -142,7 +150,7 @@ export async function payPageData(token: string): Promise<PayPageData | null> {
     carTitle: [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" "),
     plate: v ? formatPlate(v) : (job?.job_number ?? ""),
     number,
-    purpose: r.purpose ?? (r.kind === "deposit" ? "Advance payment to order the parts" : r.kind === "proforma" ? "Payment for the work on your car" : "Invoice payment"),
+    purpose: r.purpose ?? (r.kind === "deposit" ? "Advance payment to order the parts" : r.kind === "proforma" || r.kind === "advance" ? "Payment for the work on your car" : "Invoice payment"),
     amount,
     gatewayUrl: r.gateway_url,
     paid,

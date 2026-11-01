@@ -9,6 +9,7 @@ import { depositState } from "@/lib/deposits";
 import { round2 } from "@/lib/money";
 import { formatPlate } from "@/lib/types";
 import { formatPhone } from "@/lib/messages";
+import { paymentsAnytimeReady } from "@/lib/schema-ready";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     const { data: qq } = await admin.from("quotations").select("id").eq("job_id", payment.job_id).eq("token", qt).maybeSingle();
     allowed = !!qq;
   }
+  // 1 November 2026: every receipt carries a link token of its own (a payment with no invoice or quotation reaches the customer too).
+  const pt = request.nextUrl.searchParams.get("p");
+  if (!allowed && pt) {
+    const { data: own } = await admin.from("payments").select("token").eq("id", id).maybeSingle();
+    allowed = !!own?.token && own.token === pt;
+  }
   if (!allowed) {
     const access = await staffPdfAccess("document");
     if ("refused" in access) return access.refused;
@@ -47,7 +54,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       : Promise.resolve({ data: null }),
     payment.job_id ? admin.from("payments").select(PAYMENT_SELECT).eq("job_id", payment.job_id).eq("is_active", true) : Promise.resolve({ data: null }),
   ]);
-  const v = ((job as { vehicle?: unknown } | null)?.vehicle as VehicleRow | null) ?? null;
+  // A payment with no job names the car it was paid for, when it was given one.
+  const { data: carOnly } = !payment.job_id && (await paymentsAnytimeReady()) ? await admin.from("payments").select("vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", id).maybeSingle() : { data: null };
+  const v = (((job as { vehicle?: unknown } | null)?.vehicle ?? (carOnly as { vehicle?: unknown } | null)?.vehicle) as VehicleRow | null) ?? null;
   const vehicle = v
     ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ") || null, plate: v.has_plate === false ? "NO PLATE" : formatPlate(v), vin: v.vin ?? null }
     : null;
@@ -76,7 +85,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   } else {
     const st = payment.job_id ? await depositState(payment.job_id) : null;
     const qn = st?.quotationNumbers.join(", ") || null;
-    forLine = `Advance payment (deposit)${qn ? ` against quotation ${qn}` : ""}`;
+    forLine = payment.job_id ? `Advance payment (deposit)${qn ? ` against quotation ${qn}` : ""}` : `Advance payment${payment.notes ? ` – ${payment.notes}` : ""}`;
     if (qn) docRef = { label: "Quotation", value: qn };
     if (st && st.quotationTotal > 0) summary = summaryOf("Quotation total", st.quotationTotal);
   }

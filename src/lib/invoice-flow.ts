@@ -258,6 +258,8 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
     await admin.from("invoices").update({ is_active: false, status: "cancelled", updated_by: by }).eq("id", inv.id);
     return { error: `Could not add the line to the invoice: ${lineErr.message}` };
   }
+  // 1 November 2026: an advance already paid on this job comes off this invoice by itself (as it would off the proforma).
+  await admin.from("payments").update({ invoice_id: inv.id, updated_by: by }).eq("job_id", jobId).is("invoice_id", null).eq("is_active", true);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for ${description} (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
   await tryEnqueueZoho("invoice", String(inv.id), jobId, by);
   return { id: inv.id as string, number: inv.number as string, token: inv.token as string, total };

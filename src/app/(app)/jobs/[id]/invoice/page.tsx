@@ -28,6 +28,9 @@ import { RecordDeposit } from "@/components/RecordDeposit";
 import { DepositRequestSend } from "../DepositRequestSend";
 import { depositState } from "@/lib/deposits";
 import { STAGE_BOX_CLASS, STAGE_BOX_TITLE, type StageBoxState } from "@/lib/stage-style";
+import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { UnallocatedList } from "@/components/UnallocatedList";
+import { unallocatedOf } from "@/lib/customer-money";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +122,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const canRecord = can(role, "recordPayments") && acting;
   const canSend = can(role, "sendApproval") && acting;
   const canVerify = can(role, "verifyPayments") && acting;
+  // 1 November 2026: recording is ALWAYS possible for accounts and the owner - before the proforma, and after the car left.
+  const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const credit = mayPay ? await unallocatedOf({ customerId: job.customer_id }) : [];
   const phoneDigits = (customer?.phone ?? "").replace(/[^\d]/g, "");
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name).replaceAll("[name]", greetingNameOf(customer)).replaceAll("[bank]", "");
@@ -235,7 +241,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           <Card className="flex flex-col gap-2 border-ink" data-what-now>
             <SectionLabel>What to do now</SectionLabel>
             {(() => {
-              if (!job.is_open) return <p className="text-sm text-muted">The car has left. Nothing to do here.</p>;
+              if (!job.is_open) {
+                return live && unpaid && mayPay ? (
+                  <div className="flex flex-col gap-2" data-late-record>
+                    <p className="text-sm font-semibold">The car has left with AED {m(bal?.balance ?? 0)} still due on {live.number}. Record the payment when it arrives.</p>
+                    <div><RecordPaymentButton jobId={id} size="lg" label="Record payment" /></div>
+                  </div>
+                ) : <p className="text-sm text-muted">The car has left. Nothing to do here.</p>;
+              }
               if (depShort && !live) {
                 return (
                   <div className="flex flex-col gap-2">
@@ -290,7 +303,12 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               if (gateReady) {
                 return can(role, "gateOut") && acting ? <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full sm:w-auto">Gate out</LinkButton> : <p className="text-sm">Ready: the advisor or accounts gate the car out.</p>;
               }
-              return <p className="text-sm text-muted">Nothing to do yet – the proforma is created by itself when the car is Ready.</p>;
+              return canRecord ? (
+                <div className="flex flex-col gap-2" data-advance-record>
+                  <p className="text-sm font-semibold">No proforma yet{draft.lines.length ? ` · balance AED ${m(balanceDue)}` : ""}. A payment now is recorded as an advance (no VAT) with its own receipt, and comes off the invoice by itself.</p>
+                  <div><RecordPaymentButton jobId={id} size="lg" label="Record a payment" /></div>
+                </div>
+              ) : <p className="text-sm text-muted">Nothing to do yet – the proforma is created by itself when the car is Ready.</p>;
             })()}
             {proforma && !taxInvoice && role === "owner" && acting ? (
               <details className="text-xs" data-issue-early>
@@ -303,6 +321,13 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
             ) : null}
           </Card>
 
+          {credit.length ? (
+            <Card className="flex flex-col gap-2 border-amber-bar" data-credit-offer>
+              <SectionLabel right={`AED ${m(credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0))}`}>Customer credit, not allocated</SectionLabel>
+              <p className="text-xs text-muted">Money this customer paid earlier that is not on any job yet. Allocate it here and it comes off {live ? live.number : "this job’s invoice"} by itself.</p>
+              <UnallocatedList rows={credit} canAllocate={mayPay} target={{ key: live ? `inv:${live.id}` : `job:${id}`, title: job.job_number, balance: live ? (bal?.balance ?? 0) : draft.lines.length ? balanceDue : null }} />
+            </Card>
+          ) : null}
           <Card className="flex flex-col gap-2" data-payments-card>
             <SectionLabel right={`${depositRows.length + payments.length}`}>Payments &amp; receipts</SectionLabel>
             {depositRows.length + payments.length === 0 ? <p className="text-sm text-muted">No money received yet.</p> : (
@@ -320,14 +345,6 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 <Button type="submit" size="md" tone="secondary" data-customer-says-paid>Customer says paid</Button>
                 <span className="text-xs text-muted">Accounts are asked to check the bank. Nothing is released by it.</span>
               </form>
-            ) : null}
-            {!live && canRecord && !depShort ? (
-              <details className="border-t border-line pt-2 text-sm" data-advance-fold>
-                <summary className="cursor-pointer min-h-11 flex items-center font-bold text-muted">Record an advance payment (customer paying at the counter, before the proforma)</summary>
-                <p className="text-xs text-muted">It is recorded as a deposit with its own receipt and comes off the invoice total by itself. The receipt shows the method it was really paid by. Only accounts and the owner record money.</p>
-                {/* 31 October 2026: the card slip / transfer proof goes through the send queue like every other proof (job files). */}
-                <div className="pt-2"><PaymentForm invoiceId={null} jobId={id} proofJobId={id} spentKeys={spentKeys} balance={draft.lines.length ? balanceDue : null} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} isOwner={role === "owner"} /></div>
-              </details>
             ) : null}
             {live && unpaid ? (
               <details className="text-sm" data-payment-link-box>

@@ -11,6 +11,7 @@ import { FormGuard } from "@/components/FormGuard";
 import { IdleLock } from "./IdleLock";
 import { ModeGuard, type TabMode } from "./ModeGuard";
 import { CustomerPanelHost } from "@/components/CustomerPanel";
+import { RecordPaymentHost } from "@/components/RecordPaymentHost";
 import { getCurrentDevice } from "@/lib/devices";
 
 /** The browser tab says whose screens these are while the owner views or acts as someone. */
@@ -97,6 +98,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Suspense fallback={null}><FormGuard /></Suspense>
       <Suspense fallback={null}><ModeGuard serverMode={tabMode} /></Suspense>
       {can(role, "viewCustomers") ? <CustomerPanelHost /> : null}
+      {/* 1 November 2026: THE Record payment window, for the people who record money (opened from any car, customer, job or search result). */}
+      {can(role, "recordPayments") && !staff.viewingAs ? <RecordPaymentHost /> : null}
+      {can(role, "recordPayments") && !staff.viewingAs ? <meta name="erp-can-pay" content="1" /> : null}
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {/* Who is signed in, for the send queue: a sending permit is only ever kept and used for this person. */}
       <meta name="erp-staff-id" content={staff.id} />

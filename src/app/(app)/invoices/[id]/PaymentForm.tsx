@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { Button, Input } from "@/components/ui";
 import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
@@ -37,7 +37,19 @@ export function PaymentForm({
   isProforma = false,
   nextTaxNumber = null,
   spentKeys,
+  tag = null,
+  hidden = null,
+  extra = null,
+  balanceLabel = "the balance",
 }: {
+  /** The form's own key name (one per place a payment can go); by default the invoice or the job. */
+  tag?: string | null;
+  /** Extra hidden fields sent with the payment (the Record payment window: the customer's account, the car). */
+  hidden?: Record<string, string> | null;
+  /** Boxes shown inside the form above the methods (the window: "What is it for?"). */
+  extra?: ReactNode;
+  /** How "what is left" is called in the over-the-balance words. */
+  balanceLabel?: string;
   invoiceId: string | null;
   jobId: string | null;
   /** The job the invoice belongs to: the proof photo goes through the send queue under it. */
@@ -69,7 +81,7 @@ export function PaymentForm({
   const formRef = useRef<HTMLFormElement>(null);
   // The form's own key ties the proof to the payment. It stays the same across a reload or a new version (a proof still
   // waiting on the device stays with this form) and is renewed once a payment with it is recorded.
-  const formTag = invoiceId ? `payment:${invoiceId}` : `payment:job:${jobId ?? proofJobId ?? "none"}`;
+  const formTag = tag ?? (invoiceId ? `payment:${invoiceId}` : `payment:job:${jobId ?? proofJobId ?? "none"}`);
   const { key: clientKey, renew } = useFormKey(formTag, proofJobId);
   // The page came back with "message" after this form was submitted: that payment is recorded, the key is spent (a reused
   // key would be taken for the same payment, "already recorded"). The page's own list of recorded keys says the same.
@@ -102,6 +114,8 @@ export function PaymentForm({
         <input type="hidden" name="method" value={method} />
         <input type="hidden" name="client_key" value={clientKey ?? ""} />
         <input type="hidden" name="amount" value={mode === "full" && balance ? balance.toFixed(2) : amount} />
+        {hidden ? Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />) : null}
+        {extra}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {methods.map((m) => (
             <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-method={m} className={`min-h-12 rounded-control border-2 text-sm font-bold ${method === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
@@ -127,9 +141,10 @@ export function PaymentForm({
           </label>
         ) : null}
         {method === "cheque" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required /></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque date</span><Input name="cheque_date" type="date" required /></label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required data-cheque-number /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Bank</span><Input name="cheque_bank" placeholder="e.g. Emirates NBD" data-cheque-bank /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque date</span><Input name="cheque_date" type="date" required data-cheque-date /></label>
           </div>
         ) : null}
         {needsAuthCode(method) ? (
@@ -172,9 +187,16 @@ export function PaymentForm({
           {feeRuleWords(rule) !== "no bank fee" ? `Bank fee ${feeRuleWords(rule)} on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (estimated ${money(feesFor(value, rule).cost)}${feesFor(value, rule).vat > 0 ? ` + VAT ${money(feesFor(value, rule).vat)}` : ""})` : ""}, internal, never shown to the customer.` : "No bank fee on this method."}
           {method === "cheque" ? " A cheque counts as unpaid until it is marked cleared." : ""}
         </p>
-        {over ? <p className="text-sm font-semibold text-amber">{isOwner ? "More than the balance: recorded as the owner." : "More than the balance: the owner is asked to approve it before it counts."}</p> : null}
+        {over ? (
+          // 1 November 2026: more than what is left is allowed with a note of why; it is logged and the owner is told.
+          <label className="flex flex-col gap-1 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-over-warning>
+            <span className="text-sm font-bold">More than {balanceLabel} ({money(balance ?? 0)}) by {money(value - (balance ?? 0))}.</span>
+            <span className="text-xs text-muted">Write why – a refund to make or credit to keep. It is logged{isOwner ? "" : " and the owner is told"}.</span>
+            <Input name="over_note" required minLength={3} placeholder="e.g. customer paid extra, refund AED 500 by transfer" data-over-note />
+          </label>
+        ) : null}
         {/* A full payment is confirmed in words first: it creates the tax invoice, which can never be undone. */}
-        <div>{settles && invoiceId ? <Button type="button" size="lg" disabled={blocked} onClick={() => setConfirming(true)} data-record-payment>Record full payment</Button> : <RecordButton label={over && !isOwner ? "Request owner approval" : "Record"} disabled={blocked} />}</div>
+        <div>{settles && invoiceId ? <Button type="button" size="lg" disabled={blocked} onClick={() => setConfirming(true)} data-record-payment>Record full payment</Button> : <RecordButton label="Record" disabled={blocked} />}</div>
       </form>
 
       {confirming ? (

@@ -5,6 +5,8 @@ import { arrivedWords, customerName } from "@/lib/customer-view";
 import { jobBalance } from "@/lib/invoice-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { customerCredit } from "@/lib/customer-money";
+import { can, type RoleId } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +89,8 @@ export async function GET(request: NextRequest) {
     },
     spentThisYear: Math.round(spentThisYear * 100) / 100,
     openBalance: Math.round(openBalance * 100) / 100,
+    credit: await customerCredit(String(c.id)),
+    canPay: can(role as RoleId, "recordPayments") && !staff.viewingAs,
     cars: ((cars ?? []) as unknown as Vehicle[]).filter((v) => v.id !== job?.vehicle_id).map((v) => ({ id: v.id, plate: formatPlate(v), car: carWords(v) })),
     declined: (declined ?? []).map((d) => ({ id: d.id, title: d.title, date: d.declined_at })),
   });

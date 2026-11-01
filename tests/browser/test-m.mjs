@@ -136,7 +136,8 @@ await section("4 final confirmation and the tax invoice", async () => {
   await page.locator("[data-confirm-yes]").click();
   const tax = await until(async () => (await sql("select id, number, token, sent_at from public.invoices where job_id = $1 and kind = 'tax_invoice' and status = 'issued'", [jobId]))[0], 40, 500);
   check("4: Yes records the payment and creates the tax invoice", !!tax && /^INV-\d{5}$/.test(tax.number), JSON.stringify(tax));
-  const pro = (await sql("select converted_to, customer_says_paid_at from public.invoices where id = $1", [proformaId]))[0];
+  // The tax invoice is written first and the proforma marked converted a moment later: wait for that last step.
+  const pro = (await until(async () => { const r = (await sql("select converted_to, customer_says_paid_at from public.invoices where id = $1", [proformaId]))[0]; return r?.converted_to ? r : null; }, 30, 500)) ?? (await sql("select converted_to, customer_says_paid_at from public.invoices where id = $1", [proformaId]))[0];
   check("4: the proforma became the tax invoice and the checking flag is cleared", pro?.converted_to === tax?.id && !pro?.customer_says_paid_at);
   const notif = await until(async () => (await sql("select title, body from public.notifications where type = 'invoice_paid' and job_id = $1 limit 1", [jobId]))[0], 30, 500);
   check("4: the advisor is told Paid: plate, amount", !!notif && /^Paid: Dubai S 30303, AED 945\.00$/.test(notif.title), notif?.title);

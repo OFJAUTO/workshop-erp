@@ -1,3 +1,6 @@
+import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { UnallocatedList } from "@/components/UnallocatedList";
+import { unallocatedOf } from "@/lib/customer-money";
 import Link from "next/link";
 import { ppfJobsOfCar } from "@/lib/recheck";
 import { CarThumb } from "@/components/CarThumb";
@@ -76,6 +79,9 @@ export default async function VehiclePage({
   const profileUrl = v.photo_path ? (urlByPath.get(v.photo_path) ?? null) : null;
 
   const title = [v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ");
+  // 1 November 2026: a payment can always be recorded from the car page - with or without a job, open or long gone.
+  const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const carCredit = can(role, "viewInvoices") && v.customer ? await unallocatedOf({ vehicleId: v.id }) : [];
 
   return (
     <>
@@ -89,12 +95,18 @@ export default async function VehiclePage({
             {!v.is_active ? <Badge tone="red">Inactive</Badge> : null}
           </span>
         }
-        actions={canEdit ? <LinkButton href={`/vehicles/${v.id}/edit`}>Edit</LinkButton> : undefined}
+        actions={canEdit || mayPay ? <>{mayPay && v.customer ? <RecordPaymentButton vehicleId={v.id} customerId={v.customer.id} size="lg" tone="secondary" /> : null}{canEdit ? <LinkButton href={`/vehicles/${v.id}/edit`}>Edit</LinkButton> : null}</> : undefined}
       />
 
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
+      {carCredit.length ? (
+        <Card className="flex flex-col gap-2 border-amber-bar" data-car-credit>
+          <SectionLabel right={`AED ${carCredit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`}>Payments for this car, not allocated</SectionLabel>
+          <UnallocatedList rows={carCredit} canAllocate={mayPay} />
+        </Card>
+      ) : null}
       {vipRow?.is_vip && vipRow.vip_note ? (
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>

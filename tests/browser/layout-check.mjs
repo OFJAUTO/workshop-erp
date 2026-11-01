@@ -111,8 +111,11 @@ async function seedPages() {
   await sql("insert into public.approval_requests (job_id, token, status, sent_to_phone, sent_to_name, terms_text, created_by, opened_at) values ($1, $2, 'sent', '+971500000001', 'E2e Customer', 'Terms', $3, now())", [seededCar.jobId, approvalToken, owner]);
   const qToken = (await sql("select token from public.quotations where id = $1", [seededCar.quotationId]))[0]?.token ?? null;
   const job = seededCar.jobId;
+  // 1 November 2026: the car and customer pages carry Record payment and the unallocated money (one payment seeded).
+  const who = (await sql("select customer_id::text as c, vehicle_id::text as v from public.jobs where id = $1", [job]))[0];
+  if (who) await sql("insert into public.payments (customer_id, method, amount_aed, is_deposit, status, notes, vehicle_id) values ($1, 'cash', 250, true, 'recorded', 'Layout check: an advance not allocated yet', $2)", [who.c, who.v]);
   return {
-    staff: [`/jobs/${job}`, `/jobs/${job}/quote/${seededCar.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
+    staff: [...(who ? [`/vehicles/${who.v}`, `/customers/${who.c}`] : []), `/jobs/${job}`, `/jobs/${job}/quote/${seededCar.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
     customer: [qToken ? `/quote/${qToken}` : null, seededCar.invoice?.token ? `/invoice/${seededCar.invoice.token}` : null, seededCar.invoice?.token ? `/proforma/${seededCar.invoice.token}` : null, insp ? `/report/${reportToken}` : null, `/approve/${approvalToken}`].filter(Boolean),
   };
 }

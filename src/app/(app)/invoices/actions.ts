@@ -9,17 +9,17 @@ import { PAYMENT_SELECT, loadInvoice, nextDocumentNumber, toPayment } from "@/li
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { decideOverpayment, recordPaymentCore, settleJob, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
+import { decideOverpayment, settleJob, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
 import { convertProformaIfPaid, ensureProforma } from "@/lib/invoice-flow";
-import { currentPaymentLink, ensureAutoPayLink, paymentLinksOf, replacePaymentLink } from "@/lib/payment-links";
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, methodsFor } from "@/lib/money-steps";
+import { ensureAutoPayLink, replacePaymentLink } from "@/lib/payment-links";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "@/lib/money-steps";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { isUuid } from "@/lib/uuid";
+import { paymentFromForm } from "@/lib/payment-form";
 import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 
 function refresh(jobId: string | null, invoiceId?: string) {
@@ -99,61 +99,8 @@ export async function recordPayment(formData: FormData) {
   const ownPage = !!returnTo && /^\/(jobs\/[0-9a-f-]{36}\/invoice|invoices\/[0-9a-f-]{36})$/.test(returnTo.split("?")[0]);
   const back = returnTo && ownPage && !returnTo.includes("message=") && !returnTo.includes("error=") ? returnTo : base;
   const sep = back.includes("?") ? "&" : "?";
-  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
-  const method = String(formData.get("method") ?? "");
-  if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) redirect(`${back}${sep}error=${encodeURIComponent("Not allowed: payments are recorded by accounts or the owner only.")}`);
-  // A card or transfer payment carries its proof (the card slip, the transfer screenshot) or it is not recorded.
-  const proof = formData.get("proof");
-  const proofFile = proof instanceof File && proof.size > 0 ? proof : null;
-  // The proof photo normally goes straight to storage from the browser (no size limit through the server), tied to
-  // the form's client key; a file sent with the form is still taken (an invoice without a job).
-  const clientKeyIn = blankToNull(formData.get("client_key"));
-  // The same tap again (its answer was lost): the receipt it already made, before the proof check (its proof already moved
-  // onto that receipt). A different payment on a used key is never put on that receipt.
-  if (isUuid(clientKeyIn)) {
-    const { data: same } = await createAdminClient().from("payments").select("id, number, amount_aed, method").eq("client_key", clientKeyIn).maybeSingle();
-    if (same) {
-      const differs = Math.abs(Number(same.amount_aed) - amount) > 0.005 || String(same.method) !== method;
-      redirect(`${back}${sep}${differs ? "error" : "message"}=${encodeURIComponent(differs ? `This form was already used for ${same.number}. Nothing new was recorded – reload the page and record it again.` : `${same.number} was already recorded.`)}`);
-    }
-  }
-  const proofJobId = jobIdIn ?? (invoiceId ? ((await loadInvoice(invoiceId))?.invoice.job_id ?? null) : null);
-  const { data: proofRows } = !proofFile && proofJobId && isUuid(clientKeyIn) ? await createAdminClient().from("job_files").select("id, storage_path").eq("job_id", proofJobId).eq("kind", "payment_proof").eq("ref_id", clientKeyIn).is("removed_at", null).order("created_at") : { data: [] };
-  const uploaded = (proofRows ?? []) as { id: string; storage_path: string }[];
-  if ((method === "card" || method === "transfer") && !proofFile && !uploaded.length) redirect(`${back}${sep}error=${encodeURIComponent(method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first.")}`);
-  if (proofFile && proofFile.size > 25 * 1024 * 1024) redirect(`${back}${sep}error=${encodeURIComponent("The proof photo is too large (over 25 MB).")}`);
-  const r = await recordPaymentCore(actorOf(staff), {
-    invoiceId,
-    jobId: jobIdIn,
-    method: String(formData.get("method") ?? ""),
-    amount,
-    reference: blankToNull(formData.get("reference")),
-    authCode: blankToNull(formData.get("auth_code")),
-    cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
-    notes: blankToNull(formData.get("notes")),
-    clientKey: blankToNull(formData.get("client_key")),
-  }, settings);
-  // The form's key was already used for another receipt (a copied tab): that earlier receipt is never touched.
-  if (r.repeat && (Math.abs(r.repeat.amount - amount) > 0.005 || r.repeat.method !== String(formData.get("method") ?? ""))) redirect(`${back}${sep}error=${encodeURIComponent(`This form was already used for ${r.number ?? "an earlier receipt"}. Nothing new was recorded – reload the page and record it again.`)}`);
-  if (!r.error && r.paymentId && !r.repeat && !proofFile && uploaded.length) {
-    const admin = createAdminClient();
-    await admin.from("payments").update({ proof_path: uploaded[0].storage_path, updated_by: staff.id }).eq("id", r.paymentId);
-    await admin.from("job_files").update({ ref_id: r.paymentId }).in("id", uploaded.map((u) => u.id));
-  }
-  if (!r.error && r.paymentId && !r.repeat && proofFile) {
-    const admin = createAdminClient();
-    const ext = proofFile.type.includes("png") ? "png" : proofFile.type.includes("webp") ? "webp" : proofFile.type.includes("pdf") ? "pdf" : "jpg";
-    const path = `payments/${r.paymentId}.${ext}`;
-    const { error: upErr } = await admin.storage.from("job-files").upload(path, Buffer.from(await proofFile.arrayBuffer()), { contentType: proofFile.type || "image/jpeg", upsert: true });
-    if (!upErr) await admin.from("payments").update({ proof_path: path, updated_by: staff.id }).eq("id", r.paymentId);
-  }
-  const jobId = jobIdIn ?? (invoiceId ? (await loadInvoice(invoiceId))?.invoice.job_id ?? null : null);
-  // A part payment: the Pay now order (if any) is remade for what is left.
-  if (invoiceId && !r.error) {
-    const cur = currentPaymentLink(await paymentLinksOf(invoiceId));
-    if (cur?.provider === "ngenius" && !cur.paid_at) await ensureAutoPayLink(invoiceId, { id: staff.id, display_name: staff.display_name }, await getSiteUrl());
-  }
-  refresh(jobId, invoiceId ?? undefined);
+  const r = await paymentFromForm(staff, formData, settings);
+  refresh(r.jobId, invoiceId ?? undefined);
   redirect(`${back}${sep}${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Recorded.")}`);
 }
 

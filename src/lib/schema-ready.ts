@@ -29,3 +29,6 @@ export const gateOutMileageReady = () => schemaReady("gate_outs", "mileage_out, 
 /** Section 5 (complimentary jobs: a reason, the owner's approval, the cost to us): migration 20261201130000_complimentary_jobs. */
 export const compReady = () => schemaReady("quotations", "comp_reason, comp_original_job_id, comp_note, comp_status, comp_cost_aed");
 export const COMP_SELECT = "comp_reason, comp_original_job_id, comp_note, comp_status, comp_decided_by, comp_decided_at, comp_decision_note, comp_normal_aed, comp_cost_aed, comp_cost_detail";
+
+/** Record a payment any time (1 November 2026): unallocated advances, the car, the allocation. Migration 20261202090000_payments_anytime. */
+export const paymentsAnytimeReady = () => schemaReady("payments", "vehicle_id, allocated_at, allocated_by");

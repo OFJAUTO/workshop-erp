@@ -8,6 +8,7 @@ import { createAdminClient } from "./supabase/admin";
 import { loadUnsettled } from "./card-settlements";
 import { formatPlate } from "./types";
 import { formatDate } from "./format";
+import { unallocatedOf } from "./customer-money";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
 type PlateRow = Parameters<typeof formatPlate>[0];
@@ -191,6 +192,23 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
   const { data: redDays } = await admin.from("zoho_reconciliation").select("day, checked_at").eq("status", "red").order("day", { ascending: false }).limit(5);
   for (const d of (redDays ?? []) as { day: string; checked_at: string }[]) {
     out.push({ jobId: `recon:${d.day}`, plate: "Zoho Books", car: null, what: `Reconciliation differs on ${formatDate(`${String(d.day).slice(0, 10)}T12:00:00Z`)}`, amount: null, actionLabel: "Open the reconciliation", href: "/zoho/reconciliation", always: true, urgency: "amber", since: d.checked_at });
+  }
+  // 9. Money on a customer's account, not allocated to any job yet (1 November 2026): one line each, with its age.
+  for (const p of await unallocatedOf()) {
+    if (p.status !== "recorded") continue;
+    out.push({
+      jobId: `unallocated:${p.id}`,
+      plate: p.plate ?? p.customerName,
+      car: p.car,
+      what: `${p.number} not allocated – ${p.customerName}${p.notes ? ` (for: ${p.notes})` : ""}`,
+      amount: aed(p.amount_aed),
+      actionLabel: "Allocate",
+      href: `/customers/${p.customer_id}`,
+      always: true,
+      urgency: p.ageDays >= 7 ? "red" : "amber",
+      since: p.received_at,
+      hint: "Money paid with no job to put it on yet. Allocate it to the job or invoice it is for.",
+    });
   }
   return out;
 }

@@ -103,6 +103,11 @@ import { QuotationList } from "@/components/QuotationList";
 import { loadJobQuotes } from "@/lib/quote-history-data";
 import { anyApproved } from "@/lib/quote-history";
 import { refuseRecord } from "@/lib/refusal";
+import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { UnallocatedList } from "@/components/UnallocatedList";
+import { PaymentLinkSend } from "./PaymentLinkSend";
+import { jobMoneyOf, unallocatedOf } from "@/lib/customer-money";
+import { paymentsAnytimeReady } from "@/lib/schema-ready";
 
 export const dynamic = "force-dynamic";
 
@@ -284,6 +289,15 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   });
   const payNowOn = money.live ? !!currentPaymentLink(await paymentLinksOf(money.live.id)) : false;
   const bankCharges = bankFeesOf(settings);
+  // 1 November 2026: a payment can ALWAYS be recorded (owner and accounts, any stage, open or gone) and a payment link for
+  // any amount sent (advisors). "Paid so far · Balance" before the proforma is the approved total less every advance.
+  const jobMoney = can(role, "viewInvoices") ? await jobMoneyOf(id, settings) : null;
+  const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const credit = mayPay ? await unallocatedOf({ customerId: job.customer_id }) : [];
+  const linkReady = can(role, "sendApproval") && !staff.viewingAs && (await paymentsAnytimeReady());
+  const aedOf = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const payLinkMessage = String(settings.whatsapp_payment_request_template ?? "").replaceAll("[name]", greetName).replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle));
+  const owes = !!jobMoney && (jobMoney.balance === null || jobMoney.balance > 0.005);
   const inspectionMinutes = insp ? inspectionWorkingMinutes(insp, wt) : 0;
   const inspectionOver = !!insp && insp.status === "in_progress" && inspectionOverTarget(insp, wt);
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
@@ -802,7 +816,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {money.live ? <span className="text-sm font-semibold">{money.live.number}</span> : null}
             <Badge tone={money.chip.tone === "ink" ? "ink" : money.chip.tone}>{money.chip.text}</Badge>
           </span>
-          {money.live && bal?.invoice ? <span className="text-xs text-muted">Total AED {bal.invoice.total_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{bal.paid ? ` · paid AED ${bal.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}{bal.balance > 0 ? ` · due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}</span> : null}
+          {jobMoney && (jobMoney.total !== null || jobMoney.paid > 0) ? <span className="text-xs text-muted" data-paid-so-far>{jobMoney.total !== null ? `Total AED ${aedOf(jobMoney.total)} · ` : ""}Paid so far AED {aedOf(jobMoney.paid)}{jobMoney.balance !== null ? <> · <span className={jobMoney.balance > 0.005 ? "font-bold text-ink" : "font-bold text-green"} data-balance-left>{jobMoney.balance > 0.005 ? `Balance AED ${aedOf(jobMoney.balance)}` : "Paid in full"}</span></> : null}{jobMoney.pendingCheque ? ` · cheque AED ${aedOf(jobMoney.pendingCheque)} clearing` : ""}</span> : null}
           {job.ready_sent_at ? <span className="text-xs text-muted">Proforma sent {formatDayTime(job.ready_sent_at)}</span> : null}
           {money.waitingHours ? <span className="text-xs font-bold text-red" data-money-waiting>Waiting {money.waitingHours} h for payment</span> : null}
           {job.invoice_sent_at ? <span className="text-xs text-muted">Tax invoice sent {formatDayTime(job.invoice_sent_at)}</span> : null}
@@ -811,13 +825,21 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {(money.action === "send_proforma" || money.action === "send_tax_invoice") && money.live && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? (
               <ReadySendControl jobId={id} size="lg" token={money.live.token} shortLink={money.live.token ? await shortFor(`${PRODUCTION_SITE_URL}/${money.live.kind === "tax_invoice" ? "invoice" : "proforma"}/${money.live.token}`) : null} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />
             ) : null}
-            {money.action === "record_payment" && can(role, "recordPayments") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/invoice`} size="lg" className="w-full">{money.actionLabel}</LinkButton> : null}
+            {mayPay && (owes || money.action === "record_payment") ? <RecordPaymentButton jobId={id} size={money.action === "record_payment" ? "lg" : "md"} tone={money.action === "record_payment" ? "primary" : "secondary"} className="w-full" label={money.action === "record_payment" ? money.actionLabel : "Record payment"} /> : null}
+            {linkReady && owes ? <PaymentLinkSend jobId={id} balance={jobMoney?.balance ?? null} message={payLinkMessage} phoneDigits={(customer?.phone ?? "").replace(/[^d]/g, "")} /> : null}
             {money.action === "gate_out" && can(role, "gateOut") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full">Gate out</LinkButton> : null}
             {can(role, "viewInvoices") && laterStage ? <LinkButton href={`/jobs/${id}/invoice`} tone="secondary" size="md">Payments and invoice</LinkButton> : null}
           </div>
         </Card>
         ) : null}
       </div>
+      {credit.length && jobMoney ? (
+        <Card className="flex flex-col gap-2 border-amber-bar" data-credit-offer>
+          <SectionLabel right={`AED ${aedOf(credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0))}`}>Customer credit, not allocated</SectionLabel>
+          <p className="text-xs text-muted">Money this customer paid earlier that is not on any job yet. Allocate it here and it comes off this job{jobMoney.live ? `’s ${jobMoney.live.number}` : "’s invoice"} by itself.</p>
+          <UnallocatedList rows={credit} canAllocate={mayPay} target={{ key: jobMoney.live ? `inv:${jobMoney.live.id}` : `job:${id}`, title: job.job_number, balance: jobMoney.balance }} />
+        </Card>
+      ) : null}
       {visitMileage ? <MileagePanel m={visitMileage} /> : null}
       {timeSpent ? <TimeSpentPanel t={timeSpent} /> : null}
       {role === "owner" || role === "accounts" ? await (async () => {

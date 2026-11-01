@@ -13,6 +13,9 @@ import { QuotationList } from "@/components/QuotationList";
 import { loadEstimateHistory } from "@/lib/quote-history-data";
 import type { QuoteFamily } from "@/lib/quote-history";
 import { refuseRecord } from "@/lib/refusal";
+import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { UnallocatedList } from "@/components/UnallocatedList";
+import { paymentChoices, unallocatedOf } from "@/lib/customer-money";
 
 export default async function CustomerPage({
   params,
@@ -53,6 +56,13 @@ export default async function CustomerPage({
   // 30 October 2026: every estimate of the customer, per car, with its versions (the same list as a job's quotations).
   const estimatesByCar = can(staff.role_id as RoleId, "viewEstimates") ? await loadEstimateHistory({ customerId: id }) : new Map<string, QuoteFamily[]>();
   const estimateCount = Array.from(estimatesByCar.values()).reduce((n, list) => n + list.length, 0);
+  // 1 November 2026: the customer's money - "Paid so far · Balance" per job, credit not allocated - and Record payment.
+  const role = staff.role_id as RoleId;
+  const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const seesMoney = can(role, "viewInvoices");
+  const [moneyChoices, credit] = seesMoney ? await Promise.all([paymentChoices({ customerId: id }, await getSettingsForGoodwill()), unallocatedOf({ customerId: id })]) : [null, []];
+  const owing = (moneyChoices?.targets ?? []).filter((t) => t.kind !== "unallocated");
+  const creditTotal = credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0);
 
   return (
     <>
@@ -67,12 +77,17 @@ export default async function CustomerPage({
           </span>
         }
         actions={
-          canEdit ? (
+          canEdit || mayPay ? (
             <>
-              <LinkButton href={`/vehicles/new?customer=${c.id}`} tone="secondary">
-                Add a car
-              </LinkButton>
-              <LinkButton href={`/customers/${c.id}/edit`}>Edit</LinkButton>
+              {mayPay ? <RecordPaymentButton customerId={c.id} size="lg" tone="secondary" /> : null}
+              {canEdit ? (
+                <>
+                  <LinkButton href={`/vehicles/new?customer=${c.id}`} tone="secondary">
+                    Add a car
+                  </LinkButton>
+                  <LinkButton href={`/customers/${c.id}/edit`}>Edit</LinkButton>
+                </>
+              ) : null}
             </>
           ) : undefined
         }
@@ -91,6 +106,22 @@ export default async function CustomerPage({
           </Card>
         ) : null;
       })() : null}
+      {seesMoney && (owing.length || credit.length) ? (
+        <Card className="flex flex-col gap-2" data-customer-money>
+          <SectionLabel right={creditTotal > 0 ? `Credit AED ${creditTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })} (not allocated)` : undefined}>Money</SectionLabel>
+          {owing.length ? (
+            <ul className="flex flex-col divide-y divide-line">
+              {owing.map((t) => (
+                <li key={t.key} className="py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-customer-job-money={t.jobId ?? ""}>
+                  <Link href={`/jobs/${t.jobId}/invoice`} className="font-bold uppercase underline underline-offset-4">{t.title}</Link>
+                  <span className="text-xs text-muted">{t.total !== null ? `Total AED ${t.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} · ` : ""}Paid so far AED {t.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{t.balance !== null ? ` · Balance AED ${t.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : " · no approved total yet"}{t.gone ? " · the car has left" : ""}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {credit.length ? <><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Not allocated</span><UnallocatedList rows={credit} canAllocate={mayPay} /></> : null}
+        </Card>
+      ) : null}
       {c.is_vip && c.vip_note ? (
         <Card className="border-ink flex flex-col gap-1">
           <SectionLabel>VIP handling note</SectionLabel>

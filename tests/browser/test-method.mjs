@@ -25,15 +25,18 @@ if (!jobId) { console.error("seed failed:", JSON.stringify(seed).slice(0, 300));
 /* ---------------- 1. A cash advance at the counter ---------------- */
 const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 950 } });
 await go(page, `${base}/jobs/${jobId}/invoice`);
-check("1: the advance fold says what it does", (await page.locator("[data-advance-fold]").count()) === 1 && /Record an advance payment \(customer paying at the counter/.test(((await page.textContent("[data-advance-fold]")) ?? "")));
-await page.locator("[data-advance-fold] summary").click();
-await sleep(400);
-await page.locator('[data-method="cash"]').click();
-await page.locator("[data-amount-partial]").click();
-await page.locator("[data-amount-input]").pressSequentially("500");
-await page.locator("[data-record-payment]").click();
-await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
-await settle(page);
+// 1 November 2026: the grey fold became a visible "Record a payment" that opens THE Record payment window.
+check("1: before the proforma the money page offers Record a payment, as an advance", (await page.locator("[data-advance-record]").count()) === 1 && /recorded as an advance/.test(((await page.textContent("[data-advance-record]")) ?? "")));
+await page.locator("[data-advance-record] [data-record-payment-open]").click();
+const win = page.locator("[data-record-payment-dialog]");
+await win.locator("[data-pay-targets]").waitFor({ timeout: 20000 });
+await win.locator('[data-method="cash"]').click();
+await win.locator("[data-amount-partial]").click();
+await win.locator("[data-amount-input]").pressSequentially("500");
+await win.locator("[data-record-payment]").click();
+await until(async () => (await win.locator("[data-record-payment-done]").count()) > 0, 50, 500);
+await win.locator("[data-record-payment-finish]").click();
+await go(page, `${base}/jobs/${jobId}/invoice`);
 const pay = (await sql("select id, number, method, is_deposit, bank_charge_aed, received_by, client_key from public.payments where job_id = $1 and invoice_id is null order by created_at desc limit 1", [jobId]))[0];
 check("2: recorded as a cash deposit with zero bank charge", !!pay && pay.method === "cash" && pay.is_deposit && Number(pay.bank_charge_aed) === 0, JSON.stringify(pay ?? {}));
 

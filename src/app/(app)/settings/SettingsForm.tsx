@@ -681,6 +681,9 @@ export function SettingsForm({
             <Field label="WhatsApp: deposit request" hint="The advisor sends it when a deposit is asked for. [name], [make model], [plate], [amount], [link] — the link is always our own payment page (erp.ofjauto.com/p/…), never the gateway's address.">
               <Textarea name="whatsapp_deposit_request_template" defaultValue={v.whatsapp_deposit_request_template} rows={3} required />
             </Field>
+            <Field label="WhatsApp: payment link (any amount)" hint="The advisor sends it from the job card for the full balance or any amount. [name], [make model], [plate], [amount], [link] — the link is our own payment page.">
+              <Textarea name="whatsapp_payment_request_template" defaultValue={v.whatsapp_payment_request_template} rows={3} required />
+            </Field>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Allowed payment-link domains" hint="One per line. A pasted Pay-now link must be https on one of these pay-page domains, or it is refused. Empty keeps the Network International defaults.">
                 <Textarea name="payment_gateway_domains" defaultValue={Array.isArray(v.payment_gateway_domains) ? (v.payment_gateway_domains as string[]).join("\n") : String(v.payment_gateway_domains ?? "")} rows={3} data-gateway-domains />

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { formatPhone } from "@/lib/messages";
+import { openRecordPayment } from "./RecordPaymentHost";
 
 /**
  * THE owner details panel (29 October 2026, batch 2 section 1): tapping a customer's name anywhere (car card, job card,
@@ -43,6 +44,9 @@ type PanelData = {
   previous: { count: number; last: { id: string; number: string; date: string | null; car: string; total: number | null }[] };
   spentThisYear: number;
   openBalance: number;
+  /** 1 November 2026: money on the customer's account not allocated yet; canPay = this person records money. */
+  credit?: number;
+  canPay?: boolean;
   cars: { id: string; plate: string; car: string }[];
   declined: { id: string; title: string; date: string; severity?: string | null }[];
 };
@@ -185,7 +189,13 @@ export function CustomerPanelHost() {
               <span className="flex flex-wrap gap-x-4 pt-1">
                 <span>Spent this year: <span className="font-semibold">{aed(data.spentThisYear)}</span></span>
                 {data.openBalance > 0 ? <span className="font-semibold text-red" data-panel-balance>Open balance: {aed(data.openBalance)}</span> : null}
+                {data.credit ? <span className="font-semibold" data-panel-credit>Credit {aed(data.credit)} (not allocated)</span> : null}
               </span>
+              {data.canPay ? (
+                <button type="button" onClick={() => { leave(); openRecordPayment({ customerId: data.customer.id, jobId: data.job?.id ?? null }); }} className="mt-1 min-h-11 self-start rounded-control bg-ink px-4 text-sm font-bold text-white" data-panel-pay>
+                  Record payment
+                </button>
+              ) : null}
             </section>
             {data.cars.length ? (
               <section className="flex flex-col gap-1 border-t border-line pt-3" data-panel-cars>
