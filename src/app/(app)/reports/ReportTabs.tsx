@@ -9,6 +9,7 @@ const TABS = [
   { href: "/reports/declined", label: "Declined cars" },
   { href: "/reports/inspection-fees", label: "Inspection fees" },
   { href: "/reports/complimentary", label: "Complimentary" },
+  { href: "/reports/supplier-prices", label: "Supplier price changes" },
 ];
 
 /** The three report pages share one strip: the tabs and the month with its arrows. */

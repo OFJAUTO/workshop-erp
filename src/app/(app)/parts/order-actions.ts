@@ -22,6 +22,7 @@ import { SUPPLIER_PAY_METHODS, flagZohoAttention, tryEnqueueZoho, zohoPostedSome
 import { JOB_FILES_BUCKET, ensureWorkLines } from "@/lib/work-data";
 import { checkPickable } from "@/lib/staff-picker";
 import { notifyInvoiceReceived, siQueryReady } from "@/lib/supplier-invoices";
+import { applyInvoicePrices } from "@/lib/price-change-server";
 import { objectExists } from "@/lib/upload-targets/common";
 
 function refresh(jobId: string | null, poId?: string) {
@@ -279,25 +280,21 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   const check = checkSupplierInvoice({ toFollow: false, number, date: invoiceDate, amount: Number.isFinite(amount) && amount > 0 ? amount : null, poTotal: Number(po.total_cost_aed) || null, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
   if (!check.ok) return { error: check.error };
   if (!number || !invoiceDate) return { error: "Enter the supplier invoice number and date, or tick Invoice to follow." };
-  const diffs: string[] = [];
-  let mismatches = 0;
   const now = new Date().toISOString();
+  // 1 November 2026: the supplier's prices are the real cost; a price up above the limit waits for the owner (price-change.ts).
+  const prices = new Map<string, number>();
   for (const l of lines) {
     const text = String(formData.get(`price__${l.id}`) ?? "").trim();
     if (!text) continue;
     const price = Number(text.replace(/[^\d.]/g, ""));
     if (!Number.isFinite(price) || price < 0) continue;
-    const mismatch = Math.abs(price - l.unit_cost) > 1;
-    await admin.from("purchase_order_lines").update({ invoice_unit_cost: price, invoice_check: mismatch ? "mismatch" : "match", invoice_check_by: staff.id, invoice_check_at: now, updated_by: staff.id }).eq("id", l.id);
-    if (Math.abs(price - l.unit_cost) > 0.005) {
-      diffs.push(`${l.description}: LPO ${l.unit_cost.toFixed(2)}, invoice ${price.toFixed(2)}`);
-      if (l.part_item_id) await admin.from("part_items").update({ final_cost_aed: price, updated_by: staff.id }).eq("id", l.part_item_id);
-    }
-    if (mismatch) mismatches++;
+    prices.set(l.id, price);
   }
+  const priced = await applyInvoicePrices(po.id, prices, staff, await getSettings());
+  const diffs = priced.changed;
+  const mismatches = priced.decision.increase > 0 && !priced.decision.auto ? diffs.length : 0;
   await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
-  if (mismatches) await notifyRoles(["owner", "accounts"], { type: "supplier_invoice_mismatch", title: `Supplier price differs from the LPO · ${po.number}`, body: `${diffs.join("; ")}. Accept the new price or dispute it on the LPO page.`, jobId: po.job_id, href: `/parts/orders/${po.id}` });
   // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
   // already posted cannot be re-posted (never twice): the row turns red for the accountant instead.
   // After go-live a bill from before the start date sits in the REAL book's opening balances: it is never queued
@@ -323,7 +320,7 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
   }
   await notifyInvoiceReceived([po.id]);
-  return { message: mismatches ? `Supplier invoice saved. ${mismatches} price${mismatches === 1 ? "" : "s"} differ${mismatches === 1 ? "s" : ""} by more than AED 1: accept the new price or dispute it below.` : "Supplier invoice saved." };
+  return { message: mismatches ? `Supplier invoice saved. The price went up above the limit: it waits for the owner's OK (or Query with supplier).` : diffs.length ? `Supplier invoice saved. ${priced.decision.increase > 0 ? "Price up within the limit: accepted, the owner is told." : "Price down: accepted."}` : "Supplier invoice saved." };
 }
 
 /** The supplier invoice entered on its own, after the delivery. */
@@ -351,6 +348,8 @@ export async function decideInvoiceCheck(lineId: string, formData: FormData) {
   const l = toPoLine(line as Record<string, unknown>);
   const back = `/parts/orders/${l.po_id}`;
   if (decision !== "accept" && decision !== "dispute") redirect(back);
+  // 1 November 2026: a price up above the automatic limit waits for the OWNER (OK or Query with supplier).
+  if (l.invoice_check === "mismatch" && role !== "owner") redirect(`${back}?error=${encodeURIComponent("A price up above the limit waits for the owner's OK.")}`);
   const { data: poRaw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", l.po_id).maybeSingle();
   const po = poRaw ? toPo(poRaw as Record<string, unknown>) : null;
   const now = new Date().toISOString();

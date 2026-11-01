@@ -121,20 +121,17 @@ await section("2 stock order", async () => {
   check("2: the delivery lands on the shelf with the cost averaged in", after?.quantity === 12 && after?.cost === 10 && after?.moves === 1, JSON.stringify(after));
   const poAfter = (await sql("select status, supplier_invoice_status, supplier_invoice_number, supplier_invoice_checked_at from public.purchase_orders where id = $1", [stockPoId]))[0];
   const line = (await sql("select invoice_unit_cost::float as price, invoice_check from public.purchase_order_lines where id = $1", [lineId]))[0];
-  check("2: the invoice is saved and the price more than AED 1 off is flagged for a decision", poAfter?.status === "received" && poAfter?.supplier_invoice_status === "received" && poAfter?.supplier_invoice_number === "SINV-E2E-1" && !poAfter?.supplier_invoice_checked_at && line?.price === 12 && line?.invoice_check === "mismatch", JSON.stringify({ poAfter, line }));
-  const notif = await until(async () => (await sql("select title from public.notifications where type = 'supplier_invoice_mismatch' and href = $1 limit 1", [`/parts/orders/${stockPoId}`]))[0], 20, 500);
-  check("2: accounts and the owner are told about the price difference", !!notif, notif?.title);
+  // 1 November 2026: the supplier invoice is the real cost; +AED 24 on a 120 LPO is within the limit (the higher of 5% or
+  // AED 100): accepted at once, the owner told. Accounts then check the invoice (the bill goes to Zoho at their check).
+  check("2: the invoice is saved and the price up within the limit is accepted at once", poAfter?.status === "received" && poAfter?.supplier_invoice_status === "received" && poAfter?.supplier_invoice_number === "SINV-E2E-1" && !poAfter?.supplier_invoice_checked_at && line?.price === 12 && line?.invoice_check === "accepted", JSON.stringify({ poAfter, line }));
+  const notif = await until(async () => (await sql("select title from public.notifications where type = 'supplier_invoice_mismatch' and title like 'Price up after approval%' order by created_at desc limit 1"))[0], 20, 500);
+  check("2: the owner is told about the price up (with the invoice one tap away)", !!notif, notif?.title);
   await pb.close();
-  // Accounts see the invoice to check and accept the new price.
   const acc = await fetchAs("/dashboard", "accounts");
   check("2: the accounts dashboard counts the invoice to check", /Supplier invoices to check/.test(plainText(acc.text)) && /data-tile="Supplier invoices to check"[^>]*>[\s\S]*?<span class="text-xl font-extrabold">[1-9]/.test(acc.text));
   const { browser: ab, page: ap } = await browserFor("accounts", { viewport: { width: 1366, height: 1400 } });
   await go(ap, `${base}/parts/orders/${stockPoId}`);
-  check("2: Accept new price and Dispute sit on the flagged line", (await ap.locator(`[data-invoice-check="${lineId}"]`).count()) === 1);
-  await ap.locator(`[data-invoice-check="${lineId}"] button[value="accept"]`).click();
-  await afterSubmit(ap);
-  const decided = (await sql("select l.invoice_check, p.supplier_invoice_checked_at from public.purchase_order_lines l join public.purchase_orders p on p.id = l.po_id where l.id = $1", [lineId]))[0];
-  check("2: Accept new price settles the line and the LPO", decided?.invoice_check === "accepted" && !!decided?.supplier_invoice_checked_at, JSON.stringify(decided));
+  check("2: the LPO shows both prices", /Approved 10\.00 · invoiced 12\.00 \(\+2\.00 each, \+24\.00 total\)/.test((await ap.locator("[data-price-change]").first().textContent().catch(() => "")) ?? ""));
   await ab.close();
   const totals = await fetchAs("/parts/suppliers/totals", "parts");
   check("2: the supplier purchase totals list the supplier with AED 120", /data-supplier-total="E2E Stock Supplier"/i.test(totals.text) && /AED 120/.test(plainText(totals.text)));

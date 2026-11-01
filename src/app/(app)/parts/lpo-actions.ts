@@ -2,6 +2,7 @@
 
 import { isUuid } from "@/lib/uuid";
 import { notifyInvoiceReceived } from "@/lib/supplier-invoices";
+import { applyInvoicePrices } from "@/lib/price-change-server";
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
@@ -166,6 +167,7 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
     if (r.error) return { error: r.error };
   }
   let invoiceWord = "";
+  let invoicePriceWords = "";
   if (poIds.length) {
     const now = new Date().toISOString();
     if (toFollow) {
@@ -182,6 +184,21 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
       }
       // Files uploaded before the save carry the panel's key (a uuid); they re-point to the (first) LPO so the scan shows on its page.
       if (isUuid(clientKey)) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", clientKey).is("removed_at", null);
+      // 1 November 2026: the price each on the supplier's invoice (typed beside each part) is the real cost.
+      const { data: pis } = await admin.from("part_items").select("id, po_id, po_line_id").in("id", ids);
+      const byPo = new Map<string, Map<string, number>>();
+      for (const p of (pis ?? []) as { id: string; po_id: string | null; po_line_id: string | null }[]) {
+        const text = String(formData.get(`price__part__${p.id}`) ?? "").trim();
+        if (!text || !p.po_id || !p.po_line_id) continue;
+        const price = Number(text.replace(/[^\d.]/g, ""));
+        if (!Number.isFinite(price) || price < 0) continue;
+        if (!byPo.has(p.po_id)) byPo.set(p.po_id, new Map());
+        byPo.get(p.po_id)!.set(p.po_line_id, price);
+      }
+      for (const [poId, prices] of byPo) {
+        const r = await applyInvoicePrices(poId, prices, staff, await getSettings());
+        if (r.changed.length) invoicePriceWords = r.decision.increase > 0 ? (r.decision.auto ? " Price up within the limit: accepted, the owner is told." : " Price up above the limit: it waits for the owner's OK.") : " Price down: accepted.";
+      }
       // Accounts are told at once (Supplier invoices tab); the bill goes to Zoho when they mark it Checked.
       await notifyInvoiceReceived(poIds);
       invoiceWord = " Supplier invoice saved.";
@@ -190,5 +207,5 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   revalidatePath(`/parts/${jobId}`);
   revalidatePath("/parts");
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${invoiceWord}` };
+  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${invoiceWord}${invoicePriceWords}` };
 }

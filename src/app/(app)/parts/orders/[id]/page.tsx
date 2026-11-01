@@ -12,6 +12,7 @@ import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { loadJobLpos, refusalsReady } from "@/lib/lpo";
 import { invoiceHref } from "@/lib/supplier-invoices";
 import { realPartNumber } from "@/lib/parts-rows";
+import { changeWords } from "@/lib/price-change";
 import { PO_STATUS_LABELS, loadPurchaseOrder } from "@/lib/parts-data";
 import { partTypeText } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
@@ -199,11 +200,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}
                       {l.received_qty > 0 ? <Badge tone={l.received_qty >= l.quantity ? "green" : "amber"}>received {l.received_qty}</Badge> : null}
                       {l.flag ? <Badge tone="red">{l.flag === "wrong" ? "Wrong part" : "Damaged"}: {l.flag_note}</Badge> : null}
-                      {l.invoice_unit_cost !== null && Math.abs(l.invoice_unit_cost - l.unit_cost) > 0.005 ? <Badge tone={l.invoice_check === "mismatch" || l.invoice_check === "disputed" ? "red" : "amber"}>Invoice price {l.invoice_unit_cost.toFixed(2)}{l.invoice_check === "accepted" ? " · accepted" : l.invoice_check === "disputed" ? " · disputed" : ""}</Badge> : null}
-                      {l.invoice_check === "mismatch" && (role === "owner" || role === "accounts" || canManage) && !staff.viewingAs ? (
+                      {changeWords(l) ? <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${l.invoice_check === "mismatch" || l.invoice_check === "disputed" ? "border border-red-bar text-red" : "border border-amber-bar bg-amber-soft text-amber"}`} data-price-change>{changeWords(l)}{l.invoice_check === "accepted" ? " · accepted" : l.invoice_check === "disputed" ? " · queried with the supplier" : l.invoice_check === "mismatch" ? " · waits for the owner" : ""}</span> : null}
+                      {l.invoice_check === "mismatch" && role === "owner" && !staff.viewingAs ? (
                         <form action={decideInvoiceCheck.bind(null, l.id)} className="flex gap-1" data-invoice-check={l.id}>
-                          <Button type="submit" name="decision" value="accept" size="md">Accept new price</Button>
-                          <Button type="submit" name="decision" value="dispute" size="md" tone="secondary">Dispute</Button>
+                          <Button type="submit" name="decision" value="accept" size="md" data-price-ok>OK</Button>
+                          <Button type="submit" name="decision" value="dispute" size="md" tone="secondary" data-price-query>Query with supplier</Button>
                         </form>
                       ) : null}
                       {part?.label_code ? <span className="ml-auto text-xs text-muted">label {part.label_code}</span> : null}

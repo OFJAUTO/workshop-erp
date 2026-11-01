@@ -7,7 +7,7 @@ import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
 import { useFormKey, type FilesWaiting } from "@/components/JobFileUpload";
 import { Button } from "@/components/ui";
 
-export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null };
+export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null; /** The approved price each (the LPO's), so the invoice's own price can be typed beside it. */ unitCost?: number | null };
 export type ReceivedRow = { id: string; description: string; positions?: string[] | null; qty: number };
 type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
 
@@ -93,6 +93,11 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
                   return (
                     <li key={r.id} className="flex items-center gap-3 min-h-11" data-sticker-row={r.id}>
                       <span className="flex flex-1 flex-col"><span className="font-semibold">{r.description}<span className="font-normal text-muted"> × {r.qty}</span></span><PositionsLine positions={r.positions} /></span>
+                      {r.unitCost !== null && r.unitCost !== undefined ? (
+                        <label className="flex flex-col text-[11px] font-semibold text-muted">On the invoice, each
+                          <input name={`price__part__${r.id}`} defaultValue={String(r.unitCost)} inputMode="decimal" className="h-9 w-24 rounded-control border border-line-strong px-2 text-right text-sm text-ink" aria-label={`Price each on the supplier's invoice for ${r.description}`} data-invoice-price={r.id} />
+                        </label>
+                      ) : null}
                       <button type="button" onClick={() => setNoSticker((u) => { const n = new Set(u); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} aria-pressed={sticker} data-sticker-switch className={`inline-flex min-h-9 items-center gap-1.5 rounded-control border px-3 text-xs font-bold ${sticker ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`}>
                         {sticker ? `Stickers × ${r.qty}` : "No sticker"}
                       </button>

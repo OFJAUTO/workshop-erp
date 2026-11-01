@@ -107,6 +107,7 @@ import { ChargesCard } from "./ChargesCard";
 import { addJobChargesAction, decideFreeChargeAction } from "../charge-actions";
 import { chargesReady, loadCharges } from "@/lib/charges";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
+import { lineChange, profitChangeWords } from "@/lib/price-change";
 import { STATUS_WORDS as SI_STATUS_WORDS, invWords } from "@/lib/supplier-invoice-rows";
 import { loadStages } from "@/lib/bodyshop";
 import { sidesOfDepartment } from "@/lib/job-sides";
@@ -251,7 +252,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     for (const x of (cf ?? []) as { id: string; storage_path: string; content_type: string | null; caption: string | null; ref_id: string }[]) (chargeFiles[x.ref_id] ??= []).push({ id: x.id, path: x.storage_path, url: cfUrls[x.storage_path] ?? null, caption: x.caption, contentType: x.content_type, refId: x.ref_id });
   }
   // The car's supplier invoices (1 November 2026): number, its share, status, one tap to the Supplier invoices tab.
-  const jobSupplierInvoices = ["owner", "accounts", "parts", "service_advisor"].includes(role) ? (await loadSupplierInvoices({ jobId: id })).rows.filter((r) => r.shares.some((x) => x.jobId === id)) : [];
+  const jobSi = ["owner", "accounts", "parts", "service_advisor"].includes(role) ? await loadSupplierInvoices({ jobId: id }) : null;
+  const jobSupplierInvoices = jobSi ? jobSi.rows.filter((r) => r.shares.some((x) => x.jobId === id)) : [];
+  // 1 November 2026: what the supplier price changes did to this job (a price up after approval comes off the profit).
+  const myPoIds = new Set(jobSupplierInvoices.flatMap((r) => r.shares.filter((x) => x.jobId === id).map((x) => x.poId)));
+  const priceChangeNet = (jobSi?.lines ?? []).filter((l) => myPoIds.has(l.po_id)).reduce((acc, l) => acc + (lineChange(l)?.total ?? 0), 0);
   const withCarTeam = teamLines.length && job.department !== "mechanical" ? teamWithCar(jobSides.includes("bodyshop") ? await loadStages(id) : [], job.status === "in_work" && !!job.plan_released_at) : null;
   const misfits: { name: string; why: string }[] = [];
   if (teamLines.length && (onCar.length || bodyOnCar.length)) {
@@ -691,6 +696,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {jobSupplierInvoices.length ? (
         <Card className="flex flex-col gap-2" data-job-supplier-invoices>
           <SectionLabel right={`${jobSupplierInvoices.length}`}>Supplier invoices</SectionLabel>
+          {profitChangeWords(priceChangeNet) ? <p className={`text-sm font-bold ${priceChangeNet > 0 ? "text-red" : "text-green"}`} data-job-price-change>{profitChangeWords(priceChangeNet)}</p> : null}
           <ul className="divide-y divide-line text-sm">
             {jobSupplierInvoices.map((r) => {
               const share = r.shares.filter((x) => x.jobId === id).reduce((acc, x) => acc + x.amount, 0);

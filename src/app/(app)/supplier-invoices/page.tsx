@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { MATCH_WORDS, STATUS_WORDS, filterInvoices, invWords, unpaidBySupplier, type InvoiceRow, type InvoiceStatus } from "@/lib/supplier-invoice-rows";
 import { loadSupplierInvoices, siQueryReady } from "@/lib/supplier-invoices";
 import { signJobFiles } from "@/lib/work-data";
+import { changeWords } from "@/lib/price-change";
 import { checkInvoiceAction, queryInvoiceAction } from "./actions";
 
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -159,7 +160,7 @@ async function OpenInvoice({ row, acts, queryOn }: { row: InvoiceRow; acts: bool
                     <li key={i} className="flex flex-wrap items-center gap-2 py-1.5" data-si-line>
                       <span className="min-w-0 flex-1 font-semibold uppercase">{l.description}</span>
                       <span className={short ? "font-bold text-amber" : "text-muted"}>× {Number(l.quantity)}{short ? ` (received ${Number(l.received_qty)})` : ""}</span>
-                      <span className={diff ? "font-bold text-amber" : "text-muted"} data-si-prices>Approved {money(Number(l.unit_cost))}{inv !== null ? ` · invoiced ${money(inv)}` : ""}</span>
+                      <span className={diff ? "font-bold text-amber" : "text-muted"} data-si-prices>{changeWords({ quantity: Number(l.quantity), received_qty: Number(l.received_qty), unit_cost: Number(l.unit_cost), invoice_unit_cost: inv }) ?? `Approved ${money(Number(l.unit_cost))}${inv !== null ? ` · invoiced ${money(inv)}` : ""}`}</span>
                     </li>
                   );
                 })}

@@ -184,6 +184,10 @@ const DEFAULTS = {
   /** The normal recovery price per kind of truck (see recoveryRatesOf in src/lib/recovery.ts) and the flag percent. */
   recovery_rates: {} as unknown,
   recovery_flag_percent: 25,
+  /** A supplier invoice price above the approved LPO is accepted at once up to the higher of these per LPO (1 November 2026). */
+  supplier_price_auto_percent: 5,
+  supplier_price_auto_aed: 100,
+  pending_charges_reminder_days: 7,
   /** The workshop dictionary for the pre-send spelling check (car words the owner adds; see src/lib/spell.ts). */
   spell_words: [] as string[],
   /** The pay-page domains a pasted payment link may use (one per line in Settings); empty keeps the N-Genius defaults. */

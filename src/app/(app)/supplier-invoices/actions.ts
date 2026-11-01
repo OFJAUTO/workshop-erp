@@ -32,6 +32,8 @@ export async function checkInvoiceAction(key: string) {
   const row = await rowOf(key);
   if (!row) return back(key, { error: "That invoice is no longer on the list." });
   if (row.status === "waiting") return back(key, { error: "The invoice has not arrived yet: Parts enter it when it comes." });
+  const { count: waitingOwner } = await createAdminClient().from("purchase_order_lines").select("id", { count: "exact", head: true }).in("po_id", row.shares.map((s) => s.poId)).eq("invoice_check", "mismatch").eq("is_active", true);
+  if ((waitingOwner ?? 0) > 0) return back(key, { error: "A price went up above the limit: it waits for the owner's OK (or Query with supplier) before the bill goes to Zoho." });
   const admin = createAdminClient();
   const now = new Date().toISOString();
   const clearQuery = (await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {};
