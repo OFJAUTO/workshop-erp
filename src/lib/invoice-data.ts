@@ -13,6 +13,7 @@ import { createAdminClient } from "./supabase/admin";
 import { loadVisitMileage } from "./visit-mileage";
 import { gateOutMileageReady } from "./schema-ready";
 import { customerMileage } from "./mileage";
+import { realPartNumber } from "./parts-rows";
 
 export type InvoiceKind = "tax_invoice" | "proforma" | "credit_note";
 export type LabourMode = "itemised" | "combined";
@@ -328,7 +329,7 @@ function draftLineOf(l: QuoteLine, part: { part_number: string | null; cost_aed:
   const amount = lineTotal(l);
   // Spare parts are the lines Parts entered (a part item with a name and a type). Anything else, even with a cost, is work or a charge.
   const isPart = l.line_type === "part" && !!l.part_item_id;
-  const number = part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null);
+  const number = realPartNumber(part?.part_number ?? (l.line_type === "part" ? (l.title.match(/\(([^()]+)\)\s*$/)?.[1] ?? null) : null));
   const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
   const cost = l.line_type === "part" ? round2((part?.final_cost_aed ?? part?.cost_aed ?? l.unit_cost ?? 0) * (l.quantity || 1)) : lineCost(l);
   return {

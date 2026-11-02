@@ -6,6 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { decideDiscountApproval } from "../remove-actions";
+import { realPartNumber } from "@/lib/parts-rows";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export default async function DiscountApprovalsPage({ searchParams }: { searchPa
               <li key={r.id} className="py-3 flex flex-col gap-2" data-approval-row>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-extrabold">{r.description}</span>
-                  {r.part_number ? <span className="text-muted">{r.part_number}</span> : null}
+                  {realPartNumber(r.part_number) ? <span className="text-muted">{realPartNumber(r.part_number)}</span> : null}
                   <Badge tone="amber">{r.discount_percent}% from {r.supplier ?? "no supplier"}</Badge>
                   <span className="text-muted">List AED {money(r.list_price_aed)} · net AED {money(r.cost_aed)} · {line(r)}</span>
                   <LinkButton href={`/parts/${r.job_id}`} tone="secondary" size="md">Parts page</LinkButton>

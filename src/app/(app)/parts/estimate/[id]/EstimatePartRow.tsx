@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { ActionForm, SubmitButton } from "@/components/forms";
+import { useRef, useState } from "react";
+import { StockItemPicker, type PickedStockItem } from "@/components/StockItemPicker";
+import { ActionForm, ReleaseFormLock, SubmitButton } from "@/components/forms";
 import { Badge, Button, ChoiceButtons, Field, Input, Textarea } from "@/components/ui";
 import { ESTIMATE_PART_WORDS, type EstimatePartState } from "@/lib/estimate-parts";
 import { checkEstimatePrice, priceEstimatePart, tellAdvisorPrice } from "../../estimate-actions";
@@ -21,6 +22,9 @@ export type DeskPartLine = {
   availability: "in_stock" | "to_order" | null;
   days: number | null;
   advisorName: string | null;
+  /** "From our stock…" (2 November 2026): the stock item behind the price, in words. */
+  stockItemId?: string | null;
+  stockWords?: string | null;
 };
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -43,6 +47,10 @@ export function EstimatePartRow({ quotationId, line, index, partTypes, suppliers
   const router = useRouter();
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
+  // "From our stock…": the stock item picked (its cost is the price; no supplier or availability to choose).
+  const [stock, setStock] = useState<{ id: string; words: string } | null>(line.stockItemId ? { id: line.stockItemId, words: line.stockWords ?? "stock item" } : null);
+  const [stockOpen, setStockOpen] = useState(false);
+  const stockBtn = useRef<HTMLSpanElement>(null);
   const advisorPriced = line.state === "advisor";
   const dayValue = line.availability === "in_stock" ? "in_stock" : line.days !== null && line.days <= 3 ? String(line.days) : line.days !== null ? "other" : "";
   const tone = line.state === "with_desk" ? "amber" : line.state === "advisor" ? "amber" : line.state === "draft" ? "outline" : "green";
@@ -83,26 +91,54 @@ export function EstimatePartRow({ quotationId, line, index, partTypes, suppliers
           {(v) => (
             <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Field label="Part number" optional hint="Internal: never on the customer's estimate.">
-                  <Input name="part_number" defaultValue={v.part_number} autoCapitalize="characters" spellCheck={false} data-desk-part-number />
+                <Field label="Part number" optional hint="Internal: never on the customer's estimate. No number from the supplier: leave it empty.">
+                  <Input name="part_number" defaultValue={v.part_number === "NO NUMBER" ? "" : v.part_number} autoCapitalize="characters" spellCheck={false} data-desk-part-number />
                 </Field>
-                <Field label="Cost each, before VAT (AED)">
-                  <Input name="cost" defaultValue={v.cost} inputMode="decimal" required data-desk-cost />
-                </Field>
-                <Field label="Supplier">
-                  <Input name="supplier" defaultValue={v.supplier} list={`desk-suppliers-${line.id}`} required textCase="title" data-desk-supplier />
-                  <datalist id={`desk-suppliers-${line.id}`}>{suppliers.map((s) => <option key={s} value={s} />)}</datalist>
-                </Field>
+                {stock ? (
+                  <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-control border border-line bg-chip px-3 py-2" data-desk-stock>
+                    <input type="hidden" name="stock_item_id" value={stock.id} />
+                    <span className="min-w-0 flex-1 text-sm font-semibold">From our stock: {stock.words}</span>
+                    <Button type="button" size="md" tone="secondary" onClick={() => setStock(null)} data-desk-stock-off>Not from stock</Button>
+                  </div>
+                ) : (
+                  <>
+                    <Field label="Cost each, before VAT (AED)">
+                      <Input name="cost" defaultValue={v.cost} inputMode="decimal" required data-desk-cost />
+                    </Field>
+                    <Field label="Supplier">
+                      <Input name="supplier" defaultValue={v.supplier} list={`desk-suppliers-${line.id}`} required textCase="title" data-desk-supplier />
+                      <datalist id={`desk-suppliers-${line.id}`}>{suppliers.map((s) => <option key={s} value={s} />)}</datalist>
+                    </Field>
+                  </>
+                )}
               </div>
+              {stock ? null : (
+                <div>
+                  <span ref={stockBtn} className="inline-block"><Button type="button" size="md" tone="secondary" onClick={() => setStockOpen(true)} data-desk-stock-open>From our stock…</Button></span>
+                </div>
+              )}
+              {stockOpen ? <StockItemPicker anchor={stockBtn.current} suggest={line.title} need={line.quantity} onPick={(item: PickedStockItem) => { setStockOpen(false); setStock({ id: item.id, words: item.words }); }} onClose={() => setStockOpen(false)} /> : null}
               <Field label="Type" optional>
                 <ChoiceButtons name="part_type" columns={4} defaultValue={partTypes.find((t) => t.toLowerCase() === (v.part_type ?? "").toLowerCase()) ?? null} options={partTypes.map((t) => ({ value: t, label: t }))} />
               </Field>
-              <Field label="Availability">
-                <ChoiceButtons name="availability" columns={3} defaultValue={v.availability || null} options={DAY_CHOICES} />
-              </Field>
-              <Field label="Other: days to arrive" optional>
-                <Input name="days_other" defaultValue={v.days_other} inputMode="numeric" className="max-w-32" data-desk-days />
-              </Field>
+              {stock ? null : (
+                <>
+                  <Field label="Availability">
+                    <ChoiceButtons name="availability" columns={3} defaultValue={v.availability || null} options={DAY_CHOICES} />
+                  </Field>
+                  <Field label="Other: days to arrive" optional>
+                    <Input name="days_other" defaultValue={v.days_other} inputMode="numeric" className="max-w-32" data-desk-days />
+                  </Field>
+                </>
+              )}
+              {/* The cost question (2 November 2026): asked once for this cost, answered with one tap beside it */}
+              {v.ask_cost ? (
+                <div className={`flex flex-wrap items-center gap-2 rounded-control border-2 px-3 py-2 ${v.ask_kind === "far_below" ? "border-red-bar bg-white" : "border-amber-bar bg-amber-soft"}`} data-desk-cost-ask={v.ask_kind || "ask_cheap"}>
+                  <ReleaseFormLock key={v.ask_cost} />
+                  <span className={`min-w-0 flex-1 text-sm font-bold ${v.ask_kind === "far_below" ? "text-red" : "text-amber"}`}>{v.ask_words}</span>
+                  <button type="submit" name="confirm_cost" value={v.ask_cost} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white" data-desk-cost-confirm>Yes, real price</button>
+                </div>
+              ) : null}
               <div><SubmitButton>{line.state === "priced" || line.state === "checked" ? "Save the new price" : advisorPriced ? "Save the right price" : "Save price"}</SubmitButton></div>
             </>
           )}

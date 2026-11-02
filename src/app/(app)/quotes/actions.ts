@@ -2,7 +2,8 @@
 
 import { declinedItemsOf, declinedNote, saveDeclinedWork } from "@/lib/declined";
 import { isQuickJob } from "@/lib/inspection-fee";
-import { dateFromDays } from "@/lib/parts-rows";
+import { cleanPartNumber, dateFromDays, isOurStock } from "@/lib/parts-rows";
+import { costConfirmReady, lineCostConfirmReady } from "@/lib/schema-ready";
 import { dubaiDate } from "@/lib/jobs";
 import { invoicesForLock, loadQuoteLock, refuseIfLocked } from "@/lib/quote-lock-server";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -21,7 +22,8 @@ import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { handBack, quoteLeadIds } from "@/lib/quote-lead";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, packageCostingForQuote, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, revisionRowRed, revisionRowWarning, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, revisionRowRed, revisionRowWarning, round2, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
+import { costLimitsOf, markupTooHigh, markupTooHighWords } from "@/lib/part-cost-check";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -226,6 +228,11 @@ async function estimateLineRows(estimateId: string, quotationId: string, by: str
   const admin = createAdminClient();
   const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", estimateId).eq("is_active", true).order("position");
   const { data: est } = await admin.from("quotations").select("number").eq("id", estimateId).maybeSingle();
+  // 2 November 2026: the parts desk's "Yes, real price" and stock item travel with the part (once the database has them).
+  const lineReady = await lineCostConfirmReady();
+  const { data: extra } = lineReady ? await admin.from("quotation_lines").select("id, stock_item_id, cost_confirmed_aed").eq("quotation_id", estimateId).eq("is_active", true) : { data: [] as { id: string; stock_item_id: string | null; cost_confirmed_aed: number | string | null }[] };
+  const extraOf = new Map((extra ?? []).map((x) => [x.id as string, x as { stock_item_id: string | null; cost_confirmed_aed: number | string | null }]));
+  const partsReady = await costConfirmReady();
   const rows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
   for (const l of ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((x) => !x.fee_kind)) {
@@ -252,7 +259,7 @@ async function estimateLineRows(estimateId: string, quotationId: string, by: str
     const delivery = l.availability === "to_order" && l.delivery_days !== null && l.delivery_days !== undefined ? dateFromDays(String(l.delivery_days), dubaiDate()) : null;
     const { data: item, error: itemError } = await admin
       .from("part_items")
-      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: qty, confirmed_quantity: qty, positions: l.positions ?? [], part_number: l.part_number ?? null, part_type: l.part_type ?? null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: l.availability ?? null, delivery_date: delivery, confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now, added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
+      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: qty, confirmed_quantity: qty, positions: l.positions ?? [], part_number: cleanPartNumber(l.part_number), part_type: l.part_type ?? null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: isOurStock(l.supplier_text) ? "in_stock" : (l.availability ?? null), delivery_date: delivery, stock_item_id: isOurStock(l.supplier_text) ? (extraOf.get(l.id)?.stock_item_id ?? null) : null, ...(partsReady && extraOf.get(l.id)?.cost_confirmed_aed !== null && extraOf.get(l.id)?.cost_confirmed_aed !== undefined ? { cost_confirmed_aed: extraOf.get(l.id)!.cost_confirmed_aed, cost_confirmed_at: now, cost_confirmed_by: by } : {}), confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now, added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
       .select("id")
       .single();
     if (itemError || !item) {
@@ -654,7 +661,9 @@ export async function confirmEstimateUnchanged(quotationId: string) {
   const { data: est } = await admin.from("quotations").select("status, approver_name, sent_to_phone").eq("id", q.estimate_id).maybeSingle();
   if (!est || est.status !== "approved") redirect(`${back}?error=${encodeURIComponent("The estimate was not accepted by the customer.")}`);
   const settings = await getSettings();
-  const blockers = await quoteBlockers(bundle, settings, { openRequests: 0, workshopEstimate: null });
+  // The same cost questions as Send: a carried part whose price nobody confirmed never slips through as "approved".
+  const { costAsks } = await loadQuoteChecks(q.job_id);
+  const blockers = await quoteBlockers(bundle, settings, { openRequests: 0, workshopEstimate: null, costAsks });
   if (blockers.length) redirect(`${back}?error=${encodeURIComponent(blockers.map((b) => b.label).join(" · "))}`);
   await admin.from("quotations").update({ token: q.token ?? quoteToken(), sent_to_phone: est.sent_to_phone ?? bundle.customer?.phone ?? null, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_confirmed_from_estimate", `${q.number} confirmed by ${staff.display_name} as unchanged from the accepted estimate`);
@@ -680,10 +689,10 @@ export async function resendQuotation(quotationId: string): Promise<SendQuoteSta
 }
 
 /** The checks before completing or sending: the findings not yet quoted and the markups to confirm are counted in. */
-async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQuotation>>>, settings: Awaited<ReturnType<typeof getSettings>>, checks: { openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }) {
+async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQuotation>>>, settings: Awaited<ReturnType<typeof getSettings>>, checks: { openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null; costAsks?: Record<string, string> }) {
   const q = bundle.quotation;
   // Findings not quoted never block: the advisor sees them as a reference list and decides.
-  const out = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, confirmPercent: Number(settings.markup_confirm_percent) || 100, ...(await belowCostOptsFor(settings, q, bundle.lines)) });
+  const out = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, ...(await belowCostOptsFor(settings, q, bundle.lines)) });
   // Section 5 (30 October 2026): anything free needs its reason (and the original job, or the note) before it can go out.
   const decidedComeback = !!(bundle.job as { comeback_free?: boolean } | null)?.comeback_free;
   if (q.comp_reason !== undefined && !decidedComeback && compLinesOf(bundle.lines, q).length) {
@@ -706,7 +715,7 @@ async function stampComp(bundle: NonNullable<Awaited<ReturnType<typeof loadQuota
  * "Quotation complete": every check passes, the labour hours are remembered for the next quotation on
  * the same work, and descriptions typed by hand are counted so the owner can add them to the list.
  */
-export async function completeQuotation(quotationId: string, opts: { /** "Send anyway" on the low-profit warning: logged, the owner told. */ lowProfitOk?: boolean; /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean; /** "Leave them off" on the missing-parts check: logged. */ skipParts?: boolean; /** "Send without a deposit" on the deposit reminder: logged. */ skipDeposit?: boolean; /** The OWNER completes despite positions and quantity disagreeing: logged. */ skipPositions?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "low_profit" | "markup" | "parts" | "deposit" | "positions"; message?: string; missing?: string[] }> {
+export async function completeQuotation(quotationId: string, opts: { /** "Send anyway" on the low-profit warning: logged, the owner told. */ lowProfitOk?: boolean; /** "Continue anyway" on the markup reminder: logged, no approval needed. */ skipMarkup?: boolean; /** "Leave them off" on the missing-parts check: logged. */ skipParts?: boolean; /** "Send without a deposit" on the deposit reminder: logged. */ skipDeposit?: boolean; /** The OWNER completes despite positions and quantity disagreeing: logged. */ skipPositions?: boolean; /** "Send anyway" on a part markup over the warning limit (2 November 2026): logged, the owner told. */ highMarkupOk?: boolean } = {}): Promise<{ error?: string; ok?: boolean; ask?: "low_profit" | "high_markup" | "markup" | "parts" | "deposit" | "positions"; message?: string; missing?: string[] }> {
   const bundle = await loadQuotation(quotationId);
   if (!bundle) return { error: "Quotation not found." };
   const q = bundle.quotation;
@@ -741,6 +750,12 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
       lowProfit = { marginPct, profit: t.profit, net: t.net };
     }
   }
+  // Placeholder costs (2 November 2026): a part markup over the warning limit (500%) usually hides a cost that is not
+  // real (AED 1.00 + AED 870 = "87,000%"). Asked once (Fix the cost / Send anyway); logged and the owner told on completion.
+  const markupLimit = costLimitsOf(settings as unknown as Record<string, unknown>).markupWarnPercent;
+  const highMarkup = active.filter((l) => l.line_type === "part" && !isUnchosen(l) && !l.left_off && !isHidden(l)).map((l) => ({ l, pct: markupTooHigh(l, markupLimit) })).filter((x): x is { l: QuoteLine; pct: number } => x.pct !== null);
+  const highWords = highMarkup.map((x) => markupTooHighWords(x.pct, x.l.unit_cost, bundle.parts.find((p) => p.id === x.l.part_item_id)?.supplier ?? x.l.supplier_text ?? null).replace(/^Markup/, x.l.title.toUpperCase())).join(" · ");
+  if (highMarkup.length && !opts.highMarkupOk) return { ask: "high_markup", message: `${highMarkup.length === 1 ? "A part markup is" : `${highMarkup.length} part markups are`} over ${markupLimit.toLocaleString("en-GB")}%: ${highWords}` };
   // The parts markup never moved off the minimum: asked once (Set markup / Continue anyway); "Continue anyway" is logged for the owner's summary.
   const minMarkup = minMarkupFor(settings, bundle.vehicle?.make?.name ?? null);
   const partLines = active.filter((l) => l.line_type === "part" && !isUnchosen(l) && !l.left_off);
@@ -805,6 +820,12 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
     const plate = bundle.vehicle ? formatPlate(bundle.vehicle) : bundle.job?.job_number ?? q.number;
     await logQuoteEvent(q.id, q.job_id, staff.id, "low_profit_sent", `${q.number} v${q.version} completed at a ${lowProfit.marginPct.toFixed(1)}% margin (${aed(lowProfit.profit)} on ${aed(lowProfit.net)}) by ${staff.display_name}: Send anyway`);
     if (staff.role_id !== "owner") await notifyRoles(["owner"], { type: "low_profit", title: `Low-profit quote sent by ${staff.display_name}: ${plate}, ${lowProfit.marginPct.toFixed(1)}%`, body: `${q.number}: ${aed(lowProfit.profit)} profit on ${aed(lowProfit.net)} before VAT. The limits are in Settings.`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+  }
+  // "Send anyway" on a markup over the limit: written on the quotation, the owner told once (never about his own).
+  if (highMarkup.length) {
+    const plate = bundle.vehicle ? formatPlate(bundle.vehicle) : bundle.job?.job_number ?? q.number;
+    await logQuoteEvent(q.id, q.job_id, staff.id, "high_markup_sent", `${q.number} v${q.version} completed by ${staff.display_name} with a part markup over ${markupLimit}%: ${highWords} (Send anyway)`);
+    if (staff.role_id !== "owner") await notifyRoles(["owner"], { type: "high_markup", title: `Markup over ${markupLimit}% sent by ${staff.display_name}: ${plate}`, body: `${q.number}: ${highWords}. Is the cost real?`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
   }
   await admin.from("quotations").update({ completed_at: new Date().toISOString(), completed_by: staff.id, updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_complete", `${q.number} v${q.version} marked complete by ${staff.display_name}`);

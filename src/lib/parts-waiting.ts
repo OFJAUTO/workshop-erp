@@ -3,6 +3,7 @@ import { estimateTaskWords, loadEstimatesToPrice } from "./estimate-parts-data";
 import type { ExtraWaiting } from "@/components/WaitingPanel";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { pricesToFix } from "./part-cost-history";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
 type PlateRow = Parameters<typeof formatPlate>[0];
@@ -28,7 +29,7 @@ export async function partsWaitingExtra(): Promise<ExtraWaiting[]> {
     since: e.since,
     hint: "The advisor's estimate before the car arrives: price each part he named, or check the price he typed.",
   }));
-  return [...estimates, ...(await orderNowItems())];
+  return [...(await pricesToFixItem()), ...estimates, ...(await orderNowItems())];
 }
 
 async function orderNowItems(): Promise<ExtraWaiting[]> {
@@ -62,4 +63,27 @@ async function orderNowItems(): Promise<ExtraWaiting[]> {
       hint: "Approved: send it to the supplier (Copy, PDF or Email on the LPO) and press Ordered.",
     } as ExtraWaiting;
   });
+}
+
+/**
+ * "Prices to fix" (2 November 2026, 2.4): one line while parts not ordered yet carry a placeholder price, a stand-in
+ * supplier or an unanswered cost question. Ordered or received ones are on the Parts page's list only (corrected with
+ * "Correct the cost…"): they never keep a line here that nothing on this screen can clear.
+ */
+async function pricesToFixItem(): Promise<ExtraWaiting[]> {
+  const open = (await pricesToFix()).filter((r) => !r.settled);
+  if (!open.length) return [];
+  return [{
+    jobId: "prices-to-fix",
+    plate: "Prices to fix",
+    car: null,
+    what: `Prices to fix: ${open.length} part${open.length === 1 ? "" : "s"} with a placeholder price or supplier`,
+    amount: null,
+    actionLabel: "Fix the prices",
+    href: "/parts#prices-to-fix",
+    always: true,
+    urgency: "amber",
+    since: null,
+    hint: "A cost of AED 1.00 or a supplier like OFJ Additional makes the profit look bigger than it is: put the real price, the real supplier, or From our stock.",
+  }];
 }

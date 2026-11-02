@@ -11,11 +11,26 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-The newest backup, taken read-only before this batch's database change, is `backups/2026-11-02T15-57-56` (109 tables, 242,238 rows). A fresh one is taken again right before applying.
+The newest backup, taken read-only before these changes, is `backups/2026-11-02T20-42-18` (109 tables, 242,795 rows). A fresh one is taken again right before applying.
 
 | # | Migration | Task | What it switches on | Backup |
 |---|---|---|---|---|
-| 1 | `20261203090000_below_cost.sql` | Section 1: price calculation and nothing below cost (Q-00039) | The owner's "Approve below cost" with a reason kept on the line, for a typed price and for a discount that takes a line below its cost (before it, a price or discount below cost is refused for everyone, the owner too; a cost typed is always saved and flagged), and the automatic withdrawal of a Parts revision request when every part it names was taken off (never an advisor's request). It also withdraws Peter's waiting Q-00039 request ("Peter added FRONT RH HEAD LIGHT, AED 5,502.73": the part was removed as a duplicate this morning), marks that bell and Q-00020's already-answered bell read, and prices any early charge sitting on a quotation at its charge instead of its cost (none on live tonight). | `backups/2026-11-02T15-57-56` |
+| 1 | `20261203101000_stock_test_leftover.sql` | Section 2 review fixes | Switches off one made-up stock item that a browser test left on live on 16 October: "Rear brake discs · E2E-DISC-1 · 8 on hand · AED 49.00". It is guarded: it touches only that exact row (same id, part number and name), only while the item is still on, and only if no part uses it. Nothing else changes, and it adds no new table or column. Until it is applied, the item still shows in "From our stock…". Its cost counts as typed, so it gets the "Is this the real price?" question like any typed cost. | `backups/2026-11-02T20-42-18` |
+
+## Applied on 2 November 2026, evening
+
+The owner replied "apply" in manual mode, twice. For each file:
+
+1. a fresh backup was taken;
+2. the live rows it touches were read;
+3. the file was run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`;
+4. the same rows were read again;
+5. `npm run check:live` was run (33 passed, 0 failed).
+
+| # | Migration | Backup | What it did on live |
+|---|---|---|---|
+| 1 | `20261203090000_below_cost.sql` (section 1) | `backups/2026-11-02T19-18-47` | Added the below-cost approval columns and `quotations.revision_request_parts`. Withdrew Peter's waiting Q-00039 request ("FRONT RH HEAD LIGHT, AED 5,502.73"; the part had been removed as a duplicate), with the reason. Marked that bell and the revision bells already answered as read. Re-priced 0 lines: no early charge sat on a quotation being prepared. Q-00027 v2's open advisor request is left for the owner to decline by hand. |
+| 2 | `20261203100000_part_costs.sql` (section 2) | `backups/2026-11-02T19-26-11` | Applied at 19:26 UTC, before section 2's review. The review changed nothing in this file (compared with the applied copy afterwards). Its one extra change is in Waiting now above. This file added the "Yes, real price" columns on parts and estimate lines, and the estimate line's stock item. It seeded four limit rows: ask under AED 5, flag under 50%, similar within 20%, warn over 500%. 445 part numbers that were line numbers or "OFJ" now read NO NUMBER; 188 are on active parts, including J-00969's "12". There were 0 estimate lines to change. |
 
 ## Applied on 2 November 2026, morning
 

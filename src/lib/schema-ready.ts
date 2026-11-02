@@ -38,3 +38,9 @@ export const paymentsAnytimeReady = () => schemaReady("payments", "vehicle_id, a
 export const belowCostReady = () => schemaReady("quotation_lines", "below_cost_reason, below_cost_by, below_cost_at, below_cost_sell_aed, below_cost_cost_aed");
 export const BELOW_COST_SELECT = "id, below_cost_reason, below_cost_by, below_cost_at, below_cost_sell_aed, below_cost_cost_aed";
 export const revisionPartsReady = () => schemaReady("quotations", "revision_request_parts");
+
+/** Placeholder costs (2 November 2026, section 2): "Yes, real price" kept per cost figure on parts and estimate part
+ *  lines, and an estimate part's stock item. Migration 20261203100000_part_costs. Before it the cost question is a
+ *  warning only (its answer cannot be stored), and the LPO gate refuses what needs no new column. */
+export const costConfirmReady = () => schemaReady("part_items", "cost_confirmed_aed, cost_confirmed_at, cost_confirmed_by");
+export const lineCostConfirmReady = () => schemaReady("quotation_lines", "cost_confirmed_aed, cost_confirmed_at, cost_confirmed_by, stock_item_id");

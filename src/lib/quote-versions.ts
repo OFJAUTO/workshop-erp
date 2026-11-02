@@ -2,13 +2,14 @@ import { invoicesForLock, refuseIfLocked } from "./quote-lock-server";
 import { liveInvoicesOf } from "./quote-lock";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { LINE_SELECT, PART_SELECT, attachBelowCost, loadQuotation, logQuoteEvent, minMarkupFor, parentLineFor, refreshQuoteTotals, toLine, toPart } from "@/lib/quote-data";
-import { aed, belowCostOf, partLineChanges, type LineForDiff, blockOf, cheapCostWarning, isHidden, isUnchosen, lineTotal, markupForAddedPart, markupPickWords, sidelessName, type MarkupPick, type PartItem, type QuoteLine, type RevisionPreviewRow } from "@/lib/quotes";
+import { aed, belowCostOf, partLineChanges, type LineForDiff, blockOf, cheapCostWarning, isHidden, isUnchosen, lineTotal, markupForAddedPart, markupPickWords, type MarkupPick, type PartItem, type QuoteLine, type RevisionPreviewRow } from "@/lib/quotes";
 import { newToken } from "@/lib/media";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { belowCostReady, revisionPartsReady, schemaReady } from "@/lib/schema-ready";
 import { capsText } from "@/lib/text-case";
 import { compactPartNumber } from "@/lib/price-import";
+import { costReferencesFor } from "@/lib/part-cost-history";
 import { flagBelowCost } from "@/lib/below-cost";
 
 export type VersionActor = { id: string; display_name: string };
@@ -265,23 +266,9 @@ export async function withdrawStaleRevisions(jobId: string, by: string | null): 
 }
 
 /** The job's other parts and the last price for a part number: what a part's cost is compared with (the twin, the memory). */
-async function costReferences(jobId: string, p: Pick<PartItem, "id" | "description" | "part_number">): Promise<{ label: string; cost: number | null }[]> {
-  const admin = createAdminClient();
-  const pn = compactPartNumber(p.part_number);
-  const name = sidelessName(p.description);
-  const { data: mates } = await admin.from("part_items").select("id, description, part_number, cost_aed, removed_at, confirm_status").eq("job_id", jobId).eq("is_active", true).neq("id", p.id).not("cost_aed", "is", null);
-  const refs: { label: string; cost: number | null }[] = [];
-  for (const m of (mates ?? []) as { id: string; description: string; part_number: string | null; cost_aed: number | string | null; removed_at: string | null; confirm_status: string }[]) {
-    if (m.removed_at || m.confirm_status === "rejected") continue;
-    if ((pn.length >= 4 && compactPartNumber(m.part_number) === pn) || (name && sidelessName(m.description) === name)) refs.push({ label: `${String(m.description).toUpperCase()} on this job`, cost: Number(m.cost_aed) });
-  }
-  if (pn.length >= 4) {
-    // The last price given for the same number on another job (the price memory's rule).
-    const { data: hist } = await admin.from("part_items").select("part_number, cost_aed, priced_at, job_id, job:jobs!part_items_job_id_fkey(job_number)").eq("is_active", true).neq("job_id", jobId).not("priced_at", "is", null).not("cost_aed", "is", null).not("part_number", "is", null).order("priced_at", { ascending: false }).limit(400);
-    const hit = ((hist ?? []) as unknown as { part_number: string | null; cost_aed: number | string | null; job: { job_number: string } | null }[]).find((r) => compactPartNumber(r.part_number) === pn);
-    if (hit) refs.push({ label: `the last price for ${p.part_number}${hit.job?.job_number ? ` (${hit.job.job_number})` : ""}`, cost: Number(hit.cost_aed) });
-  }
-  return refs;
+async function costReferences(jobId: string, p: Pick<PartItem, "id" | "description" | "part_number"> & { part_type?: string | null; option_group?: string | null }): Promise<{ label: string; cost: number | null }[]> {
+  // 2 November 2026 (section 2): the one reference finder of part-cost-history.ts (the same as the cost question's).
+  return costReferencesFor(jobId, p);
 }
 
 /** The markup a part takes when it joins a revised quotation (the quotation's own, never silently the bare minimum). */

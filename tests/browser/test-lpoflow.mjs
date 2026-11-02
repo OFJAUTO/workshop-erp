@@ -5,7 +5,7 @@
 // the advisor's job card reads "Parts ordered from <supplier> – arriving <date>"; a refusal tells the
 // desk with the reason and the parts return to To order.
 //   node --env-file=.env.test.local tests/browser/test-lpoflow.mjs
-import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, confirmMoney, makeChecks, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots";
@@ -22,6 +22,8 @@ const desk = await browserFor("parts", { viewport: { width: 1500, height: 1200 }
 await desk.page.goto(`${base}/parts/${jobId}`, { waitUntil: "load" });
 await desk.page.waitForTimeout(1500);
 await desk.page.locator("[data-send-lpo]").click();
+// Since 1 November 2026 the open request (no part yet) is named first: send without it.
+if (await desk.page.locator("[data-lpo-unfinished-send]").count()) await desk.page.locator("[data-lpo-unfinished-send]").click();
 await desk.page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 });
 const main = await until(async () => (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval'", [jobId]))[0] ?? null, 30, 500);
 check("the main LPO waits for approval", !!main, JSON.stringify(main));
@@ -35,7 +37,8 @@ const ownRow = own.page.locator("[data-waiting-row]", { hasText: "LPO waiting fo
 check("the approver's task is amber with the button", (await ownRow.count()) >= 1 && (await ownRow.getAttribute("data-urgency")) === "amber");
 await own.page.goto(`${base}/parts/orders/${main.id}`, { waitUntil: "load" });
 await own.page.waitForTimeout(1200);
-await own.page.getByRole("button", { name: /^Approve$/ }).click();
+// Since 1 November 2026 (B3) Approve asks once, then Yes.
+await confirmMoney(own.page, "lpo-approve");
 await own.page.waitForURL((u) => /message=/.test(u.toString()), { timeout: 30000 });
 const confirm = decodeURIComponent(own.page.url());
 check("R1: the approver reads what happened AND what happens next", /approved ✓ — Parts have been asked to order from E2e Supplier \(1 part, AED [\d,]+\)/.test(confirm), confirm.slice(-160));
@@ -87,6 +90,7 @@ const d2 = await browserFor("parts", { viewport: { width: 1400, height: 1000 } }
 await d2.page.goto(`${base}/parts/${seed2.jobId}`, { waitUntil: "load" });
 await d2.page.waitForTimeout(1500);
 await d2.page.locator("[data-send-lpo]").click();
+if (await d2.page.locator("[data-lpo-unfinished-send]").count()) await d2.page.locator("[data-lpo-unfinished-send]").click();
 await d2.page.waitForURL((u) => /message=/.test(u.toString()), { timeout: 30000 });
 await d2.browser.close();
 const main2 = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval'", [seed2.jobId]))[0];

@@ -68,8 +68,6 @@ const NUMBER_KEYS = [
   "parts_remind_minutes",
   "parts_escalate_minutes",
   "notification_remind_minutes",
-  "markup_warn_percent",
-  "markup_confirm_percent",
   "pin_needed_above_aed",
   "comeback_window_days",
   "supplier_discount_approval_above_percent",
@@ -189,8 +187,6 @@ const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   parts_remind_minutes: [1, 1440, "Remind Parts after"],
   parts_escalate_minutes: [1, 1440, "Escalate to the owner after"],
   notification_remind_minutes: [1, 60, "Reminder sound every"],
-  markup_warn_percent: [5, 10000, "Markup warning from"],
-  markup_confirm_percent: [5, 100000, "Markup confirmation from"],
   pin_needed_above_aed: [0, 1000000, "PIN needed for consumables above"],
   comeback_window_days: [1, 365, "Comeback window"],
   supplier_discount_approval_above_percent: [0, 100, "Supplier discount needing owner approval above"],
@@ -345,7 +341,6 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     if (!isTone(t)) return { error: "Choose the notification sounds.", values };
     updates.push({ key, value: t });
   }
-  if (Number(formData.get("markup_confirm_percent")) < Number(formData.get("markup_warn_percent"))) return { error: "The markup confirmation figure must be at or above the warning figure.", values };
   // The ready-made jobs list: "Category:" lines start a group, the lines under it are the jobs.
   const jobs: Record<string, string[]> = {};
   let group = "General";
@@ -582,11 +577,21 @@ export async function saveMoneyLimits(formData: FormData) {
   const percent = num("supplier_price_auto_percent", 0, 100);
   const aed = num("supplier_price_auto_aed", 0, 100000);
   if (minutes === null || percent === null || aed === null) redirect(`/settings?error=${encodeURIComponent("Undo: 1 to 60 minutes; the supplier price limits: 0 to 100 % and 0 to 100,000 AED.")}#money-limits`);
+  // Placeholder costs (2 November 2026): a missing box keeps the stored figure (an older form never wipes it).
+  const askBelow = formData.has("part_cost_ask_below_aed") ? num("part_cost_ask_below_aed", 0, 10000) : undefined;
+  const farBelow = formData.has("part_cost_far_below_percent") ? num("part_cost_far_below_percent", 1, 100) : undefined;
+  const similar = formData.has("part_cost_similar_percent") ? num("part_cost_similar_percent", 0, 100) : undefined;
+  const markupWarn = formData.has("part_markup_warn_percent") ? num("part_markup_warn_percent", 50, 1000000) : undefined;
+  if (askBelow === null || farBelow === null || similar === null || markupWarn === null) redirect(`/settings?error=${encodeURIComponent("Part costs: ask under 0 to 10,000 AED; flag under 1 to 100 %; similar 0 to 100 %; markup warning 50 to 1,000,000 %.")}#money-limits`);
   const admin = createAdminClient();
   const rows = [
     { key: "money_undo_minutes", label: "Money actions: undo within (minutes)", value: Math.round(minutes) },
     { key: "supplier_price_auto_percent", label: "Supplier price above the LPO accepted up to (%)", value: percent },
     { key: "supplier_price_auto_aed", label: "Supplier price above the LPO accepted up to (AED per LPO)", value: aed },
+    ...(askBelow !== undefined ? [{ key: "part_cost_ask_below_aed", label: 'Parts: ask "Is this the real price?" for a cost each under (AED)', value: askBelow }] : []),
+    ...(farBelow !== undefined ? [{ key: "part_cost_far_below_percent", label: "Parts: flag a cost under this percent of the last price paid for the same part number", value: farBelow }] : []),
+    ...(similar !== undefined ? [{ key: "part_cost_similar_percent", label: "Parts: a cheap cost bought before within this percent is not asked again", value: similar }] : []),
+    ...(markupWarn !== undefined ? [{ key: "part_markup_warn_percent", label: "Quotations: warn on a part markup over (%)", value: markupWarn }] : []),
   ];
   for (const r of rows) await admin.from("settings").upsert({ ...r, updated_by: staff.id }, { onConflict: "key" });
   revalidatePath("/settings");

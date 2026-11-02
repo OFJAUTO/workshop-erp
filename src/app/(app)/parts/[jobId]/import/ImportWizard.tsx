@@ -208,7 +208,8 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
       }
       setApplied({ applied: res.applied ?? 0, failed: res.failed ?? [] });
       const chargeWords = res.charges ? ` and ${res.charges} supplier charge${res.charges === 1 ? "" : "s"} (on the supplier's LPO)` : "";
-      if (!(res.failed ?? []).length) router.push(`/parts/${jobId}?message=${encodeURIComponent(`${res.applied} price${res.applied === 1 ? "" : "s"}${chargeWords} imported. Undo last import is in the row above the table.`)}`);
+      const askWords = res.asks ? ` ${res.asks} price${res.asks === 1 ? "" : "s"} to confirm: tap Yes, real price on ${res.asks === 1 ? "its row" : "their rows"}.` : "";
+      if (!(res.failed ?? []).length) router.push(`/parts/${jobId}?message=${encodeURIComponent(`${res.applied} price${res.applied === 1 ? "" : "s"}${chargeWords} imported.${askWords} Undo last import is in the row above the table.`)}`);
     });
   }
 

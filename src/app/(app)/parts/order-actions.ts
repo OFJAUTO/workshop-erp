@@ -2,7 +2,6 @@
 
 import { depositShortText, depositState } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
-import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
@@ -10,7 +9,7 @@ import { blankToNull } from "@/lib/format";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief, type PoLineRow, type PurchaseOrderRow } from "@/lib/parts-data";
 import { recordStockMovement } from "@/lib/stock";
-import { refusePoLine, splitMainLpo } from "@/lib/lpo";
+import { lpoProblemWords, lpoProblemsFor, refusePoLine, splitMainLpo } from "@/lib/lpo";
 import { verifyPin } from "@/lib/pin";
 import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
@@ -48,45 +47,6 @@ async function jobBrief(jobId: string): Promise<JobBrief | null> {
 async function advisorIds(jobId: string, job: JobBrief | null) {
   void job;
   return advisorsInCharge(jobId);
-}
-
-/** Parts raise an LPO for the ticked parts of one job with one supplier. It waits for the owner or the head accountant. */
-export async function createPurchaseOrder(jobId: string, formData: FormData) {
-  const staff = await requirePermission("managePurchaseOrders");
-  const supplierId = blankToNull(formData.get("supplier_id"));
-  const ids = formData.getAll("part").map(String).filter(Boolean);
-  const notes = blankToNull(formData.get("notes"));
-  const back = `/parts?error=`;
-  const admin = createAdminClient();
-  const { data: picked } = supplierId ? await admin.from("suppliers").select("id, name").eq("id", supplierId).maybeSingle() : { data: null };
-  const supplier = (picked?.name ?? blankToNull(formData.get("supplier")) ?? "").slice(0, 120);
-  if (!supplier) redirect(back + encodeURIComponent("Choose the supplier, or type the name of a new one."));
-  if (!ids.length) redirect(back + encodeURIComponent("Tick at least one part."));
-  const { data: rows } = await admin.from("part_items").select(PART_FULL_SELECT).in("id", ids).eq("job_id", jobId).eq("is_active", true);
-  const parts = ((rows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).filter((p) => p.order_status === "to_order" && !p.po_id);
-  if (!parts.length) redirect(back + encodeURIComponent("Those parts are already on an LPO."));
-  // The Parts quantity, the net cost, and the list price and discount behind it for the supplier copy.
-  const lines = parts.map((p, i) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: p.part_number, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed ?? 0, list_price: p.list_price_aed ?? null, discount_percent: p.discount_percent ?? null }));
-  const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
-  const { data: sup } = picked ? { data: picked } : await admin.from("suppliers").select("id").ilike("name", supplier).maybeSingle();
-  let supplierRef = sup?.id ?? null;
-  if (!supplierRef) {
-    const { data: created } = await admin.from("suppliers").insert({ name: supplier, created_by: staff.id, updated_by: staff.id }).select("id").single();
-    supplierRef = created?.id ?? null;
-  }
-  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, supplier_id: supplierRef, supplier_name: supplier, notes, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: staff.id, updated_by: staff.id }).select("id, number").single();
-  if (error || !po) redirect(back + encodeURIComponent(error?.message ?? "Could not raise the LPO."));
-  const { data: createdLines } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: staff.id, updated_by: staff.id }))).select("id, part_item_id");
-  for (const l of createdLines ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: staff.id }).eq("id", l.part_item_id);
-  const job = await jobBrief(jobId);
-  await admin.from("jobs").update({ parts_state: "ordering" }).eq("id", jobId).eq("parts_state", "none");
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "po_raised", note: `${po.number} raised by ${staff.display_name} for ${supplier}: ${lines.length} part${lines.length === 1 ? "" : "s"}, AED ${total.toLocaleString("en-GB")}`, created_by: staff.id });
-  // Owner and head accountant hear the approval sound.
-  const { data: heads } = await admin.from("staff").select("id").eq("role_id", "accounts").eq("is_head_accountant", true).eq("is_active", true);
-  await notifyRoles(["owner"], { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
-  await notifyStaff((heads ?? []).map((h) => h.id), { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${supplier} · ${job?.job_number ?? ""} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, jobId, href: `/parts/orders/${po.id}` });
-  refresh(jobId, po.id);
-  redirect(`/parts/orders/${po.id}?message=${encodeURIComponent(`${po.number} raised. It waits for approval before it can be sent.`)}`);
 }
 
 /** The supplier copy went to the supplier: written down with who sent it and how. */
@@ -147,6 +107,12 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     if (role !== "owner") redirect(`${back}?error=${encodeURIComponent(`${depositShortText(deposit)} Only the owner can approve without it.`)}`);
     if (!reason || reason.length < 3) redirect(`${back}?error=${encodeURIComponent("The deposit has not been recorded. Write the reason to override.")}`);
     override = { by: staff.id, reason };
+  }
+  // A real cost before anything is ordered (2.2): an LPO raised before the rule (LPO-00038) is checked here too.
+  if (po.job_id) {
+    const { data: lineParts } = await admin.from("purchase_order_lines").select("part_item_id").eq("po_id", poId).eq("is_active", true);
+    const problems = await lpoProblemsFor(po.job_id, (lineParts ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x));
+    if (problems.size) redirect(`${back}?error=${encodeURIComponent(lpoProblemWords(problems, true))}`);
   }
   await admin.from("purchase_orders").update({ status: "approved", approved_by: staff.id, approved_at: new Date().toISOString(), deposit_override_by: override?.by ?? null, deposit_override_reason: override?.reason ?? null, updated_by: staff.id }).eq("id", poId);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number} approved by ${staff.display_name}${override ? ` (deposit override: ${override.reason})` : ""}`, created_by: staff.id });

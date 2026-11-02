@@ -211,8 +211,12 @@ const DEFAULTS = {
   notification_tone: "marimba",
   notification_tone_owner: "chord",
   notification_remind_minutes: 2,
-  markup_warn_percent: 50,
-  markup_confirm_percent: 100,
+  /** Placeholder costs (2 November 2026, Settings > Money): ask "Is this the real price?" under this cost each, flag a
+   *  cost under this share of the last price paid, a similar earlier purchase skips the question, warn above this markup. */
+  part_cost_ask_below_aed: 5,
+  part_cost_far_below_percent: 50,
+  part_cost_similar_percent: 20,
+  part_markup_warn_percent: 500,
   pin_needed_above_aed: 100,
   wash_board_show_times: false,
   /** The Testing phase (Clear test data): off unless the owner switched it on - a missing row is OFF (1 November 2026, C2). */

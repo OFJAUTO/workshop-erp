@@ -3,6 +3,8 @@ import { notifyRoles } from "./notifications";
 import { compactPartNumber } from "./price-import";
 import { round2 } from "./money";
 import { createAdminClient } from "./supabase/admin";
+import { realPartNumber } from "./parts-rows";
+import { newLabelCode } from "./parts-data";
 
 /**
  * Real stock for the bulk items (oils, filters, pads kept on the shelf): every change is a movement with the
@@ -67,6 +69,34 @@ export async function recordStockMovement(itemId: string, input: { kind: Movemen
   return { after };
 }
 
+/**
+ * A part taken from our own shelf (2 November 2026): received at once with its label, ready to issue, never ordered
+ * and never on an LPO. A part from a stock item leaves the shelf now (the "out" movement) and its cost is the stock
+ * average at this moment (what the invoice and the profit count). Fewer on the shelf than the part needs never blocks:
+ * Parts are told (the count is wrong, or more must be ordered). ONE path for the customer's approval (quote-respond)
+ * and for a replacement priced "From our stock…" after the approval.
+ */
+export async function receiveFromShelf(partId: string, actor: StockActor, note: string): Promise<{ received: boolean; short?: string }> {
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, job_id, description, quantity, confirmed_quantity, stock_item_id").eq("id", partId).maybeSingle();
+  if (!p) return { received: false };
+  const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
+  const { data: item } = p.stock_item_id ? await admin.from("stock_items").select("name, unit, quantity, unit_cost").eq("id", p.stock_item_id).maybeSingle() : { data: null };
+  const onHand = Number(item?.quantity) || 0;
+  const avg = Number(item?.unit_cost);
+  // Claimed first (received, its label and its stock cost in one write), so a second call never takes the part off the
+  // shelf twice and nothing ever reads it received without its cost.
+  const { data: claimed } = await admin.from("part_items").update({ order_status: "received", received_qty: qty, label_code: newLabelCode(), ...(avg > 0 ? { final_cost_aed: avg } : {}), updated_by: actor.id }).eq("id", partId).in("order_status", ["none", "to_order"]).select("id");
+  if (!claimed?.length) return { received: false };
+  if (!p.stock_item_id) return { received: true };
+  await recordStockMovement(p.stock_item_id as string, { kind: "out", quantity: qty, jobId: p.job_id as string, partItemId: p.id as string, note }, actor);
+  if (!item || onHand >= qty) return { received: true };
+  const { data: job } = await admin.from("jobs").select("job_number").eq("id", p.job_id).maybeSingle();
+  const short = `${String(item.name).toUpperCase()}: ${qty.toLocaleString("en-GB")} ${item.unit || "pc"} used on ${job?.job_number ?? "a job"}, ${onHand.toLocaleString("en-GB")} on the shelf by the count`;
+  await notifyRoles(["parts"], { type: "stock_low", title: `Not enough on the shelf: ${String(item.name).toUpperCase()}`, body: `${short}. Count the shelf, or order more from the stock page.`, jobId: p.job_id as string, href: `/parts/stock` });
+  return { received: true, short };
+}
+
 /** A part kept in stock: it joins the matching stock item (by part number, else by name), or starts one. */
 export async function addPartToStock(part: { id: string; description: string; part_number: string | null; cost_aed: number | string | null; quantity: number | string; confirmed_quantity?: number | string | null; supplier?: string | null }, actor: StockActor, jobId: string | null): Promise<{ error?: string; itemId?: string; itemName?: string }> {
   const admin = createAdminClient();
@@ -83,7 +113,7 @@ export async function addPartToStock(part: { id: string; description: string; pa
     item = (data as { id: string; name: string } | null) ?? null;
   }
   if (!item) {
-    const { data, error } = await admin.from("stock_items").insert({ name: part.description.trim().slice(0, 120), unit: "pc", quantity: 0, minimum_level: 0, unit_cost: cost ?? 0, part_number: part.part_number, created_by: actor.id, updated_by: actor.id }).select("id, name").single();
+    const { data, error } = await admin.from("stock_items").insert({ name: part.description.trim().slice(0, 120), unit: "pc", quantity: 0, minimum_level: 0, unit_cost: cost ?? 0, part_number: realPartNumber(part.part_number), created_by: actor.id, updated_by: actor.id }).select("id, name").single();
     if (error || !data) return { error: error?.message ?? "Could not add the stock item." };
     item = data;
   }

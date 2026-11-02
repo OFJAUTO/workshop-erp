@@ -8,7 +8,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, belowCostAll, belowCostChangesIn, belowCostWords, effectiveMarkupPercent, floorProblem, minimumMarkupAed, needsPackageCosting, parseHours, priceSideKeys, recoveryTitle, round2, worseBelowCost, type BelowCost, type BelowCostOpts, type LineType, type QuoteHeaderForTotals, type QuoteLine } from "@/lib/quotes";
 import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
 import { belowCostOptsFor, flagBelowCost, headerOf, linesForBelowCost, stampBelowCost } from "@/lib/below-cost";
-import { belowCostReady } from "@/lib/schema-ready";
+import { belowCostReady, lineCostConfirmReady } from "@/lib/schema-ready";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { toSnapshot } from "@/lib/packages";
@@ -16,6 +16,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { formatPlate, type PlateFields } from "@/lib/types";
+import { isOurStock, isPlaceholderSupplier, placeholderSupplierWords } from "@/lib/parts-rows";
+import { costCheckForLine } from "@/lib/part-cost-history";
 
 type LinePatch = {
   package_key?: string | null;
@@ -96,7 +98,7 @@ type Body = {
   /** Estimate parts (30 October 2026): send these part lines to the parts desk to be priced. */
   sendToDesk?: { ids: string[] };
   /** Estimate parts: the advisor already has a price (a dealer on the phone). Marked "Priced by advisor"; the parts desk checks it. */
-  advisorPrice?: { id: string; cost: number | string; supplier: string };
+  advisorPrice?: { id: string; cost: number | string; supplier: string; /** "Yes, real price" for this very cost (2 November 2026). */ confirmCost?: number | string | null };
   /** The owner approves a line that already sells below its cost (Parts raised the cost), with his reason. */
   belowCostApprove?: { id: string; reason: string };
   /** An advisor asks the owner to look at a line below its cost. */
@@ -459,12 +461,26 @@ export async function POST(request: NextRequest) {
     const supplier = String(ap.supplier ?? "").trim().slice(0, 120);
     if (cost === null || cost <= 0) return NextResponse.json({ error: "Type the cost of one part (before VAT)." }, { status: 400 });
     if (!supplier) return NextResponse.json({ error: "Who quoted the price? Type the supplier." }, { status: 400 });
-    const { data: cur } = await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, is_active").eq("id", String(ap.id)).eq("quotation_id", q.id).maybeSingle();
+    // 2 November 2026: never a stand-in supplier; a shelf part goes through the parts desk ("From our stock…").
+    if (isPlaceholderSupplier(supplier)) return NextResponse.json({ error: `${placeholderSupplierWords(supplier)}.` }, { status: 400 });
+    if (isOurStock(supplier)) return NextResponse.json({ error: "A part from our stock: send it to the parts desk, who pick the stock item (its cost is the stock list's)." }, { status: 400 });
+    const { data: cur } = await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, is_active, part_number").eq("id", String(ap.id)).eq("quotation_id", q.id).maybeSingle();
     if (!cur || !cur.is_active || cur.line_type !== "part" || cur.part_item_id) return NextResponse.json({ error: "Part line not found." }, { status: 404 });
     if (!String(cur.title ?? "").trim()) return NextResponse.json({ error: "Type the name of the part first." }, { status: 400 });
+    // THE cost check (2.1): a cheap price, or one far under what the part number was bought at, is asked once.
+    const confirmCost = n(ap.confirmCost);
+    const confirmNow = confirmCost !== null && Math.abs(confirmCost - cost) < 0.005;
+    const lineReady = await lineCostConfirmReady();
+    // An answer already given for this very cost stands: the same price typed again is never asked again.
+    const { data: storedAnswer } = lineReady ? await admin.from("quotation_lines").select("cost_confirmed_aed").eq("id", cur.id).maybeSingle() : { data: null };
+    const storedConfirmed = storedAnswer?.cost_confirmed_aed === null || storedAnswer?.cost_confirmed_aed === undefined ? null : Number(storedAnswer.cost_confirmed_aed);
+    const { data: siblings } = await admin.from("quotation_lines").select("id, title, part_number, unit_cost, supplier_text").eq("quotation_id", q.id).eq("line_type", "part").eq("is_active", true);
+    const check = await costCheckForLine({ id: cur.id, title: String(cur.title), part_number: (cur.part_number as string | null) ?? null, cost, supplier, confirmedCost: confirmNow ? cost : storedConfirmed }, (siblings ?? []) as { id: string; title: string; part_number: string | null; unit_cost: number | null; supplier_text: string | null }[]);
+    if (check.ask && check.hold && !confirmNow) return NextResponse.json({ error: check.ask.words, confirm: true, ask: "cost_check", kind: check.ask.kind, lineId: cur.id, cost, supplier, title: cur.title }, { status: 409 });
     const now = new Date().toISOString();
-    const { error } = await admin.from("quotation_lines").update({ unit_cost: cost, supplier_text: supplier, priced_by_advisor: true, priced_at: now, priced_by: staff.id, price_checked_at: null, price_checked_by: null, ...stamp }).eq("id", cur.id);
+    const { error } = await admin.from("quotation_lines").update({ unit_cost: cost, supplier_text: supplier, priced_by_advisor: true, priced_at: now, priced_by: staff.id, price_checked_at: null, price_checked_by: null, ...(lineReady ? { stock_item_id: null, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}) } : {}), ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (confirmNow && check.hold) await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(cur.title).toUpperCase()} from ${supplier}`, created_by: staff.id });
     await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_priced_by_advisor", note: `${staff.display_name} priced ${cur.title} at AED ${cost.toLocaleString("en-GB")} each from ${supplier} (priced by advisor; the parts desk checks it)`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "estimate_price_check", title: `Check this price · ESTIMATE ${q.number}`, body: `${cur.title}: AED ${cost.toLocaleString("en-GB")} each from ${supplier}, typed by ${staff.display_name}. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
     await refreshed();

@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import { Button, Input } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
 import { PART_TYPE_LABELS } from "@/lib/quotes";
-import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, availabilityChoice, availabilityFromChoice, availabilityWords, daysComplete, NO_PART_NUMBER, realPartNumber, discountOf, netOf, pricingSummary, rowMissing, rowState, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
+import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, isPlaceholderSupplier, availabilityChoice, availabilityFromChoice, availabilityWords, daysComplete, NO_PART_NUMBER, realPartNumber, discountOf, netOf, pricingSummary, rowMissing, rowState, sameCost, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
+import { StockItemPicker, type PickedStockItem } from "@/components/StockItemPicker";
+import { CorrectCostDialog } from "./CorrectCostDialog";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
 import { type CatalogueRow } from "@/lib/parts-list";
-import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
+import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, confirmPartCost, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
 import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 import { bulkDeleteParts, undoBulkDelete } from "../bulk-actions";
 import { FloatingMenu } from "@/components/FloatingMenu";
@@ -39,6 +41,13 @@ export type TableRow = {
   closedReason: string | null;
   /** Ordered, received, handed over: the price is locked. */
   locked: boolean;
+  /** Approved by the customer and not ordered yet: locked, but "Yes, real price" can still answer its cost question. */
+  approvedNotOrdered?: boolean;
+  /** Ordered or received with a cost that is not real ("AED 1.00 is not a real price", a stand-in supplier): the words,
+   *  and "Correct the cost…" on the row (2 November 2026). */
+  settledFix?: string | null;
+  /** On an LPO (bought from a supplier): "Correct the cost…" never offers our stock for it. */
+  onLpo?: boolean;
   orderLabel: string | null;
   diagramUrl: string | null;
   question: string | null;
@@ -236,20 +245,19 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     if (!ticked.length || (!bulkAvail && !bulkSupplier && !bulkType)) return;
     setBulkBusy(true);
     setBulkError(null);
-    const sup = bulkSupplier === "__stock" ? OUR_STOCK : suppliers.find((s) => s.id === bulkSupplier)?.name ?? "";
+    const sup = suppliers.find((s) => s.id === bulkSupplier)?.name ?? "";
     for (const r of ticked) {
       const v: RowValues = { ...r.values };
       if (bulkAvail) Object.assign(v, availabilityFromChoice(bulkAvail as AvailabilityChoice, v.days));
       if (bulkSupplier) {
         const s = suppliers.find((x) => x.id === bulkSupplier);
         const discount = s ? String(supplierDiscount(s, v.part_type)) : v.discount;
-        Object.assign(v, { supplier: sup, discount, cost_aed: netOf(v.list_price, discount) || v.cost_aed });
-        if (isOurStock(sup)) Object.assign(v, { availability: "in_stock", days: "" });
+        Object.assign(v, { supplier: sup, discount, cost_aed: netOf(v.list_price, discount) || v.cost_aed, stock_item: undefined, stock_words: "" });
       }
       if (bulkType) v.part_type = bulkType;
-      const res = await autoSavePartRow(jobId, { requestId: r.requestId, partId: r.partId, clientKey: r.key, name: r.name, ...v, quantity: v.qty, positions: r.positions });
+      const res = await autoSavePartRow(jobId, { requestId: r.requestId, partId: r.partId, clientKey: r.key, name: r.name, ...v, quantity: v.qty, positions: r.positions, ...(bulkSupplier ? { stockItemId: null } : {}) });
       if (res.error) { setBulkError(res.error); break; }
-      setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId: res.partId ?? x.partId, values: v } : x)));
+      setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId: res.partId ?? x.partId, values: { ...v, ...(res.server ?? {}) } } : x)));
     }
     setBulkBusy(false);
     setSelected(new Set());
@@ -336,8 +344,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
             </select>
             <select value={bulkSupplier} onChange={(e) => setBulkSupplier(e.target.value)} className="h-9 rounded-control border border-line-strong bg-white px-1.5 text-sm" aria-label="Supplier for the ticked parts" data-bulk-supplier>
               <option value="">Supplier…</option>
-              <option value="__stock">{OUR_STOCK}</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {suppliers.filter((s) => !isOurStock(s.name) && !isPlaceholderSupplier(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <select value={bulkType} onChange={(e) => setBulkType(e.target.value)} className="h-9 rounded-control border border-line-strong bg-white px-1.5 text-sm" aria-label="Type for the ticked parts" data-bulk-type>
               <option value="">Type…</option>
@@ -463,8 +470,13 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const [otherMode, setOtherMode] = useState(() => availabilityChoice(row.values) === "other" && !daysComplete(row.values.days));
   const [copied, setCopied] = useState(false);
   // Price memory: the last price given for this part number, offered with one tap while the price boxes are empty.
-  const [memory, setMemory] = useState<{ list: number | null; discount: number | null; net: number | null; supplier: string | null; part_type: string | null; brand: string | null; when: string | null; job: string | null } | null>(null);
+  const [memory, setMemory] = useState<{ list: number | null; discount: number | null; net: number | null; supplier: string | null; part_type: string | null; brand: string | null; when: string | null; job: string | null; paid: { cost: number; where: string } | null } | null>(null);
   const [split, setSplit] = useState(false);
+  // "From our stock…": the stock picker under the supplier box (2 November 2026).
+  const [stockOpen, setStockOpen] = useState(false);
+  const supplierRef = useRef<HTMLSelectElement>(null);
+  // "Correct the cost…" for a part already ordered or received.
+  const [correcting, setCorrecting] = useState(false);
   // "Remove: not needed": which kind of row is being removed, and the few seconds of Undo after it.
   const [removing, setRemoving] = useState<null | "part" | "request" | "ordered">(null);
   const [undo, setUndo] = useState(false);
@@ -508,14 +520,22 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const state = stateOf(row, v);
   const missing = state === "not_finished" ? rowMissing(v) : [];
   const complete = state === "priced";
-  const partial = state === "not_finished" && Object.entries(v).some(([k, x]) => k !== "qty" && !k.startsWith("tyre_") && String(x ?? "").trim() !== "" && !(k === "part_type" && x === (types[0] ?? "")));
+  const partial = state === "not_finished" && Object.entries(v).some(([k, x]) => k !== "qty" && !k.startsWith("tyre_") && !k.startsWith("cost_ask") && !k.startsWith("stock_") && k !== "cost_note" && String(x ?? "").trim() !== "" && !(k === "part_type" && x === (types[0] ?? "")));
+  // A part from a stock item: its cost is the stock list's average, never typed here.
+  const stockLinked = isOurStock(v.supplier) && !!v.stock_item;
+  // The cost question for the cost on the row (2 November 2026): "AED 1.00 – is this the real price?".
+  const costAsk = v.cost_ask && sameCost(v.cost_ask_for, v.cost_aed) ? v.cost_ask : "";
   const red = attempted && state === "not_finished";
   const tone = row.removed || row.refused ? "border-line bg-canvas opacity-60" : red ? "border-red-bar bg-white" : focused ? `border-ink ${complete ? "bg-green-soft" : "bg-chip"}` : row.waitingApproval ? "border-amber-bar bg-amber-soft/40" : row.unavailable ? "border-line bg-amber-soft/60" : complete ? "border-green bg-green-soft" : "border-line bg-white";
-  const supplier = suppliers.find((s) => s.name.toLowerCase() === v.supplier.toLowerCase());
+  // A stand-in ("OFJ Additional") is never a supplier choice: the row shows it as typed text until Parts pick the real one.
+  const supplier = suppliers.find((s) => s.name.toLowerCase() === v.supplier.toLowerCase() && !isPlaceholderSupplier(s.name));
   const standard = supplier ? supplierDiscount(supplier, v.part_type) : null;
   const standardNote = standard !== null && v.discount.trim() !== "" && Math.abs(Number(v.discount.replace(",", ".")) - standard) > 0.001 ? `Standard ${standard}%, changed to ${v.discount}%` : "";
   const qty = num(v.qty) || 1;
   const qtyChanged = Math.abs(qty - row.techQty) > 0.001;
+  // Ordered or received (past pricing), and a stock item with fewer on the shelf than this part needs (never a block).
+  const settledRow = v.settled === "1";
+  const shelfShort = !!v.stock_item && !settledRow && v.stock_on_hand !== undefined && v.stock_on_hand !== "" && Number(v.stock_on_hand) + 1e-9 < qty;
   const baseChoice = availabilityChoice(v, otherMode);
   // Days typed under "Other…" (say 15) become their own choice, "15 days", in the one box; the days box shows only while typing.
   const customDays = baseChoice === "other" && !otherMode && daysComplete(v.days) ? v.days.trim() : null;
@@ -540,7 +560,45 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   const changeNet = (cost_aed: string) => change({ cost_aed, discount: discountOf(latest.current.v.list_price, cost_aed) || latest.current.v.discount });
   const changeSupplier = (s: SupplierOption | undefined, nameText: string) => {
     const discount = s ? String(supplierDiscount(s, latest.current.v.part_type)) : latest.current.v.discount;
-    change({ supplier: nameText, discount, cost_aed: netOf(latest.current.v.list_price, discount) || latest.current.v.cost_aed });
+    // Leaving our stock: the stock item and its cost go with it.
+    const wasStock = !!latest.current.v.stock_item;
+    change({ supplier: nameText, discount, cost_aed: netOf(latest.current.v.list_price, discount) || (wasStock ? "" : latest.current.v.cost_aed), stock_item: undefined, stock_words: "" });
+  };
+  /** A stock item picked: Our stock, in stock, its average cost each; the part number from the item when the row has none. */
+  const pickStock = (item: PickedStockItem) => {
+    setStockOpen(false);
+    setOtherMode(false);
+    const cur = latest.current.v;
+    queue({ ...cur, supplier: OUR_STOCK, availability: "in_stock", days: "", stock_item: item.id, stock_words: item.words, stock_on_hand: String(item.onHand), cost_aed: String(item.unitCost), list_price: "", discount: "", part_number: cur.part_number || item.partNumber || NO_PART_NUMBER }, latest.current.name);
+    flushNow();
+  };
+  /** "Yes, real price": the answer for the cost on the screen, saved through the one row save. */
+  const confirmCost = () => {
+    const c = Number(String(latest.current.v.cost_aed).replace(",", "."));
+    if (!(c > 0)) return;
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    setUnsaved(false);
+    void persist(latest.current.v, latest.current.name, c);
+  };
+  /** "Yes, real price" on an approved row (locked, not ordered yet): only the answer is stored, nothing else changes. */
+  const confirmApproved = () => {
+    const c = Number(String(latest.current.v.cost_aed).replace(",", "."));
+    if (!(c > 0) || !partId) return;
+    setSaving(true);
+    confirmPartCost(jobId, partId, c)
+      .then((r) => {
+        setSaving(false);
+        if (r.error) { setError(r.error); return; }
+        setError(null);
+        const merged: RowValues = { ...latest.current.v, cost_ask: "", cost_ask_for: "", cost_ask_kind: "", cost_ask_hold: "" };
+        latest.current = { v: merged, name: latest.current.name };
+        setV(merged);
+        start(() => refreshWhenIdle(() => router.refresh()));
+      })
+      .catch((e) => {
+        setSaving(false);
+        if (!reloadIfStale(e)) setError("Not saved: no connection. Try again.");
+      });
   };
   const changeType = (part_type: string) => {
     const discount = supplier ? String(supplierDiscount(supplier, part_type)) : latest.current.v.discount;
@@ -551,8 +609,8 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
     if (latest.current.v.cost_aed || latest.current.v.list_price || pn.length < 4) { setMemory(null); return; }
     try {
       const res = await fetch(`/api/parts/price-memory?pn=${encodeURIComponent(pn)}`);
-      const j = (await res.json()) as { memory: { list_price: number | null; discount: number | null; net: number | null; supplier: string | null; part_type: string | null; brand: string | null; priced_at: string | null; job_number: string | null } | null };
-      setMemory(j.memory ? { list: j.memory.list_price, discount: j.memory.discount, net: j.memory.net, supplier: j.memory.supplier, part_type: j.memory.part_type, brand: j.memory.brand, when: j.memory.priced_at, job: j.memory.job_number } : null);
+      const j = (await res.json()) as { memory: { list_price: number | null; discount: number | null; net: number | null; supplier: string | null; part_type: string | null; brand: string | null; priced_at: string | null; job_number: string | null } | null; paid?: { cost: number; where: string } | null };
+      setMemory(j.memory ? { list: j.memory.list_price, discount: j.memory.discount, net: j.memory.net, supplier: j.memory.supplier, part_type: j.memory.part_type, brand: j.memory.brand, when: j.memory.priced_at, job: j.memory.job_number, paid: j.paid ?? null } : null);
     } catch { setMemory(null); }
   };
   const useMemory = () => {
@@ -574,25 +632,35 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       void persist(latest.current.v, latest.current.name);
     }
   };
-  async function persist(next: RowValues, nextName: string) {
+  async function persist(next: RowValues, nextName: string, costConfirmed?: number) {
     const run = chain.current.then(async () => {
       setUnsaved(false);
       setSaving(true);
       const tyre = tyreRef.current;
       tyreRef.current = null;
-      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty, positions: row.positions, ...(tyre ? { tyre } : {}) });
+      // The stock item rides along only for a shelf part (a part from a supplier takes it off).
+      const stock = isOurStock(next.supplier) ? (next.stock_item !== undefined ? { stockItemId: next.stock_item || null } : {}) : { stockItemId: null };
+      const res = await autoSavePartRow(jobId, { requestId: row.requestId, partId: partIdRef.current, optionOf, clientKey: row.key, name: nextName, ...next, quantity: next.qty, positions: row.positions, ...stock, ...(costConfirmed !== undefined ? { costConfirmed } : {}), ...(tyre ? { tyre } : {}) });
       setSaving(false);
       if (res.error) {
         setError(res.error);
         return;
       }
       setError(null);
-      if (latest.current.v === next && latest.current.name === nextName) clearPending(pendingKey);
+      const unchanged = latest.current.v === next && latest.current.name === nextName;
+      if (unchanged) clearPending(pendingKey);
       if (res.partId && res.partId !== partIdRef.current) {
         partIdRef.current = res.partId;
         setPartId(res.partId);
       }
-      onSaved(res.partId ?? partIdRef.current, nextName, next);
+      // What the server decided (the cost question for the cost saved, the stock item's cost) comes onto the row; while
+      // more is being typed only the question comes (it names the cost it is about).
+      const sv = res.server ?? {};
+      const asked = { cost_ask: sv.cost_ask, cost_ask_for: sv.cost_ask_for, cost_ask_kind: sv.cost_ask_kind, cost_ask_hold: sv.cost_ask_hold, cost_note: sv.cost_note };
+      const merged: RowValues = unchanged ? { ...next, ...sv } : { ...latest.current.v, ...asked };
+      latest.current = { v: merged, name: latest.current.name };
+      setV(merged);
+      onSaved(res.partId ?? partIdRef.current, nextName, merged);
       if (res.complete) start(() => refreshWhenIdle(() => router.refresh()));
     });
     chain.current = run.catch(() => undefined);
@@ -702,12 +770,12 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
           </>
         )}
       </span>
-      {/* List, Disc %, Net */}
-      {readOnly ? (
+      {/* List, Disc %, Net (a stock part: its average cost, never typed) */}
+      {readOnly || stockLinked ? (
         <>
           {textCell(v.list_price ? Number(v.list_price).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : "", "justify-end")}
           {textCell(v.discount ? `${v.discount}%` : "", "justify-end")}
-          {textCell(v.cost_aed ? Number(v.cost_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : "", "justify-end font-semibold")}
+          {textCell(v.cost_aed ? Number(v.cost_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 }) : "", `justify-end font-semibold${stockLinked ? " text-muted" : ""}`)}
         </>
       ) : (
         <>
@@ -719,11 +787,13 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       {/* Supplier: from the list, with Add a supplier at the bottom */}
       {readOnly ? textCell(v.supplier) : (
         <select
+          ref={supplierRef}
           value={isOurStock(v.supplier) ? "__stock" : supplier ? supplier.id : v.supplier ? "__text" : ""}
           onChange={(e) => {
             const val = e.target.value;
             if (val === "__add") void onAddSupplier().then((s) => { if (s) changeSupplier(s, s.name); });
-            else if (val === "__stock") { setOtherMode(false); change({ supplier: OUR_STOCK, availability: "in_stock", days: "" }); }
+            // "From our stock…": the picker opens; the row changes only when an item is picked.
+            else if (val === "__stock") setStockOpen(true);
             else if (val === "") changeSupplier(undefined, "");
             else if (val !== "__text") { const s = suppliers.find((x) => x.id === val); if (s) changeSupplier(s, s.name); }
           }}
@@ -731,13 +801,15 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
           aria-label="Supplier"
         >
           <option value="">Supplier…</option>
-          <option value="__stock">{OUR_STOCK}</option>
+          <option value="__stock">{isOurStock(v.supplier) ? OUR_STOCK : "From our stock…"}</option>
           {!supplier && v.supplier && !isOurStock(v.supplier) ? <option value="__text">{v.supplier}</option> : null}
           {/* The name only, so it shows in full; the standard discount lands in the Disc box when the supplier is picked */}
-          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {/* Never a stand-in ("OFJ Additional") or the Our stock row: From our stock… above is the shelf */}
+          {suppliers.filter((s) => !isOurStock(s.name) && !isPlaceholderSupplier(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           <option value="__add">+ Add a supplier…</option>
         </select>
       )}
+      {stockOpen ? <StockItemPicker anchor={supplierRef.current} suggest={name} need={qty} onPick={pickStock} onClose={() => setStockOpen(false)} /> : null}
       {/* Availability: one dropdown, the days box beside it only for Other */}
       {readOnly ? textCell(availabilityWords(v.availability, v.days)) : (
         <span className="h-9 flex items-center gap-1 min-w-0">
@@ -794,12 +866,49 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
         {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
-        {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""} · Use</button> : null}
+        {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""}{memory.paid ? ` · bought at AED ${memory.paid.cost.toFixed(2)} (${memory.paid.where})` : ""} · Use</button> : null}
+        {/* From our stock: the item and its average cost; Change opens the picker again */}
+        {isOurStock(v.supplier) && !row.removed ? (
+          v.stock_item ? (
+            <span className="inline-flex min-h-5 shrink-0 flex-wrap items-center gap-1.5 text-[11px]" data-stock-words>
+              <span className={`font-semibold ${shelfShort ? "text-amber" : ""}`} data-stock-short={shelfShort ? "1" : "0"}>From our stock: {v.stock_words || "stock item"}{shelfShort ? " – not enough on the shelf by the count: count it, or order more" : ""}</span>
+              {!readOnly ? <button type="button" onClick={() => setStockOpen(true)} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-stock-change>Change</button> : null}
+            </span>
+          ) : !settledRow ? (
+            // Priced "Our stock" with no stock item (before the rule, or carried from an estimate): never unpriced for
+            // it, but the stock item makes the cost the stock list's (Prices to fix lists it).
+            !readOnly ? <button type="button" onClick={() => setStockOpen(true)} className="min-h-9 shrink-0 rounded-control border border-amber-bar bg-amber-soft px-2 text-[11px] font-bold text-amber" data-stock-pick>Pick the stock item</button>
+            : canPrice && pricingLocked && !row.locked ? <span className="text-[11px] font-semibold text-amber" data-stock-pick-hint>From our stock, no stock item: tap Edit at the top, then Pick the stock item.</span> : null
+          ) : null
+        ) : null}
+        {/* The cost question (2 November 2026): one tap answers it for this cost; a different cost asks again */}
+        {costAsk && !row.removed && !row.settledFix ? (
+          <span className={`inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border px-2 py-0.5 text-[11px] font-bold ${v.cost_ask_kind === "far_below" ? "border-red-bar bg-white text-red" : "border-amber-bar bg-amber-soft text-amber"}`} data-cost-ask={v.cost_ask_kind || "ask_cheap"} data-cost-ask-hold={v.cost_ask_hold === "1" ? "1" : "0"}>
+            <span className="break-words">{costAsk}</span>
+            {/* Still being priced: through the one row save; approved and not ordered yet (locked): the answer alone */}
+            {v.cost_ask_hold === "1" && canPrice && !row.locked && !row.refused && !row.unavailable ? <button type="button" onClick={confirmCost} disabled={saving} className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50" data-cost-confirm>Yes, real price</button> : null}
+            {v.cost_ask_hold === "1" && canPrice && row.locked && row.approvedNotOrdered ? (
+              <>
+                <button type="button" onClick={confirmApproved} disabled={saving} className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50" data-cost-confirm data-cost-confirm-approved>Yes, real price</button>
+                <span className="font-normal">Approved by the customer, not ordered yet.</span>
+              </>
+            ) : null}
+          </span>
+        ) : null}
+        {/* Ordered or received with a cost that is not real: the one way to put the cost that really stands */}
+        {row.settledFix && !row.removed ? (
+          <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red" data-settled-fix>
+            <span className="break-words">{row.settledFix}</span>
+            {canPrice && partId ? <button type="button" onClick={() => setCorrecting(true)} className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white" data-correct-cost>Correct the cost…</button> : <span className="font-normal">Parts correct it.</span>}
+          </span>
+        ) : null}
+        {v.cost_note && !row.removed ? <span className="max-w-full break-words text-[11px] font-semibold text-amber" data-cost-note>{v.cost_note}</span> : null}
         <span className="min-w-0 flex-1 break-words text-muted">{notes}</span>
         {row.removed && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
         <span className={`max-w-full break-words ${tag.cls}`} data-row-tag>{tag.text}</span>
       </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
+      {correcting && partId ? <CorrectCostDialog jobId={jobId} partId={partId} name={name} why={row.settledFix ?? ""} onLpo={!!row.onLpo} suppliers={suppliers} onClose={() => setCorrecting(false)} onDone={() => { setCorrecting(false); start(() => refreshWhenIdle(() => router.refresh())); }} /> : null}
       {removing ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason, disposition) => { const kind = removing; setRemoving(null); doRemove(kind, reason, disposition); }} /> : null}
     </div>
   );

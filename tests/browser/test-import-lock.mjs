@@ -78,10 +78,15 @@ await page.screenshot({ path: shot("import-4-parts-page-cost.png") });
 /* 3. The LPO carries the courier */
 await sql("update public.part_items set order_status = 'to_order' where job_id = $1 and is_active and supplier is not null and cost_aed is not null", [jobId]);
 await sql("update public.jobs set status = 'waiting_parts', stage = 'parts' where id = $1", [jobId]);
+// 2 November 2026: "BUMPER CARRIER RIGHT & LEFT" (150) is under half of "BUMPER CARRIER" (4,350) on this car, so Parts
+// are asked "Is this the real price?" first; they answer Yes for every imported price (the LPO gate needs a real cost).
+await sql("update public.part_items set cost_confirmed_aed = cost_aed, cost_confirmed_at = now() where job_id = $1 and is_active and cost_aed is not null", [jobId]);
 await go(page, `${base}/parts/${jobId}`);
 const send = page.locator("[data-send-lpo]");
 if (await send.count()) {
   await send.click();
+  // Rows with no part number are "not finished" (the supplier's paper has none): send without asking them again.
+  if (await page.locator("[data-lpo-unfinished-send]").count()) await page.locator("[data-lpo-unfinished-send]").click();
   await page.waitForURL(/message=/, { timeout: 60000 });
 }
 const main = (await sql("select id, number, total_cost_aed::float8 as t from public.purchase_orders where job_id = $1 and kind = 'main' and is_active order by created_at desc limit 1", [jobId]))[0];

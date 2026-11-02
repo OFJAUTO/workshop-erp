@@ -24,6 +24,9 @@ import { chargesByPo } from "@/lib/supplier-charges";
 import { formatPlate } from "@/lib/types";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { PartsSteps } from "@/components/PartsSteps";
+import { realPartNumber } from "@/lib/parts-rows";
+import { pricesToFix } from "@/lib/part-cost-history";
+import { PricesToFix } from "./PricesToFix";
 
 export const dynamic = "force-dynamic";
 
@@ -160,6 +163,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <WaitingPanel staff={staff} />
+      <PricesToFix rows={await pricesToFix()} />
 
       <form method="get" className="flex flex-wrap items-center gap-2" data-parts-search-form>
         <Input name="q" defaultValue={q} placeholder={seesCust ? "Find a car: plate, job number, VIN or customer (gone-out cars too)" : "Find a car: plate, job number or VIN (gone-out cars too)"} aria-label="Find a car" className="min-w-64 flex-1" data-parts-search />
@@ -245,7 +249,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                 <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}</span>
                 <ul className="text-sm divide-y divide-line">
                   {waitingPrice.filter((p) => p.job_id === jobId).map((p) => (
-                    <li key={p.id} className="py-1.5">{p.description}{p.part_number ? <span className="text-muted"> · {p.part_number}</span> : null} · × {p.confirmed_quantity ?? p.quantity}</li>
+                    <li key={p.id} className="py-1.5">{p.description}{realPartNumber(p.part_number) ? <span className="text-muted"> · {realPartNumber(p.part_number)}</span> : null} · × {p.confirmed_quantity ?? p.quantity}</li>
                   ))}
                 </ul>
               </div>

@@ -33,6 +33,9 @@ import { depositState, depositShortText } from "@/lib/deposits";
 import { PartsTable, type TableRow } from "./PartsTable";
 import { SendLpoButton } from "./SendLpoButton";
 import { refusalsReady } from "@/lib/lpo";
+import { costChecksFor } from "@/lib/part-cost-history";
+import { isSettledStatus, settledCostProblem } from "@/lib/part-cost-check";
+import { costConfirmReady } from "@/lib/schema-ready";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +58,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, tyre_size_front, tyre_size_rear, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
-    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
+    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, stock_item_id, final_cost_aed, exchange_status${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
     admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name").eq("is_active", true),
     loadInspection(jobId),
@@ -74,6 +77,18 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const requests = (reqRows ?? []) as unknown as PartRequest[];
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPart);
   const rawById = new Map(((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => [String(r.id), r]));
+  // Placeholder costs (2 November 2026): each part's cost check, and the stock item behind a shelf part, in words.
+  const forCheck = parts.filter((p) => p.is_active !== false).map((p) => ({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null, cost_confirmed_aed: (rawById.get(p.id)?.cost_confirmed_aed as number | string | null | undefined) ?? null, final_cost_aed: (rawById.get(p.id)?.final_cost_aed as number | string | null | undefined) ?? null }));
+  const costChecks = await costChecksFor(forCheck, forCheck);
+  const stockIds = Array.from(new Set(forCheck.map((p) => p.stock_item_id).filter((x): x is string => !!x)));
+  const { data: stockRows } = stockIds.length ? await admin.from("stock_items").select("id, name, unit, quantity, unit_cost").in("id", stockIds) : { data: [] as { id: string; name: string; unit: string | null; quantity: number | string; unit_cost: number | string }[] };
+  const stockOfItem = new Map((stockRows ?? []).map((i) => [i.id as string, { words: `${String(i.name).toUpperCase()} · ${(Number(i.quantity) || 0).toLocaleString("en-GB")} ${i.unit || "pc"} on hand · AED ${(Number(i.unit_cost) || 0).toFixed(2)} average`, onHand: Number(i.quantity) || 0 }]));
+  // Ordered or received with a cost that is not real (2 November 2026, J-00017, J-00609, J-00969): "Correct the cost…".
+  const settledFixOf = (p: PartItem) => {
+    if (!isSettledStatus(p.order_status)) return null;
+    const raw = rawById.get(p.id);
+    return settledCostProblem({ cost_aed: p.cost_aed, final_cost_aed: (raw?.final_cost_aed as number | string | null | undefined) ?? null, supplier: p.supplier }) ?? costChecks.get(p.id)?.ask?.words ?? null;
+  };
   const nameOf = new Map((names ?? []).map((n) => [n.id, n.display_name]));
   const dangers = insp ? inspectionDangerous(insp) : [];
   const inPlanning = ["approved", "waiting_parts"].includes(job.status) && job.is_open;
@@ -93,7 +108,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const replacesOf = (p: PartItem) => {
     const orig = rawById.get(p.id)?.replaced_part_id ? parts.find((x) => x.id === rawById.get(p.id)?.replaced_part_id) : null;
     if (!orig) return null;
-    return `Replaces the ${rawById.get(orig.id)?.refused_at ? "refused" : "not needed"} line${orig.supplier ? ` (${orig.supplier})` : ""}`;
+    return `Replaces the ${rawById.get(orig.id)?.refused_at ? "refused" : !["", "none"].includes(String(rawById.get(orig.id)?.exchange_status ?? "")) ? "wrong or faulty" : "not needed"} line${orig.supplier ? ` (${orig.supplier})` : ""}`;
   };
   // The request's note (the positions have their own line under the name); a part added by Parts says so.
   const infoOf = (r: PartRequest | null, p?: PartItem) => [r ? (r.note ?? "") : p ? "Added by Parts" : "", p?.availability_note ?? ""].filter(Boolean).join(" · ") || null;
@@ -107,7 +122,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     info: infoOf(r, p),
     shownPositions: p.positions?.length ? p.positions : (r?.positions ?? null),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
-    values: valuesOfPart(p, today),
+    values: valuesOfPart({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null }, today, costChecks.get(p.id), stockOfItem.get(String(rawById.get(p.id)?.stock_item_id ?? "")) ?? null),
     removed: p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
     refused: refusedOf(p),
     replaces: replacesOf(p),
@@ -119,6 +134,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     unavailable: false,
     closedReason: null,
     locked: p.order_status !== "none" || String(rawById.get(p.id)?.issue_status ?? "") === "confirmed",
+    // Approved by the customer, not ordered yet: the row is locked, but its cost question can still be answered.
+    approvedNotOrdered: p.order_status === "to_order" && !rawById.get(p.id)?.refused_at && !rawById.get(p.id)?.not_needed_at,
+    settledFix: settledFixOf(p),
+    onLpo: !!rawById.get(p.id)?.po_id,
     orderLabel: orderLabel(p),
     diagramUrl: p.diagram_path ? (urls[p.diagram_path] ?? null) : null,
     question: p.question_text,

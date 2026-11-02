@@ -10,6 +10,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate, type PlateFields } from "@/lib/types";
 import { EstimatePartRow, type DeskPartLine } from "./EstimatePartRow";
+import { lineCostConfirmReady } from "@/lib/schema-ready";
+import { isOurStock, isPlaceholderSupplier } from "@/lib/parts-rows";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +33,15 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
   const vehicle = q.vehicle as unknown as (PlateFields & { vin: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null }) | null;
   const advisor = (q.creator as unknown as { display_name: string } | null)?.display_name ?? null;
   const [{ data: lineRows }, settings, { data: supplierRows }] = await Promise.all([
-    admin.from("quotation_lines").select("id, line_type, title, quantity, positions, parts_note, unit_cost, part_item_id, is_active, left_off, option_group, chosen, price_requested_at, priced_at, priced_by_advisor, price_checked_at, supplier_text, part_number, part_type, availability, delivery_days, position").eq("quotation_id", q.id).eq("line_type", "part").eq("is_active", true).order("position"),
+    admin.from("quotation_lines").select(`id, line_type, title, quantity, positions, parts_note, unit_cost, part_item_id, is_active, left_off, option_group, chosen, price_requested_at, priced_at, priced_by_advisor, price_checked_at, supplier_text, part_number, part_type, availability, delivery_days, position${(await lineCostConfirmReady()) ? ", stock_item_id" : ""}`).eq("quotation_id", q.id).eq("line_type", "part").eq("is_active", true).order("position"),
     getSettings(),
     admin.from("suppliers").select("name").eq("is_active", true).order("name"),
   ]);
-  const lines: DeskPartLine[] = (lineRows ?? [])
+  // "From our stock…" (2 November 2026): the stock item behind a price, in words.
+  const stockIds = Array.from(new Set(((lineRows ?? []) as unknown as { stock_item_id?: string | null }[]).map((l) => l.stock_item_id).filter((x): x is string => !!x)));
+  const { data: stockRows } = stockIds.length ? await admin.from("stock_items").select("id, name, unit, quantity, unit_cost").in("id", stockIds) : { data: [] as { id: string; name: string; unit: string | null; quantity: number | string; unit_cost: number | string }[] };
+  const stockWordsOf = new Map((stockRows ?? []).map((i) => [i.id as string, `${String(i.name).toUpperCase()} · ${(Number(i.quantity) || 0).toLocaleString("en-GB")} ${i.unit || "pc"} on hand · AED ${(Number(i.unit_cost) || 0).toFixed(2)} average`]));
+  const lines: DeskPartLine[] = ((lineRows ?? []) as unknown as Record<string, unknown>[])
     .filter((l) => isEstimatePart({ line_type: l.line_type as string, part_item_id: l.part_item_id as string | null }) && !l.left_off)
     .map((l) => ({
       id: l.id as string,
@@ -51,6 +57,8 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
       availability: (l.availability as "in_stock" | "to_order" | null) ?? null,
       days: l.delivery_days === null || l.delivery_days === undefined ? null : Number(l.delivery_days),
       advisorName: advisor,
+      stockItemId: (l.stock_item_id as string | null | undefined) ?? null,
+      stockWords: l.stock_item_id ? (stockWordsOf.get(l.stock_item_id as string) ?? null) : null,
     }));
   // Only what the advisor sent (or priced himself) is the desk's; a part he is still naming stays with him.
   const deskLines = lines.filter((l) => l.state !== "draft");
@@ -78,7 +86,7 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
         <SectionLabel right={[toPrice ? `${toPrice} to price` : null, toCheck ? `${toCheck} to check` : null].filter(Boolean).join(" · ") || "all priced"}>Parts on this estimate</SectionLabel>
         {deskLines.length === 0 ? <p className="text-sm text-muted">Nothing sent to the parts desk on this estimate.</p> : (
           <ol className="flex flex-col gap-3">
-            {deskLines.map((l, i) => <EstimatePartRow key={l.id} quotationId={q.id} line={l} index={i + 1} partTypes={(settings.part_types ?? []) as string[]} suppliers={(supplierRows ?? []).map((s) => s.name as string)} preparing={preparing && !q.carried_job_id} />)}
+            {deskLines.map((l, i) => <EstimatePartRow key={l.id} quotationId={q.id} line={l} index={i + 1} partTypes={(settings.part_types ?? []) as string[]} suppliers={(supplierRows ?? []).map((s) => s.name as string).filter((n) => !isPlaceholderSupplier(n) && !isOurStock(n))} preparing={preparing && !q.carried_job_id} />)}
           </ol>
         )}
       </Card>

@@ -152,7 +152,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /** The part columns an import may change; saved before and after so Undo can put them back. */
 const SNAPSHOT = "id, description, part_number, part_type, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, confirmed_quantity, availability_note, is_active";
 
-export type ApplyResult = { error?: string; applied?: number; charges?: number; failed?: { name: string; error: string }[]; importId?: string };
+export type ApplyResult = { error?: string; applied?: number; charges?: number; failed?: { name: string; error: string }[]; importId?: string; /** Placeholder costs (2 November 2026): imported prices whose cost question waits for "Yes, real price" on the table. */ asks?: number };
 
 /**
  * The safety lock again on the server, whatever the screen did: every line that will be applied must add up
@@ -230,6 +230,7 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
   }
   const empty: RowValues = { part_number: "", part_type: types[0] ?? "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
   let applied = 0;
+  let asks = 0;
   const stamp = Date.now();
   const snapshot = async (partId: string) => (await admin.from("part_items").select(SNAPSHOT).eq("id", partId).maybeSingle()).data ?? null;
   for (const line of payload.lines) {
@@ -278,6 +279,7 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       continue;
     }
     applied++;
+    if (res.server?.cost_ask && res.server.cost_ask_hold === "1") asks++;
     if (note !== null || a?.kind === "same_day" || a?.kind === "days") await admin.from("part_items").update({ availability_note: note, updated_by: staff.id }).eq("id", res.partId);
     if (importId) {
       const after = await snapshot(res.partId);
@@ -287,9 +289,9 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
   if (importId) await admin.from("price_imports").update({ applied_count: applied + charges, updated_by: staff.id }).eq("id", importId);
   const chargeWords = charges ? `; ${charges} supplier charge${charges === 1 ? "" : "s"} (internal cost, on the supplier's LPO)` : "";
   const overrideWords = override ? `; the totals did not match the supplier's (${shortAed(payload.totals?.sumLines ?? null)} against ${shortAed(payload.totals?.expected ?? null)}), applied with the reason: ${override}` : "";
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_imported", note: `${applied} price${applied === 1 ? "" : "s"} imported from ${payload.source || "a supplier file"}${supplier ? ` (${supplier.name})` : ""} by ${staff.display_name}${chargeWords}${overrideWords}${failed.length ? `; ${failed.length} failed` : ""}`, created_by: staff.id });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_imported", note: `${applied} price${applied === 1 ? "" : "s"} imported from ${payload.source || "a supplier file"}${supplier ? ` (${supplier.name})` : ""} by ${staff.display_name}${chargeWords}${overrideWords}${failed.length ? `; ${failed.length} failed` : ""}${asks ? `; ${asks} price${asks === 1 ? "" : "s"} to confirm (Yes, real price)` : ""}`, created_by: staff.id });
   revalidatePath(`/parts/${jobId}`);
-  return { applied, charges, failed, importId: importId ?? undefined };
+  return { applied, charges, failed, importId: importId ?? undefined, asks };
 }
 
 /**

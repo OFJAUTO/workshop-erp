@@ -9,7 +9,8 @@ import { SupplierProofUpload } from "./SupplierProofUpload";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
-import { loadJobLpos, refusalsReady } from "@/lib/lpo";
+import { loadJobLpos, lpoProblemsFor, refusalsReady } from "@/lib/lpo";
+import { lpoProblemAdvice } from "@/lib/part-cost-check";
 import { invoiceHref } from "@/lib/supplier-invoices";
 import { realPartNumber } from "@/lib/parts-rows";
 import { changeWords } from "@/lib/price-change";
@@ -106,6 +107,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const refusalsOn = await refusalsReady();
   const canRefuseLine = canApprove && refusalsOn && po.status === "pending_approval" && lines.length > 0;
   const { data: refusedRows } = refusalsOn ? await admin.from("part_items").select("id, description, supplier, quantity, confirmed_quantity, cost_aed, refused_at, refused_by, refused_reason, replacement_part_id").eq("refused_po_id", po.id).order("refused_at") : { data: [] };
+  // 2 November 2026: a line with no real price cannot be approved. Shown where the approver is: on the line itself,
+  // and inside the Approve box (Approve stays off until it is fixed), never only at the top of the page.
+  const lineProblems = po.status === "pending_approval" && po.job_id ? await lpoProblemsFor(po.job_id, lines.map((l) => l.part_item_id).filter((x): x is string => !!x)) : new Map<string, { words: string; fix: "confirm" | "price" | "stock" }>();
+  const problemList = Array.from(lineProblems.values());
+  const problemAdvice = problemList.length ? lpoProblemAdvice(problemList, true) : "";
   const refusedBy = new Map(((refusedRows ?? []).length ? (await admin.from("staff").select("id, display_name").in("id", (refusedRows ?? []).map((r) => r.refused_by as string).filter(Boolean))).data ?? [] : []).map((s) => [s.id as string, s.display_name as string]));
 
   return (
@@ -170,6 +176,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                         {realPartNumber(l.part_number) ? <span className="text-muted">{realPartNumber(l.part_number)}</span> : null}
                         <span className="text-muted">× {l.quantity} at {money(l.unit_cost)}</span>
                         <span className="ml-auto font-semibold">{money(l.quantity * l.unit_cost)}</span>
+                        {lineProblems.get(l.part_item_id) ? <span className="basis-full text-xs font-bold text-red" data-lpo-line-problem={l.id}>Not a real price yet: {lineProblems.get(l.part_item_id)?.words.replace(/^[^:]*:\s*/, "")}</span> : null}
                         {canRefuseLine ? (
                           <details className="basis-full" data-refuse-line={l.id}>
                             <summary className="inline-flex min-h-9 cursor-pointer list-none items-center text-xs font-bold text-red underline underline-offset-4 [&::-webkit-details-marker]:hidden">Refuse this line</summary>
@@ -211,6 +218,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       {typeOf(l.part_item_id) ? <Badge tone="outline">{typeOf(l.part_item_id)}</Badge> : null}
                       {realPartNumber(l.part_number) ? <span className="text-muted">{realPartNumber(l.part_number)}</span> : null}
                       <span className="text-muted">× {l.quantity} at AED {l.unit_cost.toFixed(2)}</span>
+                      {lineProblems.get(l.part_item_id) ? <span className="basis-full text-xs font-bold text-red" data-lpo-line-problem={l.id}>Not a real price yet: {lineProblems.get(l.part_item_id)?.words.replace(/^[^:]*:\s*/, "")}</span> : null}
                       {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}
                       {l.received_qty > 0 ? <Badge tone={l.received_qty >= l.quantity ? "green" : "amber"}>received {l.received_qty}</Badge> : null}
                       {l.flag ? <Badge tone="red">{l.flag === "wrong" ? "Wrong part" : "Damaged"}: {l.flag_note}</Badge> : null}
@@ -256,7 +264,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Approve this LPO</SectionLabel>
-              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, `${money(po.total_cost_aed)} before VAT`, `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
+              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} problems={problemList.map((p) => p.words)} problemAdvice={problemAdvice} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, `${money(po.total_cost_aed)} before VAT`, `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
             </Card>
           ) : null}
           {!isMain && po.status === "approved" ? (

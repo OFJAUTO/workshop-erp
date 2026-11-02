@@ -152,7 +152,8 @@
     "test:supinvoices": "node --env-file=.env.test.local tests/browser/test-supplier-invoices.mjs",
     "test:charges": "node --env-file=.env.test.local tests/browser/test-charges.mjs",
     "test:pricechanges": "node --env-file=.env.test.local tests/browser/test-price-changes.mjs",
-    "test:s1-price": "node --env-file=.env.test.local tests/browser/test-s1-price.mjs"
+    "test:s1-price": "node --env-file=.env.test.local tests/browser/test-s1-price.mjs",
+    "test:s2-costs": "node --env-file=.env.test.local tests/browser/test-s2-costs.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

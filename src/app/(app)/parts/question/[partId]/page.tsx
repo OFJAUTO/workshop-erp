@@ -8,6 +8,7 @@ import { partTypeText } from "@/lib/quotes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { answerQuestion } from "../../actions";
+import { realPartNumber } from "@/lib/parts-rows";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export default async function PartQuestionPage({ params, searchParams }: { param
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Card className="flex flex-col gap-3 max-w-2xl">
         <SectionLabel>The part</SectionLabel>
-        <p className="text-lg font-bold">{p.description}{p.part_number ? <span className="text-muted font-normal"> · {p.part_number}</span> : null}</p>
+        <p className="text-lg font-bold">{p.description}{realPartNumber(p.part_number) ? <span className="text-muted font-normal"> · {realPartNumber(p.part_number)}</span> : null}</p>
         <p className="text-sm text-muted">× {p.quantity}{p.part_type ? ` · ${partTypeText(p)}` : ""}{req ? ` · for "${req.label}"${req.requested_text ? ` (technician wrote: ${req.requested_text})` : ""}` : ""}</p>
         {diagram ? (
           p.diagram_path?.endsWith(".pdf") ? <a href={diagram} target="_blank" rel="noreferrer" className="text-sm font-bold underline underline-offset-4">Open the catalogue diagram (PDF)</a> : (

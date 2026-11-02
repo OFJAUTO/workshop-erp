@@ -12,7 +12,13 @@ import { blankToNull } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPricingRows } from "@/lib/parts-pricing";
-import { dateFromDays, daysComplete, isLineNumber, rowMissing, rowState } from "@/lib/parts-rows";
+import { NO_PART_NUMBER, OUR_STOCK, cleanPartNumber, dateFromDays, daysComplete, isOurStock, isPlaceholderSupplier, partNumberProblem, placeholderSupplierWords, realPartNumber, rowMissing, rowState, type RowValues } from "@/lib/parts-rows";
+import { costCheckValues, costChecksFor, forgetBoughtPrices, type PartForCheck } from "@/lib/part-cost-history";
+import { isSettledStatus } from "@/lib/part-cost-check";
+import { costConfirmReady } from "@/lib/schema-ready";
+import { compactPartNumber } from "@/lib/price-import";
+import { receiveFromShelf, recordStockMovement } from "@/lib/stock";
+import { round2 } from "@/lib/money";
 import { addPartsToOpenLpo, refreshPendingLpoLine, refusalsReady } from "@/lib/lpo";
 import { PARTS_BUCKET, PART_SELECT, toPart } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
@@ -77,9 +83,11 @@ function readRow(formData: FormData, i: number, prefix = ""): { error?: string; 
   const days = Math.max(0, Math.round(Number(g("days")) || 0));
   if (availability === "to_order" && days < 1) return { error: `${description}: how many days until it arrives?` };
   const delivery = availability === "to_order" ? new Date(Date.now() + days * 86400000).toISOString().slice(0, 10) : null;
+  const pnProblem = partNumberProblem(g("part_number"));
+  if (pnProblem) return { error: `${description}: ${pnProblem}` };
   return {
     row: {
-      part_number: g("part_number").slice(0, 80) || null,
+      part_number: cleanPartNumber(g("part_number")),
       description,
       quantity: Math.max(0.01, qty),
       confirmed_quantity: Math.max(0.01, qty),
@@ -283,7 +291,7 @@ export async function removePart(partId: string) {
    Evening of 11 October 2026: the Parts table saves itself row by row.
    --------------------------------------------------------------------------- */
 
-export type RowSave = { /** The tyre details when the row is a tyre (brand, model, size, year, marks). */ tyre?: TyreSpec | null; requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[] };
+export type RowSave = { /** The tyre details when the row is a tyre (brand, model, size, year, marks). */ tyre?: TyreSpec | null; requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[]; /** "From our stock…" (2 November 2026): the stock item; its average cost is the part's cost. null takes it off. */ stockItemId?: string | null; /** "Yes, real price": the cost each on the screen when it was tapped (stored only when it is the cost saved). */ costConfirmed?: number | null };
 
 /**
  * A custom part name typed by Parts (not in the owner's pool) is counted, so names used more than once are
@@ -334,7 +342,7 @@ async function flagSentQuotations(jobId: string, job: { job_number: string; gate
  * (the technician's words stay on the row) and the quantity (noted, the advisor and the manager told); any change
  * after the quotation went out flags it and tells the advisor.
  */
-export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ error?: string; partId?: string; complete?: boolean; waitingApproval?: boolean }> {
+export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ error?: string; partId?: string; complete?: boolean; waitingApproval?: boolean; /** What the server worked out for the row (the cost question, the stock item and its cost): the screen takes it in. */ server?: Partial<RowValues> }> {
   const staff = await getCurrentStaff();
   if (!staff || staff.viewingAs) return { error: "Please sign in again." };
   const role = staff.role_id as RoleId;
@@ -346,24 +354,27 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   const allowed = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
   const typeRaw = (row.part_type ?? "").toLowerCase();
   const type = typeRaw && (allowed.includes(typeRaw) || PART_TYPES.includes(typeRaw)) ? typeRaw : null;
-  const cost = numOrNull(row.cost_aed);
+  let cost = numOrNull(row.cost_aed);
   if (cost !== null && cost < 0) return { error: "The cost must be a number." };
-  const list = numOrNull(row.list_price);
+  let list = numOrNull(row.list_price);
   // A discount can never exceed 100%.
   const discountRaw = numOrNull(row.discount);
-  const discount = discountRaw === null ? null : Math.min(100, Math.max(0, discountRaw));
+  let discount = discountRaw === null ? null : Math.min(100, Math.max(0, discountRaw));
   const qty = numOrNull(row.quantity);
   if (qty !== null && qty <= 0) return { error: "The quantity must be above zero." };
   const supplier = (row.supplier ?? "").trim().slice(0, 120) || null;
-  const availability = row.availability === "to_order" ? "to_order" : row.availability === "in_stock" ? "in_stock" : null;
+  const fromStock = isOurStock(supplier);
+  // A part from our own shelf is in stock and never on an LPO, whatever the screen sent (2 November 2026).
+  let availability = fromStock ? "in_stock" : row.availability === "to_order" ? "to_order" : row.availability === "in_stock" ? "in_stock" : null;
   // Whole days from today in Dubai: "0" is Same day (ordered today, here today), "1" Next day.
-  const daysText = String(row.days ?? "").trim();
+  const daysText = fromStock ? "" : String(row.days ?? "").trim();
   const delivery = availability === "to_order" && daysComplete(daysText) ? dateFromDays(daysText, dubaiDate()) : null;
-  const fields = { part_number: (row.part_number ?? "").trim().slice(0, 80) || null, part_type: type, brand: type && type !== "genuine" ? (row.brand ?? "").trim().slice(0, 80) || null : null, list_price_aed: list, discount_percent: discount === null ? null : Math.min(100, Math.max(0, discount)), cost_aed: cost, supplier, availability, delivery_date: delivery };
-  // Priced means the same here as on the screen: part number, type, net above 0, supplier, availability (src/lib/parts-rows.ts).
-  const tyreRow = isTyreName(row.name) || !!row.tyre;
-  const complete = rowState({ part_number: (row.part_number ?? "").trim(), part_type: type ?? "", brand: "", list_price: "", discount: "", cost_aed: cost === null ? "" : String(cost), supplier: supplier ?? "", availability: availability ?? "", days: delivery ? daysText : "", qty: "1", ...(tyreRow ? { tyre_row: true, tyre_brand: row.tyre?.brand ?? (row.brand ?? ""), tyre_size: row.tyre?.size ?? tyreSizeIn(row.name) } : {}) }) === "priced";
-  const now = new Date().toISOString();
+  // 1 November 2026: "1", "13" are line numbers, not part numbers (they went onto the supplier's LPO); "OFJ" is not one
+  // either (2 November 2026). A new one is refused with words; "None" is the honest answer when there is no number.
+  const pnTyped = (row.part_number ?? "").trim();
+  const pnProblem = partNumberProblem(pnTyped);
+  if (pnProblem) return { error: pnProblem };
+  let partNumber = cleanPartNumber(pnTyped);
   let partId = row.partId;
   const clientKey = row.clientKey ? String(row.clientKey).slice(0, 80) : null;
   if (!partId && clientKey) {
@@ -371,13 +382,46 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: same } = await admin.from("part_items").select("id").eq("job_id", jobId).eq("client_key", clientKey).eq("is_active", true).order("created_at").limit(1).maybeSingle();
     if (same) partId = same.id;
   }
-  // 1 November 2026: "1", "13" are line numbers, not part numbers (they went onto the supplier's LPO). A number already
-  // stored stays as it was; a new one is refused with words, and "No number" is the honest answer when there is none.
-  const pnTyped = (row.part_number ?? "").trim();
-  if (isLineNumber(pnTyped)) {
-    const { data: stored } = partId ? await admin.from("part_items").select("part_number").eq("id", partId).maybeSingle() : { data: null };
-    if (String(stored?.part_number ?? "").trim() !== pnTyped) return { error: `"${pnTyped}" looks like a line number. Type the supplier's part number, or tap None when there is no number.` };
+  // "From our stock…" (2.3): the stock item's average cost is the part's cost; a typed cost is never used for it.
+  const confirmReady = await costConfirmReady();
+  const { data: stored } = partId ? await admin.from("part_items").select(`stock_item_id, option_group, supplier, order_status${confirmReady ? ", cost_confirmed_aed" : ""}`).eq("id", partId).maybeSingle() : { data: null };
+  const storedRow = stored as unknown as { stock_item_id: string | null; option_group: string | null; supplier: string | null; order_status: string | null; cost_confirmed_aed?: number | string | null } | null;
+  let stockItemId: string | null = fromStock ? (row.stockItemId === undefined ? (storedRow?.stock_item_id ?? null) : row.stockItemId) : null;
+  // A part priced "Our stock" before the rule (no stock item) keeps saving as it was (never unpriced for it; Prices to
+  // fix lists it); anything newly set to Our stock comes from a stock item, so its cost is the stock list's (2.3).
+  const oldShelfRow = fromStock && !stockItemId && !!storedRow && isOurStock(storedRow.supplier) && !storedRow.stock_item_id;
+  if (fromStock && !stockItemId && !oldShelfRow) return { error: "From our stock: pick the stock item (From our stock…), so the cost is the stock list's." };
+  let stockWords = "";
+  let stockOnHand: number | null = null;
+  if (stockItemId) {
+    const { data: item } = await admin.from("stock_items").select("id, name, unit, quantity, unit_cost, part_number, is_active").eq("id", stockItemId).maybeSingle();
+    if (!item || !item.is_active) return { error: "That stock item is no longer on the stock list. Pick it again (From our stock…)." };
+    const itemCost = Number(item.unit_cost) || 0;
+    if (!(itemCost > 0)) return { error: `${String(item.name).toUpperCase()} has no cost on the stock list yet: type its cost each when you pick it.` };
+    cost = itemCost;
+    list = null;
+    discount = null;
+    availability = "in_stock";
+    if (!partNumber) partNumber = cleanPartNumber(item.part_number) ?? NO_PART_NUMBER;
+    stockItemId = item.id as string;
+    stockWords = stockItemWords(item as StockLike);
+    stockOnHand = Number(item.quantity) || 0;
   }
+  const fields = { part_number: partNumber, part_type: type, brand: type && type !== "genuine" ? (row.brand ?? "").trim().slice(0, 80) || null : null, list_price_aed: list, discount_percent: discount === null ? null : Math.min(100, Math.max(0, discount)), cost_aed: cost, supplier, availability, delivery_date: delivery, stock_item_id: stockItemId };
+  // "Yes, real price" (2.1): stored for the cost on the screen only; a different cost later is asked again.
+  const confirmNow = confirmReady && row.costConfirmed !== null && row.costConfirmed !== undefined && cost !== null && Math.abs(Number(row.costConfirmed) - cost) < 0.005;
+  const confirmedCost = confirmNow ? cost : storedRow?.cost_confirmed_aed === null || storedRow?.cost_confirmed_aed === undefined ? null : Number(storedRow.cost_confirmed_aed);
+  // THE cost check of this part against what its part number was bought at and the same part on the car.
+  const { data: siblings } = await admin.from("part_items").select("id, job_id, description, part_number, part_type, option_group, cost_aed, supplier, is_active, removed_at, confirm_status").eq("job_id", jobId).eq("is_active", true);
+  const optionGroup = row.optionOf ? (storedRow?.option_group ?? row.optionOf) : (storedRow?.option_group ?? null);
+  const me: PartForCheck = { id: partId ?? "new-row", job_id: jobId, description: (row.name ?? "").trim(), part_number: partNumber, part_type: type, option_group: optionGroup, cost_aed: cost, list_price_aed: list, discount_percent: discount, supplier, stock_item_id: stockItemId, cost_confirmed_aed: confirmedCost };
+  const check = (await costChecksFor([me], [me, ...((siblings ?? []) as PartForCheck[]).filter((s) => s.id !== partId)])).get(me.id) ?? null;
+  const checkValues = costCheckValues(check, cost);
+  // Priced means the same here as on the screen: part number, type, net above 0, a real supplier (and its stock item),
+  // availability, and no cost question waiting (src/lib/parts-rows.ts).
+  const tyreRow = isTyreName(row.name) || !!row.tyre;
+  const complete = rowState({ part_number: partNumber ?? "", part_type: type ?? "", brand: "", list_price: "", discount: "", cost_aed: cost === null ? "" : String(cost), supplier: supplier ?? "", availability: availability ?? "", days: delivery ? daysText : "", qty: "1", ...checkValues, ...(stockItemId ? { stock_item: stockItemId } : {}), ...(isSettledStatus(storedRow?.order_status) ? { settled: "1" } : {}), ...(tyreRow ? { tyre_row: true, tyre_brand: row.tyre?.brand ?? (row.brand ?? ""), tyre_size: row.tyre?.size ?? tyreSizeIn(row.name) } : {}) }) === "priced";
+  const now = new Date().toISOString();
   // A supplier discount above the owner's limit waits for his one-tap approval; until then the part is not priced.
   const approvalLimit = Number(settings.supplier_discount_approval_above_percent ?? 70);
   const needsApproval = discount !== null && discount > approvalLimit;
@@ -410,7 +454,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: cur } = await admin.from("part_items").select("id, cost_aed, description, original_description, part_request_id, quantity, confirmed_quantity").eq("id", partId).eq("job_id", jobId).maybeSingle();
     if (!cur) return { error: "Part not found." };
     previousCost = cur.cost_aed === null ? null : Number(cur.cost_aed);
-    const patch: Record<string, unknown> = { ...fields, ...approval, ...(completeNow ? { priced_by: staff.id, priced_at: now } : {}), updated_by: staff.id };
+    const patch: Record<string, unknown> = { ...fields, ...approval, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), ...(completeNow ? { priced_by: staff.id, priced_at: now } : {}), updated_by: staff.id };
     // The name corrected by Parts: the technician's words stay on the row and are used nowhere else.
     if (description && description !== cur.description) {
       patch.description = description;
@@ -431,12 +475,12 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   } else {
     let quantity = qty ?? 1;
     let positions: string[] = [];
-    let optionGroup: string | null = null;
+    let newGroup: string | null = null;
     if (row.optionOf) {
       const { data: base } = await admin.from("part_items").select("id, part_request_id, option_group, description, quantity, confirmed_quantity, positions").eq("id", row.optionOf).maybeSingle();
       if (!base) return { error: "Part not found." };
-      optionGroup = base.option_group ?? base.id;
-      if (!base.option_group) await admin.from("part_items").update({ option_group: optionGroup, updated_by: staff.id }).eq("id", base.id);
+      newGroup = base.option_group ?? base.id;
+      if (!base.option_group) await admin.from("part_items").update({ option_group: newGroup, updated_by: staff.id }).eq("id", base.id);
       description = description || base.description;
       quantity = qty ?? (Number(base.confirmed_quantity ?? base.quantity) || 1);
       positions = (base.positions as string[] | null) ?? [];
@@ -456,14 +500,14 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: req2 } = requestId ? await admin.from("part_requests").select("label, quantity").eq("id", requestId).maybeSingle() : { data: null };
     const { data: created, error } = await admin
       .from("part_items")
-      .insert({ job_id: jobId, client_key: clientKey, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, positions, option_group: optionGroup, ...fields, ...approval, ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
+      .insert({ job_id: jobId, client_key: clientKey, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, positions, option_group: newGroup, ...fields, ...approval, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
       .select("id")
       .single();
     if (error || !created) return { error: error?.message ?? "Could not save the part." };
     partId = created.id;
-    if (optionGroup && row.optionOf) {
+    if (newGroup && row.optionOf) {
       const quotationId = await draftQuotation(jobId);
-      if (quotationId) await admin.from("quotation_lines").update({ option_group: optionGroup, updated_by: staff.id }).eq("quotation_id", quotationId).eq("part_item_id", row.optionOf);
+      if (quotationId) await admin.from("quotation_lines").update({ option_group: newGroup, updated_by: staff.id }).eq("quotation_id", quotationId).eq("part_item_id", row.optionOf);
     }
   }
   if (requestId) await admin.from("part_requests").update({ status: completeNow ? "done" : "listed", updated_by: staff.id }).eq("id", requestId).in("status", ["open", "listed", "done"]);
@@ -472,7 +516,10 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     // needed) takes over its approval: To order at once, covered by the line of the part it replaces.
     const replaces = await approvedOriginalOf(partId);
     if (replaces) {
-      await admin.from("part_items").update({ order_status: "to_order", updated_by: staff.id }).eq("id", partId).eq("order_status", "none");
+      // From our own shelf: received from the stock at once, like an approved shelf part (never To order: it would
+      // never go on an LPO and would stop the job's next one). From a supplier: To order.
+      if (availability === "in_stock" || fromStock) await receiveFromShelf(partId, staff, `Replacement for ${job.job_number}, from our stock`);
+      else await admin.from("part_items").update({ order_status: "to_order", updated_by: staff.id }).eq("id", partId).eq("order_status", "none");
       await admin.from("part_items").update({ order_status: "none", updated_by: staff.id }).eq("id", replaces).eq("order_status", "to_order").is("po_id", null);
     } else await syncLineForPart(jobId, partId, staff.id);
     await tellAdvisorIfComplete(jobId);
@@ -499,8 +546,200 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Supplier discount ${discount}% needs your approval · ${job.job_number}`, body: `${description}: list AED ${list ?? "?"}, ${discount}% from ${supplier ?? "no supplier"}, net AED ${cost ?? "?"}. Approve or refuse with one tap.`, jobId, href: "/parts/approvals" });
     await admin.from("job_events").insert({ job_id: jobId, event_type: "discount_approval", note: `${description}: ${discount}% discount from ${supplier ?? "?"} waits for the owner's approval (${staff.display_name})`, created_by: staff.id });
   }
+  // "Yes, real price": written on the job's history once per answer (the figure, the part and its number).
+  if (confirmNow && partId && cost !== null && !(storedRow?.cost_confirmed_aed !== null && storedRow?.cost_confirmed_aed !== undefined && Math.abs(Number(storedRow.cost_confirmed_aed) - cost) < 0.005)) {
+    const pn = realPartNumber(partNumber);
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${description.toUpperCase()}${pn ? ` (${pn})` : ""}${supplier ? ` from ${supplier}` : ""}`, created_by: staff.id });
+  }
+  if (stockItemId) forgetBoughtPrices();
   refresh(jobId);
-  return { partId: partId ?? undefined, complete: completeNow, waitingApproval: approvalStatus === "pending" };
+  // The screen takes in what the server decided: the cost question for the cost saved, the stock item and its cost.
+  const server: Partial<RowValues> = { ...checkValues, part_number: partNumber ?? "", ...(fromStock ? { stock_item: stockItemId ?? undefined, stock_words: stockWords, stock_on_hand: stockOnHand === null ? undefined : String(stockOnHand), availability: "in_stock", days: "", ...(stockItemId ? { cost_aed: String(cost ?? ""), list_price: "", discount: "" } : {}) } : { stock_item: undefined, stock_words: "", stock_on_hand: undefined }) };
+  return { partId: partId ?? undefined, complete: completeNow, waitingApproval: approvalStatus === "pending", server };
+}
+
+type StockLike = { name: string; unit: string | null; quantity: number | string | null; unit_cost: number | string | null };
+/** "ENGINE OIL 0W20 · 12 L on hand · AED 49.00 average": one stock item in words, for the row's status line. */
+function stockItemWords(i: StockLike): string {
+  const qty = Number(i.quantity) || 0;
+  return `${String(i.name).toUpperCase()} · ${qty.toLocaleString("en-GB")} ${i.unit || "pc"} on hand · AED ${(Number(i.unit_cost) || 0).toFixed(2)} average`;
+}
+
+/**
+ * "From our stock…" (2.3): the stock list for the picker on the Parts table and the parts desk - name, part number,
+ * on hand and the average cost each. Parts and the owner only.
+ */
+export async function stockItemsForPicker(): Promise<{ error?: string; items?: { id: string; name: string; partNumber: string | null; unit: string; onHand: number; unitCost: number; words: string }[] }> {
+  const staff = await getCurrentStaff();
+  if (!staff || !can(staff.role_id as RoleId, "priceParts")) return { error: "Not allowed." };
+  const { data } = await createAdminClient().from("stock_items").select("id, name, unit, quantity, unit_cost, part_number, item_type").eq("is_active", true).order("name");
+  return { items: ((data ?? []) as (StockLike & { id: string; part_number: string | null; item_type: string | null })[]).filter((i) => i.item_type !== "consumable").map((i) => ({ id: i.id, name: i.name, partNumber: realPartNumber(i.part_number), unit: i.unit || "pc", onHand: Number(i.quantity) || 0, unitCost: Number(i.unit_cost) || 0, words: stockItemWords(i) })) };
+}
+
+/**
+ * "+ Add to the stock list" in the picker, or the cost each of an item that has none yet: the item with its cost each
+ * (and the quantity on the shelf, written as an opening "in" movement). The same item is found again by its part
+ * number or its name, never made twice. Its cost is only set here while it has none (later costs come from deliveries).
+ */
+export async function stockItemQuick(input: { id?: string | null; name?: string; partNumber?: string; unit?: string; unitCost: number | string; onShelf?: number | string }): Promise<{ error?: string; /** The typed cost was not used: the item already has its cost on the stock list. */ note?: string; item?: { id: string; name: string; partNumber: string | null; unit: string; onHand: number; unitCost: number; words: string } }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  if (!can(staff.role_id as RoleId, "manageStock")) return { error: "Not allowed." };
+  const cost = numOrNull(input.unitCost);
+  if (cost === null || cost <= 0) return { error: "Type the cost of one, before VAT." };
+  const shelf = numOrNull(input.onShelf ?? "") ?? 0;
+  const admin = createAdminClient();
+  let id = input.id ?? null;
+  let note: string | undefined;
+  if (id) {
+    const { data: cur } = await admin.from("stock_items").select("id, unit_cost").eq("id", id).eq("is_active", true).maybeSingle();
+    if (!cur) return { error: "That stock item is no longer on the list." };
+    if (Number(cur.unit_cost) > 0) return { error: "This item already has its cost on the stock list." };
+    await admin.from("stock_items").update({ unit_cost: cost, updated_by: staff.id }).eq("id", id);
+  } else {
+    const name = (input.name ?? "").trim();
+    if (name.length < 2) return { error: "Type the item's name." };
+    if (name.length > 120) return { error: "The name is too long (120 characters at most)." };
+    const pnProblem = partNumberProblem(input.partNumber);
+    if (pnProblem) return { error: pnProblem };
+    const pn = realPartNumber(input.partNumber);
+    const compact = compactPartNumber(pn);
+    const { data: same } = await admin.from("stock_items").select("id, name, part_number, unit_cost").eq("is_active", true);
+    const hit = ((same ?? []) as { id: string; name: string; part_number: string | null; unit_cost: number | string | null }[]).find((s) => (compact.length >= 4 && compactPartNumber(s.part_number) === compact) || s.name.trim().toLowerCase() === name.toLowerCase());
+    if (hit) {
+      // Already on the list: an item with no cost yet takes the cost just typed; one with a cost keeps it (later costs
+      // come from deliveries), and the person is told the typed figure was not used.
+      id = hit.id;
+      if (!(Number(hit.unit_cost) > 0)) await admin.from("stock_items").update({ unit_cost: cost, updated_by: staff.id }).eq("id", hit.id);
+      else if (Math.abs(Number(hit.unit_cost) - cost) >= 0.005) note = `${hit.name.toUpperCase()} is already on the stock list at AED ${Number(hit.unit_cost).toFixed(2)} each: that cost is used.`;
+    } else {
+      const { data: made, error } = await admin.from("stock_items").insert({ item_type: "part", name, unit: (input.unit ?? "pc").trim().slice(0, 20) || "pc", part_number: pn, quantity: 0, minimum_level: 0, unit_cost: cost, created_by: staff.id, updated_by: staff.id }).select("id").single();
+      if (error || !made) return { error: error?.message ?? "Could not add the stock item." };
+      id = made.id as string;
+    }
+  }
+  if (shelf > 0 && id) await recordStockMovement(id, { kind: "in", quantity: shelf, unitCost: cost, note: `On the shelf, added from the Parts table by ${staff.display_name}` }, staff);
+  const { data: item } = await admin.from("stock_items").select("id, name, unit, quantity, unit_cost, part_number").eq("id", id!).maybeSingle();
+  if (!item) return { error: "Could not read the stock item." };
+  revalidatePath("/parts/stock");
+  forgetBoughtPrices();
+  return { ...(note ? { note } : {}), item: { id: item.id as string, name: item.name as string, partNumber: realPartNumber(item.part_number as string | null), unit: (item.unit as string) || "pc", onHand: Number(item.quantity) || 0, unitCost: Number(item.unit_cost) || 0, words: stockItemWords(item as StockLike) } };
+}
+
+/**
+ * "Yes, real price" on a part the customer already approved and that is not ordered yet (2 November 2026): the row is
+ * locked, so the answer alone is stored for the cost already on it (nothing else changes), and the part can go on an
+ * LPO. Parts and the owner; only while the database keeps answers (migration 20261203100000).
+ */
+export async function confirmPartCost(jobId: string, partId: string, costEach: number): Promise<{ error?: string; ok?: boolean; added?: number }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  if (!can(staff.role_id as RoleId, "priceParts")) return { error: "Not allowed." };
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  if (!(await costConfirmReady())) return { error: "The answer can be kept once the owner applies the database change." };
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, description, part_number, supplier, cost_aed, order_status, is_active").eq("id", partId).eq("job_id", jobId).maybeSingle();
+  if (!p || !p.is_active) return { error: "Part not found." };
+  if (!["none", "to_order"].includes(String(p.order_status))) return { error: "Already ordered: use Correct the cost… instead." };
+  const cost = p.cost_aed === null ? null : Number(p.cost_aed);
+  if (cost === null || !(cost > 0) || Math.abs(cost - Number(costEach)) >= 0.005) return { error: "The price changed on the screen: check it again." };
+  if (isPlaceholderSupplier(p.supplier)) return { error: `${placeholderSupplierWords(p.supplier)} (Remove: not needed, then Replace with the real supplier).` };
+  const now = new Date().toISOString();
+  const { error } = await admin.from("part_items").update({ cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id, updated_by: staff.id }).eq("id", partId);
+  if (error) return { error: error.message };
+  const pn = realPartNumber(p.part_number as string | null);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(p.description).toUpperCase()}${pn ? ` (${pn})` : ""}${p.supplier ? ` from ${p.supplier}` : ""} (already approved by the customer)`, created_by: staff.id });
+  // Approved and on no LPO: it joins the LPO that waits (or a new one after an approved main LPO).
+  const r = p.order_status === "to_order" ? await addPartsToOpenLpo(jobId, staff) : { added: 0 };
+  refresh(jobId);
+  return { ok: true, added: r.added };
+}
+
+/**
+ * "Correct the cost…" (2 November 2026: J-00017's drain plug and J-00609's engine flush were received from "OFJ
+ * Additional" at AED 1.00, J-00969's moulding was ordered on LPO-00037-1 to "OFJ Additional"): a part already ordered
+ * or received gets the cost that really stands, before its invoice is made. Logged on the job, never seen by the
+ * customer.
+ *   - From our stock: the stock item is linked, the shelf goes down (once), the cost is the stock average, the
+ *     supplier "Our stock". Never for a part on an LPO (that one was bought from a supplier).
+ *   - Bought from a supplier: the real supplier and its cost each. An LPO addressed to a stand-in supplier, with no
+ *     supplier invoice entered and not paid, is addressed to the real one (every line on it); its approved line price
+ *     stays, and the supplier invoice brings the real price through the usual price-change rule.
+ * A cost already on a TAX invoice is not changed here (tell the owner); a proforma's line follows (internal cost).
+ */
+export async function correctSettledCost(jobId: string, partId: string, input: { kind: "stock"; stockItemId: string } | { kind: "supplier"; supplier: string; cost: number | string; confirmCost?: number | null }): Promise<{ error?: string; ok?: boolean; message?: string; ask?: string }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  if (!can(staff.role_id as RoleId, "priceParts")) return { error: "Not allowed." };
+  const job = await jobOf(jobId);
+  if (!job || !job.is_open) return { error: "This job is closed." };
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("part_items").select("id, job_id, description, part_number, supplier, cost_aed, final_cost_aed, order_status, quantity, confirmed_quantity, received_qty, po_id, stock_item_id, is_active").eq("id", partId).eq("job_id", jobId).maybeSingle();
+  const p = raw as { id: string; job_id: string; description: string; part_number: string | null; supplier: string | null; cost_aed: number | string | null; final_cost_aed: number | string | null; order_status: string; quantity: number | string; confirmed_quantity: number | string | null; received_qty: number | string | null; po_id: string | null; stock_item_id: string | null; is_active: boolean } | null;
+  if (!p || !p.is_active) return { error: "Part not found." };
+  if (!isSettledStatus(p.order_status)) return { error: "Not ordered yet: change the price in the row itself." };
+  const name = String(p.description).toUpperCase();
+  // A tax invoice already carries this part's cost: it is not changed from here.
+  const { data: invLines } = await admin.from("invoice_lines").select("id, quantity, invoice:invoices!invoice_lines_invoice_id_fkey(id, number, kind, status)").eq("part_item_id", partId).eq("is_active", true);
+  const lines = ((invLines ?? []) as unknown as { id: string; quantity: number | string; invoice: { id: string; number: string; kind: string; status: string } | null }[]).filter((l) => l.invoice && l.invoice.status !== "cancelled");
+  const taxed = lines.find((l) => l.invoice?.kind !== "proforma");
+  if (taxed) return { error: `${name} is already on ${taxed.invoice?.kind === "tax_invoice" ? "tax invoice" : "invoice"} ${taxed.invoice?.number}: its cost stays as invoiced. Tell the owner.` };
+  const before = numOrNull(p.final_cost_aed) ?? numOrNull(p.cost_aed);
+  const qty = Number(p.received_qty) || Number(p.confirmed_quantity ?? p.quantity) || 1;
+  let newCost: number;
+  let newSupplier: string;
+  let extra = "";
+  const patch: Record<string, unknown> = { updated_by: staff.id };
+  if (input.kind === "stock") {
+    if (p.po_id) return { error: `${name} was ordered on an LPO: it came from a supplier, not our shelf. Choose Bought from a supplier.` };
+    const { data: item } = await admin.from("stock_items").select("id, name, unit_cost, is_active").eq("id", input.stockItemId).maybeSingle();
+    if (!item || !item.is_active) return { error: "That stock item is no longer on the stock list. Pick it again." };
+    newCost = Number(item.unit_cost) || 0;
+    if (!(newCost > 0)) return { error: `${String(item.name).toUpperCase()} has no cost on the stock list yet: type its cost each when you pick it.` };
+    newSupplier = OUR_STOCK;
+    Object.assign(patch, { supplier: OUR_STOCK, stock_item_id: item.id, availability: "in_stock", final_cost_aed: newCost });
+    // The shelf goes down once for this part (never twice, whoever corrects it again).
+    const { data: moved } = await admin.from("stock_movements").select("id").eq("part_item_id", partId).eq("kind", "out").limit(1);
+    if (!moved?.length) await recordStockMovement(item.id as string, { kind: "out", quantity: qty, jobId, partItemId: partId, note: `${name}: taken from the shelf (cost corrected by ${staff.display_name})` }, staff);
+    extra = ` (${String(item.name).toUpperCase()})`;
+  } else {
+    newSupplier = String(input.supplier ?? "").trim().slice(0, 120);
+    if (!newSupplier) return { error: "Pick the real supplier." };
+    if (isPlaceholderSupplier(newSupplier)) return { error: `${placeholderSupplierWords(newSupplier)}.` };
+    if (isOurStock(newSupplier)) return { error: "From our shelf: choose From our stock… instead." };
+    newCost = Number(String(input.cost ?? "").replace(/,/g, ""));
+    if (!Number.isFinite(newCost) || !(newCost > 0)) return { error: "Type the real cost of one, before VAT." };
+    newCost = round2(newCost);
+    // A cost this low (or far under what the part was bought at) is asked once here too, like any typed cost.
+    const confirmed = input.confirmCost !== null && input.confirmCost !== undefined && Math.abs(Number(input.confirmCost) - newCost) < 0.005;
+    const me: PartForCheck = { id: partId, job_id: jobId, description: p.description, part_number: p.part_number, cost_aed: newCost, supplier: newSupplier, cost_confirmed_aed: confirmed ? newCost : null };
+    const { data: siblings } = await admin.from("part_items").select("id, job_id, description, part_number, part_type, option_group, cost_aed, supplier, is_active, removed_at, confirm_status").eq("job_id", jobId).eq("is_active", true);
+    const check = (await costChecksFor([me], [me, ...((siblings ?? []) as PartForCheck[]).filter((x) => x.id !== partId)])).get(partId);
+    if (!confirmed && (check?.ask || newCost <= 1)) return { ask: check?.ask?.words ?? `AED ${newCost.toFixed(2)} – is this the real price?` };
+    Object.assign(patch, { supplier: newSupplier, final_cost_aed: newCost });
+    if (p.po_id) {
+      const { data: po } = await admin.from("purchase_orders").select("id, number, supplier_name, supplier_invoice_status, supplier_paid_at, zoho_bill_id").eq("id", p.po_id).maybeSingle();
+      const standIn = !!po && (isPlaceholderSupplier(po.supplier_name) || /^supplier to confirm$/i.test(String(po.supplier_name ?? "").trim()));
+      if (po && standIn) {
+        if (po.supplier_invoice_status === "received" || po.supplier_paid_at || po.zoho_bill_id) return { error: `${po.number} is addressed to "${po.supplier_name}" and its supplier invoice is already entered: tell the owner and accounts.` };
+        const { data: sup } = await admin.from("suppliers").select("id, name").ilike("name", newSupplier).eq("is_active", true).maybeSingle();
+        const real = (sup?.name as string | undefined) ?? newSupplier;
+        await admin.from("purchase_orders").update({ supplier_name: real, supplier_id: sup?.id ?? null, updated_by: staff.id }).eq("id", po.id);
+        await admin.from("part_items").update({ supplier: real, updated_by: staff.id }).eq("po_id", po.id).neq("id", partId).eq("is_active", true);
+        extra = `; ${po.number} is now addressed to ${real} (it was "${po.supplier_name}")`;
+      }
+    }
+  }
+  const { error } = await admin.from("part_items").update(patch).eq("id", partId);
+  if (error) return { error: error.message };
+  // A proforma already made for the job carries the part's cost on its line (internal only): it follows.
+  for (const l of lines) await admin.from("invoice_lines").update({ cost_aed: round2(newCost * (Number(l.quantity) || qty)), updated_by: staff.id }).eq("id", l.id);
+  const beforeWords = before === null ? "no cost" : `AED ${before.toFixed(2)}`;
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "part_cost_corrected", note: `${name}: cost corrected from ${beforeWords}${p.supplier ? ` (${p.supplier})` : ""} to AED ${newCost.toFixed(2)} each from ${newSupplier}${extra}, by ${staff.display_name}`, created_by: staff.id });
+  forgetBoughtPrices();
+  refresh(jobId);
+  return { ok: true, message: `Cost corrected: AED ${newCost.toFixed(2)} each from ${newSupplier}${extra}.` };
 }
 
 /**

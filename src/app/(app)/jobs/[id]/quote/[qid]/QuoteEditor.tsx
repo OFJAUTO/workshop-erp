@@ -34,9 +34,11 @@ import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/co
 import { NOT_PRICE_KEYS, belowCostAll, belowCostChangesIn, belowCostWords, type BelowCost } from "@/lib/quotes";
 import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
+import { DEFAULT_COST_LIMITS, markupTooHigh, markupTooHighWords } from "@/lib/part-cost-check";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
 import { SendQuoteControl } from "./SendQuoteControl";
 import { CommissionLine } from "./CommissionLine";
+import { realPartNumber } from "@/lib/parts-rows";
 
 type Op = Record<string, unknown>;
 
@@ -150,8 +152,10 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
 export type EditorSettings = {
   labourRate: number;
   minMarkup: number;
-  markupWarn: number;
-  markupConfirm: number;
+  /** Placeholder costs (2 November 2026): a part markup over this percent shows amber and asks once before sending. */
+  partMarkupWarn?: number;
+  /** The parts whose cost question still waits for Parts' answer (by part id): they stop the send. */
+  costAsks?: Record<string, string>;
   discountLimit: number;
   approvalAbove: number;
   technicianCostRate: number | null;
@@ -414,6 +418,10 @@ export function QuoteEditor({
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
   const [markupAsk, setMarkupAsk] = useState<string | null>(null);
   const [lowAsk, setLowAsk] = useState<string | null>(null);
+  // Placeholder costs (2 November 2026): a part markup over the warning limit asks once before sending ("is the cost real?").
+  const [highAsk, setHighAsk] = useState<string | null>(null);
+  // The advisor's "I have a price" asked "Is this the real price?" for a cheap or far-below cost: the answer goes with it.
+  const [costCheckAsk, setCostCheckAsk] = useState<null | { lineId: string; cost: number; supplier: string; words: string; kind: string }>(null);
   /** A price typed as 0: ask whether the line is Complimentary / Included (the PPF package pattern). */
   const [compAsk, setCompAsk] = useState<string | null>(null);
   const [depositAsk, setDepositAsk] = useState<string | null>(null);
@@ -446,7 +454,7 @@ export function QuoteEditor({
   };
   const [reviseAsk, setReviseAsk] = useState(false);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
-  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean; skipPositions?: boolean }>({});
+  const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean; skipPositions?: boolean; highMarkupOk?: boolean }>({});
   const [positionsAsk, setPositionsAsk] = useState<string | null>(null);
   const [partsAsk, setPartsAsk] = useState<{ message: string; missing: string[] } | null>(null);
   // "Minimum 5%": shown for a moment under a markup that was typed below the minimum and put back.
@@ -502,6 +510,10 @@ export function QuoteEditor({
     }, wait);
   }, [router]);
   const onConfirm = useCallback((op: Op, message: string, data: Record<string, unknown>) => {
+    if (data.ask === "cost_check") {
+      setCostCheckAsk({ lineId: String(data.lineId ?? ""), cost: Number(data.cost) || 0, supplier: String(data.supplier ?? ""), words: message, kind: String(data.kind ?? "ask_cheap") });
+      return;
+    }
     if (data.ask === "below_cost") {
       const p = (op.patchLine ?? op.addLine) as { id?: string } | undefined;
       const ask = { lineId: String(data.lineId ?? p?.id ?? ""), title: String(data.title ?? ""), below: { cost: Number(data.cost) || 0, sell: Number(data.sell) || 0, short: Number(data.short) || 0 }, more: Number(data.more) || 0, op, reason: "" };
@@ -510,7 +522,7 @@ export function QuoteEditor({
       return;
     }
     setConfirming({ op, message });
-  }, [setConfirming, setBelowAsks]);
+  }, [setConfirming, setBelowAsks, setCostCheckAsk]);
   const { save, state, error, failed, retryFailed, dropFailedFor } = useQuoteAutosave(quotation.id, refresh, onConfirm);
   /** New lines drawn on screen before the server answers: kept through refreshes until the server row arrives. */
   const pendingNew = useRef<Set<string>>(new Set());
@@ -963,7 +975,7 @@ export function QuoteEditor({
   const namedLabour = labourLines.filter((l) => l.title.trim());
   const labourDone = namedLabour.filter(finishedLine).length;
   const compBlock = compFree.length ? compProblem(q) : null;
-  const blockers = [...sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm, packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0 }), ...(compBlock ? [{ key: "comp", label: compBlock }] : [])];
+  const blockers = [...sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0, costAsks: settings.costAsks }), ...(compBlock ? [{ key: "comp", label: compBlock }] : [])];
   // Who gave the discount (B3): changed on this screen and not saved back yet = the viewer; otherwise the stored giver.
   // An unknown giver counts as not the owner, exactly as the server does.
   const discountChangedHere = Number(header.discount_value ?? 0) !== Number(quotation.discount_value ?? 0) || (header.discount_kind ?? null) !== (quotation.discount_kind ?? null) || (header.discount_scope ?? "labour") !== (quotation.discount_scope ?? "labour");
@@ -986,6 +998,7 @@ export function QuoteEditor({
     if (long) return { ok: false, error: `Not complete yet: a description is longer than ${LINE_TEXT_MAX.toLocaleString("en-GB")} characters and is not saved. Shorten it first (the red counter under it says by how much).` };
     const r = await completeQuotation(quotation.id, { ...skips.current });
     if (r.ask === "low_profit") { setLowAsk(r.message ?? "This profit is very low. Are you sure you want to send?"); return { ok: true }; }
+    if (r.ask === "high_markup") { setHighAsk(r.message ?? "A part markup is very high: is the cost real?"); return { ok: true }; }
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
     if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
@@ -1000,6 +1013,7 @@ export function QuoteEditor({
     if (a.error) return a;
     const r = await completeQuotation(quotation.id, { ...skips.current });
     if (r.ask === "low_profit") { setLowAsk(r.message ?? "This profit is very low. Are you sure you want to send?"); return { ok: true }; }
+    if (r.ask === "high_markup") { setHighAsk(r.message ?? "A part markup is very high: is the cost real?"); return { ok: true }; }
     if (r.ask === "markup") { setMarkupAsk(r.message ?? "Parts markup is still at the minimum. Set it now?"); return { ok: true }; }
     if (r.ask === "parts") { setPartsAsk({ message: r.message ?? "Priced parts are missing from the quote", missing: r.missing ?? [] }); return { ok: true }; }
     if (r.ask === "deposit") { setDepositAsk(r.message ?? "No deposit on this quote. Send without a deposit?"); return { ok: true }; }
@@ -1750,7 +1764,7 @@ export function QuoteEditor({
                           {est ? (
                             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted" data-est-part-state={estState}>
                               <Badge tone={estState === "draft" ? "outline" : estState === "with_desk" || estState === "advisor" ? "amber" : "green"}>{ESTIMATE_PART_WORDS[estState!]}</Badge>
-                              {l.supplier_text ? <span data-est-part-supplier>{l.supplier_text}{l.part_number ? ` · ${l.part_number}` : ""} (internal)</span> : null}
+                              {l.supplier_text ? <span data-est-part-supplier>{l.supplier_text}{realPartNumber(l.part_number) ? ` · ${realPartNumber(l.part_number)}` : ""} (internal)</span> : null}
                               {disabled && l.parts_note ? <span>Note: {l.parts_note}</span> : null}
                             </div>
                           ) : null}
@@ -1796,6 +1810,11 @@ export function QuoteEditor({
                             <span data-markup-percent>{mb.percent === null ? "—" : `${mb.percent.toFixed(2)}%`}</span> · <span data-markup-aed>{aed(mb.aed)}</span>{(l.quantity || 1) > 1 ? " each" : ""}
                           </span>
                           <span className={`block text-right text-[11px] font-bold text-red ${minFlags.has(l.id) ? "" : "hidden"}`} data-min-markup>Minimum {settings.minMarkup}%</span>
+                          {(() => {
+                            // Placeholder costs (2 November 2026): a markup over the limit (500%) means the cost is probably not real.
+                            const high = !unchosen ? markupTooHigh(l, settings.partMarkupWarn ?? DEFAULT_COST_LIMITS.markupWarnPercent) : null;
+                            return high !== null ? <span className="mt-0.5 block max-w-[14rem] text-right text-[11px] font-bold text-amber" data-markup-high>{markupTooHighWords(high, l.unit_cost, part?.supplier ?? null)}</span> : null;
+                          })()}
                         </td>
                         <td className="py-2 pr-2 align-top text-right" data-selling-cell>
                           {/* Type the selling price: the markup (% and AED) is worked out from it */}
@@ -2172,6 +2191,30 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" onClick={() => setLowAsk(null)} data-low-profit-fix>Go back and fix</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => { setLowAsk(null); completeNow(false, false, false, true); }} data-low-profit-send>Send anyway</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {highAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-high-markup-ask>
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card border-2 border-amber-bar bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">{highAsk}</span>
+            <p className="text-sm text-muted">A markup this high usually means the cost is a placeholder (AED 1.00), so the profit looks bigger than it is. Sending anyway is written on the quotation and the owner is told.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => { setHighAsk(null); document.querySelector<HTMLElement>("[data-markup-high]")?.scrollIntoView({ block: "center", behavior: "smooth" }); }} data-high-markup-fix>Fix the cost</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { setHighAsk(null); skips.current.highMarkupOk = true; completeNow(false); }} data-high-markup-send>Send anyway</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {costCheckAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-est-cost-ask={costCheckAsk.kind}>
+          <div className={`w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card border-2 bg-white p-5 flex flex-col gap-3 ${costCheckAsk.kind === "far_below" ? "border-red-bar" : "border-amber-bar"}`}>
+            <span className={`text-lg font-extrabold ${costCheckAsk.kind === "far_below" ? "text-red" : ""}`}>{costCheckAsk.words}</span>
+            <p className="text-sm text-muted">{costCheckAsk.supplier}: the price is kept only when it is real. &quot;Yes, real price&quot; is written on the estimate.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" onClick={() => { const a = costCheckAsk; setCostCheckAsk(null); save({ advisorPrice: { id: a.lineId, cost: a.cost, supplier: a.supplier, confirmCost: a.cost } }); }} data-est-cost-confirm>Yes, real price</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { const a = costCheckAsk; setCostCheckAsk(null); setOwnPrice({ id: a.lineId, cost: String(a.cost), supplier: a.supplier }); refresh(); }} data-est-cost-change>Change the price</Button>
             </div>
           </div>
         </div>

@@ -4,7 +4,7 @@
 // the price memory (C6), and real stock: a stock order through approval, ordered and received onto the shelf with the
 // averaged cost, the low-stock reminder from the hourly job, the monthly count (C7).
 //   node --env-file=.env.test.local tests/browser/test-p.mjs
-import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, confirmMoney, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 15 * 60 * 1000).unref();
@@ -99,7 +99,8 @@ await section("2 stock order", async () => {
   // The owner approves; Parts mark it ordered; the delivery lands on the shelf.
   const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 1400 } });
   await go(op, `${base}/parts/orders/${stockPoId}`);
-  await op.getByRole("button", { name: /^Approve$/ }).click();
+  // Since 1 November 2026 (B3) Approve asks once: "Approve this LPO?" then Yes.
+  await confirmMoney(op, "lpo-approve");
   await afterSubmit(op);
   check("2: the owner approves it with one tap", (await sql("select status from public.purchase_orders where id = $1", [stockPoId]))[0]?.status === "approved");
   await ob.close();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { initialFormState, type FormState } from "@/lib/form-state";
 import { Button, Notice } from "./ui";
@@ -8,6 +8,19 @@ import { Button, Notice } from "./ui";
 export type { FormState } from "@/lib/form-state";
 
 export type FormAction = (state: FormState, formData: FormData) => Promise<FormState>;
+
+/**
+ * The form's double-tap lock (FormGuard) ends when the server's answer is already on screen, so the next choice is
+ * not swallowed (the duplicate-estimate question, the parts desk's "Is this the real price?"). Render it with the answer.
+ */
+export function ReleaseFormLock() {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const form = ref.current?.closest("form");
+    if (form) delete form.dataset.busyUntil;
+  }, []);
+  return <span ref={ref} hidden />;
+}
 
 export function SubmitButton({
   children,

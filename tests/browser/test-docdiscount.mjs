@@ -1,7 +1,7 @@
 // Discount on every customer document (21 October 2026, section 2): the line's own discount prints in
-// bold green under the line and in the totals ("Labour and services (before discount)" → green
-// "Discount −AED X"), on the quotation PDF AND the proforma; trailing dashes leave the names; the
-// Complimentary word follows onto the invoice. One shared template renders them all.
+// bold green under the line and in the totals (Subtotal → green "Discount −AED X" since the 31 October
+// layout), on the quotation PDF AND the proforma; trailing dashes leave the names; the Complimentary word
+// follows onto the invoice (its reason set first, the 30 October rule). One shared template renders them all.
 //   node --env-file=.env.test.local tests/browser/test-docdiscount.mjs
 import { writeFileSync } from "node:fs";
 import { api, base, browserFor, cleanupDb, cookieHeader, makeChecks, sleep, sql } from "./pw-lib.mjs";
@@ -31,6 +31,8 @@ check("owner sets a 22% line discount", !d?.error, JSON.stringify(d).slice(0, 12
 await api("/api/quote/save", { quotationId, addLine: { title: "E2E PPF INTERIOR", line_type: "package", unit_price: 0, unit_cost: 80, price_display: "complimentary" } }, owner);
 const rec = (await api("/api/quote/save", { quotationId, addLine: { line_type: "recovery", title: "Recovery", recovery_type: "normal", recovery_trips: 2, unit_cost: 150, unit_price: 0 } }, owner)).json;
 await api("/api/quote/save", { quotationId, patchLine: { id: rec.id, recovery_paid_by: "us", recovery_mention_free: true } }, owner);
+// Since 30 October a free line needs its reason before the quotation can go (goodwill: with words).
+await sql("update public.quotations set comp_reason = 'goodwill', comp_note = 'E2E goodwill for a loyal customer' where id = $1", [quotationId]);
 const line1 = (await sql("select line_total from public.quotation_lines where id = $1", [l1.id]))[0];
 check("22,000 − 22% = 17,160", Number(line1?.line_total) === 17160, JSON.stringify(line1));
 
@@ -38,7 +40,8 @@ check("22,000 − 22% = 17,160", Number(line1?.line_total) === 17160, JSON.strin
 const qpdf = Buffer.from(await (await fetch(`${base}/api/pdf/quotation/${quotationId}`, { headers: { cookie: owner } })).arrayBuffer());
 const qtext = await pdfText(qpdf);
 check("quote PDF: 'Discount 22%: −AED 4,840.00' under the line", /Discount 22%:\s*−AED 4,840\.00/i.test(qtext), qtext.match(/Discount 22[^A]{0,20}AED [\d,.]+/)?.[0] ?? qtext.slice(0, 160));
-check("quote PDF: 'Labour and services (before discount)'", /before\s+discount/i.test(qtext));
+// 31 October 2026 layout ("every amount once"): the totals box shows the Subtotal, then the discount, then the total.
+check("quote PDF: the totals box carries Subtotal and the discount", /Subtotal/i.test(qtext) && /Discount/i.test(qtext) && /TOTAL INCL\.?\s*VAT/i.test(qtext), (qtext.match(/Subtotal.{0,160}/i)?.[0] ?? qtext.slice(-240)).replace(/\s+/g, " "));
 check("quote PDF: the name loses the trailing dash", /E2E PPF - EXTERIOR(?!\s*-)/i.test(qtext.replace(/\s+/g, " ")));
 
 // Complete, send, approve: the job is approved with the discounted labour.
@@ -89,7 +92,8 @@ const pbuf = Buffer.from(await ppdfRes.arrayBuffer());
 writeFileSync(`${shots}/e2e-proforma.pdf`, pbuf);
 const ptext = await pdfText(pbuf);
 check("proforma: green 'Discount 22%: −AED 4,840.00' under the line", /Discount 22%:\s*−AED 4,840\.00/i.test(ptext), ptext.match(/Discount 22[^A]{0,22}AED [\d,.]+/)?.[0] ?? ptext.slice(0, 200));
-check("proforma: '(before discount)' + green Discount row", /before\s+discount/i.test(ptext) && /Discount\s/.test(ptext));
+// 31 October 2026 layout: no "(before discount)" heading any more - the Subtotal, then the green Discount row.
+check("proforma: Subtotal + Discount row in the totals", /Subtotal/i.test(ptext) && /Discount\s/.test(ptext), (ptext.match(/Subtotal.{0,160}/i)?.[0] ?? ptext.slice(-240)).replace(/\s+/g, " "));
 check("proforma: Complimentary word carried", /Complimentary/i.test(ptext));
 check("proforma: clean name (no trailing dash)", !/E2E PPF - EXTERIOR\s+-/.test(ptext.replace(/\s+/g, " ")));
 const mupdf = await import("mupdf");

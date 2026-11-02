@@ -57,11 +57,15 @@ await section("1 our stock part after sending", async () => {
   await row.locator("input[aria-label='List price']").press("Tab");
   await sleep(1200);
   const supSel = row.locator("select[aria-label='Supplier']");
-  const stockVal = await supplierOption(supSel, "our stock");
-  check("1: Our stock is a supplier choice", !!stockVal);
-  await supSel.selectOption(stockVal);
+  const stockVal = await supplierOption(supSel, "from our stock");
+  check("1: From our stock is a supplier choice", stockVal === "__stock");
+  // 2 November 2026: the stock picker; the part takes the stock item's cost (49).
+  await supSel.selectOption("__stock");
+  await page.locator("[data-stock-add]").click();
+  await page.locator("[data-stock-new-name]").pressSequentially("E2E DISC STOCK L");
+  await page.locator("[data-stock-new-cost]").pressSequentially("49");
+  await page.locator("[data-stock-new-save]").click();
   await sleep(800);
-  await row.locator("select[aria-label='Availability']").selectOption({ label: "In stock" });
   const priced = await until(async () => { const r = (await sql("select id, cost_aed, supplier, availability from public.part_items where job_id = $1 and description ilike 'rear brake discs' and is_active", [jobId]))[0]; return Number(r?.cost_aed) === 49 && /our stock/i.test(r?.supplier ?? "") ? r : null; }, 40, 500);
   check("1: the part is priced at AED 49 from Our stock", !!priced, JSON.stringify(priced));
   // The change lands on the next version by itself; the sent one is replaced; the advisor is told.
@@ -137,7 +141,9 @@ await section("2 parts desk all cars and search", async () => {
   await go(page, `${base}/parts`);
   check("2: 'All cars' lists the open car with its dots and status", (await page.locator(`[data-all-cars] [data-all-car='${jobId}']`).count()) === 1 && (await page.locator(`[data-all-cars] [data-all-car='${jobId}'] [data-step-dot]`).count()) === 5);
   check("2: the search box sits at the top of the parts desk", (await page.locator("[data-parts-search]").count()) === 1);
-  for (const [what, q] of [["plate", "30303"], ["job number", "J-00"], ["VIN", "STAGE01"], ["customer name", "stage test"]]) {
+  // The job number as it is now (the TEST numbers passed J-01000); Parts never search by customer (29 October 2026).
+  const jobNo = (await sql("select job_number from public.jobs where id = $1", [jobId]))[0]?.job_number ?? "J-0";
+  for (const [what, q] of [["plate", "30303"], ["job number", jobNo], ["VIN", "STAGE01"]]) {
     await go(page, `${base}/parts?q=${encodeURIComponent(q)}`);
     check(`2: search by ${what} finds the car`, (await page.locator(`[data-search-results] [data-all-car='${jobId}']`).count()) === 1);
   }

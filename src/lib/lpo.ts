@@ -8,8 +8,10 @@ import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, toPartFull, toPo, toPoLine
 import { createAdminClient } from "./supabase/admin";
 import { attachChargesToPo, chargesByPo, moveChargesToSupplierPo, releaseCharges, type SupplierCharge } from "./supplier-charges";
 import { releaseWords } from "./job-sides";
-import { realPartNumber } from "./parts-rows";
-import { schemaReady } from "./schema-ready";
+import { isOurStock, isPlaceholderSupplier, realPartNumber } from "./parts-rows";
+import { costConfirmReady, schemaReady } from "./schema-ready";
+import { lpoLineProblem, lpoProblemAdvice, type LpoProblem } from "./part-cost-check";
+import { costChecksFor, type PartForCheck } from "./part-cost-history";
 
 type Actor = { id: string; display_name: string };
 
@@ -47,8 +49,10 @@ export async function loadJobLpos(jobId: string): Promise<JobLpos> {
     mainLines: main ? lines.filter((l) => l.po_id === main.id) : [],
     mainCharges: main ? charges.get(main.id) ?? [] : [],
     suppliers,
-    // Never a part marked not needed, or one refused on an LPO (its order status went back to none).
-    toOrder: parts.filter((p) => p.order_status === "to_order" && !p.po_id && !p.not_needed_at),
+    // Never a part marked not needed, or one refused on an LPO (its order status went back to none), and never a part
+    // from our own shelf (2 November 2026: it is received from the shelf, never ordered - one stuck at To order no
+    // longer blocks the job's LPO).
+    toOrder: parts.filter((p) => p.order_status === "to_order" && !p.po_id && !p.not_needed_at && p.availability !== "in_stock" && !isOurStock(p.supplier)),
     fromStock: parts.filter((p) => p.availability === "in_stock"),
   };
 }
@@ -69,6 +73,37 @@ export function expectedDateFor(p: { delivery_date: string | null; priced_at: st
   return new Date(Date.parse(orderDay) + days * 86400000).toISOString().slice(0, 10);
 }
 
+/**
+ * THE LPO gate of a job's parts (2 November 2026, 2.2): a real cost before a part is ever ordered - a price, a real
+ * supplier (never "OFJ Additional"), never from our stock, never AED 1.00 unless Parts confirmed it, and no cost
+ * question waiting. What stops each part, by part id, with what fixes it (lpoLineProblem in part-cost-check.ts).
+ */
+export async function lpoProblemsFor(jobId: string, partIds: string[]): Promise<Map<string, LpoProblem>> {
+  const out = new Map<string, LpoProblem>();
+  if (!partIds.length) return out;
+  const ready = await costConfirmReady();
+  const { data } = await createAdminClient().from("part_items").select(`id, job_id, description, part_number, part_type, option_group, cost_aed, final_cost_aed, order_status, list_price_aed, discount_percent, supplier, availability, stock_item_id, is_active, removed_at, confirm_status${ready ? ", cost_confirmed_aed" : ""}`).eq("job_id", jobId).eq("is_active", true);
+  const all = (data ?? []) as unknown as (PartForCheck & { availability: string | null })[];
+  const mine = all.filter((p) => partIds.includes(p.id));
+  const checks = await costChecksFor(mine, all);
+  for (const p of mine) {
+    const c = checks.get(p.id);
+    const problem = lpoLineProblem({ description: p.description, cost_aed: p.cost_aed === null ? null : Number(p.cost_aed), supplier: p.supplier, availability: p.availability }, { ask: c?.ask ?? null, hold: !!c?.hold, confirmed: !!c?.confirmed });
+    if (problem) out.set(p.id, problem);
+  }
+  return out;
+}
+
+/** "1 part cannot go on an LPO yet: …" with what to do: a question Parts can answer is never sent the replace way. */
+export function lpoProblemWords(problems: Map<string, LpoProblem>, approving = false): string {
+  const n = problems.size;
+  const all = Array.from(problems.values());
+  const list = all.map((p) => p.words).join("; ");
+  return approving
+    ? `Not approved: ${n} line${n === 1 ? " has" : "s have"} no real price (${list}). ${lpoProblemAdvice(all, true)}`
+    : `${n} part${n === 1 ? "" : "s"} cannot go on an LPO yet: ${list}. ${lpoProblemAdvice(all, false)}`;
+}
+
 const lineOf = (p: PartFull, i: number) => ({ part_item_id: p.id, position: i + 1, description: p.description, part_number: realPartNumber(p.part_number), quantity: Number(p.confirmed_quantity ?? p.quantity) || 1, unit_cost: p.cost_aed ?? 0, list_price: p.list_price_aed ?? null, discount_percent: p.discount_percent ?? null });
 
 /**
@@ -82,8 +117,9 @@ export async function createMainLpo(jobId: string, by: Actor): Promise<{ error?:
   const { toOrder, main } = await loadJobLpos(jobId);
   if (main && main.status === "pending_approval") return { error: `${main.number} is already waiting for approval.` };
   if (!toOrder.length) return { error: "Nothing to order: every approved part is from stock or already on an LPO." };
-  const unpriced = toOrder.filter((p) => p.cost_aed === null || !p.supplier || p.supplier.trim() === "");
-  if (unpriced.length) return { error: `${unpriced.length} part${unpriced.length === 1 ? " has" : "s have"} no price or supplier yet (${unpriced.map((p) => p.description).join(", ")}). Finish them in the table first.` };
+  // A real cost before anything is ordered (2.2): nothing is sent while one line has no real price.
+  const problems = await lpoProblemsFor(jobId, toOrder.map((p) => p.id));
+  if (problems.size) return { error: lpoProblemWords(problems) };
   const lines = toOrder.map(lineOf);
   const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
   const supplierNames = Array.from(new Set(toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
@@ -117,7 +153,9 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull);
   const groups = new Map<string, PartFull[]>();
   for (const p of parts) {
-    const key = (p.supplier ?? "").trim() || "Supplier";
+    // Never "Our stock" or a stand-in supplier as an LPO's supplier (the gate stops them before approval).
+    const raw = (p.supplier ?? "").trim();
+    const key = raw && !isOurStock(raw) && !isPlaceholderSupplier(raw) ? raw : "Supplier to confirm";
     groups.set(key, [...(groups.get(key) ?? []), p]);
   }
   const { data: existing } = await admin.from("purchase_orders").select("sub_number").eq("parent_id", mainId);
@@ -127,7 +165,8 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
     next++;
     const { data: sup } = await admin.from("suppliers").select("id").ilike("name", supplierName).maybeSingle();
     let supplierId = sup?.id ?? null;
-    if (!supplierId) {
+    // A supplier row is made for a real supplier only, never for "Supplier to confirm".
+    if (!supplierId && supplierName !== "Supplier to confirm") {
       const { data: made } = await admin.from("suppliers").insert({ name: supplierName, created_by: by.id, updated_by: by.id }).select("id").single();
       supplierId = made?.id ?? null;
     }
@@ -293,8 +332,10 @@ export async function addPartsToOpenLpo(jobId: string, by: Actor): Promise<{ add
   if (!job?.is_open) return { added: 0 };
   const { toOrder, main } = await loadJobLpos(jobId);
   if (!main) return { added: 0 };
-  const open = toOrder.filter((p) => p.availability !== "in_stock" && !p.not_needed_at);
-  const ready = open.filter((p) => p.cost_aed !== null && (p.supplier ?? "").trim() !== "");
+  const open = toOrder.filter((p) => p.availability !== "in_stock" && !isOurStock(p.supplier) && !p.not_needed_at);
+  // Only a part with a real cost joins an LPO (2.2): the others wait in the table until their price is real.
+  const problems = await lpoProblemsFor(jobId, open.map((p) => p.id));
+  const ready = open.filter((p) => !problems.has(p.id));
   if (!ready.length) return { added: 0 };
   if (main.status !== "pending_approval") {
     // Already approved: the added parts get their own approval request (once every one of them is priced).
@@ -327,6 +368,8 @@ export async function refreshPendingLpoLine(partId: string, by: Actor): Promise<
   if (!p?.po_id || !p.po_line_id) return;
   const { data: po } = await admin.from("purchase_orders").select("id, number, status, kind").eq("id", p.po_id).maybeSingle();
   if (!po || po.status !== "pending_approval" || po.kind !== "main") return;
+  // The line follows the part; when its cost is no longer real the approvers are told to refuse it (2.2).
+  const problem = (await lpoProblemsFor(p.job_id, [p.id])).get(p.id) ?? null;
   const { data: line } = await admin.from("purchase_order_lines").select("quantity, unit_cost, description, part_number").eq("id", p.po_line_id).maybeSingle();
   if (!line) return;
   const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
@@ -338,7 +381,7 @@ export async function refreshPendingLpoLine(partId: string, by: Actor): Promise<
   const { data: job } = await admin.from("jobs").select("job_number").eq("id", p.job_id).maybeSingle();
   const part = String(p.description).toUpperCase();
   await admin.from("job_events").insert({ job_id: p.job_id, event_type: "po_part_changed", note: `${po.number}: ${part} changed (${by.display_name}): × ${qty} at AED ${cost.toFixed(2)}, ${p.supplier ?? ""}. New total ${aedText(t.total)}.`, created_by: by.id });
-  await notifyStaff(await approverIds(), { type: "po_approval", title: `${po.number} changed: ${part}`, body: `${job?.job_number ?? ""} · × ${qty} at AED ${cost.toFixed(2)} from ${p.supplier ?? "?"}. New total ${aedText(t.total)}.`, jobId: p.job_id, href: `/parts/orders/${po.id}` });
+  await notifyStaff(await approverIds(), { type: "po_approval", title: `${po.number} changed: ${part}`, body: `${job?.job_number ?? ""} · × ${qty} at AED ${cost.toFixed(2)} from ${p.supplier ?? "?"}. New total ${aedText(t.total)}.${problem ? ` NOT A REAL PRICE YET: ${problem.words}. ${lpoProblemAdvice([problem], true)}` : ""}`, jobId: p.job_id, href: `/parts/orders/${po.id}` });
 }
 
 /**

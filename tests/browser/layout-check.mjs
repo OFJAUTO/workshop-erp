@@ -8,6 +8,8 @@
 //   ROLE=owner,advisor npm run test:layout       some roles (ROLE=customer the customer pages, ROLE=popups the pop-ups)
 //   PAGES=/dashboard,/jobs SIZES=800x1280,1440x900 ROLE=owner   only the pages a change touched, at two sizes
 //   WORKERS=4                                    pages checked at once (default 4)
+//   EXTRA_PATHS=/parts/orders/<id> NO_SEED=1     pages a test seeded itself (visited for every role asked; NO_SEED keeps
+//                                                that state: the checker's own test car is not seeded over it)
 // Fast by design: ONE browser, ONE login per role (its cookies shared by every worker), each page loaded once for the
 // computer sizes and once for the touch sizes and resized in between, and no fixed waits - a page is ready when the
 // bell has docked (hydrated), the fonts are in and two frames have been drawn. Best against the production test
@@ -36,6 +38,7 @@ const BIG_TEXT = [800, 1280, true];
 const onlyRoles = (process.env.ROLE ?? "").split(",").map((r) => r.trim()).filter(Boolean);
 const wants = (name) => !onlyRoles.length || onlyRoles.includes(name);
 const onlyPages = (process.env.PAGES ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+const extraPaths = (process.env.EXTRA_PATHS ?? "").split(",").map((p) => p.trim()).filter(Boolean);
 const onlySizes = (process.env.SIZES ?? "").split(",").map((p) => p.trim()).filter(Boolean);
 const [partNo, partOf] = (process.env.PART ?? "1/1").split("/").map((n) => Number(n) || 1);
 const WORKERS = Math.max(1, Number(process.env.WORKERS) || 4);
@@ -144,7 +147,7 @@ const slice = (list) => {
   return list.slice((partNo - 1) * size, partNo * size);
 };
 
-const needSeed = wants("owner") || wants("customer");
+const needSeed = !process.env.NO_SEED && (wants("owner") || wants("customer"));
 const seeded = needSeed ? await seedPages() : { staff: [], customer: [] };
 
 // One login per role; every worker opens its own context with those cookies.
@@ -176,7 +179,7 @@ for (const role of roles) {
   await ready(page);
   const hrefs = await page.evaluate(() => [...document.querySelectorAll("aside a[href], [data-menu-drawer] a[href]")].map((a) => a.getAttribute("href")).filter((h) => h && h.startsWith("/") && !h.startsWith("/api")));
   const landed = new URL(page.url()).pathname;
-  const targets = slice([...new Set([landed, ...hrefs, ...(EXTRA_PAGES[role.name] ?? []), ...(role.name === "owner" ? seeded.staff : [])])]).filter((p) => !onlyPages.length || onlyPages.includes(p));
+  const targets = slice([...new Set([landed, ...hrefs, ...extraPaths, ...(EXTRA_PAGES[role.name] ?? []), ...(role.name === "owner" ? seeded.staff : [])])]).filter((p) => !onlyPages.length || onlyPages.includes(p));
   for (const path of targets) items.push({ tag: role.name, path });
   console.log(`${role.name}: ${targets.length} pages`);
 }

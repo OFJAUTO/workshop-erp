@@ -6,6 +6,7 @@ import { renderPartsCheckPdf, type CheckRow } from "@/lib/pdf/parts-check-pdf";
 import { pdfResponse } from "@/lib/pdf/response";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { realPartNumber } from "@/lib/parts-rows";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -48,7 +49,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ jo
       description: String(p.description ?? ""),
       positions: positionsWords(positions) || null,
       note: note || null,
-      part_number: (p.part_number as string | null) || null,
+      part_number: realPartNumber(p.part_number as string | null),
       part_type: (p.part_type as string | null) || null,
       qty: Number(p.confirmed_quantity ?? p.quantity) || 1,
       list: p.list_price_aed === null || p.list_price_aed === undefined ? null : Number(p.list_price_aed),

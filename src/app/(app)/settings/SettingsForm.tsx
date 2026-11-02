@@ -274,12 +274,6 @@ export function SettingsForm({
               <Field label="Minimum parts markup (%)" hint="A quote cannot go out below this. No upper limit.">
                 <Input name="parts_min_markup_percent" defaultValue={v.parts_min_markup_percent} inputMode="numeric" required />
               </Field>
-              <Field label="Markup warning from (%)" hint="From here the markup shows amber on the quotation.">
-                <Input name="markup_warn_percent" defaultValue={v.markup_warn_percent} inputMode="numeric" required />
-              </Field>
-              <Field label="Markup confirmation from (%)" hint="From here the advisor must confirm the selling price, spelled out, and the line is flagged.">
-                <Input name="markup_confirm_percent" defaultValue={v.markup_confirm_percent} inputMode="numeric" required />
-              </Field>
             </div>
             <details className="rounded-control border border-line p-4">
               <summary className="cursor-pointer text-sm font-bold">Minimum markup per brand (optional)</summary>

@@ -30,6 +30,7 @@ import { refuseRecord } from "@/lib/refusal";
 import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
+import { costLimitsOf } from "@/lib/part-cost-check";
 
 export const dynamic = "force-dynamic";
 
@@ -144,8 +145,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         settings={{
           labourRate: labourRateFor(settings, null, vehicle?.make?.name ?? null),
           minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
-          markupWarn: Number(settings.markup_warn_percent) || 50,
-          markupConfirm: Number(settings.markup_confirm_percent) || 100,
+          partMarkupWarn: costLimitsOf(settings as unknown as Record<string, unknown>).markupWarnPercent,
           inspectionFee: Number(settings.inspection_fee_aed) || 0,
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,

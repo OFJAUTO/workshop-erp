@@ -1,21 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
+import { useEffect, useState } from "react";
+import { ActionForm, ReleaseFormLock, SubmitButton, type FormAction } from "@/components/forms";
 import { Words } from "@/components/Words";
 import type { FormState } from "@/lib/form-state";
 import { CustomerCarChooser, type ChooserCar, type ChooserCustomer, type ChooserMake, type ChooserModel } from "@/components/CustomerCarChooser";
-
-/** The form's double-tap lock (FormGuard) ends when the server's answer is already on screen, so the next choice is not swallowed. */
-function ReleaseFormLock() {
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const form = ref.current?.closest("form");
-    if (form) delete form.dataset.busyUntil;
-  }, []);
-  return <span ref={ref} hidden />;
-}
 
 /**
  * The CHOSEN car already has an open estimate (30 October 2026): a warning with a way forward, never a dead end.

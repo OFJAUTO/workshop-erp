@@ -145,6 +145,13 @@ const pricePartAs = async (jobId, partId, discount) => {
   await row.locator("select[aria-label='Availability']").selectOption({ label: "Next day" });
   const net = Math.round(200 * (1 - discount / 100) * 100) / 100;
   const priced = await until(async () => { const r = (await sql("select cost_aed::float8 as cost, discount_percent::float8 as disc from public.part_items where id = $1", [partId]))[0]; return r?.cost === net ? r : null; }, 40, 500);
+  // Section 2 (2 November 2026): a cost under half of the same part on the job is asked on the row first ("Yes, real
+  // price"); only then is the part priced and the owner asked for the revision (with his own red check).
+  const ask = row.locator("[data-cost-confirm]");
+  if (await until(async () => ((await ask.count()) ? 1 : null), 20, 400)) {
+    await ask.click();
+    await until(async () => ((await sql("select cost_confirmed_aed::float8 as c from public.part_items where id = $1", [partId]))[0]?.c === net ? 1 : null), 30, 500);
+  }
   return { browser, page, priced, net };
 };
 const seedApproved = async () => {

@@ -24,6 +24,29 @@ export type RowValues = {
   tyre_size?: string;
   /** The Parts quantity (the technician's stays on the row for the note). */
   qty: string;
+  /**
+   * Placeholder costs (2 November 2026, section 2): the server's open question about the net cost ("AED 2.24 – is
+   * this the real price?"), worked out for the cost in cost_ask_for; "" or missing when there is none. cost_ask_kind
+   * is "ask_cheap" (amber) or "far_below" (red); cost_ask_hold "1" when the answer can be stored and the row waits for
+   * it ("Yes, real price"), "" while it is a warning only (before the database change).
+   */
+  cost_ask?: string;
+  cost_ask_for?: string;
+  cost_ask_kind?: string;
+  cost_ask_hold?: string;
+  /** A part from our own shelf ("From our stock…"): the stock item it comes from; its average cost is the row's cost.
+   *  Missing = no item (a part priced "Our stock" before the rule: never unpriced for it, listed in Prices to fix);
+   *  "" = Our stock picked without an item (only ever on the screen before the picker answers). */
+  stock_item?: string;
+  /** The stock item in words for the status line: "ENGINE OIL 0W20 · 12 L on hand · AED 49.00 average". */
+  stock_words?: string;
+  /** What is on the shelf of that stock item now (a number as text): fewer than the row's quantity shows amber. */
+  stock_on_hand?: string;
+  /** A light one-line note: the supplier's standard discount taken off a price that was already net (Gargash, Q-00039). */
+  cost_note?: string;
+  /** "1" when the part is ordered, partly received or received: past pricing, so the stand-in supplier, the stock item
+   *  and the cost question never make it "not finished" (a wrong cost there is fixed with "Correct the cost…"). */
+  settled?: string;
 };
 
 export type SupplierOption = { id: string; name: string; discount: number; byType: Record<string, number> };
@@ -31,6 +54,24 @@ export type SupplierOption = { id: string; name: string; discount: number; byTyp
 export const OUR_STOCK = "Our stock";
 /** The saved supplier text is tidied into title case ("Our Stock"), so the check ignores case. */
 export const isOurStock = (name: string | null | undefined) => (name ?? "").trim().toLowerCase() === OUR_STOCK.toLowerCase();
+
+/** Supplier words that were typed to make a row look finished, never a supplier we buy from (2 November 2026). */
+const PLACEHOLDER_SUPPLIER_WORDS = ["additional", "tbc", "tba", "to be confirmed", "unknown", "n/a", "na", "none", "test", "other", "supplier", "no supplier"];
+/**
+ * A supplier text that is a stand-in ("OFJ Additional", "OFJ", "TBC", "?", "G"): the real supplier is missing. We are
+ * never our own supplier - a part from our shelf is "From our stock…" (Our stock), which is real. Fewer than three
+ * letters is never a supplier's name.
+ */
+export function isPlaceholderSupplier(name: string | null | undefined): boolean {
+  const t = String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!t || isOurStock(t)) return false;
+  if (/^ofj\b/.test(t) || /\bofj$/.test(t)) return true;
+  if ((t.match(/[a-z]/g) ?? []).length < 3) return true;
+  return PLACEHOLDER_SUPPLIER_WORDS.includes(t);
+}
+
+/** The words for a stand-in supplier on the row, the LPO and before sending. */
+export const placeholderSupplierWords = (name: string | null | undefined) => `"${String(name ?? "").trim()}" is not a supplier: pick the real supplier, or From our stock`;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -72,19 +113,49 @@ export const ROW_STATE_WORDS: Record<RowState, string> = {
   not_finished: "not finished",
 };
 
-export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days" | "tyre";
+export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days" | "tyre" | "cost_check" | "stock_item";
 export type Missing = { field: MissingField; short: string; long: string };
 
 /** What Parts store when the supplier gives no part number (1 November 2026: the box used to get line numbers). */
 export const NO_PART_NUMBER = "NO NUMBER";
 /** A line number typed into the part number box ("1", "13"), not a supplier part number. */
 export const isLineNumber = (pn: string | null | undefined) => /^[0-9]{1,3}$/.test(String(pn ?? "").trim());
-/** The part number to print or send (LPOs, the supplier copy, the supplier list): never a line number or "no number". */
+/** "OFJ", "OFJ1", "OFJ-2": typed to fill the box when the supplier gave no number (2 November 2026); never a part number. */
+export const isPlaceholderPartNumber = (pn: string | null | undefined) => /^ofj[\s\-_./]*\d{0,3}$/i.test(String(pn ?? "").trim());
+/**
+ * THE display rule for part numbers (2 November 2026, J-00969's "12"): the part number to print, show or send (LPOs,
+ * the supplier copy, the supplier list, the parts check PDF, QC labels, the staff invoice page): never a line number,
+ * an "OFJ" stand-in or "no number".
+ */
 export function realPartNumber(pn: string | null | undefined): string | null {
   const t = String(pn ?? "").trim();
-  if (!t || isLineNumber(t) || t.toUpperCase() === NO_PART_NUMBER) return null;
+  if (!t || isLineNumber(t) || isPlaceholderPartNumber(t) || t.toUpperCase() === NO_PART_NUMBER) return null;
   return t;
 }
+/**
+ * THE write rule for a part's own number (part rows, estimate part lines): a real number as typed, "NO NUMBER" for an
+ * honest none - and for a line number or an "OFJ" stand-in stored before the rule (that is what they meant) - or null
+ * when nothing was typed. Documents and LPOs read realPartNumber, which hides "NO NUMBER" too.
+ */
+export function cleanPartNumber(pn: string | null | undefined): string | null {
+  const t = String(pn ?? "").trim();
+  if (!t) return null;
+  if (isLineNumber(t) || isPlaceholderPartNumber(t) || t.toUpperCase() === NO_PART_NUMBER) return NO_PART_NUMBER;
+  return t.slice(0, 80);
+}
+/** Why a TYPED part number is refused (a line number, an "OFJ" stand-in), or null. One wording everywhere. */
+export function partNumberProblem(typed: string | null | undefined): string | null {
+  const t = String(typed ?? "").trim();
+  if (isLineNumber(t)) return `"${t}" looks like a line number. Type the supplier's part number, or tap None when there is no number.`;
+  if (isPlaceholderPartNumber(t)) return `"${t}" is not a part number. Type the supplier's part number, or tap None when the supplier gives no number.`;
+  return null;
+}
+/** Two cost texts are the same figure (to the fils). */
+export const sameCost = (a: string | number | null | undefined, b: string | number | null | undefined) => {
+  const x = Number(String(a ?? "").replace(",", "."));
+  const y = Number(String(b ?? "").replace(",", "."));
+  return String(a ?? "").trim() !== "" && String(b ?? "").trim() !== "" && Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 0.005;
+};
 
 /** Whole days typed: "0", "1", "12". Anything else means the days are still missing. */
 export const daysComplete = (days: string | null | undefined) => /^\d+$/.test(String(days ?? "").trim());
@@ -100,9 +171,15 @@ export function rowMissing(v: RowValues): Missing[] {
   const net = netText === "" ? null : Number(netText.replace(",", "."));
   if (net === null || !Number.isFinite(net)) out.push({ field: "cost_aed", short: "No price", long: "no net price" });
   else if (net <= 0) out.push({ field: "cost_aed", short: "Net price is 0", long: "net price is 0" });
+  // Ordered or received: past pricing. Its supplier and cost are history here (Correct the cost… fixes a wrong one).
+  const settled = v.settled === "1";
   if (!v.supplier.trim()) out.push({ field: "supplier", short: "No supplier", long: "no supplier" });
+  else if (!settled && isPlaceholderSupplier(v.supplier)) out.push({ field: "supplier", short: "Not a supplier", long: placeholderSupplierWords(v.supplier) });
+  else if (!settled && isOurStock(v.supplier) && v.stock_item !== undefined && !v.stock_item.trim()) out.push({ field: "stock_item", short: "Pick the stock item", long: "from our stock: pick the stock item (From our stock…)" });
   if (v.availability !== "in_stock" && v.availability !== "to_order") out.push({ field: "availability", short: "No availability", long: "no availability" });
   else if (v.availability === "to_order" && !daysComplete(v.days)) out.push({ field: "days", short: "No days", long: "days to arrive missing" });
+  // The cost question holds the row only while it is about the cost on the row and its answer can be stored.
+  if (!settled && v.cost_ask && v.cost_ask_hold === "1" && sameCost(v.cost_ask_for, v.cost_aed)) out.push({ field: "cost_check", short: "Real price?", long: v.cost_ask });
   return out;
 }
 

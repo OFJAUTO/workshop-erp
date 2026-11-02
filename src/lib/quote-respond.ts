@@ -7,7 +7,6 @@ import "server-only";
 import { addPartsToOpenLpo, finishPartsPlanning } from "./lpo";
 import { createAdminClient } from "./supabase/admin";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
-import { newLabelCode } from "./parts-data";
 import { ensureWorkLines } from "./work-data";
 import { LINE_SELECT, PART_SELECT, logQuoteEvent, refreshQuoteTotals, toLine, toPart } from "./quote-data";
 import { aed, isUnchosen, type QuoteLine, type QuoteRow } from "./quotes";
@@ -15,6 +14,7 @@ import { getSettings } from "./settings";
 import { formatPlate } from "./types";
 import { releaseWords } from "./job-sides";
 import { extendBodyshopStages } from "./bodyshop";
+import { receiveFromShelf } from "./stock";
 
 /** Everyone who should hear about a customer's answer: the advisor(s) of the job and the person who sent it. */
 export async function advisorsOf(q: Pick<QuoteRow, "job_id" | "created_by" | "sent_by"> & { number?: string }): Promise<string[]> {
@@ -144,10 +144,14 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
       // A part already in the ordering flow (a revised quotation approved again) carries on where it is.
       if (p.order_status && p.order_status !== "none") continue;
       const toOrder = p.availability !== "in_stock";
-      if (toOrder) needsOrder = true;
-      // A part on the shelf needs no LPO: it counts as received from stock, with its label, ready to issue.
-      const fromStock = toOrder ? {} : { received_qty: Number(p.confirmed_quantity ?? p.quantity) || 1, label_code: newLabelCode() };
-      await admin.from("part_items").update({ order_status: toOrder ? "to_order" : "received", ...fromStock, updated_by: answer.by ?? null }).eq("id", p.id);
+      if (toOrder) {
+        needsOrder = true;
+        await admin.from("part_items").update({ order_status: "to_order", updated_by: answer.by ?? null }).eq("id", p.id);
+      } else {
+        // A part on the shelf needs no LPO: received from stock at once, with its label, ready to issue; a part from a
+        // stock item leaves the shelf now at the stock average (THE one path, receiveFromShelf in stock.ts).
+        await receiveFromShelf(p.id, { id: answer.by ?? null, display_name: answer.name }, `Approved on ${q.number}`);
+      }
     } else if (l.advisor_added || l.unit_cost !== null) {
       // A part typed on the quotation (advisor's small part, or the owner's): it still has to be bought.
       needsOrder = true;

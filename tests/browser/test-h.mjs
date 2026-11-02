@@ -85,8 +85,12 @@ await section("A pricing table and PDF import", async () => {
   await req.locator("input[aria-label='Part number']").fill("E2E-DISC");
   await req.locator("select[aria-label='Type']").selectOption("genuine");
   await req.locator("input[aria-label='Cost before VAT']").fill("150");
+  // 2 November 2026: "From our stock…" opens the stock picker; the part takes the stock item's cost.
   await req.locator("select[aria-label='Supplier']").selectOption("__stock");
-  await page.keyboard.press("Tab");
+  await page.locator("[data-stock-add]").click();
+  await page.locator("[data-stock-new-name]").pressSequentially("E2E DISC STOCK H");
+  await page.locator("[data-stock-new-cost]").pressSequentially("150");
+  await page.locator("[data-stock-new-save]").click();
   const stock = await until(async () => { const r = (await sql("select supplier, availability from public.part_items where job_id = $1 and description ilike 'rear brake discs' and is_active", [jobId]))[0]; return (r?.supplier ?? "").toLowerCase() === "our stock" && r?.availability === "in_stock" ? r : null; }, 30, 500);
   check("17: 'Our stock' as the supplier saves In stock (no LPO later)", !!stock, stock ? JSON.stringify(stock) : `${JSON.stringify(await sql("select description, supplier, availability from public.part_items where job_id = $1 and is_active", [jobId]))} · ${await req.locator("[data-status-line]").textContent()}`);
   await sleep(1200);

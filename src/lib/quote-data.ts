@@ -9,7 +9,8 @@ import { ownerApprovalReasons, quoteTotals, lineTotal, round2, type PartItem, ty
 import { expectedFeeCost, type Settings } from "./settings";
 import { newToken } from "./media";
 import { dubaiDate } from "./jobs";
-import { loadPricingRows, valuesOfPart, PRICING_PART_SELECT, type PricingPart } from "./parts-pricing";
+import { loadPricingRows, pricingPartSelect, valuesOfPart, type PricingPart } from "./parts-pricing";
+import { costChecksFor } from "./part-cost-history";
 import { rowState } from "./parts-rows";
 import { costingWithRolls, type PackageCostingBase } from "./package-cost";
 
@@ -162,9 +163,10 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
   const out = new Map<string, QuoteSummary>();
   if (!jobIds.length) return out;
   const admin = createAdminClient();
+  const partSelect = await pricingPartSelect();
   const [{ data: qs }, { data: parts }, { data: requests }, { data: doneJobs }] = await Promise.all([
     admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at, completed_at, viewed_full_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
-    admin.from("part_items").select(`job_id, ${PRICING_PART_SELECT}`).in("job_id", jobIds).eq("is_active", true),
+    admin.from("part_items").select(`job_id, ${partSelect}`).in("job_id", jobIds).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", jobIds).eq("is_active", true),
     admin.from("jobs").select("id").in("id", jobIds).not("parts_pricing_done_at", "is", null),
   ]);
@@ -175,14 +177,17 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
     if (!s.quotation) s.quotation = toQuote(q) as QuoteSummary["quotation"];
   }
   const today = dubaiDate();
-  for (const p of (parts ?? []) as unknown as (PricingPart & { job_id: string })[]) {
+  const partRows = (parts ?? []) as unknown as (PricingPart & { job_id: string })[];
+  // The same cost check as the Parts table (2 November 2026): a placeholder price is not "priced" anywhere.
+  const checks = await costChecksFor(partRows, partRows);
+  for (const p of partRows) {
     const s = out.get(p.job_id)!;
     if (p.confirm_status === "pending") s.waitingConfirm++;
     if (p.confirm_status === "rejected") s.rejectedParts++;
     else {
       s.partsTotal!++;
-      // The same "priced" as the Parts table: part number, type, net above 0, supplier, availability.
-      if (rowState(valuesOfPart(p, today)) === "priced") s.partsPriced!++;
+      // The same "priced" as the Parts table: part number, type, net above 0, a real supplier, availability, a real price.
+      if (rowState(valuesOfPart(p, today, checks.get(p.id))) === "priced") s.partsPriced!++;
       else s.waitingPrices++;
     }
   }
@@ -427,8 +432,8 @@ export async function signPaths(bucket: string, paths: string[], seconds = 3600)
 export { INSPECTION_BUCKET };
 
 /** What the send checks need from the job: open part requests and the workshop's estimated hours (agreed by the manager or not). */
-export async function loadQuoteChecks(jobId: string | null): Promise<{ openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }> {
-  if (!jobId) return { openRequests: 0, workshopEstimate: null };
+export async function loadQuoteChecks(jobId: string | null): Promise<{ openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null; costAsks: Record<string, string> }> {
+  if (!jobId) return { openRequests: 0, workshopEstimate: null, costAsks: {} };
   const admin = createAdminClient();
   const [pricing, { data: insp }, { data: jobRow }] = await Promise.all([
     loadPricingRows(jobId),
@@ -440,7 +445,19 @@ export async function loadQuoteChecks(jobId: string | null): Promise<{ openReque
   const pricingDone = !!jobRow?.parts_pricing_done_at;
   const hours = insp?.estimated_hours === null || insp?.estimated_hours === undefined ? null : Number(insp.estimated_hours);
   const managerHours = insp?.estimated_hours_manager === null || insp?.estimated_hours_manager === undefined ? null : Number(insp.estimated_hours_manager);
-  return { openRequests: pricingDone ? 0 : pricing.summary.open, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null } };
+  return { openRequests: pricingDone ? 0 : pricing.summary.open, workshopEstimate: hours === null ? null : { hours, managerHours, agreed: managerHours !== null }, costAsks: costAsksOf(pricing.checks, pricing.parts) };
+}
+
+/**
+ * The parts still being priced whose cost question waits for Parts' answer (it holds the send even after Pricing
+ * done). A part the customer already approved (to order, ordered, received) never holds a quotation: the LPO gate and
+ * "Prices to fix" hold it where it can be answered.
+ */
+export function costAsksOf(checks: Map<string, { ask: { words: string } | null; hold: boolean }>, parts: { id: string; order_status?: string | null }[]): Record<string, string> {
+  const beingPriced = new Set(parts.filter((p) => (p.order_status ?? "none") === "none").map((p) => p.id));
+  const out: Record<string, string> = {};
+  for (const [id, c] of checks) if (c.ask && c.hold && beingPriced.has(id)) out[id] = c.ask.words;
+  return out;
 }
 
 /** How long the advisor has been waiting on Parts: the oldest open request or unpriced part, in minutes, and who the Parts people are. */

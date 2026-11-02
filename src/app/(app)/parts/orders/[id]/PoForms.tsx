@@ -6,6 +6,7 @@ import { ReasonChips } from "@/components/ReasonChips";
 import { useState } from "react";
 import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
 import { Button, Input, Select, Textarea } from "@/components/ui";
+import { realPartNumber } from "@/lib/parts-rows";
 
 type Line = { id: string; description: string; part_number: string | null; quantity: number; received_qty: number; unit_cost: number; flag: string | null; invoice_check?: string | null };
 
@@ -38,7 +39,7 @@ export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoi
             <li key={l.id} className="py-3 flex flex-wrap items-end gap-3">
               <div className="flex-1 min-w-48">
                 <p className="font-semibold">{l.description}</p>
-                <p className="text-xs text-muted">{l.part_number ?? "no part number"} · ordered {l.quantity}, received {l.received_qty}{left ? `, ${left} to come` : " (complete)"}</p>
+                <p className="text-xs text-muted">{realPartNumber(l.part_number) ?? "no part number"} · ordered {l.quantity}, received {l.received_qty}{left ? `, ${left} to come` : " (complete)"}</p>
               </div>
               {left > 0 ? (
                 <>
@@ -103,16 +104,23 @@ export function OrderedForm({ lines, action }: { lines: Line[]; action: (formDat
 }
 
 /** The owner's approval with the deposit override box when needed. */
-export function DecideForm({ action, depositShort, isOwner, reasons = [], summary = [] }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean; /** One-tap reasons to approve without the deposit (Settings). */ reasons?: string[]; /** What the approval commits to ("LPO-00038 · 2 suppliers · AED 5,651.00"), shown in the confirmation (B3). */ summary?: string[] }) {
+export function DecideForm({ action, depositShort, isOwner, reasons = [], summary = [], problems = [], problemAdvice = "" }: { action: (formData: FormData) => void; depositShort: string | null; isOwner: boolean; /** One-tap reasons to approve without the deposit (Settings). */ reasons?: string[]; /** What the approval commits to ("LPO-00038 · 2 suppliers · AED 5,651.00"), shown in the confirmation (B3). */ summary?: string[]; /** Lines with no real price (2 November 2026): Approve stays off until they are fixed or refused. */ problems?: string[]; problemAdvice?: string }) {
   return (
     <form action={action} className="flex flex-col gap-2">
+      {problems.length ? (
+        <div className="flex flex-col gap-1 rounded-control border-2 border-red-bar bg-white px-3 py-2" data-lpo-problems={problems.length}>
+          <span className="text-sm font-bold text-red">Approve is off: {problems.length} line{problems.length === 1 ? " has" : "s have"} no real price yet.</span>
+          <ul className="list-disc pl-5 text-sm text-red">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+          {problemAdvice ? <span className="text-xs text-muted">{problemAdvice}</span> : null}
+        </div>
+      ) : null}
       {depositShort ? <p className="text-sm font-semibold text-red" data-deposit-short>{depositShort}</p> : null}
       {depositShort && !isOwner ? <p className="text-xs text-muted">Only the owner can approve without the deposit.</p> : null}
       {depositShort && isOwner ? <p className="text-xs text-muted">Approving now is an override: tap a reason, it is written on the job.</p> : null}
       {depositShort && isOwner ? <ReasonChips name="override_reason" rows={2} options={reasons} placeholder="Reason to approve without the deposit (logged)" /> : null}
       <Textarea name="note" rows={2} placeholder="Note to Parts (optional)" />
       <div className="flex gap-2">
-        <ConfirmSubmit label="Approve" title="Approve this LPO?" lines={["Approve", ...summary, depositShort && isOwner ? "without the deposit (override)" : ""].filter(Boolean)} live={depositShort && isOwner ? [{ label: "reason:", field: "override_reason" }] : []} confirmLabel="Yes, approve the LPO" name="decision" value="approve" size="md" disabled={!!depositShort && !isOwner} hook="lpo-approve" />
+        <ConfirmSubmit label="Approve" title="Approve this LPO?" lines={["Approve", ...summary, depositShort && isOwner ? "without the deposit (override)" : ""].filter(Boolean)} live={depositShort && isOwner ? [{ label: "reason:", field: "override_reason" }] : []} confirmLabel="Yes, approve the LPO" name="decision" value="approve" size="md" disabled={(!!depositShort && !isOwner) || problems.length > 0} hook="lpo-approve" />
         <Button type="submit" name="decision" value="refuse" tone="secondary" size="md">Refuse</Button>
       </div>
     </form>

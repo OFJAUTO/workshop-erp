@@ -10,6 +10,7 @@ import { ensureQrLink, isBatteryPart, stickerSettings, warrantyMonthsFor } from 
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { activeTechnicians } from "./work-flow";
+import { cleanPartNumber, isOurStock, isPlaceholderSupplier, realPartNumber } from "./parts-rows";
 
 export type Actor = { id: string; display_name: string; role_id: string };
 export type Result = { error?: string; ok?: boolean; message?: string };
@@ -102,7 +103,7 @@ export async function receivePartsByTechnician(jobId: string, input: { technicia
   const takeable = parts.filter((p) => isHereForTech(p, approvedPo));
   if (!takeable.length) return { error: "Those parts were already received, or are not at the desk yet." };
   const now = new Date().toISOString();
-  const items: HandoverItem[] = takeable.map((p) => ({ id: p.id, description: p.description, part_number: p.part_number, quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1 }));
+  const items: HandoverItem[] = takeable.map((p) => ({ id: p.id, description: p.description, part_number: realPartNumber(p.part_number), quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1 }));
   const fromStaff = (takeable.find((p) => p.ready_for_handover_by)?.ready_for_handover_by as string | null) ?? null;
   const { data: handover, error } = await admin.from("part_handovers").insert({ job_id: jobId, kind: "handover", status: "confirmed", from_staff: fromStaff, to_staff: tech.id, confirmed_by: tech.id, confirmed_at: now, pin_used: true, signed_at_counter: false, device_id: input.deviceId ?? null, items, stickers: {}, created_by: actor.id, updated_by: actor.id }).select("id").single();
   if (error || !handover) return { error: error?.message ?? "Could not record the receipt." };
@@ -141,7 +142,7 @@ async function takeBack(p: { id: string; description: string; part_number: strin
   const admin = createAdminClient();
   if (p.pending_handover_id) await admin.from("part_items").update({ pending_handover_id: null, updated_by: actor.id }).eq("id", p.id);
   if (p.issue_status === "confirmed") {
-    await admin.from("part_handovers").insert({ job_id: p.job_id, kind: "return", status: "confirmed", confirmed_at: new Date().toISOString(), from_staff: p.issue_confirmed_by, to_staff: actor.id, confirmed_by: actor.id, pin_used: false, items: [{ id: p.id, description: p.description, part_number: p.part_number, quantity: p.issued_qty || 1 }], note, created_by: actor.id, updated_by: actor.id });
+    await admin.from("part_handovers").insert({ job_id: p.job_id, kind: "return", status: "confirmed", confirmed_at: new Date().toISOString(), from_staff: p.issue_confirmed_by, to_staff: actor.id, confirmed_by: actor.id, pin_used: false, items: [{ id: p.id, description: p.description, part_number: realPartNumber(p.part_number), quantity: p.issued_qty || 1 }], note, created_by: actor.id, updated_by: actor.id });
   }
   await admin.from("part_items").update({ issue_status: "none", issued_qty: 0, issued_at: null, issued_by: null, issue_confirmed_at: null, issue_confirmed_by: null, return_status: "returned", returned_qty: p.issued_qty || 0, return_note: note, updated_by: actor.id }).eq("id", p.id);
 }
@@ -162,12 +163,18 @@ export async function exchangePart(jobId: string, partId: string, actor: Actor, 
   const note = `${reasonText}${input.note ? `: ${input.note}` : ""}`;
   await takeBack(p, actor, `Wrong or faulty part. ${note}`);
   const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
-  const { data: replacement, error } = await admin.from("part_items").insert({ job_id: jobId, part_request_id: p.part_request_id, part_number: p.part_number, description: p.description, quantity: qty, supplier: p.supplier, cost_aed: p.cost_aed, availability: "to_order", confirm_status: "confirmed", confirmed_quantity: qty, confirmed_at: new Date().toISOString(), priced_by: p.priced_by, priced_at: p.priced_at, order_status: "to_order", part_type: p.part_type, brand: p.brand, positions: p.positions ?? null, replaced_part_id: p.id, added_by_role: actor.role_id, created_by: actor.id, updated_by: actor.id }).select("id").single();
+  // A part from a real supplier at a real cost: the correct one is ordered at once from the same supplier (To order).
+  // One that came off our shelf, from a stand-in supplier ("OFJ Additional") or at a placeholder cost (2 November 2026)
+  // is priced again by Parts: an open row that takes over the approval when priced (From our stock… takes it off the
+  // shelf at once, a supplier puts it To order). Never a copied stand-in that would stop the job's next LPO.
+  const reprice = isOurStock(p.supplier) || isPlaceholderSupplier(p.supplier) || p.availability === "in_stock" || !(Number(p.cost_aed) > 1);
+  const priced = reprice ? { supplier: null, cost_aed: null, availability: null, priced_by: null, priced_at: null, order_status: "none" } : { supplier: p.supplier, cost_aed: p.cost_aed, availability: "to_order", priced_by: p.priced_by, priced_at: p.priced_at, order_status: "to_order" };
+  const { data: replacement, error } = await admin.from("part_items").insert({ job_id: jobId, part_request_id: p.part_request_id, part_number: cleanPartNumber(p.part_number), description: p.description, quantity: qty, ...priced, confirm_status: "confirmed", confirmed_quantity: qty, confirmed_at: new Date().toISOString(), part_type: p.part_type, brand: p.brand, positions: p.positions ?? null, replaced_part_id: p.id, added_by_role: actor.role_id, created_by: actor.id, updated_by: actor.id }).select("id").single();
   if (error || !replacement) return { error: error?.message ?? "Could not raise the replacement." };
   const now = new Date().toISOString();
   await admin.from("part_items").update({ exchange_status: "needed", exchange_reason: input.reason, exchange_note: input.note, exchange_at: now, exchange_by: actor.id, replacement_part_id: replacement.id, updated_by: actor.id }).eq("id", p.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_exchange", note: `${p.description}: ${note.toLowerCase()} (${actor.display_name}). Back to the supplier; the correct part is raised for ordering.`, created_by: actor.id });
-  const n = { type: "parts_exchange", title: `Wrong or faulty part · ${job.job_number}`, body: `${p.description}: ${reasonText.toLowerCase()}. Order the correct part and return this one to the supplier.`, jobId, href: `/parts/handover/${jobId}` };
+  const n = { type: "parts_exchange", title: `Wrong or faulty part · ${job.job_number}`, body: reprice ? `${p.description}: ${reasonText.toLowerCase()}. Price the correct part on the Parts table (supplier and real cost, or From our stock…).` : `${p.description}: ${reasonText.toLowerCase()}. Order the correct part and return this one to the supplier.`, jobId, href: reprice ? `/parts/${jobId}#pricing` : `/parts/handover/${jobId}` };
   await notifyRoles(["parts"], n);
   await notifyManagers(job.department ?? null, { ...n, href: `/jobs/${jobId}/work` });
   return { ok: true, message: `${p.description} goes back to the supplier. The correct part is on the Parts desk to order.` };

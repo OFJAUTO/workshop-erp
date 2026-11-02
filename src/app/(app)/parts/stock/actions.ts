@@ -10,6 +10,7 @@ import { STOCK_ITEM_SELECT, recordStockMovement, toStockItem } from "@/lib/stock
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSettings } from "@/lib/settings";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
+import { partNumberProblem, realPartNumber } from "@/lib/parts-rows";
 
 const enc = encodeURIComponent;
 const back = (msg: { error?: string; message?: string }, extra = "") => redirect(`/parts/stock${extra}${extra ? "&" : "?"}${msg.error ? `error=${enc(msg.error)}` : `message=${enc(msg.message ?? "Done.")}`}`);
@@ -27,7 +28,9 @@ export async function saveStockItemDetails(formData: FormData) {
   const name = blankToNull(formData.get("name"));
   if (!name) back({ error: "Type the item name." });
   const num = (k: string) => Number(String(formData.get(k) ?? "0").replace(",", ".")) || 0;
-  const row = { item_type: formData.get("item_type") === "consumable" ? "consumable" : "part", name: name!.slice(0, 120), unit: (blankToNull(formData.get("unit")) ?? "pc").slice(0, 20), part_number: blankToNull(formData.get("part_number"))?.slice(0, 60) ?? null, minimum_level: Math.max(0, num("minimum_level")), reorder_quantity: Math.max(0, num("reorder_quantity")), supplier_id: blankToNull(formData.get("supplier_id")), updated_by: staff.id };
+  const pnProblem = partNumberProblem(String(formData.get("part_number") ?? ""));
+  if (pnProblem) back({ error: pnProblem });
+  const row = { item_type: formData.get("item_type") === "consumable" ? "consumable" : "part", name: name!.slice(0, 120), unit: (blankToNull(formData.get("unit")) ?? "pc").slice(0, 20), part_number: realPartNumber(blankToNull(formData.get("part_number"))?.slice(0, 60) ?? null), minimum_level: Math.max(0, num("minimum_level")), reorder_quantity: Math.max(0, num("reorder_quantity")), supplier_id: blankToNull(formData.get("supplier_id")), updated_by: staff.id };
   const admin = createAdminClient();
   if (id) {
     const { error } = await admin.from("stock_items").update(row).eq("id", id);
@@ -107,7 +110,7 @@ export async function createStockOrder(formData: FormData) {
     if (!Number.isFinite(qty) || qty <= 0) continue;
     const costText = String(formData.get(`cost__${i.id}`) ?? "").replace(",", ".");
     const cost = costText ? Number(costText) : i.unit_cost;
-    lines.push({ stock_item_id: i.id, description: i.name, part_number: i.part_number, quantity: round2(qty), unit_cost: round2(Number.isFinite(cost) && cost >= 0 ? cost : i.unit_cost) });
+    lines.push({ stock_item_id: i.id, description: i.name, part_number: realPartNumber(i.part_number), quantity: round2(qty), unit_cost: round2(Number.isFinite(cost) && cost >= 0 ? cost : i.unit_cost) });
   }
   if (!lines.length) back({ error: orderType === "tools" ? "Type at least one item with a quantity." : "Enter a quantity for at least one item." }, "?order=1");
   const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));

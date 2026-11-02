@@ -42,6 +42,7 @@ export function additionalWorkLabel(a: AdditionalWorkRow): { text: string; tone:
 }
 import { type QcItem } from "./qc-items";
 import { lineSideOf, type SideLine } from "./job-sides";
+import { realPartNumber } from "./parts-rows";
 
 export { QC_KIND_LABELS, type QcItem } from "./qc-items";
 export type QcCheckRow = { id: string; job_id: string; round: number; status: "open" | "passed" | "failed"; inspector_id: string | null; started_at: string; finished_at: string | null; mileage: number | null; mileage_unit: string | null; postscan_path: string | null; postscan_waived_reason: string | null; items: QcItem[]; notes: string | null; created_at: string };
@@ -213,7 +214,7 @@ export async function buildQcItems(jobId: string, settings: Settings, previous: 
   // The positions in the short form (FRONT PAIR, ALL 4) tell the inspector which wheel or side to look at.
   const at = (ps: string[] | null | undefined) => (positionsWords(ps) ? ` · ${positionsWords(ps)}` : "");
   for (const l of lines ?? []) items.push({ key: `work:${l.id}`, kind: "work", label: `${l.title}${at(l.positions)}`, result: null, remark: null });
-  for (const p of parts ?? []) items.push({ key: `part:${p.id}`, kind: "part", label: `${p.description}${p.part_number ? ` (${p.part_number})` : ""}${at(p.positions)}: fitted?`, result: null, remark: null });
+  for (const p of parts ?? []) items.push({ key: `part:${p.id}`, kind: "part", label: `${p.description}${realPartNumber(p.part_number) ? ` (${realPartNumber(p.part_number)})` : ""}${at(p.positions)}: fitted?`, result: null, remark: null });
   const general = Array.isArray(settings.qc_general_checks) ? (settings.qc_general_checks as string[]) : [];
   general.forEach((g, i) => items.push({ key: `general:${i}`, kind: "general", label: g, result: null, remark: null }));
   if (settings.sticker_service_required !== false && (await jobHasOilChange(jobId))) items.push({ key: "sticker:service", kind: "general", label: "Oil service sticker fitted and details correct", result: null, remark: null });

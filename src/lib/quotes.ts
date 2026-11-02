@@ -2,7 +2,7 @@
 
 import type { WorkingTime } from "./working-time";
 import { roundHalfUp } from "./bank-fees";
-import { customerAvailabilityWords, daysFromDate } from "./parts-rows";
+import { customerAvailabilityWords, daysFromDate, isPlaceholderSupplier } from "./parts-rows";
 import { unpricedEstimateParts, waitingWords } from "./estimate-parts";
 import { positionsQtyMismatch, positionsWords } from "./parts-list";
 import { packageItemLabels, packageLineCost, plainPpfFilm, type PackageCosting } from "./package-cost";
@@ -798,12 +798,12 @@ export function markupPickWords(p: MarkupPick, cost?: number | null): string {
  * the first reference it is under HALF of, in words; null when none. The supplier's discount taken twice (Q-00039:
  * list 12,228.30 already net, less 55% again) shows up here.
  */
-export function cheapCostWarning(cost: number | null | undefined, refs: { label: string; cost: number | null | undefined }[]): string | null {
+export function cheapCostWarning(cost: number | null | undefined, refs: { label: string; cost: number | null | undefined }[], /** Below this share of a reference it is flagged (0.5 = under half; Settings > Money). */ share = 0.5): string | null {
   const c = Number(cost);
   if (!(c > 0)) return null;
   for (const r of refs) {
     const rc = Number(r.cost);
-    if (rc > 0 && c < rc * 0.5) return `cost ${aed(c)} is ${Math.round((1 - c / rc) * 100)}% under ${r.label} (${aed(rc)})`;
+    if (rc > 0 && c < rc * share) return `cost ${aed(c)} is ${Math.round((1 - c / rc) * 100)}% under ${r.label} (${aed(rc)})`;
   }
   return null;
 }
@@ -1118,7 +1118,7 @@ export function sendBlockers(
   q: Pick<QuoteRow, "kind" | "status"> & Partial<QuoteHeaderForTotals>,
   lines: QuoteLine[],
   parts: PartItem[],
-  settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null; unquotedFindings?: number; confirmPercent?: number; /** A package's computed cost (the below-cost check). */ packageCosting?: PackageCosting | null; /** The bodyshop cost rate: a service's installer hours (the below-cost check). */ bodyshopRate?: number | null },
+  settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null; unquotedFindings?: number; /** A package's computed cost (the below-cost check). */ packageCosting?: PackageCosting | null; /** The bodyshop cost rate: a service's installer hours (the below-cost check). */ bodyshopRate?: number | null; /** Placeholder costs (2 November 2026): the parts whose cost question still waits for Parts' answer, by part id. */ costAsks?: Record<string, string> },
 ): SendBlocker[] {
   const out: SendBlocker[] = [];
   // Nothing below cost: every line judged after its share of the header discount (THE rule, belowCostAll).
@@ -1137,8 +1137,14 @@ export function sendBlockers(
       if (p) {
         if (p.confirm_status === "rejected") out.push({ key: `line-${l.id}`, label: `${short}: rejected, remove the line` });
         if (p.cost_aed === null || p.cost_aed === undefined) out.push({ key: `line-${l.id}`, label: `${short}: waiting for the parts price` });
+        // Placeholder costs (2 November 2026): a stand-in supplier or an unanswered cost question never goes out - but
+        // only while the part is still being priced. A part the customer already approved (to order, ordered, received)
+        // is past pricing: nobody can change it here, so it never stops a revision (the LPO gate and Prices to fix hold it).
+        else if (!isUnchosen(l) && !l.left_off && (p.order_status ?? "none") === "none" && isPlaceholderSupplier(p.supplier)) out.push({ key: `line-${l.id}`, label: `${short}: "${String(p.supplier).trim()}" is not a supplier – Parts to put the real supplier and price` });
+        else if (!isUnchosen(l) && !l.left_off && (p.order_status ?? "none") === "none" && settings.costAsks?.[p.id]) out.push({ key: `line-${l.id}`, label: `${short}: ${settings.costAsks[p.id]} – Parts to confirm the real price` });
       } else if (q.kind === "quotation") out.push({ key: `line-${l.id}`, label: `${short}: not a part from the Parts desk. Remove the line and use "+ Add a part"` });
-      // An estimate's unpriced parts are counted once below (30 October 2026).
+      // An estimate's unpriced parts are counted once below (30 October 2026); a stand-in supplier never goes out.
+      else if (!l.left_off && l.unit_cost !== null && l.unit_cost !== undefined && isPlaceholderSupplier(l.supplier_text)) out.push({ key: `line-${l.id}`, label: `${short}: "${String(l.supplier_text).trim()}" is not a supplier – the real supplier and price first` });
     }
     const comp = isComplimentary(l);
     if (l.line_type === "labour" && !l.title.trim()) out.push({ key: `line-${l.id}`, label: "A labour line has no description: what are we doing?" });

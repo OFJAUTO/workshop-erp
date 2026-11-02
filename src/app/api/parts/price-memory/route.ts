@@ -1,24 +1,33 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { compactPartNumber } from "@/lib/price-import";
+import { boughtPrices } from "@/lib/part-cost-history";
+import { isPlaceholderSupplier, realPartNumber } from "@/lib/parts-rows";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { can, type RoleId } from "@/lib/roles";
 
 /**
  * Price memory: the last price given for a part number ("A 167 330 68 00" and "A1673306800" are the same number):
- * list, discount, net, supplier, type and when. Staff only.
+ * list, discount, net, supplier, type and when - and (2 November 2026) what it was really BOUGHT at last (an LPO line
+ * at the supplier invoice price, an ordered part, the stock list). Placeholder prices (AED 1.00 or less, "OFJ
+ * Additional") and stand-in part numbers are never offered. Staff only.
  */
 export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   if (staff && (staff.viewingAs ? false : !can(staff.role_id as RoleId, "viewPartCosts"))) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const pn = request.nextUrl.searchParams.get("pn") ?? "";
-  const compact = compactPartNumber(pn);
-  if (compact.length < 4) return NextResponse.json({ memory: null });
+  const compact = compactPartNumber(realPartNumber(pn));
+  if (compact.length < 4) return NextResponse.json({ memory: null, paid: null });
   const admin = createAdminClient();
-  const { data } = await admin.from("part_items").select("part_number, list_price_aed, discount_percent, cost_aed, supplier, part_type, brand, priced_at, job:jobs!part_items_job_id_fkey(job_number)").eq("is_active", true).not("priced_at", "is", null).not("cost_aed", "is", null).not("part_number", "is", null).order("priced_at", { ascending: false }).limit(400);
-  const hit = ((data ?? []) as unknown as { part_number: string | null; list_price_aed: number | string | null; discount_percent: number | string | null; cost_aed: number | string | null; supplier: string | null; part_type: string | null; brand: string | null; priced_at: string | null; job: { job_number: string } | null }[]).find((r) => compactPartNumber(r.part_number) === compact);
-  if (!hit) return NextResponse.json({ memory: null });
+  const [{ data }, bought] = await Promise.all([
+    admin.from("part_items").select("part_number, list_price_aed, discount_percent, cost_aed, supplier, part_type, brand, priced_at, job:jobs!part_items_job_id_fkey(job_number)").eq("is_active", true).not("priced_at", "is", null).gt("cost_aed", 1).not("part_number", "is", null).order("priced_at", { ascending: false }).limit(400),
+    boughtPrices(),
+  ]);
+  const hit = ((data ?? []) as unknown as { part_number: string | null; list_price_aed: number | string | null; discount_percent: number | string | null; cost_aed: number | string | null; supplier: string | null; part_type: string | null; brand: string | null; priced_at: string | null; job: { job_number: string } | null }[]).find((r) => compactPartNumber(r.part_number) === compact && !isPlaceholderSupplier(r.supplier));
+  const last = (bought.get(compact) ?? [])[0] ?? null;
+  const paid = last ? { cost: last.cost, where: last.where, on: last.on } : null;
+  if (!hit) return NextResponse.json({ memory: null, paid });
   return NextResponse.json({
     memory: {
       list_price: hit.list_price_aed === null ? null : Number(hit.list_price_aed),
@@ -30,5 +39,6 @@ export async function GET(request: NextRequest) {
       priced_at: hit.priced_at,
       job_number: hit.job?.job_number ?? null,
     },
+    paid,
   });
 }
