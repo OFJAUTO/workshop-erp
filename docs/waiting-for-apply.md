@@ -2,25 +2,33 @@
 
 Database changes that are built, tested on the TEST database and pushed, waiting for the owner's "apply" on the live database. The code that needs them stays switched off on live until they are applied (`schemaReady`), so nothing live breaks while they wait.
 
-**To apply them all in the morning:** turn auto mode off and reply **"apply"**. Then, for each file in the order below:
+**To apply them:** turn auto mode off and reply **"apply"**. Then, for each file in order:
 
 1. take a fresh backup;
 2. run the file;
 3. record it;
 4. run the read-only live check (`npm run check:live`).
 
-The newest backup, taken at the end of the night after every task was live, is `backups/2026-11-02T00-19-36` (107 tables, 237,442 rows). The one before tonight's work is `backups/2026-11-01T19-33-29`. A fresh one is taken again right before applying.
+## Waiting now
 
-Tonight's later tasks (confirm + undo, spell check while typing, C1–C4, the stale tests) needed no database change.
+Nothing. The list is empty.
 
-| # | Migration | Task | What it switches on | Backup |
-|---|---|---|---|---|
-| 1 | `20261202100000_quote_handback.sql` | Estimate back to the advisor (E-00055) | The hand-back ("Edited by Omar – check and send" + what changed), the banner, the advisor's Waiting on you line. It also puts E-00055 back with Anas. | `backups/2026-11-02T00-19-36` |
-| 2 | `20261202110000_lpo_refusals_intake.sql` | LPO approvals + intake manifold | Refusing one LPO line ("Refused by Omar – reason"), the refused list on the LPO, and "Intake manifold" in the live checklist. It also fixes J-00317: the Al Tayer mount is marked refused, the Al Futtaim mount is added to LPO-00038 (you are told "1 part added to LPO-00038"), and Peter's revision request is closed. | `backups/2026-11-02T00-19-36` |
-| 3 | `20261202120000_line_teams.sql` | Departments per line (J-00969) | Choosing a team per line by hand (the default teams already work without it), and J-00969's lines set: paint → Paint, remove and refit → Dismantle & refit, coding → Electrical, PDR → Outside work. | `backups/2026-11-02T00-19-36` |
-| 4 | `20261202130000_supplier_invoice_query.sql` | Supplier invoices tab | "Query with Parts" on a supplier invoice (everything else in the tab already works). | `backups/2026-11-02T00-19-36` |
-| 5 | `20261202140000_capitals.sql` | CAPITALS (B1) | The capitals trigger on every line table and the conversion of existing text (266 quotation and estimate lines including Q-00039, 34 proforma lines, 196 services, 166 parts list names, 15 work lines, 38 requests; tax invoices untouched). | `backups/2026-11-02T00-19-36` |
-| 6 | `20261202150000_charges.sql` | Early charges + Pending charges (B2) | The charge lines (job card Charges card, CHARGES ALREADY INCURRED on the check-in, the invoice and declined-work invoice lines) and the Pending charges page with its proformas. | `backups/2026-11-02T00-19-36` |
-| 7 | `20261202160000_supplier_price_changes.sql` | LPO price changes | The two limit settings (5% / AED 100) and LPO-00035-2: the wishbone links invoiced at 260 (the job cost follows; the customer price stays). | `backups/2026-11-02T00-19-36` |
+## Applied on 2 November 2026, morning
 
-Already applied: `20261202090000_payments_anytime.sql` (1 November 2026, backup `backups/2026-11-01T16-47-48`).
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-02T03-51-29` (107 tables, 237,493 rows). The seven files were then run in order with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`. Each file runs as one transaction.
+
+Before applying, the live rows each file touches were read again; nothing had changed overnight. Afterwards, `npm run check:live` gave 33 passed, 0 failed. The features switch themselves on within a minute (`schemaReady` asks again every minute while not ready), with no new deploy.
+
+| # | Migration | What it did on live |
+|---|---|---|
+| 1 | `20261202100000_quote_handback.sql` | Hand-back columns. E-00055 v2 is back with Anas as "Edited by Omar – check and send" (Total 18,850.00 → 16,425.97), and Anas was told. |
+| 2 | `20261202110000_lpo_refusals_intake.sql` | Refused-line columns, and "Intake manifold" in the checklist. J-00317: the Al Tayer mount is refused (the owner's reason kept), and the Al Futtaim mount replaces it on LPO-00038, which still waits for approval (12 lines, AED 5,651.00, "2 suppliers"; the owner and the head accountant were told "1 part added"). Peter's revision request on Q-00020 is closed. |
+| 3 | `20261202120000_line_teams.sql` | The line's team column. J-00969 (Q-00039): PDR → Outside work, remove and refit → Dismantle & refit, coding → Electrical, the two paint lines → Paint. |
+| 4 | `20261202130000_supplier_invoice_query.sql` | "Query with Parts" on supplier invoices. |
+| 5 | `20261202140000_capitals.sql` | The capitals triggers. Existing text is in capitals now: 482 quotation and estimate lines, 3 notes to the customer, 22 proforma lines, 15 work lines, 38 requests, 196 services and 166 parts list names. Issued tax invoices and credit notes are untouched (6 lines with small letters kept as issued). |
+| 6 | `20261202150000_charges.sql` | The charge tables (server only: RLS on, no access for anon or logged-in users) and the 7-day reminder setting. |
+| 7 | `20261202160000_supplier_price_changes.sql` | The two limit settings (5% / AED 100). LPO-00035-2: the invoice price is 260.00 on both lines (accepted), the job's part cost is 260.00, and the supplier invoice amount is 1,040.00. |
+
+## Applied before
+
+- `20261202090000_payments_anytime.sql` (1 November 2026, backup `backups/2026-11-01T16-47-48`).
